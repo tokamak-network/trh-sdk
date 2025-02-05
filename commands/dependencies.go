@@ -4,48 +4,44 @@ import (
 	"fmt"
 )
 
-func checkK8sInstallation() error {
-	fmt.Println("Checking Kubernetes installation...")
-
+func checkK8sInstallation() bool {
 	// Check if kubectl is installed
 	_, err := executeCommand("kubectl", "version", "--client")
 	if err != nil {
 		fmt.Println("❌ kubectl is not installed or not in PATH.")
-		return err
+		return false
 
 	}
-	fmt.Println("✅ kubectl installed")
+	fmt.Println("✅ Kubectl installed")
 
 	// Check if Kubernetes cluster is accessible
 	_, err = executeCommand("kubectl", "cluster-info")
 	if err != nil {
 		fmt.Println("❌ Kubernetes cluster is not accessible")
-		return err
+		return true
 
 	}
 	fmt.Println("✅ Kubernetes cluster is running")
 
-	return nil
+	return true
 }
 
-func checkHelmInstallation() error {
+func checkHelmInstallation() bool {
 	_, err := executeCommand("helm", "version")
 	if err != nil {
 		fmt.Println("❌ Helm is not installed or not in PATH.")
-		return err
+		return false
 	}
 	fmt.Println("✅ Helm installed")
-	return nil
+	return true
 }
 
-func checkDockerInstallation() error {
-	fmt.Println("Checking Docker installation...")
-
+func checkDockerInstallation() bool {
 	// Check if Docker is installed
 	_, err := executeCommand("docker", "--version")
 	if err != nil {
 		fmt.Println("❌ Docker is not installed or not in PATH.")
-		return err
+		return false
 	}
 	fmt.Println("✅ Docker installed")
 
@@ -53,30 +49,30 @@ func checkDockerInstallation() error {
 	_, err = executeCommand("docker", "info")
 	if err != nil {
 		fmt.Println("Docker is installed but not running.")
-		return err
+		return true
 	}
+
 	fmt.Println("✅ Docker is running")
-	return nil
+
+	return true
 }
 
 type Dependencies struct {
+	Docker bool
+	K8s    bool
+	Helm   bool
 }
 
-func (c *Dependencies) Check(args []string) error {
-	err := checkDockerInstallation()
-	if err != nil {
-		return err
-	}
+func (c *Dependencies) Check(args []string) {
+	c.Docker = checkDockerInstallation()
 
-	err = checkK8sInstallation()
-	if err != nil {
-		return err
-	}
+	c.K8s = checkK8sInstallation()
 
-	err = checkHelmInstallation()
-	if err != nil {
-		return err
-	}
+	c.Helm = checkHelmInstallation()
+}
 
-	return err
+func (c *Dependencies) Install(args []string) error {
+	c.Check(args)
+
+	return nil
 }

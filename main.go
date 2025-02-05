@@ -7,6 +7,7 @@ import (
 	"github.com/urfave/cli/v3"
 	"log"
 	"os"
+	"strings"
 )
 
 func main() {
@@ -35,15 +36,40 @@ func main() {
 				},
 			},
 			{
-				Name:    "dependencies",
-				Aliases: []string{"a"},
-				Usage:   "Dependencies",
+				Name:  "dependencies",
+				Usage: "Dependencies",
+
 				Commands: []*cli.Command{
 					{
 						Name:  "setup",
-						Usage: "",
+						Usage: "Install the dependencies",
 						Action: func(ctx context.Context, cmd *cli.Command) error {
-							fmt.Println("new task template: ", cmd.Args().First())
+							fmt.Println("Install the dependencies...")
+							fmt.Print("Would you like to install dependencies? (y/N): ")
+							var response string
+							n, err := fmt.Scanln(&response)
+							// Blank input, default No
+							if n == 0 {
+								fmt.Println("Installation skipped.")
+								return nil
+							}
+
+							if strings.ToLower(response) != "n" && strings.ToLower(response) != "y" {
+								return fmt.Errorf("Invalid input")
+							}
+							if err != nil {
+								return err
+							}
+
+							if strings.ToLower(response) == "y" {
+								fmt.Println("Installing dependencies...")
+								// Add installation logic here
+								dependenciesCmd := commands.Dependencies{}
+								return dependenciesCmd.Install(cmd.Args().Slice())
+
+							} else {
+								fmt.Println("Installation skipped.")
+							}
 							return nil
 						},
 					},
@@ -52,7 +78,8 @@ func main() {
 						Usage: "remove an existing template",
 						Action: func(ctx context.Context, cmd *cli.Command) error {
 							dependenciesCmd := commands.Dependencies{}
-							return dependenciesCmd.Check(cmd.Args().Slice())
+							dependenciesCmd.Check(cmd.Args().Slice())
+							return nil
 						},
 					},
 				},
