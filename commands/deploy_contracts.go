@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -88,13 +89,13 @@ type wallet struct {
 	hdWallet *hdwallet.Wallet
 }
 
-func (w *wallet) getAddress(index uint8) string {
+func (w *wallet) getAddress(index int) string {
 	path := hdwallet.MustParseDerivationPath(fmt.Sprintf("m/44'/60'/0'/0/%d", index))
 	account, _ := w.hdWallet.Derive(path, false)
 	return account.Address.Hex()
 }
 
-func (w *wallet) getPrivateKey(index uint8) string {
+func (w *wallet) getPrivateKey(index int) string {
 	path := hdwallet.MustParseDerivationPath(fmt.Sprintf("m/44'/60'/0'/0/%d", index))
 	account, _ := w.hdWallet.Derive(path, false)
 	privateKey, _ := w.hdWallet.PrivateKeyHex(account)
@@ -102,72 +103,107 @@ func (w *wallet) getPrivateKey(index uint8) string {
 	return privateKey
 }
 
-type accountsIndex struct {
-	admin      uint8
-	sequencer  uint8
-	batcher    uint8
-	proposer   uint8
-	challenger uint8
+type account struct {
+	address string
+	balance string
 }
 
-func selectOperatorAccounts(l1RPC string, seed string) (*accountsIndex, error) {
+type operator int
+
+const (
+	admin operator = iota
+	sequencer
+	batcher
+	proposer
+	challenger
+)
+
+type indexAccount struct {
+	index   int
+	address string
+}
+
+type operatorMap map[operator]indexAccount
+
+func getAccountMap(l1RPC string, seed string) map[int]account {
 	client, err := ethclient.Dial(l1RPC)
 	if err != nil {
-		return nil, err
+		return nil
 	}
 
 	w, err := hdwallet.NewFromMnemonic(seed)
 	if err != nil {
-		return nil, err
+		return nil
 	}
 
 	wallet := &wallet{
 		hdWallet: w,
 	}
 
-	var admin, sequencer, batcher, proposer, challenger uint8
-
-	count := uint8(0)
-	index := uint8(0)
-	fmt.Println("Select admin acount from the following ones[minimum 0.6 ETH] (default: 0)")
-	for {
-		if count > 10 {
-			break
+	accounts := make(map[int]account)
+	for i := 0; i < 16; i++ {
+		hexAddress := wallet.getAddress(i)
+		address := common.HexToAddress(hexAddress)
+		balance, _ := client.BalanceAt(context.Background(), address, nil)
+		accounts[i] = account{
+			address: string(hexAddress),
+			balance: fmt.Sprintf("%.2f", weiToEther(balance)),
 		}
-		address := wallet.getAddress(index)
-		account := common.HexToAddress(address)
-		balance, _ := client.BalanceAt(context.Background(), account, nil)
-		fmt.Printf("\t%d. %s(%.2f ETH)\n", index, address, weiToEther(balance))
-		count++
-		index++
 	}
-	fmt.Print("Enter the number: ")
-	fmt.Scanf("%d", &admin)
-	count = 0
-	index = 0
 
-	fmt.Println("Select sequencer acount from the following ones (default: 0)")
-	for {
-		if count > 10 {
-			break
+	return accounts
+}
+
+func displayAccounts(selectedAccounts map[int]bool, accounts map[int]account) {
+	count := 0
+	for i := 0; i < len(accounts) && count < 10; i++ {
+		if !selectedAccounts[i] {
+			account := accounts[i]
+			fmt.Printf("\t%d. %s(%s ETH)\n", i, account.address, account.balance)
+			count++
 		}
-		address := wallet.getAddress(count)
-		account := common.HexToAddress(address)
-		balance, _ := client.BalanceAt(context.Background(), account, nil)
-		fmt.Printf("\t%d. %s(%.2f ETH)\n", count, address, weiToEther(balance))
-		count++
 	}
-	fmt.Print("Enter the number: ")
-	fmt.Scanf("%d", &admin)
-	count = 0
+}
 
-	return &accountsIndex{
-		admin:      admin,
-		sequencer:  sequencer,
-		batcher:    batcher,
-		proposer:   proposer,
-		challenger: challenger,
-	}, nil
+func selectAccounts(l1RPC string, seed string) operatorMap {
+	fmt.Println("Getting accounts...")
+	accounts := getAccountMap(l1RPC, seed)
+
+	selectedAccounts := make(map[int]bool)
+	scanner := bufio.NewScanner(os.Stdin)
+
+	prompts := []string{
+		"Select admin acount from the following ones[minimum 0.6 ETH]",
+		"Select sequencer acount from the following ones",
+		"Select batcher acount from the following ones",
+		"Select proposer acount from the following ones",
+		"Select challenger acount from the following ones",
+	}
+
+	operators := make(operatorMap)
+
+	for i := 0; i < 5; i++ {
+		fmt.Println(prompts[i])
+		displayAccounts(selectedAccounts, accounts)
+		fmt.Print("Enter the number: ")
+		scanner.Scan()
+		input := scanner.Text()
+
+		selectedIndex, err := strconv.Atoi(input)
+		if err != nil || selectedIndex < 0 || selectedIndex >= len(accounts) || selectedAccounts[selectedIndex] {
+			fmt.Println("Invalid selection. Please try again.")
+			i--
+			continue
+		}
+
+		selectedAccounts[selectedIndex] = true
+		operators[operator(i)] = indexAccount{
+			index:   selectedIndex,
+			address: accounts[selectedIndex].address,
+		}
+	}
+
+	return operators
 }
 
 func ActionDeployContracts() cli.ActionFunc {
@@ -179,8 +215,10 @@ func ActionDeployContracts() cli.ActionFunc {
 		}
 		fmt.Println(cfg.stack)
 
-		accounts, _ := selectOperatorAccounts(cfg.l1RPCurl, cfg.seed)
-		fmt.Println(accounts)
+		operators := selectAccounts(cfg.l1RPCurl, cfg.seed)
+		for k, v := range operators {
+			fmt.Printf("%d index: %d, address: %s\n", k, v.index, v.address)
+		}
 
 		return nil
 	}
