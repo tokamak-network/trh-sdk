@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"github.com/tokamak-network/trh-sdk/commands"
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
+	"github.com/tokamak-network/trh-sdk/pkg/scanner"
+	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"github.com/urfave/cli/v3"
 	"log"
 	"os"
-	"strings"
 )
 
 func main() {
@@ -34,18 +36,46 @@ func main() {
 					&cli.StringFlag{
 						Name:  "network",
 						Usage: "Network to deploy to",
-						Value: "local-devnet",
+						Value: "",
 					},
 					&cli.StringFlag{
 						Name:  "stack",
 						Usage: "Tech stack",
-						Value: "thanos",
+						Value: "",
 					},
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
+					var err error
+					network := cmd.String("network")
+					stack := cmd.String("stack")
+					if network == "" {
+						fmt.Print("Input network(local-devnet, testnet, mainnet): ")
+						network, err = scanner.ScanString()
+						if err != nil {
+							fmt.Println("Error parsing the network: ", err)
+							return err
+						}
+
+						if !constants.SupportedNetworks[network] {
+							return fmt.Errorf("unsupported network: %s", network)
+						}
+					}
+					if stack == "" {
+						fmt.Print("Input stack(thanos): ")
+						stack, err = scanner.ScanString()
+						if err != nil {
+							fmt.Println("Error parsing the stack: ", err)
+							return err
+						}
+
+						if !constants.SupportedStacks[stack] {
+							return fmt.Errorf("unsupported stack: %s", stack)
+						}
+					}
+
 					deployCommand := commands.Deploy{
-						Network: cmd.String("network"),
-						Stack:   cmd.String("stack"),
+						Network: network,
+						Stack:   stack,
 					}
 
 					return deployCommand.Execute()
@@ -62,22 +92,12 @@ func main() {
 						Action: func(ctx context.Context, cmd *cli.Command) error {
 							fmt.Println("Install the dependencies...")
 							fmt.Print("Would you like to install dependencies? (y/N): ")
-							var response string
-							n, err := fmt.Scanln(&response)
-							// Blank input, default No
-							if n == 0 {
-								fmt.Println("Installation skipped.")
-								return nil
-							}
-
-							if strings.ToLower(response) != "n" && strings.ToLower(response) != "y" {
-								return fmt.Errorf("Invalid input")
-							}
+							choose, err := utils.ScanBool()
 							if err != nil {
 								return err
 							}
 
-							if strings.ToLower(response) == "y" {
+							if choose {
 								fmt.Println("Installing dependencies...")
 								// Add installation logic here
 								dependenciesCmd := commands.Dependencies{}
