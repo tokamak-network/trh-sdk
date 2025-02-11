@@ -30,9 +30,25 @@ func main() {
 			{
 				Name:  "deploy",
 				Usage: "Deploy infrastructure",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:  "network",
+						Usage: "Network to deploy to",
+						Value: "local-devnet",
+					},
+					&cli.StringFlag{
+						Name:  "stack",
+						Usage: "Tech stack",
+						Value: "thanos",
+					},
+				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					fmt.Println("added task: ", cmd.Args().First())
-					return nil
+					deployCommand := commands.Deploy{
+						Network: cmd.String("network"),
+						Stack:   cmd.String("stack"),
+					}
+
+					return deployCommand.Execute()
 				},
 			},
 			{

@@ -2,11 +2,12 @@ package commands
 
 import (
 	"fmt"
+	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
 func checkK8sInstallation() bool {
 	// Check if kubectl is installed
-	_, err := executeCommand("kubectl", "version", "--client")
+	_, err := utils.ExecuteCommand("kubectl", "version", "--client")
 	if err != nil {
 		fmt.Println("❌ kubectl is not installed or not in PATH.")
 		return false
@@ -15,7 +16,7 @@ func checkK8sInstallation() bool {
 	fmt.Println("✅ Kubectl installed")
 
 	// Check if Kubernetes cluster is accessible
-	_, err = executeCommand("kubectl", "cluster-info")
+	_, err = utils.ExecuteCommand("kubectl", "cluster-info")
 	if err != nil {
 		fmt.Println("❌ Kubernetes cluster is not accessible")
 		return true
@@ -27,7 +28,7 @@ func checkK8sInstallation() bool {
 }
 
 func checkHelmInstallation() bool {
-	_, err := executeCommand("helm", "version")
+	_, err := utils.ExecuteCommand("helm", "version")
 	if err != nil {
 		fmt.Println("❌ Helm is not installed or not in PATH.")
 		return false
@@ -38,7 +39,7 @@ func checkHelmInstallation() bool {
 
 func checkDockerInstallation() bool {
 	// Check if Docker is installed
-	_, err := executeCommand("docker", "--version")
+	_, err := utils.ExecuteCommand("docker", "--version")
 	if err != nil {
 		fmt.Println("❌ Docker is not installed or not in PATH.")
 		return false
@@ -46,7 +47,7 @@ func checkDockerInstallation() bool {
 	fmt.Println("✅ Docker installed")
 
 	// Check if Docker daemon is running
-	_, err = executeCommand("docker", "info")
+	_, err = utils.ExecuteCommand("docker", "info")
 	if err != nil {
 		fmt.Println("Docker is installed but not running.")
 		return true
