@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
-	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"log"
 	"os"
 
@@ -92,7 +91,7 @@ func main() {
 						Action: func(ctx context.Context, cmd *cli.Command) error {
 							fmt.Println("Install the dependencies...")
 							fmt.Print("Would you like to install dependencies? (y/N): ")
-							choose, err := utils.ScanBool()
+							choose, err := scanner.ScanBool()
 							if err != nil {
 								return err
 							}

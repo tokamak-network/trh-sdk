@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"os"
 	"strconv"
 	"strings"
@@ -149,7 +150,7 @@ func getAccountMap(l1RPC string, seed string) map[int]account {
 		balance, _ := client.BalanceAt(context.Background(), address, nil)
 		accounts[i] = account{
 			address: string(hexAddress),
-			balance: fmt.Sprintf("%.2f", weiToEther(balance)),
+			balance: fmt.Sprintf("%.2f", utils.WeiToEther(balance)),
 		}
 	}
 
@@ -438,7 +439,7 @@ func newDeployConfigManager(cfg *config) *deployConfigManager {
 // CLI Action method
 func ActionDeployContracts() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
-		// Get CLIconfig
+		// Get CLI config
 		cliCfg := newDeployContractsCLIConfig(cmd)
 		cfg, err := inputConfig(cliCfg)
 		if err != nil {
