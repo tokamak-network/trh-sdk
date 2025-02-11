@@ -34,6 +34,6 @@ var (
 
 var DeployContractsFlag = []cli.Flag{
 	StackFlag,
-	SaveConfigFlag,
 	NetworkFlag,
+	SaveConfigFlag,
 }
