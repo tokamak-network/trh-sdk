@@ -7,8 +7,8 @@ type DeployConfigTemplate struct {
 	FinalSystemOwner                         string   `json:"finalSystemOwner"`
 	SuperchainConfigGuardian                 string   `json:"superchainConfigGuardian"`
 	L1StartingBlockTag                       string   `json:"l1StartingBlockTag,omitempty"`
-	L1ChainID                                uint64   `json:"l1ChainId"`
-	L2ChainID                                uint64   `json:"l2ChainId"`
+	L1ChainID                                uint64   `json:"l1ChainID"`
+	L2ChainID                                uint64   `json:"l2ChainID"`
 	L2BlockTime                              uint64   `json:"l2BlockTime"`
 	L1BlockTime                              uint64   `json:"l1BlockTime"`
 	MaxSequencerDrift                        uint64   `json:"maxSequencerDrift"`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
@@ -17,7 +18,9 @@ type ThanosStack struct {
 }
 
 func NewThanosStack(network string) *ThanosStack {
-	return &ThanosStack{Network: network}
+	return &ThanosStack{
+		Network: network,
+	}
 }
 
 func (t *ThanosStack) Deploy() error {
@@ -35,19 +38,28 @@ func (t *ThanosStack) DeployContracts() error {
 	}
 	var err error
 	//// STEP 1. Input the parameters
-	//cfg, err := inputConfig()
-	//if err != nil {
-	//	return err
-	//}
-	//
-	//// Select operators Accounts
-	//operators := selectAccounts(cfg.l1RPCurl, cfg.seed)
-	//for k, v := range operators {
-	//	fmt.Printf("%d index: %d, address: %s\n", k, v.Index, v.Address)
-	//}
-	//
-	//dManager := newDeployConfigManager(cfg, t.Network)
-	//dManager.makeDeplyConfigJson(operators)
+	cfg, err := inputConfig()
+	if err != nil {
+		return err
+	}
+
+	dManager := newDeployConfigManager(cfg, t.Network)
+
+	// Select operators Accounts
+	operators, err := selectAccounts(dManager.l1Provider, cfg.seed)
+	if err != nil {
+		return err
+	}
+
+	if len(operators) == 0 {
+		return fmt.Errorf("no operator found")
+	}
+
+	for k, v := range operators {
+		fmt.Printf("%d account: %d, address: %s\n", k, types.Operator(v.Index), v.Address)
+	}
+
+	dManager.makeDeplyConfigJson(operators)
 
 	// STEP 2. Clone the repository
 	err = t.cloneSourcecode()
@@ -56,16 +68,47 @@ func (t *ThanosStack) DeployContracts() error {
 	}
 
 	// STEP 3. Build the contracts
-	doneCh := make(chan bool)
-	go utils.ShowLoadingAnimation(doneCh, "Building the contracts...")
-	_, err = utils.ExecuteCommand("bash", "-c", "cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh build")
+	//doneCh := make(chan bool)
+	//go utils.ShowLoadingAnimation(doneCh, "Building the contracts...")
+	//_, err = utils.ExecuteCommand("bash", "-c", "cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh build")
+	//if err != nil {
+	//	doneCh <- true
+	//	fmt.Print("\r❌ Build the contracts failed!       \n")
+	//	return err
+	//}
+	//doneCh <- true
+	//fmt.Print("\r✅ Build the contracts completed!       \n")
+
+	// STEP 4. Deploy the contracts
+	//go utils.ShowLoadingAnimation(doneCh, "Deploying the contracts...")
+	gsAdminPrivateKey := operators[0].PrivateKey
+
+	// STEP 4.1. Generate the .env file
+	_, err = utils.ExecuteCommand("bash", "-c", fmt.Sprintf("cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && echo 'export GS_ADMIN_PRIVATE_KEY=%s' > .env && echo 'export L1_RPC_URL=%s' >> .env", gsAdminPrivateKey, cfg.l1RPCurl))
 	if err != nil {
-		doneCh <- true
-		fmt.Print("\r❌ Installation failed!       \n")
+		//doneCh <- true
+		fmt.Print("\r❌ Make .env file failed!       \n")
 		return err
 	}
-	fmt.Print("\r✅ Installation completed!       \n")
 
+	// STEP 4.2. Copy the config file into the scripts folder
+	_, err = utils.ExecuteCommand("bash", "-c", "cp ./deploy-config.json tokamak-thanos/packages/tokamak/contracts-bedrock/scripts")
+	if err != nil {
+		//doneCh <- true
+		fmt.Print("\r❌ Copy the config file successfully!       \n")
+		return err
+	}
+
+	// STEP 4.3. Deploy contracts
+	_, err = utils.ExecuteCommand("bash", "-c", "cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh deploy -e .env -c deploy-config.json")
+	if err != nil {
+		//doneCh <- true
+		fmt.Print("\r❌ Build the contracts failed!       \n")
+		return err
+	}
+	fmt.Print("\r✅ Deploy the contracts completed!       \n")
+
+	//doneCh <- true
 	return nil
 }
 
@@ -194,18 +237,21 @@ func displayAccounts(selectedAccounts map[int]bool, accounts map[int]types.Accou
 	}
 }
 
-func selectAccounts(l1RPC string, seed string) types.OperatorMap {
+func selectAccounts(client *ethclient.Client, seed string) (types.OperatorMap, error) {
 	fmt.Println("Getting accounts...")
-	accounts := types.GetAccountMap(context.Background(), l1RPC, seed)
+	accounts, err := types.GetAccountMap(context.Background(), client, seed)
+	if err != nil {
+		return nil, err
+	}
 
 	selectedAccounts := make(map[int]bool)
 
 	prompts := []string{
 		"Select admin acount from the following ones[minimum 0.6 ETH]",
 		"Select sequencer acount from the following ones",
-		"Select batcher acount from the following ones",
-		"Select proposer acount from the following ones",
-		"Select challenger acount from the following ones",
+		"Select batcher acount from the following ones[recommend 0.3 ETH]",
+		"Select proposer acount from the following ones[recommend 0.3 ETH]",
+		"Select challenger acount from the following ones[recommend 0.3 ETH]",
 	}
 
 	operators := make(types.OperatorMap)
@@ -217,7 +263,7 @@ func selectAccounts(l1RPC string, seed string) types.OperatorMap {
 		input, err := scanner.ScanString()
 		if err != nil {
 			fmt.Printf("Failed to scan input: %s", err)
-			return nil
+			return nil, err
 		}
 
 		selectedIndex, err := strconv.Atoi(input)
@@ -229,17 +275,19 @@ func selectAccounts(l1RPC string, seed string) types.OperatorMap {
 
 		selectedAccounts[selectedIndex] = true
 		operators[types.Operator(i)] = types.IndexAccount{
-			Index:   selectedIndex,
-			Address: accounts[selectedIndex].Address,
+			Index:      selectedIndex,
+			Address:    accounts[selectedIndex].Address,
+			PrivateKey: accounts[selectedIndex].PrivateKey,
 		}
 	}
 
-	return operators
+	return operators, nil
 }
 
 type deployConfigManager struct {
 	defaultDeployConfig *types.DeployConfigTemplate
-	flags               *deployContractFlags
+	//flags               *deployContractFlags
+	l1Provider *ethclient.Client
 }
 
 func (dcm *deployConfigManager) makeDeplyConfigJson(operators types.OperatorMap) {
@@ -269,6 +317,16 @@ func (dcm *deployConfigManager) makeDeplyConfigJson(operators types.OperatorMap)
 		}
 	}
 
+	// fetch the latest block
+	latest, err := dcm.l1Provider.BlockByNumber(context.Background(), nil)
+	if err != nil {
+		fmt.Println("Error fetching latest block")
+		return
+	}
+
+	dcm.defaultDeployConfig.L1StartingBlockTag = latest.Hash().Hex()
+	dcm.defaultDeployConfig.L2OutputOracleStartingTimestamp = latest.Time()
+
 	file, err := os.Create("deploy-config.json")
 	defer file.Close()
 	if err != nil {
@@ -290,7 +348,7 @@ func newDeployConfigManager(cfg *config, network string) *deployConfigManager {
 	var l2OutputOracleSubmissionInterval uint64
 	var l1UsdcAddr string
 	useFaultProofs := cfg.falutProof
-	basebatchInboxAddress := "0xff0000000000000000000000000000000000000"
+	basebatchInboxAddress := "0xff00000000000000000000000000000000000000"
 
 	if network == "testnet" {
 		l1ChainId = 11155111
@@ -374,9 +432,18 @@ func newDeployConfigManager(cfg *config, network string) *deployConfigManager {
 		UniswapV3FactoryTickSpacing1:             1,
 		PairInitCodeHash:                         "0x96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f",
 		PoolInitCodeHash:                         "0xe34f199b19b2b4f47f68442619d555527d244f78a3297ea89325f843f87b8b54",
+		GovernanceTokenName:                      "Optimism",
+		GovernanceTokenOwner:                     "0x0000000000000000000000000000000000000333",
+		GovernanceTokenSymbol:                    "OP",
 	}
 
+	l1Client, err := ethclient.Dial(cfg.l1RPCurl)
+	if err != nil {
+		fmt.Printf("Failed to dial l1 client: %v\n", err)
+		return nil
+	}
 	return &deployConfigManager{
 		defaultDeployConfig: defaultTemplate,
+		l1Provider:          l1Client,
 	}
 }
