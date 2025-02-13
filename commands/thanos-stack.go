@@ -37,7 +37,7 @@ func (t *ThanosStack) DeployContracts() error {
 		return fmt.Errorf("network %s doesn't need to deploy the contracts, please running `tokamak-cli-sdk deploy` instead", constants.LocalDevnet)
 	}
 	var err error
-	//// STEP 1. Input the parameters
+	// STEP 1. Input the parameters
 	cfg, err := inputConfig()
 	if err != nil {
 		return err
@@ -68,25 +68,23 @@ func (t *ThanosStack) DeployContracts() error {
 	}
 
 	// STEP 3. Build the contracts
-	//doneCh := make(chan bool)
-	//go utils.ShowLoadingAnimation(doneCh, "Building the contracts...")
-	//_, err = utils.ExecuteCommand("bash", "-c", "cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh build")
-	//if err != nil {
-	//	doneCh <- true
-	//	fmt.Print("\r❌ Build the contracts failed!       \n")
-	//	return err
-	//}
-	//doneCh <- true
-	//fmt.Print("\r✅ Build the contracts completed!       \n")
+	doneCh := make(chan bool)
+	go utils.ShowLoadingAnimation(doneCh, "Building the contracts...")
+	_, err = utils.ExecuteCommand("bash", "-c", "cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh build")
+	if err != nil {
+		doneCh <- true
+		fmt.Print("\r❌ Build the contracts failed!       \n")
+		return err
+	}
+	doneCh <- true
+	fmt.Print("\r✅ Build the contracts completed!       \n")
 
 	// STEP 4. Deploy the contracts
-	//go utils.ShowLoadingAnimation(doneCh, "Deploying the contracts...")
-	gsAdminPrivateKey := operators[0].PrivateKey
-
+	go utils.ShowLoadingAnimation(doneCh, "Deploying the contracts...")
 	// STEP 4.1. Generate the .env file
-	_, err = utils.ExecuteCommand("bash", "-c", fmt.Sprintf("cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && echo 'export GS_ADMIN_PRIVATE_KEY=%s' > .env && echo 'export L1_RPC_URL=%s' >> .env", gsAdminPrivateKey, cfg.l1RPCurl))
+	_, err = utils.ExecuteCommand("bash", "-c", fmt.Sprintf("cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && echo 'export GS_ADMIN_PRIVATE_KEY=%s' > .env && echo 'export L1_RPC_URL=%s' >> .env", operators[0].PrivateKey, cfg.l1RPCurl))
 	if err != nil {
-		//doneCh <- true
+		doneCh <- true
 		fmt.Print("\r❌ Make .env file failed!       \n")
 		return err
 	}
@@ -94,7 +92,7 @@ func (t *ThanosStack) DeployContracts() error {
 	// STEP 4.2. Copy the config file into the scripts folder
 	_, err = utils.ExecuteCommand("bash", "-c", "cp ./deploy-config.json tokamak-thanos/packages/tokamak/contracts-bedrock/scripts")
 	if err != nil {
-		//doneCh <- true
+		doneCh <- true
 		fmt.Print("\r❌ Copy the config file successfully!       \n")
 		return err
 	}
@@ -102,13 +100,31 @@ func (t *ThanosStack) DeployContracts() error {
 	// STEP 4.3. Deploy contracts
 	_, err = utils.ExecuteCommand("bash", "-c", "cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh deploy -e .env -c deploy-config.json")
 	if err != nil {
-		//doneCh <- true
+		doneCh <- true
 		fmt.Print("\r❌ Build the contracts failed!       \n")
 		return err
 	}
 	fmt.Print("\r✅ Deploy the contracts completed!       \n")
+	doneCh <- true
 
-	//doneCh <- true
+	// STEP 5: Generate the genesis and rollup files
+	_, err = utils.ExecuteCommand("bash", "-c", "cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh generate -e .env -c deploy-config.json")
+	go utils.ShowLoadingAnimation(doneCh, "Generating the rollup and genesis files...")
+	if err != nil {
+		doneCh <- true
+		fmt.Print("\r❌ Generate the rollup and genesis files!       \n")
+		return err
+	}
+	doneCh <- true
+	fmt.Print("\r✅ Generated the rollup and genesis files!       \n")
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Println("Error getting current directory:", err)
+		return err
+	}
+	fmt.Printf("\r Genesis file located at: %s/tokamak-thanos/build/genesis.json\n", cwd)
+	fmt.Printf("\r Rollup file located at: %s/tokamak-thanos/build/rollup.json\n", cwd)
+
 	return nil
 }
 
