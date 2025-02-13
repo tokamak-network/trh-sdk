@@ -1,7 +1,9 @@
 package scanner
 
 import (
+	"bufio"
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -27,16 +29,12 @@ func ScanBool() (bool, error) {
 }
 
 func ScanString() (string, error) {
-	var response string
-	n, err := fmt.Scanln(&response)
-	// Blank input, default No
-	if n == 0 {
-		return "", nil
-	}
-
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(response), nil
+
+	return strings.TrimSpace(input), nil
 
 }

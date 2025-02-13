@@ -3,13 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/tokamak-network/trh-sdk/commands"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
-	"github.com/tokamak-network/trh-sdk/pkg/utils"
-	"github.com/urfave/cli/v3"
 	"log"
 	"os"
+
+	"github.com/tokamak-network/trh-sdk/commands"
+	"github.com/tokamak-network/trh-sdk/flags"
+	"github.com/urfave/cli/v3"
 )
 
 func main() {
@@ -22,12 +23,10 @@ func main() {
 		},
 		Commands: []*cli.Command{
 			{
-				Name:  "deploy-contracts",
-				Usage: "Deploy contracts",
-				Action: func(ctx context.Context, cmd *cli.Command) error {
-					fmt.Println("added task: ", cmd.Args().First())
-					return nil
-				},
+				Name:   "deploy-contracts",
+				Usage:  "Deploy contracts",
+				Flags:  flags.DeployContractsFlag,
+				Action: commands.ActionDeployContracts(),
 			},
 			{
 				Name:  "deploy",
@@ -92,7 +91,7 @@ func main() {
 						Action: func(ctx context.Context, cmd *cli.Command) error {
 							fmt.Println("Install the dependencies...")
 							fmt.Print("Would you like to install dependencies? (y/N): ")
-							choose, err := utils.ScanBool()
+							choose, err := scanner.ScanBool()
 							if err != nil {
 								return err
 							}
