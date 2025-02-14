@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"log"
 	"os"
@@ -43,42 +42,7 @@ func main() {
 						Value: "",
 					},
 				},
-				Action: func(ctx context.Context, cmd *cli.Command) error {
-					var err error
-					network := cmd.String("network")
-					stack := cmd.String("stack")
-					if network == "" {
-						fmt.Print("Input network(local-devnet, testnet, mainnet): ")
-						network, err = scanner.ScanString()
-						if err != nil {
-							fmt.Println("Error parsing the network: ", err)
-							return err
-						}
-
-						if !constants.SupportedNetworks[network] {
-							return fmt.Errorf("unsupported network: %s", network)
-						}
-					}
-					if stack == "" {
-						fmt.Print("Input stack(thanos): ")
-						stack, err = scanner.ScanString()
-						if err != nil {
-							fmt.Println("Error parsing the stack: ", err)
-							return err
-						}
-
-						if !constants.SupportedStacks[stack] {
-							return fmt.Errorf("unsupported stack: %s", stack)
-						}
-					}
-
-					deployCommand := commands.Deploy{
-						Network: network,
-						Stack:   stack,
-					}
-
-					return deployCommand.Execute()
-				},
+				Action: commands.ActionDeploy(),
 			},
 			{
 				Name:  "dependencies",
