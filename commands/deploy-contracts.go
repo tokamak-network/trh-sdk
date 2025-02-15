@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/tokamak-network/trh-sdk/flags"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
+	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/urfave/cli/v3"
 )
 
@@ -15,7 +16,7 @@ func ActionDeployContracts() cli.ActionFunc {
 
 		switch stack {
 		case constants.ThanosStack:
-			thanosStack := NewThanosStack(network)
+			thanosStack := thanos.NewThanosStack(network)
 
 			return thanosStack.DeployContracts()
 		default:

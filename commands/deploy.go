@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
+	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/urfave/cli/v3"
 )
 
@@ -24,7 +25,7 @@ func Execute(network, stack string) error {
 
 	switch stack {
 	case constants.ThanosStack:
-		thanosStack := NewThanosStack(network)
+		thanosStack := thanos.NewThanosStack(network)
 		err := thanosStack.Deploy()
 		if err != nil {
 			fmt.Println("Error deploying Thanos Stack")

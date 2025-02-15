@@ -31,5 +31,6 @@ main
 trh-sdk
 
 tokamak-thanos
+tokamak-thanos-stack
 
 deploy-config.json
