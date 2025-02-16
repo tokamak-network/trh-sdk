@@ -77,3 +77,14 @@ func CheckAwsCLIInstallation() bool {
 	fmt.Println("✅ AWS cli installed")
 	return true
 }
+
+func CheckDirenvInstallation() bool {
+	_, err := utils.ExecuteCommand("direnv", "--version")
+	if err != nil {
+		fmt.Println("❌direnv is not installed or not in PATH.")
+		return false
+	}
+
+	fmt.Println("✅ direnv installed")
+	return true
+}
