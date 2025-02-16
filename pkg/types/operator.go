@@ -16,4 +16,4 @@ type IndexAccount struct {
 	PrivateKey string
 }
 
-type OperatorMap map[Operator]IndexAccount
+type OperatorMap map[Operator]*IndexAccount

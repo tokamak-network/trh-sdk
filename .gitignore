@@ -34,3 +34,4 @@ tokamak-thanos
 tokamak-thanos-stack
 
 deploy-config.json
+settings.json

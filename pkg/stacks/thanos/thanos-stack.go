@@ -16,12 +16,14 @@ import (
 )
 
 type ThanosStack struct {
-	Network             string
+	network             string
+	stack               string
 	defaultDeployConfig *types.DeployConfigTemplate
-	l1Provider          *ethclient.Client
+	l1Client            *ethclient.Client
 }
 
 type DeployContractsInput struct {
+	l1Provider string
 	l1RPCurl   string
 	seed       string
 	falutProof bool
@@ -32,18 +34,18 @@ type DeployInfraInput struct {
 	L1BeaconURL string
 }
 
-func NewThanosStack(network string) *ThanosStack {
+func NewThanosStack(network string, stack string) *ThanosStack {
 	return &ThanosStack{
-		Network: network,
+		network: network,
+		stack:   stack,
 	}
 }
 
 func (t *ThanosStack) Deploy() error {
-	switch t.Network {
+	switch t.network {
 	case constants.LocalDevnet:
 		return t.deployLocalDevnet()
 	case constants.Testnet, constants.Mainnet:
-		// get the cloud provider we support
 		fmt.Print("Please choose your infrastructure [AWS] (default AWS): ")
 		input, err := scanner.ScanString()
 		if err != nil {
@@ -62,12 +64,12 @@ func (t *ThanosStack) Deploy() error {
 			return fmt.Errorf("%s not supported", infraOpt)
 		}
 	default:
-		return fmt.Errorf("network %s is not supported", t.Network)
+		return fmt.Errorf("network %s is not supported", t.network)
 	}
 }
 
 func (t *ThanosStack) DeployContracts() error {
-	if t.Network == constants.LocalDevnet {
+	if t.network == constants.LocalDevnet {
 		return fmt.Errorf("network %s doesn't need to deploy the contracts, please running `tokamak-cli-sdk deploy` instead", constants.LocalDevnet)
 	}
 	var err error
@@ -82,10 +84,10 @@ func (t *ThanosStack) DeployContracts() error {
 		return err
 	}
 
-	deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig.falutProof, t.Network)
+	deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig.falutProof, t.network)
 
 	// Select operators Accounts
-	operators, err := selectAccounts(l1Client, deployContractsConfig.seed)
+	operators, err := selectAccounts(l1Client, deployContractsConfig.falutProof, deployContractsConfig.seed)
 	if err != nil {
 		return err
 	}
@@ -167,6 +169,32 @@ func (t *ThanosStack) DeployContracts() error {
 	fmt.Printf("\r Genesis file located at: %s/tokamak-thanos/build/genesis.json\n", cwd)
 	fmt.Printf("\r Rollup file located at: %s/tokamak-thanos/build/rollup.json\n", cwd)
 
+	var challengerPrivateKey string
+	if deployContractsConfig.falutProof {
+		if operators[4] == nil {
+			return fmt.Errorf("no challenger operator found")
+		}
+		challengerPrivateKey = operators[4].PrivateKey
+	}
+	cfg := &types.Config{
+		AdminPrivateKey:      operators[0].PrivateKey,
+		SequencerPrivateKey:  operators[1].PrivateKey,
+		BatcherPrivateKey:    operators[2].PrivateKey,
+		ProposerPrivateKey:   operators[3].PrivateKey,
+		ChallengerPrivateKey: challengerPrivateKey,
+		DeploymentPath:       fmt.Sprintf("%s/deploy-config.json", cwd),
+		L1RPCProvider:        deployContractsConfig.l1Provider,
+		L1RPCURL:             deployContractsConfig.l1RPCurl,
+		Stack:                t.stack,
+		Network:              t.network,
+		EnableFraudProof:     deployContractsConfig.falutProof,
+	}
+	err = cfg.WriteToJSONFile("settings.json")
+	if err != nil {
+		fmt.Println("Error writing settings file:", err)
+		return err
+	}
+	fmt.Printf("✅ The configuration has been saved in: %s/settings.json", cwd)
 	return nil
 }
 
@@ -204,23 +232,31 @@ func (t *ThanosStack) deployLocalDevnet() error {
 func (t *ThanosStack) deployNetworkToAWS() error {
 	// STEP 1. Check the required dependencies
 	if !dependencies.CheckTerraformInstallation() {
-		return fmt.Errorf("Terraform is not available")
+		return fmt.Errorf("terraform is not available")
 	}
 
 	if !dependencies.CheckHelmInstallation() {
-		return fmt.Errorf("Helm is not available")
+		return fmt.Errorf("helm is not available")
 	}
 
 	if !dependencies.CheckAwsCLIInstallation() {
-		return fmt.Errorf("AWS CLI is not available")
+		return fmt.Errorf("aws is not available")
 	}
 
-	if !dependencies.CheckDirenvInstallation() {
-		return fmt.Errorf("direnv is not available")
+	if !dependencies.CheckK8sInstallation() {
+		return fmt.Errorf("kubectl is not available")
 	}
+
+	// Prerequisites
+	deployConfig, err := types.ReadConfigFromJSONFile("settings.json")
+	if err != nil {
+		fmt.Println("Error reading settings file:", err)
+		return err
+	}
+	fmt.Println("Deploy config:", deployConfig)
 
 	// STEP 1. Clone the charts repository
-	err := t.cloneSourcecode("tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git")
+	err = t.cloneSourcecode("tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git")
 	if err != nil {
 		fmt.Println("Error cloning sourcecode:", err)
 		return err
@@ -425,6 +461,13 @@ func (t *ThanosStack) inputDeployContracts() (*DeployContractsInput, error) {
 		return nil, err
 	}
 
+	fmt.Print("Please input your L1 provider: ")
+	l1Provider, err := scanner.ScanString()
+	if err != nil {
+		fmt.Printf("Error scanning L1 provider: %s", err)
+		return nil, err
+	}
+
 	fmt.Print("Please input your admin seed phrase: ")
 	seed, err := scanner.ScanString()
 	if err != nil {
@@ -442,6 +485,7 @@ func (t *ThanosStack) inputDeployContracts() (*DeployContractsInput, error) {
 
 	return &DeployContractsInput{
 		l1RPCurl:   l1RPCUrl,
+		l1Provider: l1Provider,
 		seed:       seed,
 		falutProof: faultProof,
 	}, nil

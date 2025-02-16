@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
-	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
+	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/urfave/cli/v3"
 )
 
@@ -25,7 +25,7 @@ func Execute(network, stack string) error {
 
 	switch stack {
 	case constants.ThanosStack:
-		thanosStack := thanos.NewThanosStack(network)
+		thanosStack := thanos.NewThanosStack(network, stack)
 		err := thanosStack.Deploy()
 		if err != nil {
 			fmt.Println("Error deploying Thanos Stack")
@@ -38,33 +38,20 @@ func Execute(network, stack string) error {
 func ActionDeploy() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
 		var err error
-		network := cmd.String("network")
-		stack := cmd.String("stack")
-		if network == "" {
-			fmt.Print("Input network(local-devnet, testnet, mainnet): ")
-			network, err = scanner.ScanString()
-			if err != nil {
-				fmt.Println("Error parsing the network: ", err)
-				return err
-			}
-
-			if !constants.SupportedNetworks[network] {
-				return fmt.Errorf("unsupported network: %s", network)
-			}
-		}
-		if stack == "" {
-			fmt.Print("Input stack(thanos): ")
-			stack, err = scanner.ScanString()
-			if err != nil {
-				fmt.Println("Error parsing the stack: ", err)
-				return err
-			}
-
-			if !constants.SupportedStacks[stack] {
-				return fmt.Errorf("unsupported stack: %s", stack)
-			}
+		var network, stack string
+		config, err := types.ReadConfigFromJSONFile("settings.json")
+		if err != nil {
+			fmt.Println("Error reading settings.json")
+			return err
 		}
 
+		if config == nil {
+			network = constants.LocalDevnet
+			stack = constants.ThanosStack
+		} else {
+			network = config.Network
+			stack = config.Stack
+		}
 		return Execute(network, stack)
 	}
 }

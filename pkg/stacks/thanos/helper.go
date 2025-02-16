@@ -26,7 +26,7 @@ func displayAccounts(selectedAccounts map[int]bool, accounts map[int]types.Accou
 	}
 }
 
-func selectAccounts(client *ethclient.Client, seed string) (types.OperatorMap, error) {
+func selectAccounts(client *ethclient.Client, enableFraudProof bool, seed string) (types.OperatorMap, error) {
 	fmt.Println("Getting accounts...")
 	accounts, err := types.GetAccountMap(context.Background(), client, seed)
 	if err != nil {
@@ -40,12 +40,14 @@ func selectAccounts(client *ethclient.Client, seed string) (types.OperatorMap, e
 		"Select sequencer acount from the following ones",
 		"Select batcher acount from the following ones[recommend 0.3 ETH]",
 		"Select proposer acount from the following ones[recommend 0.3 ETH]",
-		"Select challenger acount from the following ones[recommend 0.3 ETH]",
+	}
+	if enableFraudProof {
+		prompts = append(prompts, "Select challenger acount from the following ones[recommend 0.3 ETH]")
 	}
 
 	operators := make(types.OperatorMap)
 
-	for i := 0; i < 5; i++ {
+	for i := 0; i < len(prompts); i++ {
 		fmt.Println(prompts[i])
 		displayAccounts(selectedAccounts, accounts)
 		fmt.Print("Enter the number: ")
@@ -63,7 +65,7 @@ func selectAccounts(client *ethclient.Client, seed string) (types.OperatorMap, e
 		}
 
 		selectedAccounts[selectedIndex] = true
-		operators[types.Operator(i)] = types.IndexAccount{
+		operators[types.Operator(i)] = &types.IndexAccount{
 			Index:      selectedIndex,
 			Address:    accounts[selectedIndex].Address,
 			PrivateKey: accounts[selectedIndex].PrivateKey,
