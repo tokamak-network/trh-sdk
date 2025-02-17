@@ -21,9 +21,16 @@ type Config struct {
 	Stack            string `json:"stack"`
 	Network          string `json:"network"`
 	EnableFraudProof bool   `json:"enable_fraud_proof"`
+
+	// these fields are added after installing the infrastructure successfully
+	K8sNamespace    string `json:"k8s_namespace"`
+	HelmReleaseName string `json:"helm_release_name"`
+	L2RpcUrl        string `json:"l2_rpc_url"`
 }
 
-func (c *Config) WriteToJSONFile(jsonFileName string) error {
+const configFileName = "settings.json"
+
+func (c *Config) WriteToJSONFile() error {
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		fmt.Println("Error marshalling JSON:", err)
@@ -31,7 +38,7 @@ func (c *Config) WriteToJSONFile(jsonFileName string) error {
 	}
 
 	// Write JSON to a file
-	err = os.WriteFile(jsonFileName, data, 0644)
+	err = os.WriteFile(configFileName, data, 0644)
 	if err != nil {
 		fmt.Println("Error writing JSON file:", err)
 		return err
@@ -40,18 +47,18 @@ func (c *Config) WriteToJSONFile(jsonFileName string) error {
 	return nil
 }
 
-func ReadConfigFromJSONFile(filename string) (*Config, error) {
+func ReadConfigFromJSONFile() (*Config, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
 
-	fileExist := utils.CheckFileExists(fmt.Sprintf("%s/%s", cwd, filename))
+	fileExist := utils.CheckFileExists(fmt.Sprintf("%s/%s", cwd, configFileName))
 	if !fileExist {
 		return nil, nil
 	}
 
-	data, err := os.ReadFile(filename)
+	data, err := os.ReadFile(configFileName)
 	if err != nil {
 		return nil, err
 	}

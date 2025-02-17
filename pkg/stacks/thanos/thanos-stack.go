@@ -191,7 +191,7 @@ func (t *ThanosStack) DeployContracts() error {
 		Network:              t.network,
 		EnableFraudProof:     deployContractsConfig.falutProof,
 	}
-	err = cfg.WriteToJSONFile("settings.json")
+	err = cfg.WriteToJSONFile()
 	if err != nil {
 		fmt.Println("Error writing settings file:", err)
 		return err
@@ -446,6 +446,7 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 	}
 	fmt.Println("Pods installed: \n", k8sPods)
 
+	var l2RPCUrl string
 	for {
 		k8sIngresses, err := utils.GetAddressByIngress(namespace, helmReleaseNameInput)
 		if err != nil {
@@ -454,12 +455,26 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 		}
 
 		if len(k8sIngresses) > 0 {
-			fmt.Printf("Your chain deployed successfully: %s", k8sIngresses[0])
-			return nil
+			l2RPCUrl = k8sIngresses[0]
+			break
 		}
 
 		time.Sleep(15 * time.Second)
 	}
+	fmt.Printf("Your chain deployed successfully: %s", l2RPCUrl)
+
+	deployConfig.HelmReleaseName = helmReleaseNameInput
+	deployConfig.K8sNamespace = namespace
+	deployConfig.L2RpcUrl = l2RPCUrl
+
+	err = deployConfig.WriteToJSONFile()
+	if err != nil {
+		fmt.Println("Error writing config file:", err)
+		return err
+	}
+	fmt.Printf("Config file written successfully: %s/settings.json", cwd)
+
+	return nil
 }
 
 func (t *ThanosStack) cloneSourcecode(repositoryName, url string) error {

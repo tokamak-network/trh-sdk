@@ -39,7 +39,7 @@ func ActionDeploy() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
 		var err error
 		var network, stack string
-		config, err := types.ReadConfigFromJSONFile("settings.json")
+		config, err := types.ReadConfigFromJSONFile()
 		if err != nil {
 			fmt.Println("Error reading settings.json")
 			return err
