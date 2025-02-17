@@ -83,6 +83,11 @@ func main() {
 					},
 				},
 			},
+			{
+				Name:   "destroy",
+				Usage:  "Destroy infrastructure",
+				Action: commands.ActionDestroyInfra(),
+			},
 		},
 	}
 
