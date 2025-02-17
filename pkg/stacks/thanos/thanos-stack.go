@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 
@@ -20,6 +21,7 @@ type ThanosStack struct {
 	stack               string
 	defaultDeployConfig *types.DeployConfigTemplate
 	l1Client            *ethclient.Client
+	deployConfig        *types.Config
 }
 
 type DeployContractsInput struct {
@@ -41,7 +43,7 @@ func NewThanosStack(network string, stack string) *ThanosStack {
 	}
 }
 
-func (t *ThanosStack) Deploy() error {
+func (t *ThanosStack) Deploy(deployConfig *types.Config) error {
 	switch t.network {
 	case constants.LocalDevnet:
 		return t.deployLocalDevnet()
@@ -59,7 +61,7 @@ func (t *ThanosStack) Deploy() error {
 
 		switch infraOpt {
 		case constants.AWS:
-			return t.deployNetworkToAWS()
+			return t.deployNetworkToAWS(deployConfig)
 		default:
 			return fmt.Errorf("%s not supported", infraOpt)
 		}
@@ -182,7 +184,7 @@ func (t *ThanosStack) DeployContracts() error {
 		BatcherPrivateKey:    operators[2].PrivateKey,
 		ProposerPrivateKey:   operators[3].PrivateKey,
 		ChallengerPrivateKey: challengerPrivateKey,
-		DeploymentPath:       fmt.Sprintf("%s/deploy-config.json", cwd),
+		DeploymentPath:       fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", cwd, deployContractsTemplate.L1ChainID),
 		L1RPCProvider:        deployContractsConfig.l1Provider,
 		L1RPCURL:             deployContractsConfig.l1RPCurl,
 		Stack:                t.stack,
@@ -229,7 +231,7 @@ func (t *ThanosStack) deployLocalDevnet() error {
 	return nil
 }
 
-func (t *ThanosStack) deployNetworkToAWS() error {
+func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 	// STEP 1. Check the required dependencies
 	if !dependencies.CheckTerraformInstallation() {
 		return fmt.Errorf("terraform is not available")
@@ -247,16 +249,8 @@ func (t *ThanosStack) deployNetworkToAWS() error {
 		return fmt.Errorf("kubectl is not available")
 	}
 
-	// Prerequisites
-	deployConfig, err := types.ReadConfigFromJSONFile("settings.json")
-	if err != nil {
-		fmt.Println("Error reading settings file:", err)
-		return err
-	}
-	fmt.Println("Deploy config:", deployConfig)
-
 	// STEP 1. Clone the charts repository
-	err = t.cloneSourcecode("tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git")
+	err := t.cloneSourcecode("tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git")
 	if err != nil {
 		fmt.Println("Error cloning sourcecode:", err)
 		return err
@@ -286,34 +280,33 @@ func (t *ThanosStack) deployNetworkToAWS() error {
 	err = makeTerraformEnvFile("tokamak-thanos-stack/terraform", types.TerraformEnvConfig{
 		ThanosStackName:  inputs.ChainName,
 		AwsRegion:        awsLoginInputs.Region,
-		SequencerKey:     "",
-		BatcherKey:       "",
-		ProposerKey:      "",
-		ChallengerKey:    "",
+		SequencerKey:     deployConfig.SequencerPrivateKey,
+		BatcherKey:       deployConfig.BatcherPrivateKey,
+		ProposerKey:      deployConfig.ProposerPrivateKey,
+		ChallengerKey:    deployConfig.ChallengerPrivateKey,
 		EksClusterAdmins: awsProfile.Arn,
-		DeploymentsPath:  "",
+		DeploymentsPath:  deployConfig.DeploymentPath,
 		L1BeaconUrl:      inputs.L1BeaconURL,
-		L1RpcUrl:         "",
-		L1RpcProvider:    "",
+		L1RpcUrl:         deployConfig.L1RPCURL,
+		L1RpcProvider:    deployConfig.L1RPCProvider,
 	})
 	if err != nil {
 		fmt.Println("Error creating Terraform environment:", err)
 		return err
 	}
 	// STEP 4. Make terraform backend up
-	output, err := utils.ExecuteCommand("bash", []string{
+	err = utils.ExecuteCommandStream("bash", []string{
 		"-c",
 		`cd tokamak-thanos-stack/terraform &&
 		source .envrc &&
 		cd backend &&
 		terraform init &&
 		terraform plan &&
-		terraform apply -auto-approve`,
+		terraform apply -auto-approve
+		`,
 	}...)
-	// Print the output
-	fmt.Println(output)
 	if err != nil {
-		fmt.Println("Error running direnv hook zsh:", err)
+		fmt.Println("Error running the terraform backend up:", err)
 		return err
 	}
 
@@ -329,8 +322,9 @@ func (t *ThanosStack) deployNetworkToAWS() error {
 		return err
 	}
 
+	fmt.Println("Make thanos stack terraform up")
 	// STEP 6. Make terraform thanos-stack up
-	thanosStackOutput, err := utils.ExecuteCommand("bash", []string{
+	err = utils.ExecuteCommandStream("bash", []string{
 		"-c",
 		`cd tokamak-thanos-stack/terraform &&
 		source .envrc &&
@@ -339,23 +333,24 @@ func (t *ThanosStack) deployNetworkToAWS() error {
 		terraform plan &&
 		terraform apply -auto-approve`,
 	}...)
-	fmt.Println(thanosStackOutput)
 	if err != nil {
-		fmt.Println("Error running direnv hook zsh:", err)
+		fmt.Println("Error running thanos-stack terraform:", err)
 		return err
 	}
 
 	thanosStackValueFileExist := utils.CheckFileExists("tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml")
 	if !thanosStackValueFileExist {
-		return fmt.Errorf("Thanos stack does not contain thanos-stack-values.yaml")
+		return fmt.Errorf("thanos-stack-values.yaml not found")
 	}
+
+	namespace := inputs.ChainName
 
 	// Step 7. Interact with EKS
 	eksSetup, err := utils.ExecuteCommand("aws", []string{
 		"eks",
 		"update-kubeconfig",
-		"--region", "ap-northeast-2",
-		"--name", inputs.ChainName,
+		"--region", awsLoginInputs.Region,
+		"--name", namespace,
 	}...)
 	if err != nil {
 		fmt.Println("Error running eks update-kubeconfig:", err, "details:", eksSetup)
@@ -364,7 +359,7 @@ func (t *ThanosStack) deployNetworkToAWS() error {
 
 	fmt.Println("eks update-kubeconfig:", eksSetup)
 
-	k8sPods, err := utils.GetK8sPods(inputs.ChainName)
+	k8sPods, err := utils.GetK8sPods(namespace)
 	if err != nil {
 		fmt.Println("Error getting k8s pods:", err, "details:", k8sPods)
 		return err
@@ -397,14 +392,46 @@ func (t *ThanosStack) deployNetworkToAWS() error {
 	fmt.Println("Helm added successfully: \n", helmSearchOutput)
 
 	// Step 8.2. Install helm charts
+	var helmReleaseNameInput string
+	for {
+		fmt.Print("Please enter the Helm chart release name: ")
+		helmReleaseNameInput, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error scanning Helm chart release name:", err)
+			return err
+		}
+
+		if helmReleaseNameInput == "" {
+			fmt.Println("Error: Release name cannot be empty. Please try again.")
+			continue
+		}
+
+		releaseNameExist, err := utils.HelmReleaseExists(namespace, helmReleaseNameInput)
+		if err != nil {
+			fmt.Println("Error checking if Helm chart release exists:", helmReleaseNameInput)
+			return err
+		}
+		if releaseNameExist {
+			fmt.Println("Error: Helm release name already exists. Please choose a different name.")
+			continue
+		}
+
+		break
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
 	_, err = utils.ExecuteCommand("helm", []string{
 		"install",
-		"{}",
+		helmReleaseNameInput,
 		"thanos-stack/thanos-stack",
 		"--values",
-		"tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml",
+		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", cwd),
 		"--namespace",
-		inputs.ChainName,
+		namespace,
 	}...)
 	if err != nil {
 		fmt.Println("Error running helm search:", err, "details:", helmSearchOutput)
@@ -412,20 +439,27 @@ func (t *ThanosStack) deployNetworkToAWS() error {
 	}
 
 	fmt.Println("✅ Helm charts installed successfully")
-	k8sPods, err = utils.GetK8sPods(inputs.ChainName)
+	k8sPods, err = utils.GetK8sPods(namespace)
 	if err != nil {
 		fmt.Println("Error getting k8s pods:", err, "details:", k8sPods)
 		return err
 	}
-	fmt.Println("kubectl get pods: \n", k8sPods)
+	fmt.Println("Pods installed: \n", k8sPods)
 
-	k8sIngresses, err := utils.GetK8sIngresses(inputs.ChainName)
-	if err != nil {
-		fmt.Println("Error getting k8s ingresses:", err, "details:", k8sIngresses)
-		return err
+	for {
+		k8sIngresses, err := utils.GetAddressByIngress(namespace, helmReleaseNameInput)
+		if err != nil {
+			fmt.Println("Error getting k8s ingresses:", err, "details:", k8sIngresses)
+			return err
+		}
+
+		if len(k8sIngresses) > 0 {
+			fmt.Printf("Your chain deployed successfully: %s", k8sIngresses[0])
+			return nil
+		}
+
+		time.Sleep(15 * time.Second)
 	}
-	fmt.Println("kubectl get ingresses: \n", k8sIngresses)
-	return nil
 }
 
 func (t *ThanosStack) cloneSourcecode(repositoryName, url string) error {
