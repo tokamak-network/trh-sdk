@@ -487,12 +487,33 @@ func (t *ThanosStack) cloneSourcecode(repositoryName, url string) error {
 
 func (t *ThanosStack) inputDeployContracts() (*DeployContractsInput, error) {
 	fmt.Println("You are deploying the L1 contracts.")
+	var (
+		l1RPCUrl string
+		err      error
+	)
+	for {
+		fmt.Print("Please input your L1 RPC URL: ")
+		l1RPCUrl, err = scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error scanning L1 RPC URL: %s", err)
+			return nil, err
+		}
 
-	fmt.Print("Please input your L1 RPC URL: ")
-	l1RPCUrl, err := scanner.ScanString()
-	if err != nil {
-		fmt.Printf("Error scanning L1 RPC URL: %s", err)
-		return nil, err
+		client, err := ethclient.Dial(l1RPCUrl)
+		if err != nil {
+			fmt.Printf("Invalid L1 RPC URL: %s, please try again", l1RPCUrl)
+			continue
+		}
+		blockNo, err := client.BlockNumber(context.Background())
+		if err != nil {
+			fmt.Printf("Error getting block number: %s", err)
+			continue
+		}
+		if blockNo == 0 {
+			fmt.Printf("L1 RPC URL does not have a block number, please try again")
+			continue
+		}
+		break
 	}
 
 	fmt.Print("Please input your L1 provider: ")
@@ -526,25 +547,44 @@ func (t *ThanosStack) inputDeployContracts() (*DeployContractsInput, error) {
 }
 
 func (t *ThanosStack) inputAWSLogin() (*types.AWSLogin, error) {
-	fmt.Print("Please enter the AWS access key(read more): ")
-	awsAccessKeyID, err := scanner.ScanString()
-	if err != nil {
-		fmt.Println("Error scanning AWS access key")
-		return nil, err
+	var (
+		awsAccessKeyID, awsSecretKey string
+		err                          error
+	)
+	for {
+		fmt.Print("Please enter the AWS access key(read more): ")
+		awsAccessKeyID, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error scanning AWS access key")
+			return nil, err
+		}
+		if awsAccessKeyID == "" {
+			fmt.Println("Error: AWS access key ID is empty")
+			continue
+		}
+		if !utils.IsValidAWSAccessKey(awsAccessKeyID) {
+			fmt.Println("Error: AWS access key ID is invalid")
+			continue
+		}
+		break
 	}
 
-	if awsAccessKeyID == "" {
-		return nil, fmt.Errorf("AWS access key ID cannot be empty")
-	}
-
-	fmt.Print("Please enter the AWS secret key(read more): ")
-	awsSecretKey, err := scanner.ScanString()
-	if err != nil {
-		fmt.Println("Error scanning AWS secret key")
-		return nil, err
-	}
-	if awsSecretKey == "" {
-		return nil, fmt.Errorf("AWS secret key cannot be empty")
+	for {
+		fmt.Print("Please enter the AWS secret key(read more): ")
+		awsSecretKey, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error scanning AWS secret key")
+			return nil, err
+		}
+		if awsSecretKey == "" {
+			fmt.Println("Error: AWS secret key is empty")
+			continue
+		}
+		if !utils.IsValidAWSSecretKey(awsSecretKey) {
+			fmt.Println("Error: AWS secret key is invalid")
+			continue
+		}
+		break
 	}
 
 	fmt.Print("Please enter the AWS region(default ap-northeast-2): ")
@@ -557,7 +597,7 @@ func (t *ThanosStack) inputAWSLogin() (*types.AWSLogin, error) {
 		awsRegion = "ap-northeast-2"
 	}
 
-	fmt.Print("Please enter the format file(default Json): ")
+	fmt.Print("Please enter the format file(default \"json\"): ")
 	defaultFormatFile, err := scanner.ScanString()
 	if err != nil {
 		fmt.Println("Error scanning AWS format file")
@@ -583,10 +623,21 @@ func (t *ThanosStack) inputDeployInfra() (*DeployInfraInput, error) {
 		return nil, err
 	}
 
-	fmt.Print("Please input your L1 beacon URL(read more): ")
-	l1BeaconUrl, err := scanner.ScanString()
-	if err != nil {
-		return nil, err
+	var l1BeaconUrl string
+	for {
+		fmt.Print("Please input your L1 beacon URL: ")
+		l1BeaconUrl, err = scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error scanning L1 beacon URL: %s\n", err)
+			continue
+		}
+
+		if !utils.IsValidBeaconURL(l1BeaconUrl) {
+			fmt.Println("Error: The URL does not return a valid beacon genesis response. Please enter a correct URL.")
+			continue
+		}
+
+		break
 	}
 
 	return &DeployInfraInput{
