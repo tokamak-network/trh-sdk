@@ -10,55 +10,55 @@ import (
 )
 
 func (t *ThanosStack) inputDeployContracts() (*DeployContractsInput, error) {
-	fmt.Println("You are deploying the L1 contracts.")
+	fmt.Println("You are about to deploy the L1 contracts.")
 	var (
 		l1RPCUrl string
 		err      error
 	)
 	for {
-		fmt.Print("Please input your L1 RPC URL: ")
+		fmt.Print("Please enter your L1 RPC URL: ")
 		l1RPCUrl, err = scanner.ScanString()
 		if err != nil {
-			fmt.Printf("Error scanning L1 RPC URL: %s", err)
+			fmt.Printf("Error while reading L1 RPC URL: %s", err)
 			return nil, err
 		}
 
 		client, err := ethclient.Dial(l1RPCUrl)
 		if err != nil {
-			fmt.Printf("Invalid L1 RPC URL: %s, please try again", l1RPCUrl)
+			fmt.Printf("Invalid L1 RPC URL: %s. Please try again", l1RPCUrl)
 			continue
 		}
 		blockNo, err := client.BlockNumber(context.Background())
 		if err != nil {
-			fmt.Printf("Error getting block number: %s", err)
+			fmt.Printf("Failed to retrieve block number: %s", err)
 			continue
 		}
 		if blockNo == 0 {
-			fmt.Printf("L1 RPC URL does not have a block number, please try again")
+			fmt.Printf("The L1 RPC URL is not returning any blocks. Please try again")
 			continue
 		}
 		break
 	}
 
-	fmt.Print("Please input your L1 provider: ")
+	fmt.Print("Please enter your L1 provider: ")
 	l1Provider, err := scanner.ScanString()
 	if err != nil {
-		fmt.Printf("Error scanning L1 provider: %s", err)
+		fmt.Printf("Error while reading L1 provider: %s", err)
 		return nil, err
 	}
 
-	fmt.Print("Please input your admin seed phrase: ")
+	fmt.Print("Please enter your admin seed phrase: ")
 	seed, err := scanner.ScanString()
 	if err != nil {
-		fmt.Printf("Error scanning the seed phrase: %s", err)
+		fmt.Printf("Error while reading the seed phrase: %s", err)
 		return nil, err
 	}
 
 	faultProof := false
-	fmt.Print("Do you want to enable the fault-proof system on your chain? [Y or N] (default: N): ")
+	fmt.Print("Would you like to enable the fault-proof system on your chain? [Y or N] (default: N): ")
 	faultProof, err = scanner.ScanBool()
 	if err != nil {
-		fmt.Printf("Error scanning the fault-proof system setting: %s", err)
+		fmt.Printf("Error while reading the fault-proof system setting: %s", err)
 		return nil, err
 	}
 
@@ -76,45 +76,45 @@ func (t *ThanosStack) inputAWSLogin() (*types.AWSLogin, error) {
 		err                          error
 	)
 	for {
-		fmt.Print("Please enter the AWS access key(read more): ")
+		fmt.Print("Please enter your AWS access key (learn more): ")
 		awsAccessKeyID, err = scanner.ScanString()
 		if err != nil {
-			fmt.Println("Error scanning AWS access key")
+			fmt.Println("Error while reading AWS access key")
 			return nil, err
 		}
 		if awsAccessKeyID == "" {
-			fmt.Println("Error: AWS access key ID is empty")
+			fmt.Println("Error: AWS access key ID cannot be empty")
 			continue
 		}
 		if !utils.IsValidAWSAccessKey(awsAccessKeyID) {
-			fmt.Println("Error: AWS access key ID is invalid")
+			fmt.Println("Error: The AWS access key ID format is invalid")
 			continue
 		}
 		break
 	}
 
 	for {
-		fmt.Print("Please enter the AWS secret key(read more): ")
+		fmt.Print("Please enter your AWS secret key (learn more): ")
 		awsSecretKey, err = scanner.ScanString()
 		if err != nil {
-			fmt.Println("Error scanning AWS secret key")
+			fmt.Println("Error while reading AWS secret key")
 			return nil, err
 		}
 		if awsSecretKey == "" {
-			fmt.Println("Error: AWS secret key is empty")
+			fmt.Println("Error: AWS secret key cannot be empty")
 			continue
 		}
 		if !utils.IsValidAWSSecretKey(awsSecretKey) {
-			fmt.Println("Error: AWS secret key is invalid")
+			fmt.Println("Error: The AWS secret key format is invalid")
 			continue
 		}
 		break
 	}
 
-	fmt.Print("Please enter the AWS region(default ap-northeast-2): ")
+	fmt.Print("Please enter your AWS region (default: ap-northeast-2): ")
 	awsRegion, err := scanner.ScanString()
 	if err != nil {
-		fmt.Println("Error scanning AWS region")
+		fmt.Println("Error while reading AWS region")
 		return nil, err
 	}
 	if awsRegion == "" {
@@ -130,24 +130,24 @@ func (t *ThanosStack) inputAWSLogin() (*types.AWSLogin, error) {
 }
 
 func (t *ThanosStack) inputDeployInfra() (*DeployInfraInput, error) {
-	fmt.Print("Please input your chain name: ")
+	fmt.Print("Please enter your chain name: ")
 	chainName, err := scanner.ScanString()
 	if err != nil {
-		fmt.Printf("Error scanning chain name: %s", err)
+		fmt.Printf("Error while reading chain name: %s", err)
 		return nil, err
 	}
 
 	var l1BeaconUrl string
 	for {
-		fmt.Print("Please input your L1 beacon URL: ")
+		fmt.Print("Please enter your L1 beacon URL: ")
 		l1BeaconUrl, err = scanner.ScanString()
 		if err != nil {
-			fmt.Printf("Error scanning L1 beacon URL: %s\n", err)
+			fmt.Printf("Error while reading L1 beacon URL: %s\n", err)
 			continue
 		}
 
 		if !utils.IsValidBeaconURL(l1BeaconUrl) {
-			fmt.Println("Error: The URL does not return a valid beacon genesis response. Please enter a correct URL.")
+			fmt.Println("Error: The URL provided does not return a valid beacon genesis response. Please enter a valid URL.")
 			continue
 		}
 
@@ -165,7 +165,7 @@ func (t *ThanosStack) cloneSourcecode(repositoryName, url string) error {
 	defer close(doneCh)
 	existingSourcecode, err := utils.CheckExistingSourceCode(repositoryName)
 	if err != nil {
-		fmt.Println("Error checking existing source code")
+		fmt.Println("Error while checking existing source code")
 		return err
 	}
 
@@ -174,11 +174,11 @@ func (t *ThanosStack) cloneSourcecode(repositoryName, url string) error {
 		err := utils.CloneRepo(url, repositoryName)
 		doneCh <- true
 		if err != nil {
-			fmt.Println("Error cloning the repo")
+			fmt.Println("Error while cloning the repository")
 			return err
 		}
 	}
-	fmt.Printf("\r✅ Clone the %s repository successfully!       \n", repositoryName)
+	fmt.Printf("\r✅ Successfully cloned the %s repository!       \n", repositoryName)
 
 	return nil
 }
@@ -187,25 +187,25 @@ func (t *ThanosStack) inputHelmReleaseName(namespace string) (string, error) {
 	var helmReleaseNameInput string
 	var err error
 	for {
-		fmt.Print("Please enter the Helm chart release name: ")
+		fmt.Print("Please enter a name for your Helm chart release: ")
 		helmReleaseNameInput, err = scanner.ScanString()
 		if err != nil {
-			fmt.Println("Error scanning Helm chart release name:", err)
+			fmt.Println("Error while reading Helm chart release name:", err)
 			return "", err
 		}
 
 		if helmReleaseNameInput == "" {
-			fmt.Println("Error: Release name cannot be empty. Please try again.")
+			fmt.Println("Error: The release name cannot be empty. Please try again.")
 			continue
 		}
 
 		releaseNameExist, err := utils.HelmReleaseExists(namespace, helmReleaseNameInput)
 		if err != nil {
-			fmt.Println("Error checking if Helm chart release exists:", helmReleaseNameInput)
+			fmt.Println("Error while checking if Helm chart release exists:", helmReleaseNameInput)
 			return "", err
 		}
 		if releaseNameExist {
-			fmt.Println("Error: Helm release name already exists. Please choose a different name.")
+			fmt.Println("Error: This Helm release name already exists. Please choose a different name.")
 			continue
 		}
 

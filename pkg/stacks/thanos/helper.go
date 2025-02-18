@@ -28,7 +28,7 @@ func displayAccounts(selectedAccounts map[int]bool, accounts map[int]types.Accou
 }
 
 func selectAccounts(client *ethclient.Client, enableFraudProof bool, seed string) (types.OperatorMap, error) {
-	fmt.Println("Getting accounts...")
+	fmt.Println("Retrieving accounts...")
 	accounts, err := types.GetAccountMap(context.Background(), client, seed)
 	if err != nil {
 		return nil, err
@@ -37,21 +37,21 @@ func selectAccounts(client *ethclient.Client, enableFraudProof bool, seed string
 	selectedAccounts := make(map[int]bool)
 
 	prompts := []string{
-		"Select admin acount from the following ones[minimum 0.6 ETH]",
-		"Select sequencer acount from the following ones",
-		"Select batcher acount from the following ones[recommend 0.3 ETH]",
-		"Select proposer acount from the following ones[recommend 0.3 ETH]",
+		"Select an admin account from the following list (minimum 0.6 ETH required)",
+		"Select a sequencer account from the following list",
+		"Select a batcher account from the following list (recommended 0.3 ETH)",
+		"Select a proposer account from the following list (recommended 0.3 ETH)",
 	}
-	prompts = append(prompts, "Select challenger acount from the following ones[recommend 0.3 ETH]")
+	prompts = append(prompts, "Select a challenger account from the following list (recommended 0.3 ETH)")
 	operators := make(types.OperatorMap)
 
 	for i := 0; i < len(prompts); i++ {
 		fmt.Println(prompts[i])
 		displayAccounts(selectedAccounts, accounts)
-		fmt.Print("Enter the number: ")
+		fmt.Print("Enter the account number: ")
 		input, err := scanner.ScanString()
 		if err != nil {
-			fmt.Printf("Failed to scan input: %s", err)
+			fmt.Printf("Failed to read input: %s", err)
 			return nil, err
 		}
 
@@ -100,10 +100,10 @@ func makeDeployContractConfigJsonFile(l1Provider *ethclient.Client, operators ty
 		}
 	}
 
-	// fetch the latest block
+	// Fetch the latest block
 	latest, err := l1Provider.BlockByNumber(context.Background(), nil)
 	if err != nil {
-		fmt.Println("Error fetching latest block")
+		fmt.Println("Error retrieving latest block")
 		return err
 	}
 
@@ -113,7 +113,7 @@ func makeDeployContractConfigJsonFile(l1Provider *ethclient.Client, operators ty
 	file, err := os.Create("deploy-config.json")
 	defer file.Close()
 	if err != nil {
-		fmt.Printf("Failed to create file: %s", err)
+		fmt.Printf("Failed to create configuration file: %s", err)
 		return err
 	}
 
@@ -229,10 +229,10 @@ func initDeployConfigTemplate(enableFraudProof bool, network string) *types.Depl
 }
 
 func loginAWS(awsLoginInputs *types.AWSLogin) (*aws.AccountProfile, error) {
-	fmt.Println("Logging the AWS account....")
+	fmt.Println("Authenticating AWS account...")
 	awsProfileAccount, err := aws.LoginAWS(awsLoginInputs.AccessKey, awsLoginInputs.SecretKey, awsLoginInputs.Region, awsLoginInputs.DefaultFormat)
 	if err != nil {
-		return nil, fmt.Errorf("Error getting AWS credentials: %s", err)
+		return nil, fmt.Errorf("Failed to authenticate AWS credentials: %s", err)
 	}
 
 	return awsProfileAccount, nil
@@ -246,7 +246,7 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	filePath := filepath.Join(dirPath, ".envrc")
 	output, err := os.Create(filePath)
 	if err != nil {
-		fmt.Println("Error creating file:", err)
+		fmt.Println("Error creating environment file:", err)
 		return err
 	}
 	defer output.Close()
@@ -285,6 +285,6 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	if err != nil {
 		return err
 	}
-	fmt.Println(".envrc file has been generated successfully!")
+	fmt.Println("Environment configuration file (.envrc) has been successfully generated!")
 	return nil
 }
