@@ -41,10 +41,7 @@ func selectAccounts(client *ethclient.Client, enableFraudProof bool, seed string
 		"Select batcher acount from the following ones[recommend 0.3 ETH]",
 		"Select proposer acount from the following ones[recommend 0.3 ETH]",
 	}
-	if enableFraudProof {
-		prompts = append(prompts, "Select challenger acount from the following ones[recommend 0.3 ETH]")
-	}
-
+	prompts = append(prompts, "Select challenger acount from the following ones[recommend 0.3 ETH]")
 	operators := make(types.OperatorMap)
 
 	for i := 0; i < len(prompts); i++ {

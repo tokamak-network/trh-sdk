@@ -91,7 +91,7 @@ func (t *ThanosStack) DeployContracts() error {
 	// STEP 3. Build the contracts
 	doneCh := make(chan bool)
 	go utils.ShowLoadingAnimation(doneCh, "Building the contracts...")
-	_, err = utils.ExecuteCommand("bash", "-c", "cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh build")
+	err = utils.ExecuteCommandStream("bash", "-c", "cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh build")
 	if err != nil {
 		doneCh <- true
 		fmt.Print("\r❌ Build the contracts failed!       \n")
@@ -111,7 +111,7 @@ func (t *ThanosStack) DeployContracts() error {
 	}
 
 	// STEP 4.2. Copy the config file into the scripts folder
-	_, err = utils.ExecuteCommand("bash", "-c", "cp ./deploy-config.json tokamak-thanos/packages/tokamak/contracts-bedrock/scripts")
+	err = utils.ExecuteCommandStream("bash", "-c", "cp ./deploy-config.json tokamak-thanos/packages/tokamak/contracts-bedrock/scripts")
 	if err != nil {
 		doneCh <- true
 		fmt.Print("\r❌ Copy the config file successfully!       \n")
@@ -119,7 +119,7 @@ func (t *ThanosStack) DeployContracts() error {
 	}
 
 	// STEP 4.3. Deploy contracts
-	_, err = utils.ExecuteCommand("bash", "-c", "cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh deploy -e .env -c deploy-config.json")
+	err = utils.ExecuteCommandStream("bash", "-c", "cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh deploy -e .env -c deploy-config.json")
 	if err != nil {
 		doneCh <- true
 		fmt.Print("\r❌ Build the contracts failed!       \n")
@@ -129,7 +129,7 @@ func (t *ThanosStack) DeployContracts() error {
 	doneCh <- true
 
 	// STEP 5: Generate the genesis and rollup files
-	_, err = utils.ExecuteCommand("bash", "-c", "cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh generate -e .env -c deploy-config.json")
+	err = utils.ExecuteCommandStream("bash", "-c", "cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh generate -e .env -c deploy-config.json")
 	go utils.ShowLoadingAnimation(doneCh, "Generating the rollup and genesis files...")
 	if err != nil {
 		doneCh <- true
@@ -212,7 +212,7 @@ func (t *ThanosStack) deployLocalDevnet() error {
 
 	doneCh := make(chan bool)
 	go utils.ShowLoadingAnimation(doneCh, "Installing the devnet packages...")
-	_, err = utils.ExecuteCommand("bash", "-c", "cd tokamak-thanos && bash ./install-devnet-packages.sh")
+	err = utils.ExecuteCommandStream("bash", "-c", "cd tokamak-thanos && bash ./install-devnet-packages.sh")
 	if err != nil {
 		doneCh <- true
 		fmt.Print("\r❌ Installation failed!       \n")
@@ -222,10 +222,10 @@ func (t *ThanosStack) deployLocalDevnet() error {
 	doneCh <- true
 
 	go utils.ShowLoadingAnimation(doneCh, "Making the devnet up...")
-	output, err := utils.ExecuteCommand("bash", "-c", "cd tokamak-thanos && make devnet-up")
+	err = utils.ExecuteCommandStream("bash", "-c", "cd tokamak-thanos && make devnet-up")
 	if err != nil {
 		doneCh <- true
-		fmt.Printf("\r❌ Make devnet failed!       \n Detail: %s", output)
+		fmt.Print("\r❌ Make devnet failed!       \n")
 
 		return err
 	}
