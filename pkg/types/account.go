@@ -75,7 +75,7 @@ func GetAccountMap(ctx context.Context, client *ethclient.Client, seedPhrase str
 		}
 		publicKey := privateKey.Public().(*ecdsa.PublicKey)
 		address := crypto.PubkeyToAddress(*publicKey)
-		
+
 		balance, err := client.BalanceAt(ctx, address, nil)
 		if err != nil {
 			log.Printf("Failed to get balance: %v", err)
@@ -84,7 +84,7 @@ func GetAccountMap(ctx context.Context, client *ethclient.Client, seedPhrase str
 		account := Account{
 			Address:    address.Hex(),
 			Balance:    fmt.Sprintf("%.2f", utils.WeiToEther(balance)),
-			PrivateKey: privateKey.D.Text(16),
+			PrivateKey: fmt.Sprintf("%064x", privateKey.D),
 		}
 
 		accounts[i] = account
