@@ -209,6 +209,11 @@ func (t *ThanosStack) deployLocalDevnet() error {
 	if err != nil {
 		return err
 	}
+	err = utils.ExecuteCommandStream("bash", "-c", "cd tokamak-thanos && git checkout feat/skip-install-foundry-if-installed")
+	if err != nil {
+		fmt.Println("Error checking out feat/skip-install-foundry-if-installed branch", err)
+		return err
+	}
 
 	doneCh := make(chan bool)
 	go utils.ShowLoadingAnimation(doneCh, "Installing the devnet packages...")
