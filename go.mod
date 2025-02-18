@@ -1,6 +1,6 @@
 module github.com/tokamak-network/trh-sdk
 
-go 1.22.7
+go 1.22.6
 
 require (
 	github.com/ethereum-optimism/go-ethereum-hdwallet v0.1.3
