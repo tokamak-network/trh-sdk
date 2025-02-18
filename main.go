@@ -28,20 +28,8 @@ func main() {
 				Action: commands.ActionDeployContracts(),
 			},
 			{
-				Name:  "deploy",
-				Usage: "Deploy infrastructure",
-				Flags: []cli.Flag{
-					&cli.StringFlag{
-						Name:  "network",
-						Usage: "Network to deploy to",
-						Value: "",
-					},
-					&cli.StringFlag{
-						Name:  "stack",
-						Usage: "Tech stack",
-						Value: "",
-					},
-				},
+				Name:   "deploy",
+				Usage:  "Deploy infrastructure",
 				Action: commands.ActionDeploy(),
 			},
 			{
@@ -87,6 +75,29 @@ func main() {
 				Name:   "destroy",
 				Usage:  "Destroy infrastructure",
 				Action: commands.ActionDestroyInfra(),
+			},
+			{
+				Name:  "install",
+				Usage: "Install plugins",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:  "plugins",
+						Usage: "",
+						Value: "",
+					},
+					&cli.StringFlag{
+						Name:  "stack",
+						Usage: "Tech stack",
+						Value: "",
+					},
+				},
+				Action: commands.ActionInstallPlugins(),
+			},
+			{
+				Name:      "install",
+				Usage:     "Install plugins",
+				ArgsUsage: "[plugins...]",
+				Action:    commands.ActionInstallPlugins(),
 			},
 		},
 	}

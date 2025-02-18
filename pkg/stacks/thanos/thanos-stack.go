@@ -43,6 +43,8 @@ func NewThanosStack(network string, stack string) *ThanosStack {
 	}
 }
 
+// ----------------------------------------- Deploy contracts command  ----------------------------- //
+
 func (t *ThanosStack) DeployContracts() error {
 	if t.network == constants.LocalDevnet {
 		return fmt.Errorf("network %s doesn't need to deploy the contracts, please running `tokamak-cli-sdk deploy` instead", constants.LocalDevnet)
@@ -173,6 +175,8 @@ func (t *ThanosStack) DeployContracts() error {
 	return nil
 }
 
+// ----------------------------------------- Deploy command  ----------------------------- //
+
 func (t *ThanosStack) Deploy(deployConfig *types.Config) error {
 	switch t.network {
 	case constants.LocalDevnet:
@@ -198,16 +202,6 @@ func (t *ThanosStack) Deploy(deployConfig *types.Config) error {
 	default:
 		return fmt.Errorf("network %s is not supported", t.network)
 	}
-}
-
-func (t *ThanosStack) Destroy(deployConfig *types.Config) error {
-	switch t.network {
-	case constants.LocalDevnet:
-		return t.destroyDevnet()
-	case constants.Testnet, constants.Mainnet:
-		return t.destroyInfraOnAWS(deployConfig)
-	}
-	return nil
 }
 
 func (t *ThanosStack) deployLocalDevnet() error {
@@ -402,31 +396,10 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 	fmt.Println("Helm added successfully: \n", helmSearchOutput)
 
 	// Step 8.2. Install helm charts
-	var helmReleaseNameInput string
-	for {
-		fmt.Print("Please enter the Helm chart release name: ")
-		helmReleaseNameInput, err = scanner.ScanString()
-		if err != nil {
-			fmt.Println("Error scanning Helm chart release name:", err)
-			return err
-		}
-
-		if helmReleaseNameInput == "" {
-			fmt.Println("Error: Release name cannot be empty. Please try again.")
-			continue
-		}
-
-		releaseNameExist, err := utils.HelmReleaseExists(namespace, helmReleaseNameInput)
-		if err != nil {
-			fmt.Println("Error checking if Helm chart release exists:", helmReleaseNameInput)
-			return err
-		}
-		if releaseNameExist {
-			fmt.Println("Error: Helm release name already exists. Please choose a different name.")
-			continue
-		}
-
-		break
+	helmReleaseNameInput, err := t.inputHelmReleaseName(namespace)
+	if err != nil {
+		fmt.Println("Error getting helm release name:", err)
+		return err
 	}
 
 	cwd, err := os.Getwd()
@@ -487,6 +460,18 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 	return nil
 }
 
+// --------------------------------------------- Destroy command -------------------------------------//
+
+func (t *ThanosStack) Destroy(deployConfig *types.Config) error {
+	switch t.network {
+	case constants.LocalDevnet:
+		return t.destroyDevnet()
+	case constants.Testnet, constants.Mainnet:
+		return t.destroyInfraOnAWS(deployConfig)
+	}
+	return nil
+}
+
 func (t *ThanosStack) destroyDevnet() error {
 	err := t.cloneSourcecode("tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
 	if err != nil {
@@ -518,5 +503,64 @@ func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
 	}
 
 	fmt.Println("Helm release uninstalled successfully:", output)
+	return nil
+}
+
+// ------------------------------------------ Install plugins ---------------------------
+
+func (t *ThanosStack) InstallPlugins(pluginNames []string, deployConfig *types.Config) error {
+	for _, pluginName := range pluginNames {
+		if !constants.SupportedPlugins[pluginName] {
+			fmt.Printf("Plugin %s is not supported by this stack.\n", pluginName)
+			continue
+		}
+
+		fmt.Printf("Installing plugin: %s in namespace: %s...\n", pluginName, deployConfig.K8sNamespace)
+
+		switch pluginName {
+		case constants.PluginBridge:
+			return t.installBridges(deployConfig.K8sNamespace)
+		}
+	}
+	fmt.Println(pluginNames)
+	return nil
+}
+
+func (t *ThanosStack) installBridges(namespace string) error {
+	fmt.Println("Installing bridge...")
+
+	helmReleaseNameInput, err := t.inputHelmReleaseName(namespace)
+	if err != nil {
+		fmt.Println("Error getting helm release name:", err)
+		return err
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Println("Error getting working directory:", err)
+		return err
+	}
+
+	_, err = utils.ExecuteCommand("helm", []string{
+		"install",
+		helmReleaseNameInput,
+		"thanos-stack/thanos-stack",
+		"--values",
+		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", cwd),
+		"--namespace",
+		namespace,
+	}...)
+	if err != nil {
+		fmt.Println("Error running helm search:", err)
+		return err
+	}
+
+	fmt.Println("✅ Helm charts installed successfully")
+	k8sPods, err := utils.GetK8sPods(namespace)
+	if err != nil {
+		fmt.Println("Error getting k8s pods:", err, "details:", k8sPods)
+		return err
+	}
+	fmt.Println("Pods installed: \n", k8sPods)
+
 	return nil
 }

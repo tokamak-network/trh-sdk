@@ -192,3 +192,34 @@ func (t *ThanosStack) cloneSourcecode(repositoryName, url string) error {
 
 	return nil
 }
+
+func (t *ThanosStack) inputHelmReleaseName(namespace string) (string, error) {
+	var helmReleaseNameInput string
+	var err error
+	for {
+		fmt.Print("Please enter the Helm chart release name: ")
+		helmReleaseNameInput, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error scanning Helm chart release name:", err)
+			return "", err
+		}
+
+		if helmReleaseNameInput == "" {
+			fmt.Println("Error: Release name cannot be empty. Please try again.")
+			continue
+		}
+
+		releaseNameExist, err := utils.HelmReleaseExists(namespace, helmReleaseNameInput)
+		if err != nil {
+			fmt.Println("Error checking if Helm chart release exists:", helmReleaseNameInput)
+			return "", err
+		}
+		if releaseNameExist {
+			fmt.Println("Error: Helm release name already exists. Please choose a different name.")
+			continue
+		}
+
+		break
+	}
+	return helmReleaseNameInput, nil
+}
