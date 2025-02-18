@@ -215,21 +215,15 @@ func (t *ThanosStack) deployLocalDevnet() error {
 		return err
 	}
 
-	doneCh := make(chan bool)
-	go utils.ShowLoadingAnimation(doneCh, "Installing the devnet packages...")
 	err = utils.ExecuteCommandStream("bash", "-c", "cd tokamak-thanos && bash ./install-devnet-packages.sh")
 	if err != nil {
-		doneCh <- true
 		fmt.Print("\r❌ Installation failed!       \n")
 		return err
 	}
 	fmt.Print("\r✅ Installation completed!       \n")
-	doneCh <- true
 
-	go utils.ShowLoadingAnimation(doneCh, "Making the devnet up...")
 	err = utils.ExecuteCommandStream("bash", "-c", "cd tokamak-thanos && make devnet-up")
 	if err != nil {
-		doneCh <- true
 		fmt.Print("\r❌ Make devnet failed!       \n")
 
 		return err
