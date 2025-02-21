@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 func displayAccounts(selectedAccounts map[int]bool, accounts map[int]types.Account) {
@@ -233,6 +234,7 @@ func loginAWS(awsLoginInputs *types.AWSLogin) (*cloud_provider.AccountProfile, e
 	if err != nil {
 		return nil, fmt.Errorf("Error getting AWS credentials: %s", err)
 	}
+
 	return awsProfileAccount, nil
 }
 
@@ -263,7 +265,7 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	writer.WriteString(fmt.Sprintf("export TF_VAR_proposer_key=\"%s\"\n", config.ProposerKey))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_challenger_key=\"%s\"\n", config.ChallengerKey))
 
-	writer.WriteString(fmt.Sprintf("export TF_VAR_azs='[\"ap-northeast-2a\", \"ap-northeast-2c\"]'\n"))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_azs='[%s]'\n", strings.Join(config.Azs, "\", \"")))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_vpc_cidr=\"%s\"\n", "192.168.0.0/16"))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_vpc_name=\"${TF_VAR_thanos_stack_name}/VPC\"\n"))
 

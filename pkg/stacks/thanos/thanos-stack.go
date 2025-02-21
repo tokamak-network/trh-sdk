@@ -283,6 +283,7 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 		L1BeaconUrl:      inputs.L1BeaconURL,
 		L1RpcUrl:         deployConfig.L1RPCURL,
 		L1RpcProvider:    deployConfig.L1RPCProvider,
+		Azs:              awsProfile.AvailabilityZones,
 	})
 	if err != nil {
 		fmt.Println("Error creating Terraform environment:", err)

@@ -121,21 +121,11 @@ func (t *ThanosStack) inputAWSLogin() (*types.AWSLogin, error) {
 		awsRegion = "ap-northeast-2"
 	}
 
-	fmt.Print("Please enter the format file(default \"json\"): ")
-	defaultFormatFile, err := scanner.ScanString()
-	if err != nil {
-		fmt.Println("Error scanning AWS format file")
-		return nil, err
-	}
-	if defaultFormatFile == "" {
-		defaultFormatFile = "json"
-	}
-
 	return &types.AWSLogin{
 		SecretKey:     awsSecretKey,
 		Region:        awsRegion,
 		AccessKey:     awsAccessKeyID,
-		DefaultFormat: defaultFormatFile,
+		DefaultFormat: "json",
 	}, nil
 }
 

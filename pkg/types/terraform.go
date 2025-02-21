@@ -8,7 +8,7 @@ type TerraformEnvConfig struct {
 	BatcherKey        string
 	ProposerKey       string
 	ChallengerKey     string
-	Azs               string
+	Azs               []string
 	VpcCidr           string
 	VpcName           string
 	EksClusterAdmins  string
