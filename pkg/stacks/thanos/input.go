@@ -40,13 +40,6 @@ func (t *ThanosStack) inputDeployContracts() (*DeployContractsInput, error) {
 		break
 	}
 
-	fmt.Print("Please enter your L1 provider: ")
-	l1Provider, err := scanner.ScanString()
-	if err != nil {
-		fmt.Printf("Error while reading L1 provider: %s", err)
-		return nil, err
-	}
-
 	fmt.Print("Please enter your admin seed phrase: ")
 	seed, err := scanner.ScanString()
 	if err != nil {
@@ -64,7 +57,7 @@ func (t *ThanosStack) inputDeployContracts() (*DeployContractsInput, error) {
 
 	return &DeployContractsInput{
 		l1RPCurl:   l1RPCUrl,
-		l1Provider: l1Provider,
+		l1Provider: utils.DetectRPCKind(l1RPCUrl),
 		seed:       seed,
 		falutProof: faultProof,
 	}, nil
