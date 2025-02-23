@@ -20,9 +20,9 @@ type Account struct {
 }
 
 func GetAccountMap(ctx context.Context, client *ethclient.Client, seedPhrase string) (map[int]Account, error) {
-	// Validate the mnemonic
+	// Validate the mnemonic seed phrase
 	if !bip39.IsMnemonicValid(seedPhrase) {
-		return nil, errors.New("invalid seed phrase")
+		return nil, errors.New("invalid mnemonic seed phrase")
 	}
 	accounts := make(map[int]Account)
 
@@ -30,7 +30,7 @@ func GetAccountMap(ctx context.Context, client *ethclient.Client, seedPhrase str
 
 	masterKey, err := bip32.NewMasterKey(seed)
 	if err != nil {
-		log.Printf("Failed to create master key: %v", err)
+		log.Printf("Error creating master key: %v", err)
 		return nil, err
 	}
 
@@ -40,22 +40,22 @@ func GetAccountMap(ctx context.Context, client *ethclient.Client, seedPhrase str
 
 	purposeKey, err := masterKey.NewChildKey(hardened(44)) // 44'
 	if err != nil {
-		log.Printf("Failed to derive purpose key: %v", err)
+		log.Printf("Error deriving purpose key: %v", err)
 		return nil, err
 	}
 	coinTypeKey, err := purposeKey.NewChildKey(hardened(60)) // 60'
 	if err != nil {
-		log.Printf("Failed to derive coin type key: %v", err)
+		log.Printf("Error deriving coin type key: %v", err)
 		return nil, err
 	}
 	accountKey, err := coinTypeKey.NewChildKey(hardened(0)) // 0'
 	if err != nil {
-		log.Printf("Failed to derive account key: %v", err)
+		log.Printf("Error deriving account key: %v", err)
 		return nil, err
 	}
 	changeKey, err := accountKey.NewChildKey(0) // External (0)
 	if err != nil {
-		log.Printf("Failed to derive change key: %v", err)
+		log.Printf("Error deriving change key: %v", err)
 		return nil, err
 	}
 
@@ -64,13 +64,13 @@ func GetAccountMap(ctx context.Context, client *ethclient.Client, seedPhrase str
 	for i := 0; i < accountCount; i++ {
 		childKey, err := changeKey.NewChildKey(uint32(i))
 		if err != nil {
-			log.Printf("Failed to derive key for index %d: %v", i, err)
+			log.Printf("Error deriving key for index %d: %v", i, err)
 			return nil, err
 		}
 
 		privateKey, err := crypto.ToECDSA(childKey.Key)
 		if err != nil {
-			log.Printf("Failed to convert key to ECDSA: %v", err)
+			log.Printf("Error converting key to ECDSA format: %v", err)
 			return nil, err
 		}
 		publicKey := privateKey.Public().(*ecdsa.PublicKey)
@@ -78,7 +78,7 @@ func GetAccountMap(ctx context.Context, client *ethclient.Client, seedPhrase str
 
 		balance, err := client.BalanceAt(ctx, address, nil)
 		if err != nil {
-			log.Printf("Failed to get balance: %v", err)
+			log.Printf("Error retrieving account balance: %v", err)
 			return nil, err
 		}
 		account := Account{
