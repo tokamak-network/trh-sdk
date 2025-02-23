@@ -99,6 +99,11 @@ func main() {
 				ArgsUsage: "[plugins...]",
 				Action:    commands.ActionInstallPlugins(),
 			},
+			{
+				Name:   "version",
+				Usage:  "SDK version",
+				Action: commands.ActionVersion(),
+			},
 		},
 	}
 
