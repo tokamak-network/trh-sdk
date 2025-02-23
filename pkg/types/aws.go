@@ -1,8 +1,8 @@
 package types
 
 type AWSLogin struct {
-	SecretKey     string
-	AccessKey     string
-	Region        string
-	DefaultFormat string
+	SecretKey     string `json:"secret_key"`
+	AccessKey     string `json:"access_key"`
+	Region        string `json:"region"`
+	DefaultFormat string `json:"default_format" default:"json"`
 }

@@ -263,6 +263,7 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 		return err
 	}
 	fmt.Println("AWS Profile:", awsProfile)
+	deployConfig.AWS = awsLoginInputs
 
 	inputs, err := t.inputDeployInfra()
 	if err != nil {
