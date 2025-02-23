@@ -465,12 +465,6 @@ func (t *ThanosStack) Destroy(deployConfig *types.Config) error {
 }
 
 func (t *ThanosStack) destroyDevnet() error {
-	err := t.cloneSourcecode("tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
-	if err != nil {
-		return err
-	}
-
-	fmt.Println("Destroying the devnet network...")
 	output, err := utils.ExecuteCommand("bash", "-c", "cd tokamak-thanos && make nuke")
 	if err != nil {
 		fmt.Printf("\r❌ Make devnet failed!       \n Detail: %s", output)
