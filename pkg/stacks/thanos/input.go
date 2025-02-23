@@ -12,8 +12,9 @@ import (
 func (t *ThanosStack) inputDeployContracts() (*DeployContractsInput, error) {
 	fmt.Println("You are about to deploy the L1 contracts.")
 	var (
-		l1RPCUrl string
-		err      error
+		l1RPCUrl  string
+		l1RRCKind string
+		err       error
 	)
 	for {
 		fmt.Print("Please enter your L1 RPC URL: ")
@@ -37,6 +38,8 @@ func (t *ThanosStack) inputDeployContracts() (*DeployContractsInput, error) {
 			fmt.Printf("The L1 RPC URL is not returning any blocks. Please try again")
 			continue
 		}
+
+		l1RRCKind = utils.DetectRPCKind(l1RPCUrl)
 		break
 	}
 
@@ -57,7 +60,7 @@ func (t *ThanosStack) inputDeployContracts() (*DeployContractsInput, error) {
 
 	return &DeployContractsInput{
 		l1RPCurl:   l1RPCUrl,
-		l1Provider: utils.DetectRPCKind(l1RPCUrl),
+		l1Provider: l1RRCKind,
 		seed:       seed,
 		falutProof: faultProof,
 	}, nil

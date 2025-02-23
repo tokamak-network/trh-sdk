@@ -24,6 +24,15 @@ const (
 )
 
 func DetectRPCKind(rpcURL string) string {
+	switch {
+	case strings.Contains(rpcURL, "alchemy"):
+		return RPCKindAlchemy
+	case strings.Contains(rpcURL, "quiknode"):
+		return RPCKindQuickNode
+	case strings.Contains(rpcURL, "infura"):
+		return RPCKindInfura
+	}
+
 	requestBody := []byte(`{"jsonrpc":"2.0","method":"web3_clientVersion","params":[],"id":1}`)
 	resp, err := http.Post(rpcURL, "application/json", bytes.NewBuffer(requestBody))
 	if err != nil {
@@ -45,15 +54,6 @@ func DetectRPCKind(rpcURL string) string {
 	}
 
 	clientVersion := rpcResponse.Result
-
-	switch {
-	case strings.Contains(rpcURL, "alchemy"):
-		return RPCKindAlchemy
-	case strings.Contains(rpcURL, "quicknode"):
-		return RPCKindQuickNode
-	case strings.Contains(rpcURL, "infura"):
-		return RPCKindInfura
-	}
 
 	switch {
 	case strings.Contains(clientVersion, "Geth"):
