@@ -26,6 +26,9 @@ type Config struct {
 	K8sNamespace    string `json:"k8s_namespace"`
 	HelmReleaseName string `json:"helm_release_name"`
 	L2RpcUrl        string `json:"l2_rpc_url"`
+
+	// AWS config
+	AWS *AWSLogin `json:"aws"`
 }
 
 const configFileName = "settings.json"
