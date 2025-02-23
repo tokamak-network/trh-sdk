@@ -1,4 +1,4 @@
-package cloud_provider
+package aws
 
 import (
 	"encoding/json"
@@ -21,6 +21,10 @@ type AvailabilityZone struct {
 
 type AWSAvailabilityZoneResponse struct {
 	AvailabilityZones []AvailabilityZone `json:"AvailabilityZones"`
+}
+
+type AWSTableListResponse struct {
+	TableNames []string `json:"TableNames"`
 }
 
 func LoginAWS(accessKey, secretKey, region, formatFile string) (*AccountProfile, error) {
@@ -50,6 +54,30 @@ func LoginAWS(accessKey, secretKey, region, formatFile string) (*AccountProfile,
 	fmt.Println("Available AWS availability zones:", availabilityZones)
 
 	profile.AvailabilityZones = availabilityZones
+
+	// Check requirements
+	// before making the thanos-stack terraform up, check the `terraform-lock` table creation first
+	// https://github.com/tokamak-network/tokamak-thanos-stack/blob/main/terraform/thanos-stack/backend.tf#L7
+	// Step 1: get the table list by the region
+	tables, err := getTablesByRegion(region)
+	if err != nil {
+		return nil, fmt.Errorf("Error getting tables: %s", err)
+	}
+
+	existTerraformLockTable := false
+	for _, table := range tables {
+		if table == "terraform-lock" {
+			existTerraformLockTable = true
+		}
+	}
+
+	if !existTerraformLockTable {
+		err = createDynamoDBTable(region, "terraform-lock")
+		if err != nil {
+			return nil, fmt.Errorf("Error creating terraform-lock table: %s", err)
+		}
+	}
+
 	return &profile, nil
 }
 
@@ -86,4 +114,42 @@ func getAvailabilityZones(region string) ([]string, error) {
 	}
 
 	return availabilityZones, nil
+}
+
+func getTablesByRegion(region string) ([]string, error) {
+	cmd := exec.Command("aws", "dynamodb", "list-tables", "--region", region, "--output", "json")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Println("Error fetching the table list:", err)
+		return nil, err
+	}
+	var awsResponse AWSTableListResponse
+	err = json.Unmarshal(output, &awsResponse)
+	if err != nil {
+		fmt.Printf("❌ Error parsing JSON: %v\n", err)
+		return nil, err
+	}
+
+	return awsResponse.TableNames, nil
+}
+
+func createDynamoDBTable(region, tableName string) error {
+	cmd := exec.Command(
+		"aws", "dynamodb", "create-table",
+		"--table-name", tableName,
+		"--attribute-definitions", "AttributeName=LockID,AttributeType=S",
+		"--key-schema", "AttributeName=LockID,KeyType=HASH",
+		"--billing-mode", "PAY_PER_REQUEST",
+		"--region", region,
+		"--output", "json",
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Printf("❌ Error creating table: %v\nDetails: %s\n", err, string(output))
+		return err
+	}
+
+	fmt.Println("✅ Table created successfully:", string(output))
+	return nil
 }
