@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/ethereum/go-ethereum/ethclient"
-	cloud_provider "github.com/tokamak-network/trh-sdk/pkg/cloud-provider"
+	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
@@ -228,9 +228,9 @@ func initDeployConfigTemplate(enableFraudProof bool, network string) *types.Depl
 
 }
 
-func loginAWS(awsLoginInputs *types.AWSLogin) (*cloud_provider.AccountProfile, error) {
+func loginAWS(awsLoginInputs *types.AWSLogin) (*aws.AccountProfile, error) {
 	fmt.Println("Logging the AWS account....")
-	awsProfileAccount, err := cloud_provider.LoginAWS(awsLoginInputs.AccessKey, awsLoginInputs.SecretKey, awsLoginInputs.Region, awsLoginInputs.DefaultFormat)
+	awsProfileAccount, err := aws.LoginAWS(awsLoginInputs.AccessKey, awsLoginInputs.SecretKey, awsLoginInputs.Region, awsLoginInputs.DefaultFormat)
 	if err != nil {
 		return nil, fmt.Errorf("Error getting AWS credentials: %s", err)
 	}
