@@ -163,48 +163,29 @@ func makeDeployContractConfigJsonFile(l1Provider *ethclient.Client, operators ty
 	return nil
 }
 
-func initDeployConfigTemplate(enableFraudProof bool, network string) *types.DeployConfigTemplate {
-	var l1ChainId uint64
-	var l2ChainId uint64
-	var batchInboxAddress string
-	var finalizationPeriodSeconds uint64
-	var nativeTokenAddress string
-	var l2OutputOracleSubmissionInterval uint64
-	var l1UsdcAddr string
-	basebatchInboxAddress := "0xff00000000000000000000000000000000000000"
-
-	if network == constants.Testnet {
-		l1ChainId = 11155111
-		finalizationPeriodSeconds = 12
-		nativeTokenAddress = "0xa30fe40285b8f5c0457dbc3b7c8a280373c40044"
-		l2OutputOracleSubmissionInterval = 120
-		l1UsdcAddr = "0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8"
-	} else if network == constants.Mainnet {
-		l1ChainId = 1
-		finalizationPeriodSeconds = 604800
-		nativeTokenAddress = "0x2be5e8c109e2197D077D13A82dAead6a9b3433C5"
-		l2OutputOracleSubmissionInterval = 10800
-		l1UsdcAddr = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+func initDeployConfigTemplate(enableFraudProof bool, network string, l1Client *ethclient.Client) *types.DeployConfigTemplate {
+	chainId, err := l1Client.ChainID(context.Background())
+	if err != nil {
+		fmt.Printf("Failed to get chain id: %s", err)
+		return nil
 	}
-
-	l2ChainId = 111551119876
-	batchInboxAddress = fmt.Sprintf("%s%d", basebatchInboxAddress[:len(basebatchInboxAddress)-len(fmt.Sprintf("%d", l2ChainId))], l2ChainId)
+	l1ChainId := chainId.Uint64()
 
 	defaultTemplate := &types.DeployConfigTemplate{
 		NativeTokenName:                          "Tokamak Network Token",
 		NativeTokenSymbol:                        "TON",
-		NativeTokenAddress:                       nativeTokenAddress,
+		NativeTokenAddress:                       constants.L1ChainConfigurations[l1ChainId].NativeToken,
 		L1ChainID:                                l1ChainId,
-		L2ChainID:                                l2ChainId,
+		L2ChainID:                                constants.L2ChainId,
 		L2BlockTime:                              2,
 		L1BlockTime:                              12,
 		MaxSequencerDrift:                        600,
 		SequencerWindowSize:                      3600,
 		ChannelTimeout:                           300,
-		BatchInboxAddress:                        batchInboxAddress,
-		L2OutputOracleSubmissionInterval:         l2OutputOracleSubmissionInterval,
+		BatchInboxAddress:                        constants.BatchInboxAddress,
+		L2OutputOracleSubmissionInterval:         constants.L1ChainConfigurations[l1ChainId].L2OutputOracleSubmissionInterval,
 		L2OutputOracleStartingBlockNumber:        0,
-		FinalizationPeriodSeconds:                finalizationPeriodSeconds,
+		FinalizationPeriodSeconds:                constants.L1ChainConfigurations[l1ChainId].FinalizationPeriodSeconds,
 		BaseFeeVaultMinimumWithdrawalAmount:      "0x8ac7230489e80000",
 		L1FeeVaultMinimumWithdrawalAmount:        "0x8ac7230489e80000",
 		SequencerFeeVaultMinimumWithdrawalAmount: "0x8ac7230489e80000",
@@ -240,7 +221,7 @@ func initDeployConfigTemplate(enableFraudProof bool, network string) *types.Depl
 		DisputeGameFinalityDelaySeconds:          302400,
 		RespectedGameType:                        0,
 		UseFaultProofs:                           enableFraudProof,
-		L1UsdcAddr:                               l1UsdcAddr,
+		L1UsdcAddr:                               constants.L1ChainConfigurations[l1ChainId].USDCAddress,
 		UsdcTokenName:                            "Bridged USDC (Tokamak Network)",
 		FactoryV2addr:                            "0x0000000000000000000000000000000000000000",
 		NativeCurrencyLabelBytes:                 []uint64{84, 87, 79, 78, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},

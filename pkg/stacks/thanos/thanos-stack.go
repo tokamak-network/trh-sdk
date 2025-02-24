@@ -64,7 +64,7 @@ func (t *ThanosStack) DeployContracts() error {
 		return err
 	}
 
-	deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig.falutProof, t.network)
+	deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig.falutProof, t.network, l1Client)
 
 	// Select operators Accounts
 	operators, err := selectAccounts(l1Client, deployContractsConfig.falutProof, deployContractsConfig.seed)
