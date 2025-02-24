@@ -157,8 +157,6 @@ func (t *ThanosStack) inputDeployInfra() (*DeployInfraInput, error) {
 }
 
 func (t *ThanosStack) cloneSourcecode(repositoryName, url string) error {
-	doneCh := make(chan bool)
-	defer close(doneCh)
 	existingSourcecode, err := utils.CheckExistingSourceCode(repositoryName)
 	if err != nil {
 		fmt.Println("Error while checking existing source code")
@@ -166,9 +164,8 @@ func (t *ThanosStack) cloneSourcecode(repositoryName, url string) error {
 	}
 
 	if !existingSourcecode {
-		go utils.ShowLoadingAnimation(doneCh, fmt.Sprintf("Cloning the %s repository...", repositoryName))
+		fmt.Printf("Cloning the %s repository...", repositoryName)
 		err := utils.CloneRepo(url, repositoryName)
-		doneCh <- true
 		if err != nil {
 			fmt.Println("Error while cloning the repository")
 			return err
