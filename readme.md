@@ -2,7 +2,7 @@
 
 ## Introduction
 
-The tokamak rollup hub sdk allows anyone to quickly deploy customized and autonomous Layer 2 Rollups on the Ethereum network.
+The tokamak rollup hub SDK allows anyone to quickly deploy customized and autonomous Layer 2 Rollups on the Ethereum network.
 
 ## Set up the SDK
 
@@ -17,6 +17,15 @@ The tokamak rollup hub sdk allows anyone to quickly deploy customized and autono
 
   ```bash
   go build
+  ```
+- Or you can install the SDK by using `go install`
+  ```
+  go install github.com/tokamak-network/trh-sdk@latest
+  ```
+
+  Then check the installation
+  ```
+  trh-sdk version
   ```
 
   **Note:** After building, all SDK commands will be available in the `trh-sdk` directory. Make sure you are in this directory when running commands.
