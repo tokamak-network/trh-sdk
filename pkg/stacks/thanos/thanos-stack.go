@@ -49,6 +49,9 @@ func (t *ThanosStack) DeployContracts() error {
 	if t.network == constants.LocalDevnet {
 		return fmt.Errorf("network %s does not require contract deployment, please run `trh-sdk deploy` instead", constants.LocalDevnet)
 	}
+	if t.network != constants.Testnet && t.network != constants.Mainnet {
+		return fmt.Errorf("network %s does not support", t.network)
+	}
 	var err error
 	// STEP 1. Input the parameters
 	deployContractsConfig, err := t.inputDeployContracts()
