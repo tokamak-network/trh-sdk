@@ -3,24 +3,23 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/tokamak-network/trh-sdk/commands"
+	"github.com/tokamak-network/trh-sdk/flags"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"log"
 	"os"
 
-	"github.com/tokamak-network/trh-sdk/commands"
-	"github.com/tokamak-network/trh-sdk/flags"
 	"github.com/urfave/cli/v3"
 )
 
 func main() {
-
 	cmd := &cli.Command{
 		Name:  "tokamak-sdk-cli",
 		Usage: "make an explosive entrance",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return nil
 		},
-		Commands: []*cli.Command{
+		Commands: []*cli.Command{			
 			{
 				Name:   "deploy-contracts",
 				Usage:  "Deploy contracts",
@@ -113,12 +112,7 @@ func main() {
 						Usage:    "Address of the rollup config contract",
 						Required: true,
 					},
-					&cli.StringFlag{
-						Name:     "private-key",
-						Usage:    "Private key for transaction signing",
-						Required: true,
-					},
-					&cli.Float64Flag{
+					&cli.FloatFlag{
 						Name:     "amount",
 						Usage:    "Amount of TON to stake (minimum 1000.1)",
 						Required: true,
@@ -135,7 +129,19 @@ func main() {
 					},
 				},
 				Action: commands.ActionRegisterCandidates(),
-			}
+			},
+			{
+				Name:  "serve",
+				Usage: "Start the HTTP server",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:  "port",
+						Usage: "Port to run the server on",
+						Value: "8080",
+					},
+				},
+				Action: commands.ActionStartServer(),
+			},
 		},
 	}
 

@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
 	"math/big"
 	"strings"
 
@@ -40,10 +41,24 @@ func ActionRegisterCandidates() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
 		// Get flags
 		rpcURL := cmd.String("rpc-url")
-		privateKeyHex := cmd.String("private-key")
-		amount := cmd.Float64("amount")
+		amount := float64(cmd.Float("amount"))
 		memo := cmd.String("memo")
-		rollupConfig := cmd.String("rollup-config")
+
+		privateKeyString := os.Getenv("PRIVATE_KEY")
+		if privateKeyString == "" {
+			return fmt.Errorf("PRIVATE_KEY environment variable is not set")
+		}
+
+		// Parse private key
+		privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKeyString, "0x"))
+		if err != nil {
+			return fmt.Errorf("invalid private key: %v", err)
+		}
+
+		l2ManagerContractAddress := os.Getenv("L2_MANAGER_ADDRESS")
+		if l2ManagerContractAddress == "" {
+			return fmt.Errorf("L2_MANAGER_ADDRESS environment variable is not set")
+		}
 
 		// Validate minimum amount
 		if amount < 1000.1 {
@@ -56,12 +71,6 @@ func ActionRegisterCandidates() cli.ActionFunc {
 			return fmt.Errorf("failed to connect to the Ethereum client: %v", err)
 		}
 
-		// Parse private key
-		privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKeyHex, "0x"))
-		if err != nil {
-			return fmt.Errorf("invalid private key: %v", err)
-		}
-
 		// Create contract ABI
 		contractAbi, err := abi.JSON(strings.NewReader(Layer2ManagerABI))
 		if err != nil {
@@ -69,7 +78,7 @@ func ActionRegisterCandidates() cli.ActionFunc {
 		}
 
 		// Create contract instance
-		contractAddress := common.HexToAddress(rollupConfig)
+		contractAddress := common.HexToAddress(l2ManagerContractAddress)
 		contract := bind.NewBoundContract(contractAddress, contractAbi, client, client, client)
 
 		// Convert amount to Wei (18 decimals)
