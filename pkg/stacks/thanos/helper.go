@@ -16,14 +16,22 @@ import (
 	"strings"
 )
 
-func displayAccounts(selectedAccounts map[int]bool, accounts map[int]types.Account) {
-	count := 0
-	for i := 0; i < len(accounts) && count < 10; i++ {
-		if !selectedAccounts[i] {
-			account := accounts[i]
-			fmt.Printf("\t%d. %s(%s ETH)\n", i, account.Address, account.Balance)
-			count++
-		}
+var mapAccountIndexes = map[int]string{
+	0: "Admin",
+	1: "Sequencer",
+	2: "Batcher",
+	3: "Proposer",
+	4: "Challenger",
+}
+
+func displayAccounts(accounts map[int]types.Account) {
+	sortedAccounts := make([]types.Account, len(accounts), len(accounts))
+	for i, account := range accounts {
+		sortedAccounts[i] = account
+	}
+
+	for i, account := range sortedAccounts {
+		fmt.Printf("\t%d. %s(%s ETH)\n", i, account.Address, account.Balance)
 	}
 }
 
@@ -34,7 +42,7 @@ func selectAccounts(client *ethclient.Client, enableFraudProof bool, seed string
 		return nil, err
 	}
 
-	selectedAccounts := make(map[int]bool)
+	selectedAccountsIndex := [5]int{-1, -1, -1, -1, -1}
 
 	prompts := []string{
 		"Select an admin account from the following list (minimum 0.6 ETH required)",
@@ -42,32 +50,60 @@ func selectAccounts(client *ethclient.Client, enableFraudProof bool, seed string
 		"Select a batcher account from the following list (recommended 0.3 ETH)",
 		"Select a proposer account from the following list (recommended 0.3 ETH)",
 	}
-	prompts = append(prompts, "Select a challenger account from the following list (recommended 0.3 ETH)")
+	if enableFraudProof {
+		prompts = append(prompts, "Select a challenger account from the following list (recommended 0.3 ETH)")
+	}
 	operators := make(types.OperatorMap)
 
+	displayAccounts(accounts)
 	for i := 0; i < len(prompts); i++ {
-		fmt.Println(prompts[i])
-		displayAccounts(selectedAccounts, accounts)
-		fmt.Print("Enter the account number: ")
-		input, err := scanner.ScanString()
-		if err != nil {
-			fmt.Printf("Failed to read input: %s", err)
-			return nil, err
-		}
+	startLoop:
+		for {
+			fmt.Println(prompts[i])
+			fmt.Print("Enter the account number: ")
+			input, err := scanner.ScanString()
+			if err != nil {
+				fmt.Printf("Failed to read input: %s", err)
+				return nil, err
+			}
 
-		selectedIndex, err := strconv.Atoi(input)
-		if err != nil || selectedIndex < 0 || selectedIndex >= len(accounts) || selectedAccounts[selectedIndex] {
-			fmt.Println("Invalid selection. Please try again.")
-			i--
-			continue
-		}
+			selectingIndex, err := strconv.Atoi(input)
+			if err != nil || selectingIndex < 0 || selectingIndex >= len(accounts) {
+				fmt.Println("Invalid selection. Please try again.")
+				goto startLoop
+			}
 
-		selectedAccounts[selectedIndex] = true
-		operators[types.Operator(i)] = &types.IndexAccount{
-			Index:      selectedIndex,
-			Address:    accounts[selectedIndex].Address,
-			PrivateKey: accounts[selectedIndex].PrivateKey,
+			for j, selectedAccountIndex := range selectedAccountsIndex {
+				if selectingIndex == selectedAccountIndex {
+					fmt.Printf("You selected this account as the %s. Do you want to want to continue(y/N): ", mapAccountIndexes[j])
+					nextInput, err := scanner.ScanBool()
+					if err != nil {
+						return nil, err
+					}
+					if !nextInput {
+						goto startLoop
+					} else {
+						break
+					}
+				}
+			}
+
+			selectedAccountsIndex[i] = selectingIndex
+			operators[types.Operator(i)] = &types.IndexAccount{
+				Index:      selectingIndex,
+				Address:    accounts[selectingIndex].Address,
+				PrivateKey: accounts[selectingIndex].PrivateKey,
+			}
+			break
 		}
+	}
+
+	sortedOperators := make([]*types.IndexAccount, len(operators), len(operators))
+	for i, operator := range operators {
+		sortedOperators[i] = operator
+	}
+	for i, operator := range sortedOperators {
+		fmt.Printf("%s account address: %s\n", mapAccountIndexes[i], operator.Address)
 	}
 
 	return operators, nil
@@ -222,6 +258,7 @@ func initDeployConfigTemplate(enableFraudProof bool, network string) *types.Depl
 		GovernanceTokenName:                      "Optimism",
 		GovernanceTokenOwner:                     "0x0000000000000000000000000000000000000333",
 		GovernanceTokenSymbol:                    "OP",
+		L2OutputOracleChallenger:                 "0x0000000000000000000000000000000000000000",
 	}
 
 	return defaultTemplate
