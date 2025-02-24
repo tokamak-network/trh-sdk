@@ -73,10 +73,6 @@ func (t *ThanosStack) DeployContracts() error {
 		return fmt.Errorf("no operators were found")
 	}
 
-	for k, v := range operators {
-		fmt.Printf("%d account: %d, address: %s\n", k, types.Operator(v.Index), v.Address)
-	}
-
 	err = makeDeployContractConfigJsonFile(l1Client, operators, deployContractsTemplate)
 	if err != nil {
 		return err
