@@ -258,7 +258,7 @@ func initDeployConfigTemplate(enableFraudProof bool, network string) *types.Depl
 		GovernanceTokenName:                      "Optimism",
 		GovernanceTokenOwner:                     "0x0000000000000000000000000000000000000333",
 		GovernanceTokenSymbol:                    "OP",
-		L2OutputOracleChallenger:                 "0x0000000000000000000000000000000000000000",
+		L2OutputOracleChallenger:                 "0x0000000000000000000000000000000000000001",
 	}
 
 	return defaultTemplate
