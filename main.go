@@ -156,12 +156,7 @@ func main() {
 						Usage:    "Address of the rollup config contract",
 						Required: true,
 					},
-					&cli.StringFlag{
-						Name:     "private-key",
-						Usage:    "Private key for transaction signing",
-						Required: true,
-					},
-					&cli.Float64Flag{
+					&cli.FloatFlag{
 						Name:     "amount",
 						Usage:    "Amount of TON to stake (minimum 1000.1)",
 						Required: true,
@@ -178,6 +173,18 @@ func main() {
 					},
 				},
 				Action: commands.ActionRegisterCandidates(),
+			},
+			{
+				Name:  "serve",
+				Usage: "Start the HTTP server",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:  "port",
+						Usage: "Port to run the server on",
+						Value: "8080",
+					},
+				},
+				Action: commands.ActionStartServer(),
 			},
 		},
 	}
