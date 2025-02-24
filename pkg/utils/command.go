@@ -33,9 +33,25 @@ func ExecuteCommandStream(command string, args ...string) error {
 		return err
 	}
 
-	// Stream stdout and stderr concurrently
-	go streamOutput(stdout)
-	go streamOutput(stderr)
+	// Create channels to signal goroutine completion
+	stdoutDone := make(chan struct{})
+	stderrDone := make(chan struct{})
+
+	// Stream stdout concurrently
+	go func() {
+		streamOutput(stdout)
+		close(stdoutDone)
+	}()
+
+	// Stream stderr concurrently
+	go func() {
+		streamOutput(stderr)
+		close(stderrDone)
+	}()
+
+	// Wait for both streamOutput goroutines to finish
+	<-stdoutDone
+	<-stderrDone
 
 	// Wait for the command to complete
 	return cmd.Wait()
