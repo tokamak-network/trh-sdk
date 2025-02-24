@@ -142,6 +142,43 @@ func main() {
 				},
 				Action: commands.ActionStartServer(),
 			},
+			{
+				Name:   "register-candidates",
+				Usage:  "Register candidates",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:     "rpc-url",
+						Usage:    "L1 RPC URL",
+						Required: true,
+					},
+					&cli.StringFlag{
+						Name:     "rollup-config",
+						Usage:    "Address of the rollup config contract",
+						Required: true,
+					},
+					&cli.StringFlag{
+						Name:     "private-key",
+						Usage:    "Private key for transaction signing",
+						Required: true,
+					},
+					&cli.Float64Flag{
+						Name:     "amount",
+						Usage:    "Amount of TON to stake (minimum 1000.1)",
+						Required: true,
+					},
+					&cli.StringFlag{
+						Name:  "memo",
+						Usage: "Memo for the registration",
+						Value: "",
+					},
+					&cli.BoolFlag{
+						Name:  "use-ton",
+						Usage: "Use TON instead of WTON for staking",
+						Value: false,
+					},
+				},
+				Action: commands.ActionRegisterCandidates(),
+			},
 		},
 	}
 
