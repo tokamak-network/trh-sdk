@@ -106,8 +106,8 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 
 	envValues := fmt.Sprintf("export GS_ADMIN_PRIVATE_KEY=%s\nexport L1_RPC_URL=%s\n", operators[0].PrivateKey, deployContractsConfig.l1RPCurl)
 	if gasPriceWei != nil && gasPriceWei.Uint64() > 0 {
-		// Triple gas price
-		envValues += fmt.Sprintf("export GAS_PRICE=%d\n", gasPriceWei.Uint64()*3)
+		// double gas price
+		envValues += fmt.Sprintf("export GAS_PRICE=%d\n", gasPriceWei.Uint64()*2)
 	}
 
 	// STEP 4.1. Generate the .env file
