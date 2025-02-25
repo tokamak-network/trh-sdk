@@ -18,7 +18,7 @@ func ActionDeployContracts() cli.ActionFunc {
 		case constants.ThanosStack:
 			thanosStack := thanos.NewThanosStack(network, stack)
 
-			return thanosStack.DeployContracts()
+			return thanosStack.DeployContracts(ctx)
 		default:
 			return fmt.Errorf("unsupported stack: %s", stack)
 		}

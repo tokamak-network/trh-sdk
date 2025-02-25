@@ -45,7 +45,7 @@ func NewThanosStack(network string, stack string) *ThanosStack {
 
 // ----------------------------------------- Deploy contracts command  ----------------------------- //
 
-func (t *ThanosStack) DeployContracts() error {
+func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	if t.network == constants.LocalDevnet {
 		return fmt.Errorf("network %s does not require contract deployment, please run `trh-sdk deploy` instead", constants.LocalDevnet)
 	}
@@ -59,7 +59,7 @@ func (t *ThanosStack) DeployContracts() error {
 		return err
 	}
 
-	l1Client, err := ethclient.DialContext(context.Background(), deployContractsConfig.l1RPCurl)
+	l1Client, err := ethclient.DialContext(ctx, deployContractsConfig.l1RPCurl)
 	if err != nil {
 		return err
 	}
@@ -98,8 +98,24 @@ func (t *ThanosStack) DeployContracts() error {
 
 	// STEP 4. Deploy the contracts
 	fmt.Println("Deploying the contracts...")
+
+	gasPriceWei, err := l1Client.SuggestGasPrice(ctx)
+	if err != nil {
+		fmt.Printf("Failed to get gas price: %v\n", err)
+	}
+
+	envValues := fmt.Sprintf("export GS_ADMIN_PRIVATE_KEY=%s\nexport L1_RPC_URL=%s\n", operators[0].PrivateKey, deployContractsConfig.l1RPCurl)
+	if gasPriceWei != nil && gasPriceWei.Uint64() > 0 {
+		// Triple gas price
+		envValues += fmt.Sprintf("export GAS_PRICE=%d\n", gasPriceWei.Uint64()*3)
+	}
+
 	// STEP 4.1. Generate the .env file
-	_, err = utils.ExecuteCommand("bash", "-c", fmt.Sprintf("cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && echo 'export GS_ADMIN_PRIVATE_KEY=%s' > .env && echo 'export L1_RPC_URL=%s' >> .env", operators[0].PrivateKey, deployContractsConfig.l1RPCurl))
+	_, err = utils.ExecuteCommand(
+		"bash",
+		"-c",
+		fmt.Sprintf("cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && echo '%s' > .env", envValues),
+	)
 	if err != nil {
 		fmt.Print("\r❌ Make .env file failed!       \n")
 		return err
