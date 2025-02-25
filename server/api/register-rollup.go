@@ -5,7 +5,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
-
+	
+	"github.com/tokamak-network/trh-sdk/abis"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -13,38 +14,6 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/gin-gonic/gin"
 )
-
-// L1BridgeRegistryABI contains the ABI definition for the L1BridgeRegistry contract
-const L1BridgeRegistryABI = `[
-	{
-		"inputs": [
-			{
-				"internalType": "address",
-				"name": "rollupConfig",
-				"type": "address"
-			},
-			{
-				"internalType": "uint8",
-				"name": "_type",
-				"type": "uint8"
-			},
-			{
-				"internalType": "address",
-				"name": "_l2TON",
-				"type": "address"
-			},
-			{
-				"internalType": "string",
-				"name": "_name",
-				"type": "string"
-			}
-		],
-		"name": "registerRollupConfig",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	}
-]`
 
 type RegisterRollupRequest struct {
 	Rollup     string `json:"rollup" binding:"required"`
@@ -102,7 +71,7 @@ func RegisterRollupConfig(c *gin.Context) {
 	}
 
 	// Create contract ABI
-	contractAbi, err := abi.JSON(strings.NewReader(L1BridgeRegistryABI))
+	contractAbi, err := abi.JSON(strings.NewReader(abis.L1BridgeRegistryABI))
 	if err != nil {
 		c.String(http.StatusInternalServerError, "Failed to parse contract ABI")
 		return

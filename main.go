@@ -6,6 +6,7 @@ import (
 	"github.com/tokamak-network/trh-sdk/commands"
 	"github.com/tokamak-network/trh-sdk/flags"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
+	"github.com/joho/godotenv"
 	"log"
 	"os"
 
@@ -13,6 +14,10 @@ import (
 )
 
 func main() {
+	if err := godotenv.Load(); err != nil {
+        fmt.Println("Error loading .env file:", err)
+    }
+
 	cmd := &cli.Command{
 		Name:  "tokamak-sdk-cli",
 		Usage: "make an explosive entrance",
@@ -103,13 +108,8 @@ func main() {
 				Usage:  "Register candidates",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
-						Name:     "rpc-url",
-						Usage:    "L1 RPC URL",
-						Required: true,
-					},
-					&cli.StringFlag{
 						Name:     "rollup-config",
-						Usage:    "Address of the rollup config contract",
+						Usage:    "Rollup config address",
 						Required: true,
 					},
 					&cli.FloatFlag{

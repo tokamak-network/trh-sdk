@@ -18,10 +18,10 @@ import (
 func ActionStartServer() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
 		port := cmd.String("port")
-		
+
 		// Initialize Gin router
 		router := gin.Default()
-		
+
 		// Setup API routes
 		api.SetupRoutes(router)
 

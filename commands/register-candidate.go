@@ -13,36 +13,21 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/urfave/cli/v3"
+	"github.com/tokamak-network/trh-sdk/abis"
 )
-
-// Layer2ManagerABI contains the ABI definition for the Layer2Manager contract
-const Layer2ManagerABI = `[
-	{
-		"inputs": [
-			{
-				"internalType": "uint256",
-				"name": "_amount",
-				"type": "uint256"
-			},
-			{
-				"internalType": "string",
-				"name": "_memo",
-				"type": "string"
-			}
-		],
-		"name": "registerCandidateAddOn",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	}
-]`
 
 func ActionRegisterCandidates() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
 		// Get flags
-		rpcURL := cmd.String("rpc-url")
+		rollupConfig := cmd.String("rollup-config")
 		amount := float64(cmd.Float("amount"))
+		useTon := cmd.Bool("use-ton")
 		memo := cmd.String("memo")
+
+		rpcURL := os.Getenv("RPC_URL")
+		if rpcURL == "" {
+			return fmt.Errorf("RPC_URL environment variable is not set")
+		}
 
 		privateKeyString := os.Getenv("PRIVATE_KEY")
 		if privateKeyString == "" {
@@ -72,7 +57,7 @@ func ActionRegisterCandidates() cli.ActionFunc {
 		}
 
 		// Create contract ABI
-		contractAbi, err := abi.JSON(strings.NewReader(Layer2ManagerABI))
+		contractAbi, err := abi.JSON(strings.NewReader(abis.Layer2ManagerABI))
 		if err != nil {
 			return fmt.Errorf("failed to parse contract ABI: %v", err)
 		}
@@ -93,7 +78,7 @@ func ActionRegisterCandidates() cli.ActionFunc {
 		}
 
 		// Call registerCandidateAddOn
-		tx, err := contract.Transact(auth, "registerCandidateAddOn", amountBigInt, memo)
+		tx, err := contract.Transact(auth, "registerCandidateAddOn",rollupConfig, amountBigInt, useTon, memo)
 		if err != nil {
 			return fmt.Errorf("failed to register candidate: %v", err)
 		}
