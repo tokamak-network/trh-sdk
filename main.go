@@ -147,13 +147,8 @@ func main() {
 				Usage:  "Register candidates",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
-						Name:     "rpc-url",
-						Usage:    "L1 RPC URL",
-						Required: true,
-					},
-					&cli.StringFlag{
 						Name:     "rollup-config",
-						Usage:    "Address of the rollup config contract",
+						Usage:    "Rollup config address",
 						Required: true,
 					},
 					&cli.FloatFlag{
