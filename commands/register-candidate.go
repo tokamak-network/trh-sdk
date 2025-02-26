@@ -72,13 +72,13 @@ func ActionRegisterCandidates() cli.ActionFunc {
 		amountInWei.Int(amountBigInt)
 
 		// Create transaction options
-		auth, err := bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(1)) // Replace 1 with actual chain ID
+		auth, err := bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(11155111)) // Replace 1 with actual chain ID
 		if err != nil {
 			return fmt.Errorf("failed to create transaction options: %v", err)
 		}
 
 		// Call registerCandidateAddOn
-		tx, err := contract.Transact(auth, "registerCandidateAddOn",rollupConfig, amountBigInt, useTon, memo)
+		tx, err := contract.Transact(auth, "registerCandidateAddOn",common.HexToAddress(rollupConfig), amountBigInt, useTon, memo)
 		if err != nil {
 			return fmt.Errorf("failed to register candidate: %v", err)
 		}

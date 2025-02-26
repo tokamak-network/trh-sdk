@@ -20,7 +20,6 @@ type RegisterRollupRequest struct {
 	Type       uint8  `json:"type" binding:"required"`
 	L2TON      string `json:"l2ton" binding:"required"`
 	Name       string `json:"name" binding:"required"`
-	PrivateKey string `json:"privateKey" binding:"required"` // Encrypted private key
 }
 
 // RegisterRollupConfig handles the registration of rollup configuration
@@ -49,8 +48,14 @@ func RegisterRollupConfig(c *gin.Context) {
 		return
 	}
 
+	privateKeyString := os.Getenv("PRIVATE_KEY")
+	if privateKeyString == "" {
+		c.String(http.StatusBadRequest, "PRIVATE_KEY environment variable is not set")
+		return
+	}
+
 	// Decrypt private key (implement your decryption logic here)
-	decryptedKey, err := decryptPrivateKey(request.PrivateKey)
+	decryptedKey, err := decryptPrivateKey(privateKeyString)
 	if err != nil {
 		c.String(http.StatusBadRequest, "Invalid private key")
 		return
