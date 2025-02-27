@@ -2,7 +2,10 @@ package thanos
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"gopkg.in/yaml.v3"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -63,8 +66,13 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	chainID, err := l1Client.ChainID(ctx)
+	if err != nil {
+		fmt.Printf("Failed to get chain id: %s", err)
+		return err
+	}
 
-	deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig.falutProof, t.network, l1Client)
+	deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig.falutProof, chainID)
 
 	// Select operators Accounts
 	operators, err := selectAccounts(l1Client, deployContractsConfig.falutProof, deployContractsConfig.seed)
@@ -167,6 +175,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		ChallengerPrivateKey: challengerPrivateKey,
 		DeploymentPath:       fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", cwd, deployContractsTemplate.L1ChainID),
 		L1RPCProvider:        deployContractsConfig.l1Provider,
+		L1ChainID:            chainID.Uint64(),
 		L1RPCURL:             deployContractsConfig.l1RPCurl,
 		Stack:                t.stack,
 		Network:              t.network,
@@ -348,7 +357,8 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 		return fmt.Errorf("Configuration file thanos-stack-values.yaml not found")
 	}
 
-	namespace := inputs.ChainName
+	namespace := types.ConvertChainNameToNamespace(inputs.ChainName)
+	deployConfig.ChainName = inputs.ChainName
 
 	// Step 7. Configure EKS access
 	eksSetup, err := utils.ExecuteCommand("aws", []string{
@@ -397,20 +407,15 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 	fmt.Println("Helm repository added successfully: \n", helmSearchOutput)
 
 	// Step 8.2. Install Helm charts
-	helmReleaseNameInput, err := t.inputHelmReleaseName(namespace)
-	if err != nil {
-		fmt.Println("Error obtaining Helm release name:", err)
-		return err
-	}
-
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
 
+	helmReleaseName := fmt.Sprintf("%s-%d", namespace, time.Now().Unix())
 	_, err = utils.ExecuteCommand("helm", []string{
 		"install",
-		helmReleaseNameInput,
+		helmReleaseName,
 		"thanos-stack/thanos-stack",
 		"--values",
 		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", cwd),
@@ -432,14 +437,14 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 
 	var l2RPCUrl string
 	for {
-		k8sIngresses, err := utils.GetAddressByIngress(namespace, helmReleaseNameInput)
+		k8sIngresses, err := utils.GetAddressByIngress(namespace, helmReleaseName)
 		if err != nil {
 			fmt.Println("Error retrieving ingress addresses:", err, "details:", k8sIngresses)
 			return err
 		}
 
 		if len(k8sIngresses) > 0 {
-			l2RPCUrl = k8sIngresses[0]
+			l2RPCUrl = "http://" + k8sIngresses[0]
 			break
 		}
 
@@ -447,7 +452,7 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 	}
 	fmt.Printf("Network deployment completed successfully. RPC endpoint: %s", l2RPCUrl)
 
-	deployConfig.HelmReleaseName = helmReleaseNameInput
+	deployConfig.HelmReleaseName = helmReleaseName
 	deployConfig.K8sNamespace = namespace
 	deployConfig.L2RpcUrl = l2RPCUrl
 
@@ -546,33 +551,144 @@ func (t *ThanosStack) InstallPlugins(pluginNames []string, deployConfig *types.C
 
 		switch pluginName {
 		case constants.PluginBridge:
-			return t.installBridges(deployConfig.K8sNamespace)
+			return t.installBridges(deployConfig)
 		}
 	}
 	fmt.Println(pluginNames)
 	return nil
 }
 
-func (t *ThanosStack) installBridges(namespace string) error {
-	fmt.Println("Installing a bridge component...")
+func (t *ThanosStack) installBridges(deployConfig *types.Config) error {
+	var (
+		namespace = deployConfig.K8sNamespace
+		chainName = deployConfig.ChainName
+		l1ChainID = deployConfig.L1ChainID
+		l1RPC     = deployConfig.L1RPCURL
+	)
 
-	helmReleaseNameInput, err := t.inputHelmReleaseName(namespace)
+	awsConfig := deployConfig.AWS
+	if awsConfig == nil {
+		return fmt.Errorf("AWS configuration is missing")
+	}
+
+	_, err := loginAWS(awsConfig)
 	if err != nil {
-		fmt.Println("Error obtaining Helm release name:", err)
+		fmt.Println("Error to login in AWS:", err)
 		return err
 	}
+
+	fmt.Println("Installing a bridge component...")
+
+	fmt.Print("Please input the L2 USDT address: ")
+	l2UsdtAddress, err := scanner.ScanString()
+	if err != nil {
+		fmt.Println("Error scanning L2 USDT address:", err)
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Println("Error determining current directory:", err)
 		return err
 	}
 
+	file, err := os.Open(fmt.Sprintf("%s/%s", cwd, fmt.Sprintf("tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", deployConfig.L1ChainID)))
+	if err != nil {
+		fmt.Println("Error opening deployment file:", err)
+		return err
+	}
+	defer file.Close()
+
+	// Decode JSON
+	var contracts types.Contracts
+	decoder := json.NewDecoder(file)
+	if err := decoder.Decode(&contracts); err != nil {
+		fmt.Println("Error decoding deployment JSON file:", err)
+		return err
+	}
+
+	// make yaml file at {cwd}/tokamak-thanos-stack/terraform/thanos-stack/op-bridge-values.yaml
+	opBridgeConfig := types.OpBridgeConfig{}
+
+	opBridgeConfig.OpBridge.Env.L1ChainName = constants.L1ChainConfigurations[l1ChainID].ChainName
+	opBridgeConfig.OpBridge.Env.L1ChainID = fmt.Sprintf("%d", l1ChainID)
+	opBridgeConfig.OpBridge.Env.L1RPC = l1RPC
+
+	opBridgeConfig.OpBridge.Env.L1NativeCurrencyName = constants.L1ChainConfigurations[l1ChainID].NativeTokenName
+	opBridgeConfig.OpBridge.Env.L1NativeCurrencySymbol = constants.L1ChainConfigurations[l1ChainID].NativeTokenSymbol
+	opBridgeConfig.OpBridge.Env.L1NativeCurrencyDecimals = constants.L1ChainConfigurations[l1ChainID].NativeTokenDecimals
+
+	opBridgeConfig.OpBridge.Env.NativeTokenL1Address = constants.L1ChainConfigurations[l1ChainID].L2NativeTokenAddress
+
+	opBridgeConfig.OpBridge.Env.L1BlockExplorer = constants.L1ChainConfigurations[l1ChainID].BlockExplorer
+	opBridgeConfig.OpBridge.Env.L1USDCBridgeAddress = constants.L1ChainConfigurations[l1ChainID].USDCAddress
+	opBridgeConfig.OpBridge.Env.L1USDTAddress = constants.L1ChainConfigurations[l1ChainID].USDTAddress
+	opBridgeConfig.OpBridge.Env.L1USDCAddress = constants.L1ChainConfigurations[l1ChainID].USDCAddress
+
+	opBridgeConfig.OpBridge.Env.L2ChainName = chainName
+	opBridgeConfig.OpBridge.Env.L2ChainID = fmt.Sprintf("%d", constants.L2ChainId)
+	opBridgeConfig.OpBridge.Env.L2RPC = deployConfig.L2RpcUrl
+	opBridgeConfig.OpBridge.Env.L2NativeCurrencyName = "Tokamak Network Token"
+	opBridgeConfig.OpBridge.Env.L2NativeCurrencySymbol = "TON"
+	opBridgeConfig.OpBridge.Env.L2NativeCurrencyDecimals = 18
+	opBridgeConfig.OpBridge.Env.L2USDTAddress = l2UsdtAddress
+
+	opBridgeConfig.OpBridge.Env.StandardBridgeAddress = contracts.L1StandardBridgeProxy
+	opBridgeConfig.OpBridge.Env.AddressManagerAddress = contracts.AddressManager
+	opBridgeConfig.OpBridge.Env.L1CrossDomainMessengerAddress = contracts.L1CrossDomainMessengerProxy
+	opBridgeConfig.OpBridge.Env.OptimismPortalAddress = contracts.OptimismPortalProxy
+	opBridgeConfig.OpBridge.Env.L2OutputOracleAddress = contracts.L2OutputOracleProxy
+	opBridgeConfig.OpBridge.Env.L1USDCBridgeAddress = contracts.L1UsdcBridgeProxy
+	opBridgeConfig.OpBridge.Env.DisputeGameFactoryAddress = contracts.DisputeGameFactoryProxy
+
+	// input from users
+
+	opBridgeConfig.OpBridge.Ingress = struct {
+		Enabled     bool              `yaml:"enabled"`
+		ClassName   string            `yaml:"className"`
+		Annotations map[string]string `yaml:"annotations"`
+		TLS         struct {
+			Enabled bool `yaml:"enabled"`
+		} `yaml:"tls"`
+	}{Enabled: true, ClassName: "alb", Annotations: map[string]string{
+		"alb.ingress.kubernetes.io/target-type":  "ip",
+		"alb.ingress.kubernetes.io/scheme":       "internet-facing",
+		"alb.ingress.kubernetes.io/listen-ports": "[{\"HTTP\": 80}]",
+		"alb.ingress.kubernetes.io/group.name":   "bridge",
+	}, TLS: struct {
+		Enabled bool `yaml:"enabled"`
+	}{
+		Enabled: false,
+	}}
+
+	data, err := yaml.Marshal(&opBridgeConfig)
+	if err != nil {
+		fmt.Println("Error marshalling op-bridge values YAML file:", err)
+		return err
+	}
+
+	configFileDir := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", cwd)
+	if err := os.MkdirAll(configFileDir, os.ModePerm); err != nil {
+		fmt.Println("Error creating directory:", err)
+		return err
+	}
+
+	// Write to file
+	filePath := filepath.Join(configFileDir, "/op-bridge-values.yaml")
+	err = os.WriteFile(filePath, data, 0644)
+	if err != nil {
+		fmt.Println("Error writing file:", err)
+		return nil
+	}
+
+	fmt.Println("OP Bridge values file written to", filePath)
+
+	helmReleaseName := fmt.Sprintf("op-bridge-%d", time.Now().Unix())
 	_, err = utils.ExecuteCommand("helm", []string{
 		"install",
-		helmReleaseNameInput,
-		"thanos-stack/thanos-stack",
+		helmReleaseName,
+		"thanos-stack/op-bridge",
 		"--values",
-		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", cwd),
+		filePath,
 		"--namespace",
 		namespace,
 	}...)
