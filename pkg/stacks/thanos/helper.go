@@ -5,16 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
-	"github.com/tokamak-network/trh-sdk/pkg/constants"
-	"github.com/tokamak-network/trh-sdk/pkg/scanner"
-	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"math/big"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
+	"github.com/tokamak-network/trh-sdk/pkg/scanner"
+	"github.com/tokamak-network/trh-sdk/pkg/types"
 )
 
 var mapAccountIndexes = map[int]string{
@@ -26,7 +27,7 @@ var mapAccountIndexes = map[int]string{
 }
 
 func displayAccounts(accounts map[int]types.Account) {
-	sortedAccounts := make([]types.Account, len(accounts), len(accounts))
+	sortedAccounts := make([]types.Account, len(accounts))
 	for i, account := range accounts {
 		sortedAccounts[i] = account
 	}
@@ -99,7 +100,7 @@ func selectAccounts(client *ethclient.Client, enableFraudProof bool, seed string
 		}
 	}
 
-	sortedOperators := make([]*types.IndexAccount, len(operators), len(operators))
+	sortedOperators := make([]*types.IndexAccount, len(operators))
 	for i, operator := range operators {
 		sortedOperators[i] = operator
 	}
@@ -148,11 +149,11 @@ func makeDeployContractConfigJsonFile(l1Provider *ethclient.Client, operators ty
 	deployContractTemplate.L2OutputOracleStartingTimestamp = latest.Time()
 
 	file, err := os.Create("deploy-config.json")
-	defer file.Close()
 	if err != nil {
 		fmt.Printf("Failed to create configuration file: %s", err)
 		return err
 	}
+	defer file.Close()
 
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "  ")
@@ -281,7 +282,7 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 
 	writer.WriteString(fmt.Sprintf("export TF_VAR_azs='[\"%s\"]'\n", strings.Join(config.Azs, "\", \"")))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_vpc_cidr=\"%s\"\n", "192.168.0.0/16"))
-	writer.WriteString(fmt.Sprintf("export TF_VAR_vpc_name=\"${TF_VAR_thanos_stack_name}/VPC\"\n"))
+	writer.WriteString("export TF_VAR_vpc_name=\"${TF_VAR_thanos_stack_name}/VPC\"\n")
 
 	writer.WriteString(fmt.Sprintf("export TF_VAR_eks_cluster_admins='[\"%s\"]'\n", config.EksClusterAdmins))
 

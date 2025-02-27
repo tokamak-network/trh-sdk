@@ -4,27 +4,27 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/ethereum/go-ethereum/ethclient"
+
+	"os"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/dependencies"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
-	"os"
 )
 
 type ThanosStack struct {
-	network             string
-	stack               string
-	defaultDeployConfig *types.DeployConfigTemplate
-	l1Client            *ethclient.Client
-	deployConfig        *types.Config
+	network      string
+	stack        string
+	deployConfig *types.Config
 }
 
 type DeployContractsInput struct {

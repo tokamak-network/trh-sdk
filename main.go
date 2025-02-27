@@ -3,9 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"log"
 	"os"
+
+	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 
 	"github.com/tokamak-network/trh-sdk/commands"
 	"github.com/tokamak-network/trh-sdk/flags"

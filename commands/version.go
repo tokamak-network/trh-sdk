@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/urfave/cli/v3"
 )

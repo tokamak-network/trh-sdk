@@ -2,6 +2,7 @@ package dependencies
 
 import (
 	"fmt"
+
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 

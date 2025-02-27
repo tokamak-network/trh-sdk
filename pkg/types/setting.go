@@ -3,9 +3,10 @@ package types
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"os"
 	"strings"
+
+	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
 type Config struct {
