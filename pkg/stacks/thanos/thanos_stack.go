@@ -57,7 +57,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	}
 	var err error
 	// STEP 1. Input the parameters
-	deployContractsConfig, err := t.inputDeployContracts()
+	deployContractsConfig, err := t.inputDeployContracts(ctx)
 	if err != nil {
 		return err
 	}
@@ -75,7 +75,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig.falutProof, chainID)
 
 	// Select operators Accounts
-	operators, err := selectAccounts(l1Client, deployContractsConfig.falutProof, deployContractsConfig.seed)
+	operators, err := selectAccounts(ctx, l1Client, deployContractsConfig.falutProof, deployContractsConfig.seed)
 	if err != nil {
 		return err
 	}
@@ -84,7 +84,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		return fmt.Errorf("no operators were found")
 	}
 
-	err = makeDeployContractConfigJsonFile(l1Client, operators, deployContractsTemplate)
+	err = makeDeployContractConfigJsonFile(ctx, l1Client, operators, deployContractsTemplate)
 	if err != nil {
 		return err
 	}
@@ -192,7 +192,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 
 // ----------------------------------------- Deploy command  ----------------------------- //
 
-func (t *ThanosStack) Deploy(deployConfig *types.Config) error {
+func (t *ThanosStack) Deploy(ctx context.Context, deployConfig *types.Config) error {
 	switch t.network {
 	case constants.LocalDevnet:
 		return t.deployLocalDevnet()

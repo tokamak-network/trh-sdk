@@ -10,7 +10,7 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
-func (t *ThanosStack) inputDeployContracts() (*DeployContractsInput, error) {
+func (t *ThanosStack) inputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
 	fmt.Println("You are about to deploy the L1 contracts.")
 	var (
 		l1RPCUrl  string
@@ -30,7 +30,7 @@ func (t *ThanosStack) inputDeployContracts() (*DeployContractsInput, error) {
 			fmt.Printf("Invalid L1 RPC URL: %s. Please try again", l1RPCUrl)
 			continue
 		}
-		blockNo, err := client.BlockNumber(context.Background())
+		blockNo, err := client.BlockNumber(ctx)
 		if err != nil {
 			fmt.Printf("Failed to retrieve block number: %s", err)
 			continue

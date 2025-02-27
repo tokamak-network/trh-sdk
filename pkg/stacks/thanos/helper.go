@@ -37,9 +37,9 @@ func displayAccounts(accounts map[int]types.Account) {
 	}
 }
 
-func selectAccounts(client *ethclient.Client, enableFraudProof bool, seed string) (types.OperatorMap, error) {
+func selectAccounts(ctx context.Context, client *ethclient.Client, enableFraudProof bool, seed string) (types.OperatorMap, error) {
 	fmt.Println("Retrieving accounts...")
-	accounts, err := types.GetAccountMap(context.Background(), client, seed)
+	accounts, err := types.GetAccountMap(ctx, client, seed)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +111,7 @@ func selectAccounts(client *ethclient.Client, enableFraudProof bool, seed string
 	return operators, nil
 }
 
-func makeDeployContractConfigJsonFile(l1Provider *ethclient.Client, operators types.OperatorMap, deployContractTemplate *types.DeployConfigTemplate) error {
+func makeDeployContractConfigJsonFile(ctx context.Context, l1Provider *ethclient.Client, operators types.OperatorMap, deployContractTemplate *types.DeployConfigTemplate) error {
 	for role, account := range operators {
 		switch role {
 		case types.Admin:
@@ -139,7 +139,7 @@ func makeDeployContractConfigJsonFile(l1Provider *ethclient.Client, operators ty
 	}
 
 	// Fetch the latest block
-	latest, err := l1Provider.BlockByNumber(context.Background(), nil)
+	latest, err := l1Provider.BlockByNumber(ctx, nil)
 	if err != nil {
 		fmt.Println("Error retrieving latest block")
 		return err
