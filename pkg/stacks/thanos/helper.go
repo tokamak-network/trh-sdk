@@ -10,6 +10,7 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -163,18 +164,13 @@ func makeDeployContractConfigJsonFile(l1Provider *ethclient.Client, operators ty
 	return nil
 }
 
-func initDeployConfigTemplate(enableFraudProof bool, network string, l1Client *ethclient.Client) *types.DeployConfigTemplate {
-	chainId, err := l1Client.ChainID(context.Background())
-	if err != nil {
-		fmt.Printf("Failed to get chain id: %s", err)
-		return nil
-	}
+func initDeployConfigTemplate(enableFraudProof bool, chainId *big.Int) *types.DeployConfigTemplate {
 	l1ChainId := chainId.Uint64()
 
 	defaultTemplate := &types.DeployConfigTemplate{
 		NativeTokenName:                          "Tokamak Network Token",
 		NativeTokenSymbol:                        "TON",
-		NativeTokenAddress:                       constants.L1ChainConfigurations[l1ChainId].NativeToken,
+		NativeTokenAddress:                       constants.L1ChainConfigurations[l1ChainId].L2NativeTokenAddress,
 		L1ChainID:                                l1ChainId,
 		L2ChainID:                                constants.L2ChainId,
 		L2BlockTime:                              2,
