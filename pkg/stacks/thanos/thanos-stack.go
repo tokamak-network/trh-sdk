@@ -3,17 +3,23 @@ package thanos
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
+	"os"
+
+	"github.com/tokamak-network/trh-sdk/abis"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/dependencies"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
-	"os"
 )
 
 type ThanosStack struct {
@@ -36,6 +42,13 @@ type DeployInfraInput struct {
 	L1BeaconURL string
 }
 
+type RegisterCandidate struct {
+	rollupConfig string
+	amount       float64
+	useTon       bool
+	memo         string
+}
+
 func NewThanosStack(network string, stack string) *ThanosStack {
 	return &ThanosStack{
 		network: network,
@@ -43,9 +56,18 @@ func NewThanosStack(network string, stack string) *ThanosStack {
 	}
 }
 
+func NewRegisterCandidate(rollupConfig string, amount float64, useTon bool, memo string) *RegisterCandidate {
+	return &RegisterCandidate{
+		rollupConfig: rollupConfig,
+		amount:       amount,
+		useTon:       useTon,
+		memo:         memo,
+	}
+}
+
 // ----------------------------------------- Deploy contracts command  ----------------------------- //
 
-func (t *ThanosStack) DeployContracts() error {
+func (t *ThanosStack) DeployContracts(rollupConfig string, amount float64, useTon bool, memo string) error {
 	if t.network == constants.LocalDevnet {
 		return fmt.Errorf("network %s does not require contract deployment, please run `trh-sdk deploy` instead", constants.LocalDevnet)
 	}
@@ -162,6 +184,13 @@ func (t *ThanosStack) DeployContracts() error {
 		return err
 	}
 	fmt.Printf("✅ Configuration successfully saved to: %s/settings.json", cwd)
+	registerCandidate := NewRegisterCandidate(rollupConfig, amount, useTon, memo)
+	err = registerCandidate.ActionRegisterCandidates()
+	if err != nil {
+		fmt.Println("Failed register candidate:", err)
+		return err
+	}
+
 	return nil
 }
 
@@ -573,5 +602,90 @@ func (t *ThanosStack) installBridges(namespace string) error {
 	}
 	fmt.Println("Installed pods: \n", k8sPods)
 
+	return nil
+}
+
+// --------------------------------------------- Register Candidates ---------------------------
+
+func (r *RegisterCandidate) ActionRegisterCandidates() error {
+	// Get RPC URL from environment
+	rpcURL := os.Getenv("RPC_URL")
+	if rpcURL == "" {
+		return fmt.Errorf("RPC_URL environment variable is not set")
+	}
+
+	// Connect to Ethereum client
+	client, err := ethclient.Dial(rpcURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to the Ethereum client: %v", err)
+	}
+
+	// Get private key from environment
+	privateKeyString := os.Getenv("PRIVATE_KEY")
+	if privateKeyString == "" {
+		return fmt.Errorf("PRIVATE_KEY environment variable is not set")
+	}
+
+	// Parse private key
+	privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKeyString, "0x"))
+	if err != nil {
+		return fmt.Errorf("invalid private key: %v", err)
+	}
+
+	// Get chain ID
+	chainID, err := client.ChainID(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to get chain ID: %v", err)
+	}
+
+	// Create transaction auth
+	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, chainID)
+	if err != nil {
+		return fmt.Errorf("failed to create transaction auth: %v", err)
+	}
+
+	// Convert amount to Wei
+	amountInWei := new(big.Float).Mul(big.NewFloat(r.amount), big.NewFloat(1e18))
+	amountBigInt, _ := amountInWei.Int(nil)
+
+	// Get contract address from environment
+	contractAddrStr := os.Getenv("L2_MANAGER_ADDRESS")
+	if contractAddrStr == "" {
+		return fmt.Errorf("L2_MANAGER_ADDRESS environment variable is not set")
+	}
+	contractAddr := common.HexToAddress(contractAddrStr)
+
+	// Create contract instance
+	contract, err := abis.NewLayer2ManagerV1(contractAddr, client)
+	if err != nil {
+		return fmt.Errorf("failed to create contract instance: %v", err)
+	}
+
+	// Call registerCandidateAddOn
+	tx, err := contract.RegisterCandidateAddOn(
+		auth,
+		common.HexToAddress(r.rollupConfig),
+		amountBigInt,
+		r.useTon,
+		r.memo,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to register candidate: %v", err)
+	}
+
+	fmt.Printf("Transaction submitted: %s\n", tx.Hash().Hex())
+	fmt.Println("Waiting for confirmation...")
+
+	// Create a context with timeout for transaction mining
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// Wait for transaction receipt
+	receipt, err := bind.WaitMined(ctx, client, tx)
+	if err != nil {
+		return fmt.Errorf("failed to get transaction receipt: %v", err)
+	}
+	fmt.Printf("✅ Transaction confirmed in block %d\n", receipt.BlockNumber)
+	fmt.Printf("Gas used: %d\n", receipt.GasUsed)
 	return nil
 }

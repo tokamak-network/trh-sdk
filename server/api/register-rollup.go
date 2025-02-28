@@ -4,22 +4,20 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
-	
-	"github.com/tokamak-network/trh-sdk/abis"
-	"github.com/ethereum/go-ethereum/accounts/abi"
+
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/gin-gonic/gin"
+	"github.com/tokamak-network/trh-sdk/abis"
 )
 
 type RegisterRollupRequest struct {
-	Rollup     string `json:"rollup" binding:"required"`
-	Type       uint8  `json:"type" binding:"required"`
-	L2TON      string `json:"l2ton" binding:"required"`
-	Name       string `json:"name" binding:"required"`
+	Rollup string `json:"rollup" binding:"required"`
+	Type   uint8  `json:"type" binding:"required"`
+	L2TON  string `json:"l2ton" binding:"required"`
+	Name   string `json:"name" binding:"required"`
 }
 
 // RegisterRollupConfig handles the registration of rollup configuration
@@ -75,13 +73,6 @@ func RegisterRollupConfig(c *gin.Context) {
 		return
 	}
 
-	// Create contract ABI
-	contractAbi, err := abi.JSON(strings.NewReader(abis.L1BridgeRegistryABI))
-	if err != nil {
-		c.String(http.StatusInternalServerError, "Failed to parse contract ABI")
-		return
-	}
-
 	// Get chain ID
 	chainID, err := client.ChainID(c.Request.Context())
 	if err != nil {
@@ -96,15 +87,21 @@ func RegisterRollupConfig(c *gin.Context) {
 		return
 	}
 
-	// Create contract instance
-	contract := bind.NewBoundContract(common.HexToAddress(contractAddress), contractAbi, client, client, client)
+	// Create contract instance using the generated bindings
+	contract, err := abis.NewL1BridgeRegistry(common.HexToAddress(contractAddress), client)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Failed to create contract instance")
+		return
+	}
 
-	// Prepare parameters
-	rollupAddr := common.HexToAddress(request.Rollup)
-	l2tonAddr := common.HexToAddress(request.L2TON)
-
-	// Call registerRollupConfig
-	tx, err := contract.Transact(auth, "registerRollupConfig", rollupAddr, request.Type, l2tonAddr, request.Name)
+	// Call registerRollupConfig using the generated method
+	tx, err := contract.RegisterRollupConfig(
+		auth,
+		common.HexToAddress(request.Rollup),
+		request.Type,
+		common.HexToAddress(request.L2TON),
+		request.Name,
+	)
 	if err != nil {
 		c.String(http.StatusInternalServerError, fmt.Sprintf("Failed to register rollup config: %v", err))
 		return

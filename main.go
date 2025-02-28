@@ -3,20 +3,21 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
+
+	"github.com/joho/godotenv"
 	"github.com/tokamak-network/trh-sdk/commands"
 	"github.com/tokamak-network/trh-sdk/flags"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
-	"github.com/joho/godotenv"
-	"log"
-	"os"
 
 	"github.com/urfave/cli/v3"
 )
 
 func main() {
 	if err := godotenv.Load(); err != nil {
-        fmt.Println("Error loading .env file:", err)
-    }
+		fmt.Println("Error loading .env file:", err)
+	}
 
 	cmd := &cli.Command{
 		Name:  "tokamak-sdk-cli",
@@ -24,7 +25,7 @@ func main() {
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return nil
 		},
-		Commands: []*cli.Command{			
+		Commands: []*cli.Command{
 			{
 				Name:   "deploy-contracts",
 				Usage:  "Deploy contracts",
@@ -102,72 +103,6 @@ func main() {
 				Usage:     "Install plugins",
 				ArgsUsage: "[plugins...]",
 				Action:    commands.ActionInstallPlugins(),
-			},
-			{
-				Name:   "register-candidates",
-				Usage:  "Register candidates",
-				Flags: []cli.Flag{
-					&cli.StringFlag{
-						Name:     "rollup-config",
-						Usage:    "Rollup config address",
-						Required: true,
-					},
-					&cli.FloatFlag{
-						Name:     "amount",
-						Usage:    "Amount of TON to stake (minimum 1000.1)",
-						Required: true,
-					},
-					&cli.StringFlag{
-						Name:  "memo",
-						Usage: "Memo for the registration",
-						Value: "",
-					},
-					&cli.BoolFlag{
-						Name:  "use-ton",
-						Usage: "Use TON instead of WTON for staking",
-						Value: false,
-					},
-				},
-				Action: commands.ActionRegisterCandidates(),
-			},
-			{
-				Name:  "serve",
-				Usage: "Start the HTTP server",
-				Flags: []cli.Flag{
-					&cli.StringFlag{
-						Name:  "port",
-						Usage: "Port to run the server on",
-						Value: "8080",
-					},
-				},
-				Action: commands.ActionStartServer(),
-			},
-			{
-				Name:   "register-candidates",
-				Usage:  "Register candidates",
-				Flags: []cli.Flag{
-					&cli.StringFlag{
-						Name:     "rollup-config",
-						Usage:    "Rollup config address",
-						Required: true,
-					},
-					&cli.FloatFlag{
-						Name:     "amount",
-						Usage:    "Amount of TON to stake (minimum 1000.1)",
-						Required: true,
-					},
-					&cli.StringFlag{
-						Name:  "memo",
-						Usage: "Memo for the registration",
-						Value: "",
-					},
-					&cli.BoolFlag{
-						Name:  "use-ton",
-						Usage: "Use TON instead of WTON for staking",
-						Value: false,
-					},
-				},
-				Action: commands.ActionRegisterCandidates(),
 			},
 			{
 				Name:  "serve",

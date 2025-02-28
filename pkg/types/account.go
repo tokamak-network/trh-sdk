@@ -5,12 +5,13 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"log"
+
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"github.com/tyler-smith/go-bip32"
 	"github.com/tyler-smith/go-bip39"
-	"log"
 )
 
 type Account struct {
