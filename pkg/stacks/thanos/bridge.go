@@ -33,6 +33,18 @@ func (t *ThanosStack) installBridge(deployConfig *types.Config) error {
 		return err
 	}
 
+	opBridgePods, err := utils.GetPodsByName(namespace, "op-bridge")
+	if err != nil {
+		fmt.Println("Error to get op bridge pods:", err)
+		return err
+	}
+	if len(opBridgePods) > 0 {
+		fmt.Println("OP Bridge is running:")
+		for _, pod := range opBridgePods {
+			fmt.Println(pod)
+		}
+	}
+
 	fmt.Println("Installing a bridge component...")
 
 	fmt.Print("Please input the L2 USDT address: ")
