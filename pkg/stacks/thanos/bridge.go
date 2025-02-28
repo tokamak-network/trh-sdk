@@ -39,10 +39,11 @@ func (t *ThanosStack) installBridge(deployConfig *types.Config) error {
 		return err
 	}
 	if len(opBridgePods) > 0 {
-		fmt.Println("OP Bridge is running:")
+		fmt.Printf("OP Bridge is running: \n")
 		for _, pod := range opBridgePods {
 			fmt.Println(pod)
 		}
+		return nil
 	}
 
 	fmt.Println("Installing a bridge component...")
@@ -180,6 +181,50 @@ func (t *ThanosStack) installBridge(deployConfig *types.Config) error {
 		time.Sleep(15 * time.Second)
 	}
 	fmt.Printf("Network deployment completed successfully. RPC endpoint: %s", bridgeUrl)
+
+	return nil
+}
+
+func (t *ThanosStack) uninstallBridge(deployConfig *types.Config) error {
+	var (
+		namespace = deployConfig.K8sNamespace
+	)
+
+	awsConfig := deployConfig.AWS
+	if awsConfig == nil {
+		return fmt.Errorf("AWS configuration is missing")
+	}
+
+	_, err := loginAWS(awsConfig)
+	if err != nil {
+		fmt.Println("Error to login in AWS:", err)
+		return err
+	}
+
+	releases, err := utils.FilterHelmReleases(namespace, "op-bridge")
+	if err != nil {
+		fmt.Println("Error to filter helm releases:", err)
+		return err
+	}
+
+	if len(releases) == 0 {
+		return nil
+	}
+
+	for _, release := range releases {
+		_, err = utils.ExecuteCommand("helm", []string{
+			"uninstall",
+			release,
+			"--namespace",
+			namespace,
+		}...)
+		if err != nil {
+			fmt.Println("Error uninstalling op-bridge helm chart:", err)
+			return err
+		}
+	}
+
+	fmt.Println("Uninstall a bridge component successfully")
 
 	return nil
 }

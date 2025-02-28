@@ -92,13 +92,24 @@ func main() {
 						Value: "",
 					},
 				},
-				Action: commands.ActionInstallPlugins(),
+				Action: commands.ActionInstallationPlugins(),
 			},
 			{
-				Name:      "install",
-				Usage:     "Install plugins",
-				ArgsUsage: "[plugins...]",
-				Action:    commands.ActionInstallPlugins(),
+				Name:  "uninstall",
+				Usage: "Uninstall plugins",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:  "plugins",
+						Usage: "",
+						Value: "",
+					},
+					&cli.StringFlag{
+						Name:  "stack",
+						Usage: "Tech stack",
+						Value: "",
+					},
+				},
+				Action: commands.ActionInstallationPlugins(),
 			},
 			{
 				Name:   "version",

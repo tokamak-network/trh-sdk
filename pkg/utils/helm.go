@@ -18,16 +18,17 @@ func GetHelmReleases(namespace string) ([]string, error) {
 	return strings.Split(output, "\n"), nil
 }
 
-// HelmReleaseExists checks if a release name exists in the list
-func HelmReleaseExists(namespace string, releaseName string) (bool, error) {
+func FilterHelmReleases(namespace string, releaseName string) ([]string, error) {
 	releases, err := GetHelmReleases(namespace)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
+
+	helmReleases := make([]string, 0)
 	for _, r := range releases {
-		if r == releaseName {
-			return true, nil
+		if strings.Contains(r, releaseName) {
+			helmReleases = append(helmReleases, r)
 		}
 	}
-	return false, nil
+	return helmReleases, nil
 }

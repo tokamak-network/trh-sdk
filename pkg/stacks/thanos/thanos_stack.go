@@ -549,6 +549,24 @@ func (t *ThanosStack) InstallPlugins(pluginNames []string, deployConfig *types.C
 
 		}
 	}
-	fmt.Println(pluginNames)
+	return nil
+}
+
+// ------------------------------------------ Uninstall plugins ---------------------------
+
+func (t *ThanosStack) UninstallPlugins(pluginNames []string, deployConfig *types.Config) error {
+	for _, pluginName := range pluginNames {
+		if !constants.SupportedPlugins[pluginName] {
+			fmt.Printf("Plugin %s is not supported for this stack.\n", pluginName)
+			continue
+		}
+
+		fmt.Printf("Uninstalling plugin: %s in namespace: %s...\n", pluginName, deployConfig.K8sNamespace)
+
+		switch pluginName {
+		case constants.PluginBridge:
+			return t.uninstallBridge(deployConfig)
+		}
+	}
 	return nil
 }
