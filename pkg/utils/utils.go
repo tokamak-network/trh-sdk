@@ -1,8 +1,9 @@
 package utils
 
 import (
-	"github.com/ethereum/go-ethereum/params"
 	"math/big"
+
+	"github.com/ethereum/go-ethereum/params"
 )
 
 func WeiToEther(wei *big.Int) *big.Float {

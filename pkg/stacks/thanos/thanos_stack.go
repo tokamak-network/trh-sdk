@@ -23,11 +23,9 @@ import (
 )
 
 type ThanosStack struct {
-	network             string
-	stack               string
-	defaultDeployConfig *types.DeployConfigTemplate
-	l1Client            *ethclient.Client
-	deployConfig        *types.Config
+	network      string
+	stack        string
+	deployConfig *types.Config
 }
 
 type DeployContractsInput struct {
@@ -67,7 +65,7 @@ func NewRegisterCandidate(rollupConfig string, amount float64, useTon bool, memo
 
 // ----------------------------------------- Deploy contracts command  ----------------------------- //
 
-func (t *ThanosStack) DeployContracts(rollupConfig string, amount float64, useTon bool, memo string) error {
+func (t *ThanosStack) DeployContracts(ctx context.Context, rollupConfig string, amount float64, useTon bool, memo string) error {
 	if t.network == constants.LocalDevnet {
 		return fmt.Errorf("network %s does not require contract deployment, please run `trh-sdk deploy` instead", constants.LocalDevnet)
 	}
@@ -76,20 +74,25 @@ func (t *ThanosStack) DeployContracts(rollupConfig string, amount float64, useTo
 	}
 	var err error
 	// STEP 1. Input the parameters
-	deployContractsConfig, err := t.inputDeployContracts()
+	deployContractsConfig, err := t.inputDeployContracts(ctx)
 	if err != nil {
 		return err
 	}
 
-	l1Client, err := ethclient.DialContext(context.Background(), deployContractsConfig.l1RPCurl)
+	l1Client, err := ethclient.DialContext(ctx, deployContractsConfig.l1RPCurl)
 	if err != nil {
 		return err
 	}
+	chainID, err := l1Client.ChainID(ctx)
+	if err != nil {
+		fmt.Printf("Failed to get chain id: %s", err)
+		return err
+	}
 
-	deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig.falutProof, t.network, l1Client)
+	deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig.falutProof, chainID)
 
 	// Select operators Accounts
-	operators, err := selectAccounts(l1Client, deployContractsConfig.falutProof, deployContractsConfig.seed)
+	operators, err := selectAccounts(ctx, l1Client, deployContractsConfig.falutProof, deployContractsConfig.seed)
 	if err != nil {
 		return err
 	}
@@ -98,7 +101,7 @@ func (t *ThanosStack) DeployContracts(rollupConfig string, amount float64, useTo
 		return fmt.Errorf("no operators were found")
 	}
 
-	err = makeDeployContractConfigJsonFile(l1Client, operators, deployContractsTemplate)
+	err = makeDeployContractConfigJsonFile(ctx, l1Client, operators, deployContractsTemplate)
 	if err != nil {
 		return err
 	}
@@ -120,8 +123,24 @@ func (t *ThanosStack) DeployContracts(rollupConfig string, amount float64, useTo
 
 	// STEP 4. Deploy the contracts
 	fmt.Println("Deploying the contracts...")
+
+	gasPriceWei, err := l1Client.SuggestGasPrice(ctx)
+	if err != nil {
+		fmt.Printf("Failed to get gas price: %v\n", err)
+	}
+
+	envValues := fmt.Sprintf("export GS_ADMIN_PRIVATE_KEY=%s\nexport L1_RPC_URL=%s\n", operators[0].PrivateKey, deployContractsConfig.l1RPCurl)
+	if gasPriceWei != nil && gasPriceWei.Uint64() > 0 {
+		// double gas price
+		envValues += fmt.Sprintf("export GAS_PRICE=%d\n", gasPriceWei.Uint64()*2)
+	}
+
 	// STEP 4.1. Generate the .env file
-	_, err = utils.ExecuteCommand("bash", "-c", fmt.Sprintf("cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && echo 'export GS_ADMIN_PRIVATE_KEY=%s' > .env && echo 'export L1_RPC_URL=%s' >> .env", operators[0].PrivateKey, deployContractsConfig.l1RPCurl))
+	_, err = utils.ExecuteCommand(
+		"bash",
+		"-c",
+		fmt.Sprintf("cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && echo '%s' > .env", envValues),
+	)
 	if err != nil {
 		fmt.Print("\r❌ Make .env file failed!       \n")
 		return err
@@ -173,6 +192,7 @@ func (t *ThanosStack) DeployContracts(rollupConfig string, amount float64, useTo
 		ChallengerPrivateKey: challengerPrivateKey,
 		DeploymentPath:       fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", cwd, deployContractsTemplate.L1ChainID),
 		L1RPCProvider:        deployContractsConfig.l1Provider,
+		L1ChainID:            chainID.Uint64(),
 		L1RPCURL:             deployContractsConfig.l1RPCurl,
 		Stack:                t.stack,
 		Network:              t.network,
@@ -196,7 +216,7 @@ func (t *ThanosStack) DeployContracts(rollupConfig string, amount float64, useTo
 
 // ----------------------------------------- Deploy command  ----------------------------- //
 
-func (t *ThanosStack) Deploy(deployConfig *types.Config) error {
+func (t *ThanosStack) Deploy(ctx context.Context, deployConfig *types.Config) error {
 	switch t.network {
 	case constants.LocalDevnet:
 		return t.deployLocalDevnet()
@@ -361,7 +381,8 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 		return fmt.Errorf("Configuration file thanos-stack-values.yaml not found")
 	}
 
-	namespace := inputs.ChainName
+	namespace := types.ConvertChainNameToNamespace(inputs.ChainName)
+	deployConfig.ChainName = inputs.ChainName
 
 	// Step 7. Configure EKS access
 	eksSetup, err := utils.ExecuteCommand("aws", []string{
@@ -410,20 +431,15 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 	fmt.Println("Helm repository added successfully: \n", helmSearchOutput)
 
 	// Step 8.2. Install Helm charts
-	helmReleaseNameInput, err := t.inputHelmReleaseName(namespace)
-	if err != nil {
-		fmt.Println("Error obtaining Helm release name:", err)
-		return err
-	}
-
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
 
+	helmReleaseName := fmt.Sprintf("%s-%d", namespace, time.Now().Unix())
 	_, err = utils.ExecuteCommand("helm", []string{
 		"install",
-		helmReleaseNameInput,
+		helmReleaseName,
 		"thanos-stack/thanos-stack",
 		"--values",
 		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", cwd),
@@ -436,23 +452,17 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 	}
 
 	fmt.Println("✅ Helm charts installed successfully")
-	k8sPods, err = utils.GetK8sPods(namespace)
-	if err != nil {
-		fmt.Println("Error retrieving updated pod list:", err, "details:", k8sPods)
-		return err
-	}
-	fmt.Println("Installed pods: \n", k8sPods)
 
 	var l2RPCUrl string
 	for {
-		k8sIngresses, err := utils.GetAddressByIngress(namespace, helmReleaseNameInput)
+		k8sIngresses, err := utils.GetAddressByIngress(namespace, helmReleaseName)
 		if err != nil {
 			fmt.Println("Error retrieving ingress addresses:", err, "details:", k8sIngresses)
 			return err
 		}
 
 		if len(k8sIngresses) > 0 {
-			l2RPCUrl = k8sIngresses[0]
+			l2RPCUrl = "http://" + k8sIngresses[0]
 			break
 		}
 
@@ -460,7 +470,7 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 	}
 	fmt.Printf("Network deployment completed successfully. RPC endpoint: %s", l2RPCUrl)
 
-	deployConfig.HelmReleaseName = helmReleaseNameInput
+	deployConfig.HelmReleaseName = helmReleaseName
 	deployConfig.K8sNamespace = namespace
 	deployConfig.L2RpcUrl = l2RPCUrl
 
@@ -470,6 +480,12 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 		return err
 	}
 	fmt.Printf("Configuration saved successfully to: %s/settings.json", cwd)
+
+	// After installing the infra successfully, we install the bridge
+	err = t.installBridge(deployConfig)
+	if err != nil {
+		fmt.Println("Error installing bridge:", err)
+	}
 
 	return nil
 }
@@ -558,50 +574,10 @@ func (t *ThanosStack) InstallPlugins(pluginNames []string, deployConfig *types.C
 		fmt.Printf("Installing plugin: %s in namespace: %s...\n", pluginName, deployConfig.K8sNamespace)
 
 		switch pluginName {
-		case constants.PluginBridge:
-			return t.installBridges(deployConfig.K8sNamespace)
+
 		}
 	}
 	fmt.Println(pluginNames)
-	return nil
-}
-
-func (t *ThanosStack) installBridges(namespace string) error {
-	fmt.Println("Installing a bridge component...")
-
-	helmReleaseNameInput, err := t.inputHelmReleaseName(namespace)
-	if err != nil {
-		fmt.Println("Error obtaining Helm release name:", err)
-		return err
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Println("Error determining current directory:", err)
-		return err
-	}
-
-	_, err = utils.ExecuteCommand("helm", []string{
-		"install",
-		helmReleaseNameInput,
-		"thanos-stack/thanos-stack",
-		"--values",
-		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", cwd),
-		"--namespace",
-		namespace,
-	}...)
-	if err != nil {
-		fmt.Println("Error installing Helm charts:", err)
-		return err
-	}
-
-	fmt.Println("✅ Bridge component installed successfully")
-	k8sPods, err := utils.GetK8sPods(namespace)
-	if err != nil {
-		fmt.Println("Error retrieving Kubernetes pods:", err, "details:", k8sPods)
-		return err
-	}
-	fmt.Println("Installed pods: \n", k8sPods)
-
 	return nil
 }
 

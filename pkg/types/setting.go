@@ -3,8 +3,10 @@ package types
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"os"
+	"strings"
+
+	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
 type Config struct {
@@ -17,6 +19,7 @@ type Config struct {
 	DeploymentPath string `json:"deployment_path"`
 	L1RPCURL       string `json:"l1_rpc_url"`
 	L1RPCProvider  string `json:"l1_rpc_provider"`
+	L1ChainID      uint64 `json:"l1_chain_id"`
 
 	Stack            string `json:"stack"`
 	Network          string `json:"network"`
@@ -29,6 +32,8 @@ type Config struct {
 
 	// AWS config
 	AWS *AWSLogin `json:"aws"`
+
+	ChainName string `json:"chain_name"`
 }
 
 const configFileName = "settings.json"
@@ -71,4 +76,13 @@ func ReadConfigFromJSONFile() (*Config, error) {
 		return nil, err
 	}
 	return &config, nil
+}
+
+func ConvertChainNameToNamespace(chainName string) string {
+	words := strings.Split(chainName, " ")
+	namespace := ""
+	for _, word := range words {
+		namespace = fmt.Sprintf("%s-%s", namespace, strings.ToLower(word))
+	}
+	return namespace
 }

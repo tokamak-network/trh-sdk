@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
@@ -14,7 +15,7 @@ type Deploy struct {
 	Stack   string
 }
 
-func Execute(network, stack string, config *types.Config) error {
+func Execute(ctx context.Context, network, stack string, config *types.Config) error {
 	if !constants.SupportedStacks[stack] {
 		return fmt.Errorf("unsupported stack: %s", stack)
 	}
@@ -26,7 +27,7 @@ func Execute(network, stack string, config *types.Config) error {
 	switch stack {
 	case constants.ThanosStack:
 		thanosStack := thanos.NewThanosStack(network, stack)
-		err := thanosStack.Deploy(config)
+		err := thanosStack.Deploy(ctx, config)
 		if err != nil {
 			fmt.Println("Error deploying Thanos Stack")
 			return err
@@ -52,6 +53,6 @@ func ActionDeploy() cli.ActionFunc {
 			network = config.Network
 			stack = config.Stack
 		}
-		return Execute(network, stack, config)
+		return Execute(ctx, network, stack, config)
 	}
 }

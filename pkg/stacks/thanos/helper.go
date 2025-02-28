@@ -5,15 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
-	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
 )
 
 var mapAccountIndexes = map[int]string{
@@ -25,7 +27,7 @@ var mapAccountIndexes = map[int]string{
 }
 
 func displayAccounts(accounts map[int]types.Account) {
-	sortedAccounts := make([]types.Account, len(accounts), len(accounts))
+	sortedAccounts := make([]types.Account, len(accounts))
 	for i, account := range accounts {
 		sortedAccounts[i] = account
 	}
@@ -35,9 +37,9 @@ func displayAccounts(accounts map[int]types.Account) {
 	}
 }
 
-func selectAccounts(client *ethclient.Client, enableFraudProof bool, seed string) (types.OperatorMap, error) {
+func selectAccounts(ctx context.Context, client *ethclient.Client, enableFraudProof bool, seed string) (types.OperatorMap, error) {
 	fmt.Println("Retrieving accounts...")
-	accounts, err := types.GetAccountMap(context.Background(), client, seed)
+	accounts, err := types.GetAccountMap(ctx, client, seed)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +100,7 @@ func selectAccounts(client *ethclient.Client, enableFraudProof bool, seed string
 		}
 	}
 
-	sortedOperators := make([]*types.IndexAccount, len(operators), len(operators))
+	sortedOperators := make([]*types.IndexAccount, len(operators))
 	for i, operator := range operators {
 		sortedOperators[i] = operator
 	}
@@ -109,7 +111,7 @@ func selectAccounts(client *ethclient.Client, enableFraudProof bool, seed string
 	return operators, nil
 }
 
-func makeDeployContractConfigJsonFile(l1Provider *ethclient.Client, operators types.OperatorMap, deployContractTemplate *types.DeployConfigTemplate) error {
+func makeDeployContractConfigJsonFile(ctx context.Context, l1Provider *ethclient.Client, operators types.OperatorMap, deployContractTemplate *types.DeployConfigTemplate) error {
 	for role, account := range operators {
 		switch role {
 		case types.Admin:
@@ -137,7 +139,7 @@ func makeDeployContractConfigJsonFile(l1Provider *ethclient.Client, operators ty
 	}
 
 	// Fetch the latest block
-	latest, err := l1Provider.BlockByNumber(context.Background(), nil)
+	latest, err := l1Provider.BlockByNumber(ctx, nil)
 	if err != nil {
 		fmt.Println("Error retrieving latest block")
 		return err
@@ -147,11 +149,11 @@ func makeDeployContractConfigJsonFile(l1Provider *ethclient.Client, operators ty
 	deployContractTemplate.L2OutputOracleStartingTimestamp = latest.Time()
 
 	file, err := os.Create("deploy-config.json")
-	defer file.Close()
 	if err != nil {
 		fmt.Printf("Failed to create configuration file: %s", err)
 		return err
 	}
+	defer file.Close()
 
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "  ")
@@ -163,18 +165,13 @@ func makeDeployContractConfigJsonFile(l1Provider *ethclient.Client, operators ty
 	return nil
 }
 
-func initDeployConfigTemplate(enableFraudProof bool, network string, l1Client *ethclient.Client) *types.DeployConfigTemplate {
-	chainId, err := l1Client.ChainID(context.Background())
-	if err != nil {
-		fmt.Printf("Failed to get chain id: %s", err)
-		return nil
-	}
+func initDeployConfigTemplate(enableFraudProof bool, chainId *big.Int) *types.DeployConfigTemplate {
 	l1ChainId := chainId.Uint64()
 
 	defaultTemplate := &types.DeployConfigTemplate{
 		NativeTokenName:                          "Tokamak Network Token",
 		NativeTokenSymbol:                        "TON",
-		NativeTokenAddress:                       constants.L1ChainConfigurations[l1ChainId].NativeToken,
+		NativeTokenAddress:                       constants.L1ChainConfigurations[l1ChainId].L2NativeTokenAddress,
 		L1ChainID:                                l1ChainId,
 		L2ChainID:                                constants.L2ChainId,
 		L2BlockTime:                              2,
@@ -285,7 +282,7 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 
 	writer.WriteString(fmt.Sprintf("export TF_VAR_azs='[\"%s\"]'\n", strings.Join(config.Azs, "\", \"")))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_vpc_cidr=\"%s\"\n", "192.168.0.0/16"))
-	writer.WriteString(fmt.Sprintf("export TF_VAR_vpc_name=\"${TF_VAR_thanos_stack_name}/VPC\"\n"))
+	writer.WriteString("export TF_VAR_vpc_name=\"${TF_VAR_thanos_stack_name}/VPC\"\n")
 
 	writer.WriteString(fmt.Sprintf("export TF_VAR_eks_cluster_admins='[\"%s\"]'\n", config.EksClusterAdmins))
 

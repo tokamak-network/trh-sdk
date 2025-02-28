@@ -3,13 +3,14 @@ package thanos
 import (
 	"context"
 	"fmt"
+
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
-func (t *ThanosStack) inputDeployContracts() (*DeployContractsInput, error) {
+func (t *ThanosStack) inputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
 	fmt.Println("You are about to deploy the L1 contracts.")
 	var (
 		l1RPCUrl  string
@@ -29,7 +30,7 @@ func (t *ThanosStack) inputDeployContracts() (*DeployContractsInput, error) {
 			fmt.Printf("Invalid L1 RPC URL: %s. Please try again", l1RPCUrl)
 			continue
 		}
-		blockNo, err := client.BlockNumber(context.Background())
+		blockNo, err := client.BlockNumber(ctx)
 		if err != nil {
 			fmt.Printf("Failed to retrieve block number: %s", err)
 			continue
@@ -174,35 +175,4 @@ func (t *ThanosStack) cloneSourcecode(repositoryName, url string) error {
 	fmt.Printf("\r✅ Successfully cloned the %s repository!       \n", repositoryName)
 
 	return nil
-}
-
-func (t *ThanosStack) inputHelmReleaseName(namespace string) (string, error) {
-	var helmReleaseNameInput string
-	var err error
-	for {
-		fmt.Print("Please enter a name for your Helm chart release: ")
-		helmReleaseNameInput, err = scanner.ScanString()
-		if err != nil {
-			fmt.Println("Error while reading Helm chart release name:", err)
-			return "", err
-		}
-
-		if helmReleaseNameInput == "" {
-			fmt.Println("Error: The release name cannot be empty. Please try again.")
-			continue
-		}
-
-		releaseNameExist, err := utils.HelmReleaseExists(namespace, helmReleaseNameInput)
-		if err != nil {
-			fmt.Println("Error while checking if Helm chart release exists:", helmReleaseNameInput)
-			return "", err
-		}
-		if releaseNameExist {
-			fmt.Println("Error: This Helm release name already exists. Please choose a different name.")
-			continue
-		}
-
-		break
-	}
-	return helmReleaseNameInput, nil
 }
