@@ -442,7 +442,6 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 	}
 	fmt.Printf("Network deployment completed successfully. RPC endpoint: %s", l2RPCUrl)
 
-	deployConfig.HelmReleaseName = helmReleaseName
 	deployConfig.K8sNamespace = namespace
 	deployConfig.L2RpcUrl = l2RPCUrl
 
@@ -487,7 +486,6 @@ func (t *ThanosStack) destroyDevnet() error {
 }
 
 func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
-	fmt.Printf("Removing Helm release: %s from namespace: %s...\n", deployConfig.HelmReleaseName, deployConfig.K8sNamespace)
 	// login aws again because the session when logging in will be expired after a few time.
 	_, err := loginAWS(t.deployConfig.AWS)
 	if err != nil {
@@ -495,22 +493,33 @@ func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
 		return err
 	}
 
-	fmt.Printf("Uninstalling Helm release: %s in namespace: %s...\n", deployConfig.HelmReleaseName, deployConfig.K8sNamespace)
+	var (
+		namespace = deployConfig.K8sNamespace
+	)
 
-	output, err := utils.ExecuteCommand("helm", "uninstall", deployConfig.HelmReleaseName, "--namespace", deployConfig.K8sNamespace)
+	helmReleases, err := utils.GetHelmReleases(namespace)
 	if err != nil {
-		fmt.Println("Error removing Helm release:", err, "details:", output)
+		fmt.Println("Error retrieving Helm releases:", err)
 		return err
 	}
 
-	fmt.Println("Helm release removed successfully:", output)
+	for _, release := range helmReleases {
+		fmt.Printf("Uninstalling Helm release: %s in namespace: %s...\n", release, deployConfig.K8sNamespace)
+		_, err := utils.ExecuteCommand("helm", "uninstall", release, "--namespace", deployConfig.K8sNamespace)
+		if err != nil {
+			fmt.Println("Error removing Helm release:", err)
+			return err
+		}
+	}
+
+	fmt.Println("Helm release removed successfully:")
 
 	err = utils.ExecuteCommandStream("bash", []string{
 		"-c",
 		`cd tokamak-thanos-stack/terraform &&
 		source .envrc &&
 		cd thanos-stack &&
-		terraform destroy`,
+		terraform destroy -auto-approve`,
 	}...)
 	if err != nil {
 		fmt.Println("Error running thanos-stack terraform destroy:", err)
@@ -523,7 +532,7 @@ func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
 		`cd tokamak-thanos-stack/terraform &&
 		source .envrc &&
 		cd backend &&
-		terraform destroy`,
+		terraform destroy -auto-approve`,
 	}...)
 	if err != nil {
 		fmt.Println("Error running the terraform backend destroy:", err)

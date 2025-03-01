@@ -26,9 +26,8 @@ type Config struct {
 	EnableFraudProof bool   `json:"enable_fraud_proof"`
 
 	// these fields are added after installing the infrastructure successfully
-	K8sNamespace    string `json:"k8s_namespace"`
-	HelmReleaseName string `json:"helm_release_name"`
-	L2RpcUrl        string `json:"l2_rpc_url"`
+	K8sNamespace string `json:"k8s_namespace"`
+	L2RpcUrl     string `json:"l2_rpc_url"`
 
 	// AWS config
 	AWS *AWSLogin `json:"aws"`
