@@ -31,37 +31,25 @@ var (
 		Sources: cli.EnvVars(PrefixEnvVars(envPrefix, "NETWORK")...),
 	}
 
-	RollupConfigFlag = &cli.StringFlag{
-		Name:     "rollup-config",
-		Usage:    "Rollup config address",
-		Required: true,
-	}
-
-	AmountFlag = &cli.FloatFlag{
-		Name:     "amount",
-		Usage:    "Amount of TON to stake (minimum 1000.1)",
-		Required: true,
-	}
-
-	MemoFlag = &cli.StringFlag{
-		Name:  "memo",
-		Usage: "Memo for the registration",
-		Value: "",
-	}
-
-	UseTonFlag = &cli.BoolFlag{
-		Name:  "use-ton",
-		Usage: "Use TON instead of WTON for staking",
-		Value: false,
+	ServerFlag = &cli.StringFlag{
+		Name:    "port",
+		Usage:   "Port to run the server on",
+		Value:   "8080",
+		Sources: cli.EnvVars(PrefixEnvVars(envPrefix, "PORT")...),
 	}
 )
+
+var StartServerFlag = []cli.Flag{
+	ServerFlag,
+}
 
 var DeployContractsFlag = []cli.Flag{
 	StackFlag,
 	NetworkFlag,
 	SaveConfigFlag,
-	RollupConfigFlag,
-	AmountFlag,
-	MemoFlag,
-	UseTonFlag,
+}
+
+var VerifyRegisterCandidateFlag = []cli.Flag{
+	StackFlag,
+	NetworkFlag,
 }

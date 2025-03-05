@@ -110,15 +110,15 @@ func main() {
 				Action: commands.ActionVersion(),
 			},
 			{
-				Name:  "serve",
-				Usage: "Start the HTTP server",
-				Flags: []cli.Flag{
-					&cli.StringFlag{
-						Name:  "port",
-						Usage: "Port to run the server on",
-						Value: "8080",
-					},
-				},
+				Name:   "verify-register-candidate",
+				Usage:  "Verify and Register Candidate",
+				Flags:  flags.VerifyRegisterCandidateFlag,
+				Action: commands.ActionVersion(),
+			},
+			{
+				Name:   "serve",
+				Usage:  "Start the HTTP server",
+				Flags:  flags.StartServerFlag,
 				Action: commands.ActionStartServer(),
 			},
 		},

@@ -40,11 +40,13 @@ type DeployInfraInput struct {
 	L1BeaconURL string
 }
 
-type RegisterCandidate struct {
+type RegisterCandidateInput struct {
 	rollupConfig string
+	l2TonAddress string
 	amount       float64
 	useTon       bool
 	memo         string
+	nameInfo     string
 }
 
 func NewThanosStack(network string, stack string) *ThanosStack {
@@ -54,18 +56,9 @@ func NewThanosStack(network string, stack string) *ThanosStack {
 	}
 }
 
-func NewRegisterCandidate(rollupConfig string, amount float64, useTon bool, memo string) *RegisterCandidate {
-	return &RegisterCandidate{
-		rollupConfig: rollupConfig,
-		amount:       amount,
-		useTon:       useTon,
-		memo:         memo,
-	}
-}
-
 // ----------------------------------------- Deploy contracts command  ----------------------------- //
 
-func (t *ThanosStack) DeployContracts(ctx context.Context, rollupConfig string, amount float64, useTon bool, memo string) error {
+func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	if t.network == constants.LocalDevnet {
 		return fmt.Errorf("network %s does not require contract deployment, please run `trh-sdk deploy` instead", constants.LocalDevnet)
 	}
@@ -204,11 +197,18 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, rollupConfig string, 
 		return err
 	}
 	fmt.Printf("✅ Configuration successfully saved to: %s/settings.json", cwd)
-	registerCandidate := NewRegisterCandidate(rollupConfig, amount, useTon, memo)
-	err = registerCandidate.ActionRegisterCandidates()
+
+	verifyAndRegister, err := t.inputVerifyAndRegister()
 	if err != nil {
-		fmt.Println("Failed register candidate:", err)
 		return err
+	}
+
+	if verifyAndRegister {
+		err = t.VerifyRegisterCandidates(ctx)
+		if err != nil {
+			fmt.Println("Failed register candidate:", err)
+			return err
+		}
 	}
 
 	return nil
@@ -583,7 +583,12 @@ func (t *ThanosStack) InstallPlugins(pluginNames []string, deployConfig *types.C
 
 // --------------------------------------------- Register Candidates ---------------------------
 
-func (r *RegisterCandidate) ActionRegisterCandidates() error {
+func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context) error {
+	registerCandidate, err := t.inputRegisterCandidate()
+	if err != nil {
+		return err
+	}
+
 	// Get RPC URL from environment
 	rpcURL := os.Getenv("RPC_URL")
 	if rpcURL == "" {
@@ -609,7 +614,7 @@ func (r *RegisterCandidate) ActionRegisterCandidates() error {
 	}
 
 	// Get chain ID
-	chainID, err := client.ChainID(context.Background())
+	chainID, err := client.ChainID(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get chain ID: %v", err)
 	}
@@ -620,48 +625,103 @@ func (r *RegisterCandidate) ActionRegisterCandidates() error {
 		return fmt.Errorf("failed to create transaction auth: %v", err)
 	}
 
-	// Convert amount to Wei
-	amountInWei := new(big.Float).Mul(big.NewFloat(r.amount), big.NewFloat(1e18))
-	amountBigInt, _ := amountInWei.Int(nil)
-
 	// Get contract address from environment
-	contractAddrStr := os.Getenv("L2_MANAGER_ADDRESS")
+	contractAddrStr := os.Getenv("L1_VERIFICATION_CONTRACT_ADDRESS")
 	if contractAddrStr == "" {
-		return fmt.Errorf("L2_MANAGER_ADDRESS environment variable is not set")
+		return fmt.Errorf("L1_VERIFICATION_CONTRACT_ADDRESS environment variable is not set")
 	}
 	contractAddr := common.HexToAddress(contractAddrStr)
 
 	// Create contract instance
-	contract, err := abis.NewLayer2ManagerV1(contractAddr, client)
+	contract, err := abis.NewL1ContractVerification(contractAddr, client)
 	if err != nil {
 		return fmt.Errorf("failed to create contract instance: %v", err)
 	}
 
-	// Call registerCandidateAddOn
-	tx, err := contract.RegisterCandidateAddOn(
+	//TODO: Need to check and update these functionality to get system config and safe wallet address
+
+	systemConfigProxy := os.Getenv("SYSTEM_CONFIG_ADDRESS")
+	if systemConfigProxy == "" {
+		return fmt.Errorf("SYSTEM_CONFIG_ADDRESS environment variable is not set")
+	}
+
+	safeWallet := os.Getenv("SAFE_WALLET_ADDRESS")
+	if safeWallet == "" {
+		return fmt.Errorf("SAFE_WALLET_ADDRESS environment variable is not set")
+	}
+
+	// Verify and register config
+	txVerifyAndRegisterConfig, err := contract.VerifyAndRegisterRollupConfig(
 		auth,
-		common.HexToAddress(r.rollupConfig),
-		amountBigInt,
-		r.useTon,
-		r.memo,
+		chainID,
+		common.HexToAddress(systemConfigProxy),
+		common.HexToAddress(safeWallet),
+		common.HexToAddress(registerCandidate.rollupConfig),
+		2, //TODO: Need to check and update this using TON
+		common.HexToAddress(registerCandidate.l2TonAddress),
+		registerCandidate.nameInfo,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to register candidate: %v", err)
 	}
 
-	fmt.Printf("Transaction submitted: %s\n", tx.Hash().Hex())
-	fmt.Println("Waiting for confirmation...")
+	fmt.Printf("Transaction submitted: %s\n", txVerifyAndRegisterConfig.Hash().Hex())
 
-	// Create a context with timeout for transaction mining
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	// Wait for transaction receipt
-	receipt, err := bind.WaitMined(ctx, client, tx)
+	// Wait for transaction confirmation
+	receiptVerifyRegisterConfig, err := bind.WaitMined(ctx, client, txVerifyAndRegisterConfig)
 	if err != nil {
-		return fmt.Errorf("failed to get transaction receipt: %v", err)
+	    return fmt.Errorf("failed waiting for transaction confirmation: %v", err)
 	}
-	fmt.Printf("✅ Transaction confirmed in block %d\n", receipt.BlockNumber)
-	fmt.Printf("Gas used: %d\n", receipt.GasUsed)
+
+	if receiptVerifyRegisterConfig.Status != 1 {
+	    return fmt.Errorf("transaction failed with status: %d", receiptVerifyRegisterConfig.Status)
+	}
+
+	fmt.Printf("Transaction confirmed in block %d\n", receiptVerifyRegisterConfig.BlockNumber.Uint64())
+
+	// Convert amount to Wei
+	amountInWei := new(big.Float).Mul(big.NewFloat(registerCandidate.amount), big.NewFloat(1e18))
+	amountBigInt, _ := amountInWei.Int(nil)
+
+	// Get contract address from environment
+	l2ManagerAddressStr := os.Getenv("L2_MANAGER_ADDRESS")
+	if l2ManagerAddressStr == "" {
+		return fmt.Errorf("L2_MANAGER_ADDRESS environment variable is not set")
+	}
+	l2ManagerAddress := common.HexToAddress(l2ManagerAddressStr)
+
+	// Create contract instance
+	l2ManagerContract, err := abis.NewLayer2ManagerV1(l2ManagerAddress, client)
+	if err != nil {
+		return fmt.Errorf("failed to create contract instance: %v", err)
+	}
+
+	// Call registerCandidateAddOn
+	txRegisterCandidate, err := l2ManagerContract.RegisterCandidateAddOn(
+		auth,
+		common.HexToAddress(registerCandidate.rollupConfig),
+		amountBigInt,
+		registerCandidate.useTon,
+		registerCandidate.memo,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to register candidate: %v", err)
+	}
+
+	fmt.Printf("Transaction submitted: %s\n", txRegisterCandidate.Hash().Hex())
+
+	// Wait for transaction confirmation
+	receiptRegisterCandidate, err := bind.WaitMined(ctx, client, txRegisterCandidate)
+	if err != nil {
+		return fmt.Errorf("failed waiting for transaction confirmation: %v", err)
+	}
+
+	if receiptRegisterCandidate.Status != 1 {
+		return fmt.Errorf("transaction failed with status: %d", receiptRegisterCandidate.Status)
+	}
+
+	fmt.Printf("Transaction confirmed in block %d\n", receiptRegisterCandidate.BlockNumber.Uint64())
+	
+	
 	return nil
 }

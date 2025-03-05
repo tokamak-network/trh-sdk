@@ -10,7 +10,7 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-func ActionDeployContracts() cli.ActionFunc {
+func ActionVerifyRegisterCandidates() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
 		stack := cmd.String(flags.StackFlag.Name)
 		network := cmd.String(flags.NetworkFlag.Name)
@@ -19,7 +19,7 @@ func ActionDeployContracts() cli.ActionFunc {
 		case constants.ThanosStack:
 			thanosStack := thanos.NewThanosStack(network, stack)
 
-			return thanosStack.DeployContracts(ctx)
+			return thanosStack.VerifyRegisterCandidates(ctx)
 		default:
 			return fmt.Errorf("unsupported stack: %s", stack)
 		}
