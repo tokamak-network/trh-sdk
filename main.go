@@ -113,7 +113,7 @@ func main() {
 				Name:   "verify-register-candidate",
 				Usage:  "Verify and Register Candidate",
 				Flags:  flags.VerifyRegisterCandidateFlag,
-				Action: commands.ActionVersion(),
+				Action: commands.ActionVerifyRegisterCandidates(),
 			},
 			{
 				Name:   "serve",
