@@ -18,9 +18,8 @@ import (
 )
 
 type ThanosStack struct {
-	network      string
-	stack        string
-	deployConfig *types.Config
+	network string
+	stack   string
 }
 
 type DeployContractsInput struct {
@@ -487,7 +486,7 @@ func (t *ThanosStack) destroyDevnet() error {
 
 func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
 	// login aws again because the session when logging in will be expired after a few time.
-	_, err := loginAWS(t.deployConfig.AWS)
+	_, err := loginAWS(deployConfig.AWS)
 	if err != nil {
 		fmt.Println("Error getting AWS profile:", err)
 		return err
