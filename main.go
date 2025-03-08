@@ -6,14 +6,18 @@ import (
 	"log"
 	"os"
 
-	"github.com/tokamak-network/trh-sdk/pkg/scanner"
-
+	"github.com/joho/godotenv"
 	"github.com/tokamak-network/trh-sdk/commands"
 	"github.com/tokamak-network/trh-sdk/flags"
+	"github.com/tokamak-network/trh-sdk/pkg/scanner"
+
 	"github.com/urfave/cli/v3"
 )
 
 func main() {
+	if err := godotenv.Load(); err != nil {
+		fmt.Println("Error loading .env file:", err)
+	}
 
 	cmd := &cli.Command{
 		Name:  "tokamak-sdk-cli",
@@ -115,6 +119,18 @@ func main() {
 				Name:   "version",
 				Usage:  "SDK version",
 				Action: commands.ActionVersion(),
+			},
+			{
+				Name:   "verify-register-candidate",
+				Usage:  "Verify and Register Candidate",
+				Flags:  flags.VerifyRegisterCandidateFlag,
+				Action: commands.ActionVerifyRegisterCandidates(),
+			},
+			{
+				Name:   "serve",
+				Usage:  "Start the HTTP server",
+				Flags:  flags.StartServerFlag,
+				Action: commands.ActionStartServer(),
 			},
 		},
 	}

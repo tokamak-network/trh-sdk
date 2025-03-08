@@ -30,10 +30,26 @@ var (
 		Value:   "localhost",
 		Sources: cli.EnvVars(PrefixEnvVars(envPrefix, "NETWORK")...),
 	}
+
+	ServerFlag = &cli.StringFlag{
+		Name:    "port",
+		Usage:   "Port to run the server on",
+		Value:   "8080",
+		Sources: cli.EnvVars(PrefixEnvVars(envPrefix, "PORT")...),
+	}
 )
+
+var StartServerFlag = []cli.Flag{
+	ServerFlag,
+}
 
 var DeployContractsFlag = []cli.Flag{
 	StackFlag,
 	NetworkFlag,
 	SaveConfigFlag,
+}
+
+var VerifyRegisterCandidateFlag = []cli.Flag{
+	StackFlag,
+	NetworkFlag,
 }

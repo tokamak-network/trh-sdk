@@ -1,0 +1,292 @@
+[
+  { "inputs": [], "stateMutability": "nonpayable", "type": "constructor" },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "bridgeRegistry",
+        "type": "address"
+      }
+    ],
+    "name": "BridgeRegistryUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "chainId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "contractId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "ConfigurationSet",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "previousOwner",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "newOwner",
+        "type": "address"
+      }
+    ],
+    "name": "OwnershipTransferred",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "operator",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "chainId",
+        "type": "uint256"
+      }
+    ],
+    "name": "RegistrationSuccess",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "operator",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "chainId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "reason",
+        "type": "string"
+      }
+    ],
+    "name": "VerificationFailure",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "operator",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "chainId",
+        "type": "uint256"
+      }
+    ],
+    "name": "VerificationSuccess",
+    "type": "event"
+  },
+  {
+    "inputs": [],
+    "name": "L1BridgeRegistryV1_1Address",
+    "outputs": [{ "internalType": "address", "name": "", "type": "address" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "L1_CROSS_DOMAIN_MESSENGER",
+    "outputs": [{ "internalType": "bytes32", "name": "", "type": "bytes32" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "L1_STANDARD_BRIDGE",
+    "outputs": [{ "internalType": "bytes32", "name": "", "type": "bytes32" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "OPTIMISM_PORTAL",
+    "outputs": [{ "internalType": "bytes32", "name": "", "type": "bytes32" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "SYSTEM_CONFIG",
+    "outputs": [{ "internalType": "bytes32", "name": "", "type": "bytes32" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "uint256", "name": "", "type": "uint256" },
+      { "internalType": "bytes32", "name": "", "type": "bytes32" }
+    ],
+    "name": "contractConfigs",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "implementationHash",
+        "type": "bytes32"
+      },
+      { "internalType": "bytes32", "name": "proxyHash", "type": "bytes32" },
+      {
+        "internalType": "address",
+        "name": "expectedProxyAdmin",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "owner",
+    "outputs": [{ "internalType": "address", "name": "", "type": "address" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "renounceOwnership",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "name": "safeConfigs",
+    "outputs": [
+      { "internalType": "address", "name": "tokamakDAO", "type": "address" },
+      { "internalType": "address", "name": "foundation", "type": "address" },
+      {
+        "internalType": "uint256",
+        "name": "requiredThreshold",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_bridgeRegistry",
+        "type": "address"
+      }
+    ],
+    "name": "setBridgeRegistryAddress",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "uint256", "name": "chainId", "type": "uint256" },
+      { "internalType": "bytes32", "name": "contractId", "type": "bytes32" },
+      {
+        "internalType": "bytes32",
+        "name": "implementationHash",
+        "type": "bytes32"
+      },
+      { "internalType": "bytes32", "name": "proxyHash", "type": "bytes32" },
+      {
+        "internalType": "address",
+        "name": "expectedProxyAdmin",
+        "type": "address"
+      }
+    ],
+    "name": "setContractConfig",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "uint256", "name": "chainId", "type": "uint256" },
+      { "internalType": "address", "name": "tokamakDAO", "type": "address" },
+      { "internalType": "address", "name": "foundation", "type": "address" },
+      { "internalType": "uint256", "name": "threshold", "type": "uint256" }
+    ],
+    "name": "setSafeConfig",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "address", "name": "newOwner", "type": "address" }
+    ],
+    "name": "transferOwnership",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "uint256", "name": "chainId", "type": "uint256" },
+      {
+        "internalType": "address",
+        "name": "systemConfigProxy",
+        "type": "address"
+      },
+      { "internalType": "address", "name": "safeWallet", "type": "address" },
+      { "internalType": "address", "name": "rollupConfig", "type": "address" },
+      { "internalType": "uint8", "name": "_type", "type": "uint8" },
+      { "internalType": "address", "name": "_l2TON", "type": "address" },
+      { "internalType": "string", "name": "_name", "type": "string" }
+    ],
+    "name": "verifyAndRegisterRollupConfig",
+    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "uint256", "name": "chainId", "type": "uint256" },
+      {
+        "internalType": "address",
+        "name": "systemConfigProxy",
+        "type": "address"
+      },
+      { "internalType": "address", "name": "safeWallet", "type": "address" }
+    ],
+    "name": "verifyL1Contracts",
+    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  }
+]
