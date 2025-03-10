@@ -243,7 +243,7 @@ func initDeployConfigTemplate(enableFraudProof bool, chainId *big.Int) *types.De
 
 }
 
-func loginAWS(awsLoginInputs *types.AWSLogin) (*aws.AccountProfile, error) {
+func loginAWS(awsLoginInputs *types.AWSConfig) (*aws.AccountProfile, error) {
 	fmt.Println("Authenticating AWS account...")
 	awsProfileAccount, err := aws.LoginAWS(awsLoginInputs.AccessKey, awsLoginInputs.SecretKey, awsLoginInputs.Region, awsLoginInputs.DefaultFormat)
 	if err != nil {
@@ -266,8 +266,10 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	}
 	defer output.Close()
 
+	bucketName := strings.Join(strings.Split(strings.ToLower(config.ThanosStackName), " "), "-")
+
 	writer := bufio.NewWriter(output)
-	writer.WriteString(fmt.Sprintf("export TF_VAR_thanos_stack_name=\"%s\"\n", config.ThanosStackName))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_thanos_stack_name=\"%s\"\n", bucketName))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_aws_region=\"%s\"\n", config.AwsRegion))
 
 	writer.WriteString(fmt.Sprintf("export TF_VAR_backend_bucket_name=\"%s\"\n", ""))
@@ -301,5 +303,50 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 		return err
 	}
 	fmt.Println("Environment configuration file (.envrc) has been successfully generated!")
+	return nil
+}
+
+func makeBlockExplorerEnvs(dirPath string, filename string, config types.BlockExplorerEnvs) error {
+	if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
+		fmt.Println("Error creating directory:", err)
+		return err
+	}
+
+	filePath := filepath.Join(dirPath, filename)
+
+	// Open file in append mode, create if not exists
+	output, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Println("Error opening environment file:", err)
+		return err
+	}
+	defer output.Close()
+
+	writer := bufio.NewWriter(output)
+
+	// Define the new environment variables to append
+	envVars := []string{
+		fmt.Sprintf("export TF_VAR_thanos_stack_name=\"%s\"\n", config.ThanosStackName),
+		fmt.Sprintf("export TF_VAR_aws_region=\"%s\"\n", config.AwsRegion),
+		fmt.Sprintf("export TF_VAR_db_username=\"%s\"\n", config.BlockExplorerDatabaseUserName),
+		fmt.Sprintf("export TF_VAR_db_password=\"%s\"\n", config.BlockExplorerDatabasePassword),
+		fmt.Sprintf("export TF_VAR_db_name=\"%s\"\n", config.BlockExplorerDatabaseName),
+		fmt.Sprintf("export TF_VAR_vpc_id=\"%s\"\n", config.VpcId),
+	}
+
+	// Append new variables
+	for _, envVar := range envVars {
+		_, err = writer.WriteString(envVar)
+		if err != nil {
+			return err
+		}
+	}
+
+	err = writer.Flush()
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Environment configuration file (.envrc) has been successfully updated!")
 	return nil
 }

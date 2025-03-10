@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
-	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"gopkg.in/yaml.v3"
@@ -16,7 +15,7 @@ import (
 
 func (t *ThanosStack) installBridge(deployConfig *types.Config) error {
 	var (
-		namespace = deployConfig.K8sNamespace
+		namespace = deployConfig.K8s.Namespace
 		chainName = deployConfig.ChainName
 		l1ChainID = deployConfig.L1ChainID
 		l1RPC     = deployConfig.L1RPCURL
@@ -48,19 +47,13 @@ func (t *ThanosStack) installBridge(deployConfig *types.Config) error {
 
 	fmt.Println("Installing a bridge component...")
 
-	fmt.Print("Please input the L2 USDT address: ")
-	l2UsdtAddress, err := scanner.ScanString()
-	if err != nil {
-		fmt.Println("Error scanning L2 USDT address:", err)
-	}
-
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Println("Error determining current directory:", err)
 		return err
 	}
 
-	file, err := os.Open(fmt.Sprintf("%s/%s", cwd, fmt.Sprintf("%d-deploy.json", l1ChainID)))
+	file, err := os.Open(fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%s", cwd, fmt.Sprintf("%d-deploy.json", l1ChainID)))
 	if err != nil {
 		fmt.Println("Error opening deployment file:", err)
 		return err
@@ -99,7 +92,7 @@ func (t *ThanosStack) installBridge(deployConfig *types.Config) error {
 	opBridgeConfig.OpBridge.Env.L2NativeCurrencyName = "Tokamak Network Token"
 	opBridgeConfig.OpBridge.Env.L2NativeCurrencySymbol = "TON"
 	opBridgeConfig.OpBridge.Env.L2NativeCurrencyDecimals = 18
-	opBridgeConfig.OpBridge.Env.L2USDTAddress = l2UsdtAddress
+	opBridgeConfig.OpBridge.Env.L2USDTAddress = ""
 
 	opBridgeConfig.OpBridge.Env.StandardBridgeAddress = contracts.L1StandardBridgeProxy
 	opBridgeConfig.OpBridge.Env.AddressManagerAddress = contracts.AddressManager
@@ -187,7 +180,7 @@ func (t *ThanosStack) installBridge(deployConfig *types.Config) error {
 
 func (t *ThanosStack) uninstallBridge(deployConfig *types.Config) error {
 	var (
-		namespace = deployConfig.K8sNamespace
+		namespace = deployConfig.K8s.Namespace
 	)
 
 	awsConfig := deployConfig.AWS

@@ -51,9 +51,9 @@ func (t *ThanosStack) inputDeployContracts(ctx context.Context) (*DeployContract
 		return nil, err
 	}
 
-	faultProof := false
+	fraudProof := false
 	fmt.Print("Would you like to enable the fault-proof system on your chain? [Y or N] (default: N): ")
-	faultProof, err = scanner.ScanBool()
+	fraudProof, err = scanner.ScanBool()
 	if err != nil {
 		fmt.Printf("Error while reading the fault-proof system setting: %s", err)
 		return nil, err
@@ -63,11 +63,11 @@ func (t *ThanosStack) inputDeployContracts(ctx context.Context) (*DeployContract
 		l1RPCurl:   l1RPCUrl,
 		l1Provider: l1RRCKind,
 		seed:       seed,
-		falutProof: faultProof,
+		fraudProof: fraudProof,
 	}, nil
 }
 
-func (t *ThanosStack) inputAWSLogin() (*types.AWSLogin, error) {
+func (t *ThanosStack) inputAWSLogin() (*types.AWSConfig, error) {
 	var (
 		awsAccessKeyID, awsSecretKey string
 		err                          error
@@ -118,7 +118,7 @@ func (t *ThanosStack) inputAWSLogin() (*types.AWSLogin, error) {
 		awsRegion = "ap-northeast-2"
 	}
 
-	return &types.AWSLogin{
+	return &types.AWSConfig{
 		SecretKey:     awsSecretKey,
 		Region:        awsRegion,
 		AccessKey:     awsAccessKeyID,

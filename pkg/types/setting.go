@@ -9,6 +9,10 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
+type K8sConfig struct {
+	Namespace string `json:"namespace"`
+}
+
 type Config struct {
 	AdminPrivateKey      string `json:"admin_private_key"`
 	SequencerPrivateKey  string `json:"sequencer_private_key"`
@@ -26,11 +30,13 @@ type Config struct {
 	EnableFraudProof bool   `json:"enable_fraud_proof"`
 
 	// these fields are added after installing the infrastructure successfully
-	K8sNamespace string `json:"k8s_namespace"`
-	L2RpcUrl     string `json:"l2_rpc_url"`
+	L2RpcUrl string `json:"l2_rpc_url"`
 
 	// AWS config
-	AWS *AWSLogin `json:"aws"`
+	AWS *AWSConfig `json:"aws"`
+
+	// K8s config
+	K8s *K8sConfig `json:"k8s"`
 
 	ChainName string `json:"chain_name"`
 }
@@ -78,10 +84,5 @@ func ReadConfigFromJSONFile() (*Config, error) {
 }
 
 func ConvertChainNameToNamespace(chainName string) string {
-	words := strings.Split(chainName, " ")
-	namespace := ""
-	for _, word := range words {
-		namespace = fmt.Sprintf("%s-%s", namespace, strings.ToLower(word))
-	}
-	return namespace
+	return strings.ToLower(strings.Join(strings.Split(chainName, " "), "-"))
 }

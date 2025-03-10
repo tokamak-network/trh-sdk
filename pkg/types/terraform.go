@@ -21,3 +21,12 @@ type TerraformEnvConfig struct {
 	L1RpcProvider     string
 	L1BeaconUrl       string
 }
+
+type BlockExplorerEnvs struct {
+	ThanosStackName               string
+	AwsRegion                     string
+	BlockExplorerDatabaseName     string
+	BlockExplorerDatabasePassword string
+	BlockExplorerDatabaseUserName string
+	VpcId                         string
+}

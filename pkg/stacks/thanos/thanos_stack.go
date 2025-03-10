@@ -26,7 +26,7 @@ type DeployContractsInput struct {
 	l1Provider string
 	l1RPCurl   string
 	seed       string
-	falutProof bool
+	fraudProof bool
 }
 
 type DeployInfraInput struct {
@@ -67,10 +67,10 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		return err
 	}
 
-	deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig.falutProof, chainID)
+	deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig.fraudProof, chainID)
 
 	// Select operators Accounts
-	operators, err := selectAccounts(ctx, l1Client, deployContractsConfig.falutProof, deployContractsConfig.seed)
+	operators, err := selectAccounts(ctx, l1Client, deployContractsConfig.fraudProof, deployContractsConfig.seed)
 	if err != nil {
 		return err
 	}
@@ -156,7 +156,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	fmt.Printf("\r Rollup file path: %s/tokamak-thanos/build/rollup.json\n", cwd)
 
 	var challengerPrivateKey string
-	if deployContractsConfig.falutProof {
+	if deployContractsConfig.fraudProof {
 		if operators[4] == nil {
 			return fmt.Errorf("challenger operator is required for fault proof but was not found")
 		}
@@ -174,7 +174,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		L1RPCURL:             deployContractsConfig.l1RPCurl,
 		Stack:                t.stack,
 		Network:              t.network,
-		EnableFraudProof:     deployContractsConfig.falutProof,
+		EnableFraudProof:     deployContractsConfig.fraudProof,
 	}
 	err = cfg.WriteToJSONFile()
 	if err != nil {
@@ -311,6 +311,7 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 		cd backend &&
 		terraform init &&
 		terraform plan &&
+		terraform taint terraform_data.env_bucket_name &&
 		terraform apply -auto-approve
 		`,
 	}...)
@@ -347,9 +348,23 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 		return err
 	}
 
+	// Get VPC ID
+	vpcIdOutput, err := utils.ExecuteCommand("bash", []string{
+		"-c",
+		`cd tokamak-thanos-stack/terraform &&
+		source .envrc &&
+		cd thanos-stack &&
+		terraform output -json vpc_id`,
+	}...)
+	if err != nil {
+		return fmt.Errorf("failed to get terraform output for %s: %w", "vpc_id", err)
+	}
+
+	deployConfig.AWS.VpcID = strings.Trim(vpcIdOutput, `"`)
+
 	thanosStackValueFileExist := utils.CheckFileExists("tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml")
 	if !thanosStackValueFileExist {
-		return fmt.Errorf("Configuration file thanos-stack-values.yaml not found")
+		return fmt.Errorf("configuration file thanos-stack-values.yaml not found")
 	}
 
 	namespace := types.ConvertChainNameToNamespace(inputs.ChainName)
@@ -441,7 +456,9 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 	}
 	fmt.Printf("Network deployment completed successfully. RPC endpoint: %s", l2RPCUrl)
 
-	deployConfig.K8sNamespace = namespace
+	deployConfig.K8s = &types.K8sConfig{
+		Namespace: namespace,
+	}
 	deployConfig.L2RpcUrl = l2RPCUrl
 
 	err = deployConfig.WriteToJSONFile()
@@ -493,7 +510,7 @@ func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
 	}
 
 	var (
-		namespace = deployConfig.K8sNamespace
+		namespace = deployConfig.K8s.Namespace
 	)
 
 	helmReleases, err := utils.GetHelmReleases(namespace)
@@ -503,8 +520,8 @@ func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
 	}
 
 	for _, release := range helmReleases {
-		fmt.Printf("Uninstalling Helm release: %s in namespace: %s...\n", release, deployConfig.K8sNamespace)
-		_, err := utils.ExecuteCommand("helm", "uninstall", release, "--namespace", deployConfig.K8sNamespace)
+		fmt.Printf("Uninstalling Helm release: %s in namespace: %s...\n", release, namespace)
+		_, err := utils.ExecuteCommand("helm", "uninstall", release, "--namespace", namespace)
 		if err != nil {
 			fmt.Println("Error removing Helm release:", err)
 			return err
@@ -518,7 +535,7 @@ func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
 		`cd tokamak-thanos-stack/terraform &&
 		source .envrc &&
 		cd thanos-stack &&
-		terraform destroy -auto-approve`,
+		terraform destroy -auto-approve -parallelism=50`,
 	}...)
 	if err != nil {
 		fmt.Println("Error running thanos-stack terraform destroy:", err)
@@ -531,7 +548,7 @@ func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
 		`cd tokamak-thanos-stack/terraform &&
 		source .envrc &&
 		cd backend &&
-		terraform destroy -auto-approve`,
+		terraform destroy -auto-approve -parallelism=50`,
 	}...)
 	if err != nil {
 		fmt.Println("Error running the terraform backend destroy:", err)
@@ -545,16 +562,21 @@ func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
 // ------------------------------------------ Install plugins ---------------------------
 
 func (t *ThanosStack) InstallPlugins(pluginNames []string, deployConfig *types.Config) error {
+	var (
+		namespace = deployConfig.K8s.Namespace
+	)
+
 	for _, pluginName := range pluginNames {
 		if !constants.SupportedPlugins[pluginName] {
 			fmt.Printf("Plugin %s is not supported for this stack.\n", pluginName)
 			continue
 		}
 
-		fmt.Printf("Installing plugin: %s in namespace: %s...\n", pluginName, deployConfig.K8sNamespace)
+		fmt.Printf("Installing plugin: %s in namespace: %s...\n", pluginName, namespace)
 
 		switch pluginName {
-
+		case constants.PluginBlockExplorer:
+			return t.installBlockExplorer(deployConfig)
 		}
 	}
 	return nil
@@ -563,13 +585,17 @@ func (t *ThanosStack) InstallPlugins(pluginNames []string, deployConfig *types.C
 // ------------------------------------------ Uninstall plugins ---------------------------
 
 func (t *ThanosStack) UninstallPlugins(pluginNames []string, deployConfig *types.Config) error {
+	var (
+		namespace = deployConfig.K8s.Namespace
+	)
+
 	for _, pluginName := range pluginNames {
 		if !constants.SupportedPlugins[pluginName] {
 			fmt.Printf("Plugin %s is not supported for this stack.\n", pluginName)
 			continue
 		}
 
-		fmt.Printf("Uninstalling plugin: %s in namespace: %s...\n", pluginName, deployConfig.K8sNamespace)
+		fmt.Printf("Uninstalling plugin: %s in namespace: %s...\n", pluginName, namespace)
 
 		switch pluginName {
 		case constants.PluginBridge:
