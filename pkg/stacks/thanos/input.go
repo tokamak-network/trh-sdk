@@ -179,14 +179,14 @@ func (t *ThanosStack) cloneSourcecode(repositoryName, url string) error {
 }
 
 func (t *ThanosStack) inputVerifyAndRegister() (bool, error) {
-    fmt.Print("Would you like to verify and register the candidate? [Y or N] (default: N): ")
-    verifyAndRegister, err := scanner.ScanBool()
-    if err != nil {
-        fmt.Printf("Error while reading verification and registration choice: %s", err)
-        return false, err
-    }
+	fmt.Print("Would you like to verify and register the candidate? [Y or N] (default: N): ")
+	verifyAndRegister, err := scanner.ScanBool()
+	if err != nil {
+		fmt.Printf("Error while reading verification and registration choice: %s", err)
+		return false, err
+	}
 
-    return verifyAndRegister, nil
+	return verifyAndRegister, nil
 }
 
 func (t *ThanosStack) inputRegisterCandidate() (*RegisterCandidateInput, error) {
