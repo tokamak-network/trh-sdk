@@ -1,5 +1,15 @@
 [
-  { "inputs": [], "stateMutability": "nonpayable", "type": "constructor" },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_proxyAdminAddress",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "constructor"
+  },
   {
     "anonymous": false,
     "inputs": [
@@ -17,13 +27,7 @@
     "anonymous": false,
     "inputs": [
       {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "chainId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
+        "indexed": true,
         "internalType": "bytes32",
         "name": "contractId",
         "type": "bytes32"
@@ -57,14 +61,8 @@
       {
         "indexed": true,
         "internalType": "address",
-        "name": "operator",
+        "name": "verifier",
         "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "chainId",
-        "type": "uint256"
       }
     ],
     "name": "RegistrationSuccess",
@@ -75,15 +73,28 @@
     "inputs": [
       {
         "indexed": true,
-        "internalType": "address",
-        "name": "operator",
-        "type": "address"
-      },
-      {
-        "indexed": false,
         "internalType": "uint256",
         "name": "chainId",
         "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "required",
+        "type": "bool"
+      }
+    ],
+    "name": "SafeVerificationRequiredSet",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "operator",
+        "type": "address"
       },
       {
         "indexed": false,
@@ -101,14 +112,8 @@
       {
         "indexed": true,
         "internalType": "address",
-        "name": "operator",
+        "name": "verifier",
         "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "chainId",
-        "type": "uint256"
       }
     ],
     "name": "VerificationSuccess",
@@ -144,17 +149,68 @@
   },
   {
     "inputs": [],
+    "name": "PROXY_ADMIN_ADDRESS",
+    "outputs": [{ "internalType": "address", "name": "", "type": "address" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "SYSTEM_CONFIG",
     "outputs": [{ "internalType": "bytes32", "name": "", "type": "bytes32" }],
     "stateMutability": "view",
     "type": "function"
   },
   {
-    "inputs": [
-      { "internalType": "uint256", "name": "", "type": "uint256" },
-      { "internalType": "bytes32", "name": "", "type": "bytes32" }
+    "inputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "name": "chainConfigs",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "tokamakDAO",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "foundation",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "thirdOwner",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "requiredThreshold",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct IL1ContractVerification.SafeConfig",
+        "name": "safeConfig",
+        "type": "tuple"
+      },
+      {
+        "internalType": "address",
+        "name": "expectedNativeToken",
+        "type": "address"
+      },
+      {
+        "internalType": "bool",
+        "name": "safeVerificationRequired",
+        "type": "bool"
+      }
     ],
-    "name": "contractConfigs",
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "bytes32", "name": "contractId", "type": "bytes32" }
+    ],
+    "name": "getContractConfig",
     "outputs": [
       {
         "internalType": "bytes32",
@@ -166,6 +222,22 @@
         "internalType": "address",
         "name": "expectedProxyAdmin",
         "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "getSafeConfig",
+    "outputs": [
+      { "internalType": "address", "name": "tokamakDAO", "type": "address" },
+      { "internalType": "address", "name": "foundation", "type": "address" },
+      { "internalType": "address", "name": "thirdOwner", "type": "address" },
+      {
+        "internalType": "uint256",
+        "name": "requiredThreshold",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -186,21 +258,6 @@
     "type": "function"
   },
   {
-    "inputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
-    "name": "safeConfigs",
-    "outputs": [
-      { "internalType": "address", "name": "tokamakDAO", "type": "address" },
-      { "internalType": "address", "name": "foundation", "type": "address" },
-      {
-        "internalType": "uint256",
-        "name": "requiredThreshold",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
     "inputs": [
       {
         "internalType": "address",
@@ -215,7 +272,6 @@
   },
   {
     "inputs": [
-      { "internalType": "uint256", "name": "chainId", "type": "uint256" },
       { "internalType": "bytes32", "name": "contractId", "type": "bytes32" },
       {
         "internalType": "bytes32",
@@ -236,12 +292,28 @@
   },
   {
     "inputs": [
-      { "internalType": "uint256", "name": "chainId", "type": "uint256" },
+      { "internalType": "address", "name": "tokenAddress", "type": "address" }
+    ],
+    "name": "setExpectedNativeToken",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
       { "internalType": "address", "name": "tokamakDAO", "type": "address" },
       { "internalType": "address", "name": "foundation", "type": "address" },
+      { "internalType": "address", "name": "thirdOwner", "type": "address" },
       { "internalType": "uint256", "name": "threshold", "type": "uint256" }
     ],
     "name": "setSafeConfig",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "bool", "name": "required", "type": "bool" }],
+    "name": "setSafeVerificationRequired",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -257,14 +329,11 @@
   },
   {
     "inputs": [
-      { "internalType": "uint256", "name": "chainId", "type": "uint256" },
       {
         "internalType": "address",
         "name": "systemConfigProxy",
         "type": "address"
       },
-      { "internalType": "address", "name": "safeWallet", "type": "address" },
-      { "internalType": "address", "name": "rollupConfig", "type": "address" },
       { "internalType": "uint8", "name": "_type", "type": "uint8" },
       { "internalType": "address", "name": "_l2TON", "type": "address" },
       { "internalType": "string", "name": "_name", "type": "string" }
@@ -276,13 +345,11 @@
   },
   {
     "inputs": [
-      { "internalType": "uint256", "name": "chainId", "type": "uint256" },
       {
         "internalType": "address",
         "name": "systemConfigProxy",
         "type": "address"
-      },
-      { "internalType": "address", "name": "safeWallet", "type": "address" }
+      }
     ],
     "name": "verifyL1Contracts",
     "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],

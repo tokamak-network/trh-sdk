@@ -29,9 +29,17 @@ var (
 	_ = abi.ConvertType
 )
 
+// IL1ContractVerificationSafeConfig is an auto generated low-level Go binding around an user-defined struct.
+type IL1ContractVerificationSafeConfig struct {
+	TokamakDAO        common.Address
+	Foundation        common.Address
+	ThirdOwner        common.Address
+	RequiredThreshold *big.Int
+}
+
 // L1ContractVerificationMetaData contains all meta data concerning the L1ContractVerification contract.
 var L1ContractVerificationMetaData = &bind.MetaData{
-	ABI: "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"bridgeRegistry\",\"type\":\"address\"}],\"name\":\"BridgeRegistryUpdated\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"chainId\",\"type\":\"uint256\"},{\"indexed\":false,\"internalType\":\"bytes32\",\"name\":\"contractId\",\"type\":\"bytes32\"}],\"name\":\"ConfigurationSet\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"previousOwner\",\"type\":\"address\"},{\"indexed\":true,\"internalType\":\"address\",\"name\":\"newOwner\",\"type\":\"address\"}],\"name\":\"OwnershipTransferred\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"operator\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"chainId\",\"type\":\"uint256\"}],\"name\":\"RegistrationSuccess\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"operator\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"chainId\",\"type\":\"uint256\"},{\"indexed\":false,\"internalType\":\"string\",\"name\":\"reason\",\"type\":\"string\"}],\"name\":\"VerificationFailure\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"operator\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"chainId\",\"type\":\"uint256\"}],\"name\":\"VerificationSuccess\",\"type\":\"event\"},{\"inputs\":[],\"name\":\"L1BridgeRegistryV1_1Address\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"L1_CROSS_DOMAIN_MESSENGER\",\"outputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"L1_STANDARD_BRIDGE\",\"outputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"OPTIMISM_PORTAL\",\"outputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"SYSTEM_CONFIG\",\"outputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"name\":\"contractConfigs\",\"outputs\":[{\"internalType\":\"bytes32\",\"name\":\"implementationHash\",\"type\":\"bytes32\"},{\"internalType\":\"bytes32\",\"name\":\"proxyHash\",\"type\":\"bytes32\"},{\"internalType\":\"address\",\"name\":\"expectedProxyAdmin\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"owner\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"renounceOwnership\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"name\":\"safeConfigs\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"tokamakDAO\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"foundation\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"requiredThreshold\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_bridgeRegistry\",\"type\":\"address\"}],\"name\":\"setBridgeRegistryAddress\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"chainId\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"contractId\",\"type\":\"bytes32\"},{\"internalType\":\"bytes32\",\"name\":\"implementationHash\",\"type\":\"bytes32\"},{\"internalType\":\"bytes32\",\"name\":\"proxyHash\",\"type\":\"bytes32\"},{\"internalType\":\"address\",\"name\":\"expectedProxyAdmin\",\"type\":\"address\"}],\"name\":\"setContractConfig\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"chainId\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"tokamakDAO\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"foundation\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"threshold\",\"type\":\"uint256\"}],\"name\":\"setSafeConfig\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"newOwner\",\"type\":\"address\"}],\"name\":\"transferOwnership\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"chainId\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"systemConfigProxy\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"safeWallet\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"rollupConfig\",\"type\":\"address\"},{\"internalType\":\"uint8\",\"name\":\"_type\",\"type\":\"uint8\"},{\"internalType\":\"address\",\"name\":\"_l2TON\",\"type\":\"address\"},{\"internalType\":\"string\",\"name\":\"_name\",\"type\":\"string\"}],\"name\":\"verifyAndRegisterRollupConfig\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"chainId\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"systemConfigProxy\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"safeWallet\",\"type\":\"address\"}],\"name\":\"verifyL1Contracts\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]",
+	ABI: "[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_proxyAdminAddress\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"bridgeRegistry\",\"type\":\"address\"}],\"name\":\"BridgeRegistryUpdated\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"contractId\",\"type\":\"bytes32\"}],\"name\":\"ConfigurationSet\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"previousOwner\",\"type\":\"address\"},{\"indexed\":true,\"internalType\":\"address\",\"name\":\"newOwner\",\"type\":\"address\"}],\"name\":\"OwnershipTransferred\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"verifier\",\"type\":\"address\"}],\"name\":\"RegistrationSuccess\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"uint256\",\"name\":\"chainId\",\"type\":\"uint256\"},{\"indexed\":false,\"internalType\":\"bool\",\"name\":\"required\",\"type\":\"bool\"}],\"name\":\"SafeVerificationRequiredSet\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"operator\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"string\",\"name\":\"reason\",\"type\":\"string\"}],\"name\":\"VerificationFailure\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"verifier\",\"type\":\"address\"}],\"name\":\"VerificationSuccess\",\"type\":\"event\"},{\"inputs\":[],\"name\":\"L1BridgeRegistryV1_1Address\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"L1_CROSS_DOMAIN_MESSENGER\",\"outputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"L1_STANDARD_BRIDGE\",\"outputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"OPTIMISM_PORTAL\",\"outputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"PROXY_ADMIN_ADDRESS\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"SYSTEM_CONFIG\",\"outputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"name\":\"chainConfigs\",\"outputs\":[{\"components\":[{\"internalType\":\"address\",\"name\":\"tokamakDAO\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"foundation\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"thirdOwner\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"requiredThreshold\",\"type\":\"uint256\"}],\"internalType\":\"structIL1ContractVerification.SafeConfig\",\"name\":\"safeConfig\",\"type\":\"tuple\"},{\"internalType\":\"address\",\"name\":\"expectedNativeToken\",\"type\":\"address\"},{\"internalType\":\"bool\",\"name\":\"safeVerificationRequired\",\"type\":\"bool\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"contractId\",\"type\":\"bytes32\"}],\"name\":\"getContractConfig\",\"outputs\":[{\"internalType\":\"bytes32\",\"name\":\"implementationHash\",\"type\":\"bytes32\"},{\"internalType\":\"bytes32\",\"name\":\"proxyHash\",\"type\":\"bytes32\"},{\"internalType\":\"address\",\"name\":\"expectedProxyAdmin\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"getSafeConfig\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"tokamakDAO\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"foundation\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"thirdOwner\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"requiredThreshold\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"owner\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"renounceOwnership\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_bridgeRegistry\",\"type\":\"address\"}],\"name\":\"setBridgeRegistryAddress\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"contractId\",\"type\":\"bytes32\"},{\"internalType\":\"bytes32\",\"name\":\"implementationHash\",\"type\":\"bytes32\"},{\"internalType\":\"bytes32\",\"name\":\"proxyHash\",\"type\":\"bytes32\"},{\"internalType\":\"address\",\"name\":\"expectedProxyAdmin\",\"type\":\"address\"}],\"name\":\"setContractConfig\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"tokenAddress\",\"type\":\"address\"}],\"name\":\"setExpectedNativeToken\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"tokamakDAO\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"foundation\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"thirdOwner\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"threshold\",\"type\":\"uint256\"}],\"name\":\"setSafeConfig\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bool\",\"name\":\"required\",\"type\":\"bool\"}],\"name\":\"setSafeVerificationRequired\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"newOwner\",\"type\":\"address\"}],\"name\":\"transferOwnership\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"systemConfigProxy\",\"type\":\"address\"},{\"internalType\":\"uint8\",\"name\":\"_type\",\"type\":\"uint8\"},{\"internalType\":\"address\",\"name\":\"_l2TON\",\"type\":\"address\"},{\"internalType\":\"string\",\"name\":\"_name\",\"type\":\"string\"}],\"name\":\"verifyAndRegisterRollupConfig\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"systemConfigProxy\",\"type\":\"address\"}],\"name\":\"verifyL1Contracts\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]",
 }
 
 // L1ContractVerificationABI is the input ABI used to generate the binding from.
@@ -304,6 +312,37 @@ func (_L1ContractVerification *L1ContractVerificationCallerSession) OPTIMISMPORT
 	return _L1ContractVerification.Contract.OPTIMISMPORTAL(&_L1ContractVerification.CallOpts)
 }
 
+// PROXYADMINADDRESS is a free data retrieval call binding the contract method 0x7e1dfea3.
+//
+// Solidity: function PROXY_ADMIN_ADDRESS() view returns(address)
+func (_L1ContractVerification *L1ContractVerificationCaller) PROXYADMINADDRESS(opts *bind.CallOpts) (common.Address, error) {
+	var out []interface{}
+	err := _L1ContractVerification.contract.Call(opts, &out, "PROXY_ADMIN_ADDRESS")
+
+	if err != nil {
+		return *new(common.Address), err
+	}
+
+	out0 := *abi.ConvertType(out[0], new(common.Address)).(*common.Address)
+
+	return out0, err
+
+}
+
+// PROXYADMINADDRESS is a free data retrieval call binding the contract method 0x7e1dfea3.
+//
+// Solidity: function PROXY_ADMIN_ADDRESS() view returns(address)
+func (_L1ContractVerification *L1ContractVerificationSession) PROXYADMINADDRESS() (common.Address, error) {
+	return _L1ContractVerification.Contract.PROXYADMINADDRESS(&_L1ContractVerification.CallOpts)
+}
+
+// PROXYADMINADDRESS is a free data retrieval call binding the contract method 0x7e1dfea3.
+//
+// Solidity: function PROXY_ADMIN_ADDRESS() view returns(address)
+func (_L1ContractVerification *L1ContractVerificationCallerSession) PROXYADMINADDRESS() (common.Address, error) {
+	return _L1ContractVerification.Contract.PROXYADMINADDRESS(&_L1ContractVerification.CallOpts)
+}
+
 // SYSTEMCONFIG is a free data retrieval call binding the contract method 0xf0498750.
 //
 // Solidity: function SYSTEM_CONFIG() view returns(bytes32)
@@ -335,16 +374,66 @@ func (_L1ContractVerification *L1ContractVerificationCallerSession) SYSTEMCONFIG
 	return _L1ContractVerification.Contract.SYSTEMCONFIG(&_L1ContractVerification.CallOpts)
 }
 
-// ContractConfigs is a free data retrieval call binding the contract method 0x730465d7.
+// ChainConfigs is a free data retrieval call binding the contract method 0x51bfbc32.
 //
-// Solidity: function contractConfigs(uint256 , bytes32 ) view returns(bytes32 implementationHash, bytes32 proxyHash, address expectedProxyAdmin)
-func (_L1ContractVerification *L1ContractVerificationCaller) ContractConfigs(opts *bind.CallOpts, arg0 *big.Int, arg1 [32]byte) (struct {
+// Solidity: function chainConfigs(uint256 ) view returns((address,address,address,uint256) safeConfig, address expectedNativeToken, bool safeVerificationRequired)
+func (_L1ContractVerification *L1ContractVerificationCaller) ChainConfigs(opts *bind.CallOpts, arg0 *big.Int) (struct {
+	SafeConfig               IL1ContractVerificationSafeConfig
+	ExpectedNativeToken      common.Address
+	SafeVerificationRequired bool
+}, error) {
+	var out []interface{}
+	err := _L1ContractVerification.contract.Call(opts, &out, "chainConfigs", arg0)
+
+	outstruct := new(struct {
+		SafeConfig               IL1ContractVerificationSafeConfig
+		ExpectedNativeToken      common.Address
+		SafeVerificationRequired bool
+	})
+	if err != nil {
+		return *outstruct, err
+	}
+
+	outstruct.SafeConfig = *abi.ConvertType(out[0], new(IL1ContractVerificationSafeConfig)).(*IL1ContractVerificationSafeConfig)
+	outstruct.ExpectedNativeToken = *abi.ConvertType(out[1], new(common.Address)).(*common.Address)
+	outstruct.SafeVerificationRequired = *abi.ConvertType(out[2], new(bool)).(*bool)
+
+	return *outstruct, err
+
+}
+
+// ChainConfigs is a free data retrieval call binding the contract method 0x51bfbc32.
+//
+// Solidity: function chainConfigs(uint256 ) view returns((address,address,address,uint256) safeConfig, address expectedNativeToken, bool safeVerificationRequired)
+func (_L1ContractVerification *L1ContractVerificationSession) ChainConfigs(arg0 *big.Int) (struct {
+	SafeConfig               IL1ContractVerificationSafeConfig
+	ExpectedNativeToken      common.Address
+	SafeVerificationRequired bool
+}, error) {
+	return _L1ContractVerification.Contract.ChainConfigs(&_L1ContractVerification.CallOpts, arg0)
+}
+
+// ChainConfigs is a free data retrieval call binding the contract method 0x51bfbc32.
+//
+// Solidity: function chainConfigs(uint256 ) view returns((address,address,address,uint256) safeConfig, address expectedNativeToken, bool safeVerificationRequired)
+func (_L1ContractVerification *L1ContractVerificationCallerSession) ChainConfigs(arg0 *big.Int) (struct {
+	SafeConfig               IL1ContractVerificationSafeConfig
+	ExpectedNativeToken      common.Address
+	SafeVerificationRequired bool
+}, error) {
+	return _L1ContractVerification.Contract.ChainConfigs(&_L1ContractVerification.CallOpts, arg0)
+}
+
+// GetContractConfig is a free data retrieval call binding the contract method 0xfe15a04d.
+//
+// Solidity: function getContractConfig(bytes32 contractId) view returns(bytes32 implementationHash, bytes32 proxyHash, address expectedProxyAdmin)
+func (_L1ContractVerification *L1ContractVerificationCaller) GetContractConfig(opts *bind.CallOpts, contractId [32]byte) (struct {
 	ImplementationHash [32]byte
 	ProxyHash          [32]byte
 	ExpectedProxyAdmin common.Address
 }, error) {
 	var out []interface{}
-	err := _L1ContractVerification.contract.Call(opts, &out, "contractConfigs", arg0, arg1)
+	err := _L1ContractVerification.contract.Call(opts, &out, "getContractConfig", contractId)
 
 	outstruct := new(struct {
 		ImplementationHash [32]byte
@@ -363,26 +452,81 @@ func (_L1ContractVerification *L1ContractVerificationCaller) ContractConfigs(opt
 
 }
 
-// ContractConfigs is a free data retrieval call binding the contract method 0x730465d7.
+// GetContractConfig is a free data retrieval call binding the contract method 0xfe15a04d.
 //
-// Solidity: function contractConfigs(uint256 , bytes32 ) view returns(bytes32 implementationHash, bytes32 proxyHash, address expectedProxyAdmin)
-func (_L1ContractVerification *L1ContractVerificationSession) ContractConfigs(arg0 *big.Int, arg1 [32]byte) (struct {
+// Solidity: function getContractConfig(bytes32 contractId) view returns(bytes32 implementationHash, bytes32 proxyHash, address expectedProxyAdmin)
+func (_L1ContractVerification *L1ContractVerificationSession) GetContractConfig(contractId [32]byte) (struct {
 	ImplementationHash [32]byte
 	ProxyHash          [32]byte
 	ExpectedProxyAdmin common.Address
 }, error) {
-	return _L1ContractVerification.Contract.ContractConfigs(&_L1ContractVerification.CallOpts, arg0, arg1)
+	return _L1ContractVerification.Contract.GetContractConfig(&_L1ContractVerification.CallOpts, contractId)
 }
 
-// ContractConfigs is a free data retrieval call binding the contract method 0x730465d7.
+// GetContractConfig is a free data retrieval call binding the contract method 0xfe15a04d.
 //
-// Solidity: function contractConfigs(uint256 , bytes32 ) view returns(bytes32 implementationHash, bytes32 proxyHash, address expectedProxyAdmin)
-func (_L1ContractVerification *L1ContractVerificationCallerSession) ContractConfigs(arg0 *big.Int, arg1 [32]byte) (struct {
+// Solidity: function getContractConfig(bytes32 contractId) view returns(bytes32 implementationHash, bytes32 proxyHash, address expectedProxyAdmin)
+func (_L1ContractVerification *L1ContractVerificationCallerSession) GetContractConfig(contractId [32]byte) (struct {
 	ImplementationHash [32]byte
 	ProxyHash          [32]byte
 	ExpectedProxyAdmin common.Address
 }, error) {
-	return _L1ContractVerification.Contract.ContractConfigs(&_L1ContractVerification.CallOpts, arg0, arg1)
+	return _L1ContractVerification.Contract.GetContractConfig(&_L1ContractVerification.CallOpts, contractId)
+}
+
+// GetSafeConfig is a free data retrieval call binding the contract method 0x2d5044b0.
+//
+// Solidity: function getSafeConfig() view returns(address tokamakDAO, address foundation, address thirdOwner, uint256 requiredThreshold)
+func (_L1ContractVerification *L1ContractVerificationCaller) GetSafeConfig(opts *bind.CallOpts) (struct {
+	TokamakDAO        common.Address
+	Foundation        common.Address
+	ThirdOwner        common.Address
+	RequiredThreshold *big.Int
+}, error) {
+	var out []interface{}
+	err := _L1ContractVerification.contract.Call(opts, &out, "getSafeConfig")
+
+	outstruct := new(struct {
+		TokamakDAO        common.Address
+		Foundation        common.Address
+		ThirdOwner        common.Address
+		RequiredThreshold *big.Int
+	})
+	if err != nil {
+		return *outstruct, err
+	}
+
+	outstruct.TokamakDAO = *abi.ConvertType(out[0], new(common.Address)).(*common.Address)
+	outstruct.Foundation = *abi.ConvertType(out[1], new(common.Address)).(*common.Address)
+	outstruct.ThirdOwner = *abi.ConvertType(out[2], new(common.Address)).(*common.Address)
+	outstruct.RequiredThreshold = *abi.ConvertType(out[3], new(*big.Int)).(**big.Int)
+
+	return *outstruct, err
+
+}
+
+// GetSafeConfig is a free data retrieval call binding the contract method 0x2d5044b0.
+//
+// Solidity: function getSafeConfig() view returns(address tokamakDAO, address foundation, address thirdOwner, uint256 requiredThreshold)
+func (_L1ContractVerification *L1ContractVerificationSession) GetSafeConfig() (struct {
+	TokamakDAO        common.Address
+	Foundation        common.Address
+	ThirdOwner        common.Address
+	RequiredThreshold *big.Int
+}, error) {
+	return _L1ContractVerification.Contract.GetSafeConfig(&_L1ContractVerification.CallOpts)
+}
+
+// GetSafeConfig is a free data retrieval call binding the contract method 0x2d5044b0.
+//
+// Solidity: function getSafeConfig() view returns(address tokamakDAO, address foundation, address thirdOwner, uint256 requiredThreshold)
+func (_L1ContractVerification *L1ContractVerificationCallerSession) GetSafeConfig() (struct {
+	TokamakDAO        common.Address
+	Foundation        common.Address
+	ThirdOwner        common.Address
+	RequiredThreshold *big.Int
+}, error) {
+	return _L1ContractVerification.Contract.GetSafeConfig(&_L1ContractVerification.CallOpts)
 }
 
 // Owner is a free data retrieval call binding the contract method 0x8da5cb5b.
@@ -414,56 +558,6 @@ func (_L1ContractVerification *L1ContractVerificationSession) Owner() (common.Ad
 // Solidity: function owner() view returns(address)
 func (_L1ContractVerification *L1ContractVerificationCallerSession) Owner() (common.Address, error) {
 	return _L1ContractVerification.Contract.Owner(&_L1ContractVerification.CallOpts)
-}
-
-// SafeConfigs is a free data retrieval call binding the contract method 0xd3b6809a.
-//
-// Solidity: function safeConfigs(uint256 ) view returns(address tokamakDAO, address foundation, uint256 requiredThreshold)
-func (_L1ContractVerification *L1ContractVerificationCaller) SafeConfigs(opts *bind.CallOpts, arg0 *big.Int) (struct {
-	TokamakDAO        common.Address
-	Foundation        common.Address
-	RequiredThreshold *big.Int
-}, error) {
-	var out []interface{}
-	err := _L1ContractVerification.contract.Call(opts, &out, "safeConfigs", arg0)
-
-	outstruct := new(struct {
-		TokamakDAO        common.Address
-		Foundation        common.Address
-		RequiredThreshold *big.Int
-	})
-	if err != nil {
-		return *outstruct, err
-	}
-
-	outstruct.TokamakDAO = *abi.ConvertType(out[0], new(common.Address)).(*common.Address)
-	outstruct.Foundation = *abi.ConvertType(out[1], new(common.Address)).(*common.Address)
-	outstruct.RequiredThreshold = *abi.ConvertType(out[2], new(*big.Int)).(**big.Int)
-
-	return *outstruct, err
-
-}
-
-// SafeConfigs is a free data retrieval call binding the contract method 0xd3b6809a.
-//
-// Solidity: function safeConfigs(uint256 ) view returns(address tokamakDAO, address foundation, uint256 requiredThreshold)
-func (_L1ContractVerification *L1ContractVerificationSession) SafeConfigs(arg0 *big.Int) (struct {
-	TokamakDAO        common.Address
-	Foundation        common.Address
-	RequiredThreshold *big.Int
-}, error) {
-	return _L1ContractVerification.Contract.SafeConfigs(&_L1ContractVerification.CallOpts, arg0)
-}
-
-// SafeConfigs is a free data retrieval call binding the contract method 0xd3b6809a.
-//
-// Solidity: function safeConfigs(uint256 ) view returns(address tokamakDAO, address foundation, uint256 requiredThreshold)
-func (_L1ContractVerification *L1ContractVerificationCallerSession) SafeConfigs(arg0 *big.Int) (struct {
-	TokamakDAO        common.Address
-	Foundation        common.Address
-	RequiredThreshold *big.Int
-}, error) {
-	return _L1ContractVerification.Contract.SafeConfigs(&_L1ContractVerification.CallOpts, arg0)
 }
 
 // RenounceOwnership is a paid mutator transaction binding the contract method 0x715018a6.
@@ -508,46 +602,88 @@ func (_L1ContractVerification *L1ContractVerificationTransactorSession) SetBridg
 	return _L1ContractVerification.Contract.SetBridgeRegistryAddress(&_L1ContractVerification.TransactOpts, _bridgeRegistry)
 }
 
-// SetContractConfig is a paid mutator transaction binding the contract method 0x1312dd2d.
+// SetContractConfig is a paid mutator transaction binding the contract method 0xd51cdefa.
 //
-// Solidity: function setContractConfig(uint256 chainId, bytes32 contractId, bytes32 implementationHash, bytes32 proxyHash, address expectedProxyAdmin) returns()
-func (_L1ContractVerification *L1ContractVerificationTransactor) SetContractConfig(opts *bind.TransactOpts, chainId *big.Int, contractId [32]byte, implementationHash [32]byte, proxyHash [32]byte, expectedProxyAdmin common.Address) (*types.Transaction, error) {
-	return _L1ContractVerification.contract.Transact(opts, "setContractConfig", chainId, contractId, implementationHash, proxyHash, expectedProxyAdmin)
+// Solidity: function setContractConfig(bytes32 contractId, bytes32 implementationHash, bytes32 proxyHash, address expectedProxyAdmin) returns()
+func (_L1ContractVerification *L1ContractVerificationTransactor) SetContractConfig(opts *bind.TransactOpts, contractId [32]byte, implementationHash [32]byte, proxyHash [32]byte, expectedProxyAdmin common.Address) (*types.Transaction, error) {
+	return _L1ContractVerification.contract.Transact(opts, "setContractConfig", contractId, implementationHash, proxyHash, expectedProxyAdmin)
 }
 
-// SetContractConfig is a paid mutator transaction binding the contract method 0x1312dd2d.
+// SetContractConfig is a paid mutator transaction binding the contract method 0xd51cdefa.
 //
-// Solidity: function setContractConfig(uint256 chainId, bytes32 contractId, bytes32 implementationHash, bytes32 proxyHash, address expectedProxyAdmin) returns()
-func (_L1ContractVerification *L1ContractVerificationSession) SetContractConfig(chainId *big.Int, contractId [32]byte, implementationHash [32]byte, proxyHash [32]byte, expectedProxyAdmin common.Address) (*types.Transaction, error) {
-	return _L1ContractVerification.Contract.SetContractConfig(&_L1ContractVerification.TransactOpts, chainId, contractId, implementationHash, proxyHash, expectedProxyAdmin)
+// Solidity: function setContractConfig(bytes32 contractId, bytes32 implementationHash, bytes32 proxyHash, address expectedProxyAdmin) returns()
+func (_L1ContractVerification *L1ContractVerificationSession) SetContractConfig(contractId [32]byte, implementationHash [32]byte, proxyHash [32]byte, expectedProxyAdmin common.Address) (*types.Transaction, error) {
+	return _L1ContractVerification.Contract.SetContractConfig(&_L1ContractVerification.TransactOpts, contractId, implementationHash, proxyHash, expectedProxyAdmin)
 }
 
-// SetContractConfig is a paid mutator transaction binding the contract method 0x1312dd2d.
+// SetContractConfig is a paid mutator transaction binding the contract method 0xd51cdefa.
 //
-// Solidity: function setContractConfig(uint256 chainId, bytes32 contractId, bytes32 implementationHash, bytes32 proxyHash, address expectedProxyAdmin) returns()
-func (_L1ContractVerification *L1ContractVerificationTransactorSession) SetContractConfig(chainId *big.Int, contractId [32]byte, implementationHash [32]byte, proxyHash [32]byte, expectedProxyAdmin common.Address) (*types.Transaction, error) {
-	return _L1ContractVerification.Contract.SetContractConfig(&_L1ContractVerification.TransactOpts, chainId, contractId, implementationHash, proxyHash, expectedProxyAdmin)
+// Solidity: function setContractConfig(bytes32 contractId, bytes32 implementationHash, bytes32 proxyHash, address expectedProxyAdmin) returns()
+func (_L1ContractVerification *L1ContractVerificationTransactorSession) SetContractConfig(contractId [32]byte, implementationHash [32]byte, proxyHash [32]byte, expectedProxyAdmin common.Address) (*types.Transaction, error) {
+	return _L1ContractVerification.Contract.SetContractConfig(&_L1ContractVerification.TransactOpts, contractId, implementationHash, proxyHash, expectedProxyAdmin)
 }
 
-// SetSafeConfig is a paid mutator transaction binding the contract method 0xc6d34e11.
+// SetExpectedNativeToken is a paid mutator transaction binding the contract method 0x32e92dee.
 //
-// Solidity: function setSafeConfig(uint256 chainId, address tokamakDAO, address foundation, uint256 threshold) returns()
-func (_L1ContractVerification *L1ContractVerificationTransactor) SetSafeConfig(opts *bind.TransactOpts, chainId *big.Int, tokamakDAO common.Address, foundation common.Address, threshold *big.Int) (*types.Transaction, error) {
-	return _L1ContractVerification.contract.Transact(opts, "setSafeConfig", chainId, tokamakDAO, foundation, threshold)
+// Solidity: function setExpectedNativeToken(address tokenAddress) returns()
+func (_L1ContractVerification *L1ContractVerificationTransactor) SetExpectedNativeToken(opts *bind.TransactOpts, tokenAddress common.Address) (*types.Transaction, error) {
+	return _L1ContractVerification.contract.Transact(opts, "setExpectedNativeToken", tokenAddress)
 }
 
-// SetSafeConfig is a paid mutator transaction binding the contract method 0xc6d34e11.
+// SetExpectedNativeToken is a paid mutator transaction binding the contract method 0x32e92dee.
 //
-// Solidity: function setSafeConfig(uint256 chainId, address tokamakDAO, address foundation, uint256 threshold) returns()
-func (_L1ContractVerification *L1ContractVerificationSession) SetSafeConfig(chainId *big.Int, tokamakDAO common.Address, foundation common.Address, threshold *big.Int) (*types.Transaction, error) {
-	return _L1ContractVerification.Contract.SetSafeConfig(&_L1ContractVerification.TransactOpts, chainId, tokamakDAO, foundation, threshold)
+// Solidity: function setExpectedNativeToken(address tokenAddress) returns()
+func (_L1ContractVerification *L1ContractVerificationSession) SetExpectedNativeToken(tokenAddress common.Address) (*types.Transaction, error) {
+	return _L1ContractVerification.Contract.SetExpectedNativeToken(&_L1ContractVerification.TransactOpts, tokenAddress)
 }
 
-// SetSafeConfig is a paid mutator transaction binding the contract method 0xc6d34e11.
+// SetExpectedNativeToken is a paid mutator transaction binding the contract method 0x32e92dee.
 //
-// Solidity: function setSafeConfig(uint256 chainId, address tokamakDAO, address foundation, uint256 threshold) returns()
-func (_L1ContractVerification *L1ContractVerificationTransactorSession) SetSafeConfig(chainId *big.Int, tokamakDAO common.Address, foundation common.Address, threshold *big.Int) (*types.Transaction, error) {
-	return _L1ContractVerification.Contract.SetSafeConfig(&_L1ContractVerification.TransactOpts, chainId, tokamakDAO, foundation, threshold)
+// Solidity: function setExpectedNativeToken(address tokenAddress) returns()
+func (_L1ContractVerification *L1ContractVerificationTransactorSession) SetExpectedNativeToken(tokenAddress common.Address) (*types.Transaction, error) {
+	return _L1ContractVerification.Contract.SetExpectedNativeToken(&_L1ContractVerification.TransactOpts, tokenAddress)
+}
+
+// SetSafeConfig is a paid mutator transaction binding the contract method 0xf0ff1d95.
+//
+// Solidity: function setSafeConfig(address tokamakDAO, address foundation, address thirdOwner, uint256 threshold) returns()
+func (_L1ContractVerification *L1ContractVerificationTransactor) SetSafeConfig(opts *bind.TransactOpts, tokamakDAO common.Address, foundation common.Address, thirdOwner common.Address, threshold *big.Int) (*types.Transaction, error) {
+	return _L1ContractVerification.contract.Transact(opts, "setSafeConfig", tokamakDAO, foundation, thirdOwner, threshold)
+}
+
+// SetSafeConfig is a paid mutator transaction binding the contract method 0xf0ff1d95.
+//
+// Solidity: function setSafeConfig(address tokamakDAO, address foundation, address thirdOwner, uint256 threshold) returns()
+func (_L1ContractVerification *L1ContractVerificationSession) SetSafeConfig(tokamakDAO common.Address, foundation common.Address, thirdOwner common.Address, threshold *big.Int) (*types.Transaction, error) {
+	return _L1ContractVerification.Contract.SetSafeConfig(&_L1ContractVerification.TransactOpts, tokamakDAO, foundation, thirdOwner, threshold)
+}
+
+// SetSafeConfig is a paid mutator transaction binding the contract method 0xf0ff1d95.
+//
+// Solidity: function setSafeConfig(address tokamakDAO, address foundation, address thirdOwner, uint256 threshold) returns()
+func (_L1ContractVerification *L1ContractVerificationTransactorSession) SetSafeConfig(tokamakDAO common.Address, foundation common.Address, thirdOwner common.Address, threshold *big.Int) (*types.Transaction, error) {
+	return _L1ContractVerification.Contract.SetSafeConfig(&_L1ContractVerification.TransactOpts, tokamakDAO, foundation, thirdOwner, threshold)
+}
+
+// SetSafeVerificationRequired is a paid mutator transaction binding the contract method 0xc2d60eb8.
+//
+// Solidity: function setSafeVerificationRequired(bool required) returns()
+func (_L1ContractVerification *L1ContractVerificationTransactor) SetSafeVerificationRequired(opts *bind.TransactOpts, required bool) (*types.Transaction, error) {
+	return _L1ContractVerification.contract.Transact(opts, "setSafeVerificationRequired", required)
+}
+
+// SetSafeVerificationRequired is a paid mutator transaction binding the contract method 0xc2d60eb8.
+//
+// Solidity: function setSafeVerificationRequired(bool required) returns()
+func (_L1ContractVerification *L1ContractVerificationSession) SetSafeVerificationRequired(required bool) (*types.Transaction, error) {
+	return _L1ContractVerification.Contract.SetSafeVerificationRequired(&_L1ContractVerification.TransactOpts, required)
+}
+
+// SetSafeVerificationRequired is a paid mutator transaction binding the contract method 0xc2d60eb8.
+//
+// Solidity: function setSafeVerificationRequired(bool required) returns()
+func (_L1ContractVerification *L1ContractVerificationTransactorSession) SetSafeVerificationRequired(required bool) (*types.Transaction, error) {
+	return _L1ContractVerification.Contract.SetSafeVerificationRequired(&_L1ContractVerification.TransactOpts, required)
 }
 
 // TransferOwnership is a paid mutator transaction binding the contract method 0xf2fde38b.
@@ -571,46 +707,46 @@ func (_L1ContractVerification *L1ContractVerificationTransactorSession) Transfer
 	return _L1ContractVerification.Contract.TransferOwnership(&_L1ContractVerification.TransactOpts, newOwner)
 }
 
-// VerifyAndRegisterRollupConfig is a paid mutator transaction binding the contract method 0x4c559659.
+// VerifyAndRegisterRollupConfig is a paid mutator transaction binding the contract method 0x034490b9.
 //
-// Solidity: function verifyAndRegisterRollupConfig(uint256 chainId, address systemConfigProxy, address safeWallet, address rollupConfig, uint8 _type, address _l2TON, string _name) returns(bool)
-func (_L1ContractVerification *L1ContractVerificationTransactor) VerifyAndRegisterRollupConfig(opts *bind.TransactOpts, chainId *big.Int, systemConfigProxy common.Address, safeWallet common.Address, rollupConfig common.Address, _type uint8, _l2TON common.Address, _name string) (*types.Transaction, error) {
-	return _L1ContractVerification.contract.Transact(opts, "verifyAndRegisterRollupConfig", chainId, systemConfigProxy, safeWallet, rollupConfig, _type, _l2TON, _name)
+// Solidity: function verifyAndRegisterRollupConfig(address systemConfigProxy, uint8 _type, address _l2TON, string _name) returns(bool)
+func (_L1ContractVerification *L1ContractVerificationTransactor) VerifyAndRegisterRollupConfig(opts *bind.TransactOpts, systemConfigProxy common.Address, _type uint8, _l2TON common.Address, _name string) (*types.Transaction, error) {
+	return _L1ContractVerification.contract.Transact(opts, "verifyAndRegisterRollupConfig", systemConfigProxy, _type, _l2TON, _name)
 }
 
-// VerifyAndRegisterRollupConfig is a paid mutator transaction binding the contract method 0x4c559659.
+// VerifyAndRegisterRollupConfig is a paid mutator transaction binding the contract method 0x034490b9.
 //
-// Solidity: function verifyAndRegisterRollupConfig(uint256 chainId, address systemConfigProxy, address safeWallet, address rollupConfig, uint8 _type, address _l2TON, string _name) returns(bool)
-func (_L1ContractVerification *L1ContractVerificationSession) VerifyAndRegisterRollupConfig(chainId *big.Int, systemConfigProxy common.Address, safeWallet common.Address, rollupConfig common.Address, _type uint8, _l2TON common.Address, _name string) (*types.Transaction, error) {
-	return _L1ContractVerification.Contract.VerifyAndRegisterRollupConfig(&_L1ContractVerification.TransactOpts, chainId, systemConfigProxy, safeWallet, rollupConfig, _type, _l2TON, _name)
+// Solidity: function verifyAndRegisterRollupConfig(address systemConfigProxy, uint8 _type, address _l2TON, string _name) returns(bool)
+func (_L1ContractVerification *L1ContractVerificationSession) VerifyAndRegisterRollupConfig(systemConfigProxy common.Address, _type uint8, _l2TON common.Address, _name string) (*types.Transaction, error) {
+	return _L1ContractVerification.Contract.VerifyAndRegisterRollupConfig(&_L1ContractVerification.TransactOpts, systemConfigProxy, _type, _l2TON, _name)
 }
 
-// VerifyAndRegisterRollupConfig is a paid mutator transaction binding the contract method 0x4c559659.
+// VerifyAndRegisterRollupConfig is a paid mutator transaction binding the contract method 0x034490b9.
 //
-// Solidity: function verifyAndRegisterRollupConfig(uint256 chainId, address systemConfigProxy, address safeWallet, address rollupConfig, uint8 _type, address _l2TON, string _name) returns(bool)
-func (_L1ContractVerification *L1ContractVerificationTransactorSession) VerifyAndRegisterRollupConfig(chainId *big.Int, systemConfigProxy common.Address, safeWallet common.Address, rollupConfig common.Address, _type uint8, _l2TON common.Address, _name string) (*types.Transaction, error) {
-	return _L1ContractVerification.Contract.VerifyAndRegisterRollupConfig(&_L1ContractVerification.TransactOpts, chainId, systemConfigProxy, safeWallet, rollupConfig, _type, _l2TON, _name)
+// Solidity: function verifyAndRegisterRollupConfig(address systemConfigProxy, uint8 _type, address _l2TON, string _name) returns(bool)
+func (_L1ContractVerification *L1ContractVerificationTransactorSession) VerifyAndRegisterRollupConfig(systemConfigProxy common.Address, _type uint8, _l2TON common.Address, _name string) (*types.Transaction, error) {
+	return _L1ContractVerification.Contract.VerifyAndRegisterRollupConfig(&_L1ContractVerification.TransactOpts, systemConfigProxy, _type, _l2TON, _name)
 }
 
-// VerifyL1Contracts is a paid mutator transaction binding the contract method 0x9570f472.
+// VerifyL1Contracts is a paid mutator transaction binding the contract method 0x89fe2f87.
 //
-// Solidity: function verifyL1Contracts(uint256 chainId, address systemConfigProxy, address safeWallet) returns(bool)
-func (_L1ContractVerification *L1ContractVerificationTransactor) VerifyL1Contracts(opts *bind.TransactOpts, chainId *big.Int, systemConfigProxy common.Address, safeWallet common.Address) (*types.Transaction, error) {
-	return _L1ContractVerification.contract.Transact(opts, "verifyL1Contracts", chainId, systemConfigProxy, safeWallet)
+// Solidity: function verifyL1Contracts(address systemConfigProxy) returns(bool)
+func (_L1ContractVerification *L1ContractVerificationTransactor) VerifyL1Contracts(opts *bind.TransactOpts, systemConfigProxy common.Address) (*types.Transaction, error) {
+	return _L1ContractVerification.contract.Transact(opts, "verifyL1Contracts", systemConfigProxy)
 }
 
-// VerifyL1Contracts is a paid mutator transaction binding the contract method 0x9570f472.
+// VerifyL1Contracts is a paid mutator transaction binding the contract method 0x89fe2f87.
 //
-// Solidity: function verifyL1Contracts(uint256 chainId, address systemConfigProxy, address safeWallet) returns(bool)
-func (_L1ContractVerification *L1ContractVerificationSession) VerifyL1Contracts(chainId *big.Int, systemConfigProxy common.Address, safeWallet common.Address) (*types.Transaction, error) {
-	return _L1ContractVerification.Contract.VerifyL1Contracts(&_L1ContractVerification.TransactOpts, chainId, systemConfigProxy, safeWallet)
+// Solidity: function verifyL1Contracts(address systemConfigProxy) returns(bool)
+func (_L1ContractVerification *L1ContractVerificationSession) VerifyL1Contracts(systemConfigProxy common.Address) (*types.Transaction, error) {
+	return _L1ContractVerification.Contract.VerifyL1Contracts(&_L1ContractVerification.TransactOpts, systemConfigProxy)
 }
 
-// VerifyL1Contracts is a paid mutator transaction binding the contract method 0x9570f472.
+// VerifyL1Contracts is a paid mutator transaction binding the contract method 0x89fe2f87.
 //
-// Solidity: function verifyL1Contracts(uint256 chainId, address systemConfigProxy, address safeWallet) returns(bool)
-func (_L1ContractVerification *L1ContractVerificationTransactorSession) VerifyL1Contracts(chainId *big.Int, systemConfigProxy common.Address, safeWallet common.Address) (*types.Transaction, error) {
-	return _L1ContractVerification.Contract.VerifyL1Contracts(&_L1ContractVerification.TransactOpts, chainId, systemConfigProxy, safeWallet)
+// Solidity: function verifyL1Contracts(address systemConfigProxy) returns(bool)
+func (_L1ContractVerification *L1ContractVerificationTransactorSession) VerifyL1Contracts(systemConfigProxy common.Address) (*types.Transaction, error) {
+	return _L1ContractVerification.Contract.VerifyL1Contracts(&_L1ContractVerification.TransactOpts, systemConfigProxy)
 }
 
 // L1ContractVerificationBridgeRegistryUpdatedIterator is returned from FilterBridgeRegistryUpdated and is used to iterate over the raw logs and unpacked data for BridgeRegistryUpdated events raised by the L1ContractVerification contract.
@@ -826,29 +962,38 @@ func (it *L1ContractVerificationConfigurationSetIterator) Close() error {
 
 // L1ContractVerificationConfigurationSet represents a ConfigurationSet event raised by the L1ContractVerification contract.
 type L1ContractVerificationConfigurationSet struct {
-	ChainId    *big.Int
 	ContractId [32]byte
 	Raw        types.Log // Blockchain specific contextual infos
 }
 
-// FilterConfigurationSet is a free log retrieval operation binding the contract event 0x190a3447a114270366d40d3654c5ba533cc983c2b7f29e9a3df81b51c131c511.
+// FilterConfigurationSet is a free log retrieval operation binding the contract event 0x58acddd661fe333e2843b91e39f7746bd581e75c4820870c0cbd781867ea64b6.
 //
-// Solidity: event ConfigurationSet(uint256 chainId, bytes32 contractId)
-func (_L1ContractVerification *L1ContractVerificationFilterer) FilterConfigurationSet(opts *bind.FilterOpts) (*L1ContractVerificationConfigurationSetIterator, error) {
+// Solidity: event ConfigurationSet(bytes32 indexed contractId)
+func (_L1ContractVerification *L1ContractVerificationFilterer) FilterConfigurationSet(opts *bind.FilterOpts, contractId [][32]byte) (*L1ContractVerificationConfigurationSetIterator, error) {
 
-	logs, sub, err := _L1ContractVerification.contract.FilterLogs(opts, "ConfigurationSet")
+	var contractIdRule []interface{}
+	for _, contractIdItem := range contractId {
+		contractIdRule = append(contractIdRule, contractIdItem)
+	}
+
+	logs, sub, err := _L1ContractVerification.contract.FilterLogs(opts, "ConfigurationSet", contractIdRule)
 	if err != nil {
 		return nil, err
 	}
 	return &L1ContractVerificationConfigurationSetIterator{contract: _L1ContractVerification.contract, event: "ConfigurationSet", logs: logs, sub: sub}, nil
 }
 
-// WatchConfigurationSet is a free log subscription operation binding the contract event 0x190a3447a114270366d40d3654c5ba533cc983c2b7f29e9a3df81b51c131c511.
+// WatchConfigurationSet is a free log subscription operation binding the contract event 0x58acddd661fe333e2843b91e39f7746bd581e75c4820870c0cbd781867ea64b6.
 //
-// Solidity: event ConfigurationSet(uint256 chainId, bytes32 contractId)
-func (_L1ContractVerification *L1ContractVerificationFilterer) WatchConfigurationSet(opts *bind.WatchOpts, sink chan<- *L1ContractVerificationConfigurationSet) (event.Subscription, error) {
+// Solidity: event ConfigurationSet(bytes32 indexed contractId)
+func (_L1ContractVerification *L1ContractVerificationFilterer) WatchConfigurationSet(opts *bind.WatchOpts, sink chan<- *L1ContractVerificationConfigurationSet, contractId [][32]byte) (event.Subscription, error) {
 
-	logs, sub, err := _L1ContractVerification.contract.WatchLogs(opts, "ConfigurationSet")
+	var contractIdRule []interface{}
+	for _, contractIdItem := range contractId {
+		contractIdRule = append(contractIdRule, contractIdItem)
+	}
+
+	logs, sub, err := _L1ContractVerification.contract.WatchLogs(opts, "ConfigurationSet", contractIdRule)
 	if err != nil {
 		return nil, err
 	}
@@ -880,9 +1025,9 @@ func (_L1ContractVerification *L1ContractVerificationFilterer) WatchConfiguratio
 	}), nil
 }
 
-// ParseConfigurationSet is a log parse operation binding the contract event 0x190a3447a114270366d40d3654c5ba533cc983c2b7f29e9a3df81b51c131c511.
+// ParseConfigurationSet is a log parse operation binding the contract event 0x58acddd661fe333e2843b91e39f7746bd581e75c4820870c0cbd781867ea64b6.
 //
-// Solidity: event ConfigurationSet(uint256 chainId, bytes32 contractId)
+// Solidity: event ConfigurationSet(bytes32 indexed contractId)
 func (_L1ContractVerification *L1ContractVerificationFilterer) ParseConfigurationSet(log types.Log) (*L1ContractVerificationConfigurationSet, error) {
 	event := new(L1ContractVerificationConfigurationSet)
 	if err := _L1ContractVerification.contract.UnpackLog(event, "ConfigurationSet", log); err != nil {
@@ -1114,39 +1259,38 @@ func (it *L1ContractVerificationRegistrationSuccessIterator) Close() error {
 
 // L1ContractVerificationRegistrationSuccess represents a RegistrationSuccess event raised by the L1ContractVerification contract.
 type L1ContractVerificationRegistrationSuccess struct {
-	Operator common.Address
-	ChainId  *big.Int
+	Verifier common.Address
 	Raw      types.Log // Blockchain specific contextual infos
 }
 
-// FilterRegistrationSuccess is a free log retrieval operation binding the contract event 0x7d570c7a3b78ec09f296a50703d271bdd7113e2dafbb70d313c00a7d8cfd923d.
+// FilterRegistrationSuccess is a free log retrieval operation binding the contract event 0x8dcd7c08b0210742c621c9ac106f92321fed60215a0adcd8d5c377e1e0460a41.
 //
-// Solidity: event RegistrationSuccess(address indexed operator, uint256 chainId)
-func (_L1ContractVerification *L1ContractVerificationFilterer) FilterRegistrationSuccess(opts *bind.FilterOpts, operator []common.Address) (*L1ContractVerificationRegistrationSuccessIterator, error) {
+// Solidity: event RegistrationSuccess(address indexed verifier)
+func (_L1ContractVerification *L1ContractVerificationFilterer) FilterRegistrationSuccess(opts *bind.FilterOpts, verifier []common.Address) (*L1ContractVerificationRegistrationSuccessIterator, error) {
 
-	var operatorRule []interface{}
-	for _, operatorItem := range operator {
-		operatorRule = append(operatorRule, operatorItem)
+	var verifierRule []interface{}
+	for _, verifierItem := range verifier {
+		verifierRule = append(verifierRule, verifierItem)
 	}
 
-	logs, sub, err := _L1ContractVerification.contract.FilterLogs(opts, "RegistrationSuccess", operatorRule)
+	logs, sub, err := _L1ContractVerification.contract.FilterLogs(opts, "RegistrationSuccess", verifierRule)
 	if err != nil {
 		return nil, err
 	}
 	return &L1ContractVerificationRegistrationSuccessIterator{contract: _L1ContractVerification.contract, event: "RegistrationSuccess", logs: logs, sub: sub}, nil
 }
 
-// WatchRegistrationSuccess is a free log subscription operation binding the contract event 0x7d570c7a3b78ec09f296a50703d271bdd7113e2dafbb70d313c00a7d8cfd923d.
+// WatchRegistrationSuccess is a free log subscription operation binding the contract event 0x8dcd7c08b0210742c621c9ac106f92321fed60215a0adcd8d5c377e1e0460a41.
 //
-// Solidity: event RegistrationSuccess(address indexed operator, uint256 chainId)
-func (_L1ContractVerification *L1ContractVerificationFilterer) WatchRegistrationSuccess(opts *bind.WatchOpts, sink chan<- *L1ContractVerificationRegistrationSuccess, operator []common.Address) (event.Subscription, error) {
+// Solidity: event RegistrationSuccess(address indexed verifier)
+func (_L1ContractVerification *L1ContractVerificationFilterer) WatchRegistrationSuccess(opts *bind.WatchOpts, sink chan<- *L1ContractVerificationRegistrationSuccess, verifier []common.Address) (event.Subscription, error) {
 
-	var operatorRule []interface{}
-	for _, operatorItem := range operator {
-		operatorRule = append(operatorRule, operatorItem)
+	var verifierRule []interface{}
+	for _, verifierItem := range verifier {
+		verifierRule = append(verifierRule, verifierItem)
 	}
 
-	logs, sub, err := _L1ContractVerification.contract.WatchLogs(opts, "RegistrationSuccess", operatorRule)
+	logs, sub, err := _L1ContractVerification.contract.WatchLogs(opts, "RegistrationSuccess", verifierRule)
 	if err != nil {
 		return nil, err
 	}
@@ -1178,12 +1322,157 @@ func (_L1ContractVerification *L1ContractVerificationFilterer) WatchRegistration
 	}), nil
 }
 
-// ParseRegistrationSuccess is a log parse operation binding the contract event 0x7d570c7a3b78ec09f296a50703d271bdd7113e2dafbb70d313c00a7d8cfd923d.
+// ParseRegistrationSuccess is a log parse operation binding the contract event 0x8dcd7c08b0210742c621c9ac106f92321fed60215a0adcd8d5c377e1e0460a41.
 //
-// Solidity: event RegistrationSuccess(address indexed operator, uint256 chainId)
+// Solidity: event RegistrationSuccess(address indexed verifier)
 func (_L1ContractVerification *L1ContractVerificationFilterer) ParseRegistrationSuccess(log types.Log) (*L1ContractVerificationRegistrationSuccess, error) {
 	event := new(L1ContractVerificationRegistrationSuccess)
 	if err := _L1ContractVerification.contract.UnpackLog(event, "RegistrationSuccess", log); err != nil {
+		return nil, err
+	}
+	event.Raw = log
+	return event, nil
+}
+
+// L1ContractVerificationSafeVerificationRequiredSetIterator is returned from FilterSafeVerificationRequiredSet and is used to iterate over the raw logs and unpacked data for SafeVerificationRequiredSet events raised by the L1ContractVerification contract.
+type L1ContractVerificationSafeVerificationRequiredSetIterator struct {
+	Event *L1ContractVerificationSafeVerificationRequiredSet // Event containing the contract specifics and raw log
+
+	contract *bind.BoundContract // Generic contract to use for unpacking event data
+	event    string              // Event name to use for unpacking event data
+
+	logs chan types.Log        // Log channel receiving the found contract events
+	sub  ethereum.Subscription // Subscription for errors, completion and termination
+	done bool                  // Whether the subscription completed delivering logs
+	fail error                 // Occurred error to stop iteration
+}
+
+// Next advances the iterator to the subsequent event, returning whether there
+// are any more events found. In case of a retrieval or parsing error, false is
+// returned and Error() can be queried for the exact failure.
+func (it *L1ContractVerificationSafeVerificationRequiredSetIterator) Next() bool {
+	// If the iterator failed, stop iterating
+	if it.fail != nil {
+		return false
+	}
+	// If the iterator completed, deliver directly whatever's available
+	if it.done {
+		select {
+		case log := <-it.logs:
+			it.Event = new(L1ContractVerificationSafeVerificationRequiredSet)
+			if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+				it.fail = err
+				return false
+			}
+			it.Event.Raw = log
+			return true
+
+		default:
+			return false
+		}
+	}
+	// Iterator still in progress, wait for either a data or an error event
+	select {
+	case log := <-it.logs:
+		it.Event = new(L1ContractVerificationSafeVerificationRequiredSet)
+		if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+			it.fail = err
+			return false
+		}
+		it.Event.Raw = log
+		return true
+
+	case err := <-it.sub.Err():
+		it.done = true
+		it.fail = err
+		return it.Next()
+	}
+}
+
+// Error returns any retrieval or parsing error occurred during filtering.
+func (it *L1ContractVerificationSafeVerificationRequiredSetIterator) Error() error {
+	return it.fail
+}
+
+// Close terminates the iteration process, releasing any pending underlying
+// resources.
+func (it *L1ContractVerificationSafeVerificationRequiredSetIterator) Close() error {
+	it.sub.Unsubscribe()
+	return nil
+}
+
+// L1ContractVerificationSafeVerificationRequiredSet represents a SafeVerificationRequiredSet event raised by the L1ContractVerification contract.
+type L1ContractVerificationSafeVerificationRequiredSet struct {
+	ChainId  *big.Int
+	Required bool
+	Raw      types.Log // Blockchain specific contextual infos
+}
+
+// FilterSafeVerificationRequiredSet is a free log retrieval operation binding the contract event 0xd8293dca6523eb19283de4e3ac4d68739adda8465202391fd566ac9ec17430c4.
+//
+// Solidity: event SafeVerificationRequiredSet(uint256 indexed chainId, bool required)
+func (_L1ContractVerification *L1ContractVerificationFilterer) FilterSafeVerificationRequiredSet(opts *bind.FilterOpts, chainId []*big.Int) (*L1ContractVerificationSafeVerificationRequiredSetIterator, error) {
+
+	var chainIdRule []interface{}
+	for _, chainIdItem := range chainId {
+		chainIdRule = append(chainIdRule, chainIdItem)
+	}
+
+	logs, sub, err := _L1ContractVerification.contract.FilterLogs(opts, "SafeVerificationRequiredSet", chainIdRule)
+	if err != nil {
+		return nil, err
+	}
+	return &L1ContractVerificationSafeVerificationRequiredSetIterator{contract: _L1ContractVerification.contract, event: "SafeVerificationRequiredSet", logs: logs, sub: sub}, nil
+}
+
+// WatchSafeVerificationRequiredSet is a free log subscription operation binding the contract event 0xd8293dca6523eb19283de4e3ac4d68739adda8465202391fd566ac9ec17430c4.
+//
+// Solidity: event SafeVerificationRequiredSet(uint256 indexed chainId, bool required)
+func (_L1ContractVerification *L1ContractVerificationFilterer) WatchSafeVerificationRequiredSet(opts *bind.WatchOpts, sink chan<- *L1ContractVerificationSafeVerificationRequiredSet, chainId []*big.Int) (event.Subscription, error) {
+
+	var chainIdRule []interface{}
+	for _, chainIdItem := range chainId {
+		chainIdRule = append(chainIdRule, chainIdItem)
+	}
+
+	logs, sub, err := _L1ContractVerification.contract.WatchLogs(opts, "SafeVerificationRequiredSet", chainIdRule)
+	if err != nil {
+		return nil, err
+	}
+	return event.NewSubscription(func(quit <-chan struct{}) error {
+		defer sub.Unsubscribe()
+		for {
+			select {
+			case log := <-logs:
+				// New log arrived, parse the event and forward to the user
+				event := new(L1ContractVerificationSafeVerificationRequiredSet)
+				if err := _L1ContractVerification.contract.UnpackLog(event, "SafeVerificationRequiredSet", log); err != nil {
+					return err
+				}
+				event.Raw = log
+
+				select {
+				case sink <- event:
+				case err := <-sub.Err():
+					return err
+				case <-quit:
+					return nil
+				}
+			case err := <-sub.Err():
+				return err
+			case <-quit:
+				return nil
+			}
+		}
+	}), nil
+}
+
+// ParseSafeVerificationRequiredSet is a log parse operation binding the contract event 0xd8293dca6523eb19283de4e3ac4d68739adda8465202391fd566ac9ec17430c4.
+//
+// Solidity: event SafeVerificationRequiredSet(uint256 indexed chainId, bool required)
+func (_L1ContractVerification *L1ContractVerificationFilterer) ParseSafeVerificationRequiredSet(log types.Log) (*L1ContractVerificationSafeVerificationRequiredSet, error) {
+	event := new(L1ContractVerificationSafeVerificationRequiredSet)
+	if err := _L1ContractVerification.contract.UnpackLog(event, "SafeVerificationRequiredSet", log); err != nil {
 		return nil, err
 	}
 	event.Raw = log
@@ -1260,14 +1549,13 @@ func (it *L1ContractVerificationVerificationFailureIterator) Close() error {
 // L1ContractVerificationVerificationFailure represents a VerificationFailure event raised by the L1ContractVerification contract.
 type L1ContractVerificationVerificationFailure struct {
 	Operator common.Address
-	ChainId  *big.Int
 	Reason   string
 	Raw      types.Log // Blockchain specific contextual infos
 }
 
-// FilterVerificationFailure is a free log retrieval operation binding the contract event 0xe97ec9c71de05bb19c78121318166a315bda01c5a4ff0892a007c64b5663b64c.
+// FilterVerificationFailure is a free log retrieval operation binding the contract event 0x05a24be642665ac29790d5b2805427718e343b1f5a1050e2b31a584a9987a5a5.
 //
-// Solidity: event VerificationFailure(address indexed operator, uint256 chainId, string reason)
+// Solidity: event VerificationFailure(address indexed operator, string reason)
 func (_L1ContractVerification *L1ContractVerificationFilterer) FilterVerificationFailure(opts *bind.FilterOpts, operator []common.Address) (*L1ContractVerificationVerificationFailureIterator, error) {
 
 	var operatorRule []interface{}
@@ -1282,9 +1570,9 @@ func (_L1ContractVerification *L1ContractVerificationFilterer) FilterVerificatio
 	return &L1ContractVerificationVerificationFailureIterator{contract: _L1ContractVerification.contract, event: "VerificationFailure", logs: logs, sub: sub}, nil
 }
 
-// WatchVerificationFailure is a free log subscription operation binding the contract event 0xe97ec9c71de05bb19c78121318166a315bda01c5a4ff0892a007c64b5663b64c.
+// WatchVerificationFailure is a free log subscription operation binding the contract event 0x05a24be642665ac29790d5b2805427718e343b1f5a1050e2b31a584a9987a5a5.
 //
-// Solidity: event VerificationFailure(address indexed operator, uint256 chainId, string reason)
+// Solidity: event VerificationFailure(address indexed operator, string reason)
 func (_L1ContractVerification *L1ContractVerificationFilterer) WatchVerificationFailure(opts *bind.WatchOpts, sink chan<- *L1ContractVerificationVerificationFailure, operator []common.Address) (event.Subscription, error) {
 
 	var operatorRule []interface{}
@@ -1324,9 +1612,9 @@ func (_L1ContractVerification *L1ContractVerificationFilterer) WatchVerification
 	}), nil
 }
 
-// ParseVerificationFailure is a log parse operation binding the contract event 0xe97ec9c71de05bb19c78121318166a315bda01c5a4ff0892a007c64b5663b64c.
+// ParseVerificationFailure is a log parse operation binding the contract event 0x05a24be642665ac29790d5b2805427718e343b1f5a1050e2b31a584a9987a5a5.
 //
-// Solidity: event VerificationFailure(address indexed operator, uint256 chainId, string reason)
+// Solidity: event VerificationFailure(address indexed operator, string reason)
 func (_L1ContractVerification *L1ContractVerificationFilterer) ParseVerificationFailure(log types.Log) (*L1ContractVerificationVerificationFailure, error) {
 	event := new(L1ContractVerificationVerificationFailure)
 	if err := _L1ContractVerification.contract.UnpackLog(event, "VerificationFailure", log); err != nil {
@@ -1405,39 +1693,38 @@ func (it *L1ContractVerificationVerificationSuccessIterator) Close() error {
 
 // L1ContractVerificationVerificationSuccess represents a VerificationSuccess event raised by the L1ContractVerification contract.
 type L1ContractVerificationVerificationSuccess struct {
-	Operator common.Address
-	ChainId  *big.Int
+	Verifier common.Address
 	Raw      types.Log // Blockchain specific contextual infos
 }
 
-// FilterVerificationSuccess is a free log retrieval operation binding the contract event 0x55b3e4a97731406914c076a9607bf0d9454bd8d6bb418528252caa6012988866.
+// FilterVerificationSuccess is a free log retrieval operation binding the contract event 0xe7d3ae9adcd435646a0c1db62e35bd781df450b6197d8a22be132dfb7f736197.
 //
-// Solidity: event VerificationSuccess(address indexed operator, uint256 chainId)
-func (_L1ContractVerification *L1ContractVerificationFilterer) FilterVerificationSuccess(opts *bind.FilterOpts, operator []common.Address) (*L1ContractVerificationVerificationSuccessIterator, error) {
+// Solidity: event VerificationSuccess(address indexed verifier)
+func (_L1ContractVerification *L1ContractVerificationFilterer) FilterVerificationSuccess(opts *bind.FilterOpts, verifier []common.Address) (*L1ContractVerificationVerificationSuccessIterator, error) {
 
-	var operatorRule []interface{}
-	for _, operatorItem := range operator {
-		operatorRule = append(operatorRule, operatorItem)
+	var verifierRule []interface{}
+	for _, verifierItem := range verifier {
+		verifierRule = append(verifierRule, verifierItem)
 	}
 
-	logs, sub, err := _L1ContractVerification.contract.FilterLogs(opts, "VerificationSuccess", operatorRule)
+	logs, sub, err := _L1ContractVerification.contract.FilterLogs(opts, "VerificationSuccess", verifierRule)
 	if err != nil {
 		return nil, err
 	}
 	return &L1ContractVerificationVerificationSuccessIterator{contract: _L1ContractVerification.contract, event: "VerificationSuccess", logs: logs, sub: sub}, nil
 }
 
-// WatchVerificationSuccess is a free log subscription operation binding the contract event 0x55b3e4a97731406914c076a9607bf0d9454bd8d6bb418528252caa6012988866.
+// WatchVerificationSuccess is a free log subscription operation binding the contract event 0xe7d3ae9adcd435646a0c1db62e35bd781df450b6197d8a22be132dfb7f736197.
 //
-// Solidity: event VerificationSuccess(address indexed operator, uint256 chainId)
-func (_L1ContractVerification *L1ContractVerificationFilterer) WatchVerificationSuccess(opts *bind.WatchOpts, sink chan<- *L1ContractVerificationVerificationSuccess, operator []common.Address) (event.Subscription, error) {
+// Solidity: event VerificationSuccess(address indexed verifier)
+func (_L1ContractVerification *L1ContractVerificationFilterer) WatchVerificationSuccess(opts *bind.WatchOpts, sink chan<- *L1ContractVerificationVerificationSuccess, verifier []common.Address) (event.Subscription, error) {
 
-	var operatorRule []interface{}
-	for _, operatorItem := range operator {
-		operatorRule = append(operatorRule, operatorItem)
+	var verifierRule []interface{}
+	for _, verifierItem := range verifier {
+		verifierRule = append(verifierRule, verifierItem)
 	}
 
-	logs, sub, err := _L1ContractVerification.contract.WatchLogs(opts, "VerificationSuccess", operatorRule)
+	logs, sub, err := _L1ContractVerification.contract.WatchLogs(opts, "VerificationSuccess", verifierRule)
 	if err != nil {
 		return nil, err
 	}
@@ -1469,9 +1756,9 @@ func (_L1ContractVerification *L1ContractVerificationFilterer) WatchVerification
 	}), nil
 }
 
-// ParseVerificationSuccess is a log parse operation binding the contract event 0x55b3e4a97731406914c076a9607bf0d9454bd8d6bb418528252caa6012988866.
+// ParseVerificationSuccess is a log parse operation binding the contract event 0xe7d3ae9adcd435646a0c1db62e35bd781df450b6197d8a22be132dfb7f736197.
 //
-// Solidity: event VerificationSuccess(address indexed operator, uint256 chainId)
+// Solidity: event VerificationSuccess(address indexed verifier)
 func (_L1ContractVerification *L1ContractVerificationFilterer) ParseVerificationSuccess(log types.Log) (*L1ContractVerificationVerificationSuccess, error) {
 	event := new(L1ContractVerificationVerificationSuccess)
 	if err := _L1ContractVerification.contract.UnpackLog(event, "VerificationSuccess", log); err != nil {

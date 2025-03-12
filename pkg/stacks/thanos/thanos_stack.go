@@ -645,18 +645,10 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context) error {
 		return fmt.Errorf("SYSTEM_CONFIG_ADDRESS environment variable is not set")
 	}
 
-	safeWallet := os.Getenv("SAFE_WALLET_ADDRESS")
-	if safeWallet == "" {
-		return fmt.Errorf("SAFE_WALLET_ADDRESS environment variable is not set")
-	}
-
 	// Verify and register config
 	txVerifyAndRegisterConfig, err := contract.VerifyAndRegisterRollupConfig(
 		auth,
-		chainID,
 		common.HexToAddress(systemConfigProxy),
-		common.HexToAddress(safeWallet),
-		common.HexToAddress(registerCandidate.rollupConfig),
 		2, //TODO: Need to check and update this using TON
 		common.HexToAddress(registerCandidate.l2TonAddress),
 		registerCandidate.nameInfo,
@@ -670,11 +662,11 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context) error {
 	// Wait for transaction confirmation
 	receiptVerifyRegisterConfig, err := bind.WaitMined(ctx, client, txVerifyAndRegisterConfig)
 	if err != nil {
-	    return fmt.Errorf("failed waiting for transaction confirmation: %v", err)
+		return fmt.Errorf("failed waiting for transaction confirmation: %v", err)
 	}
 
 	if receiptVerifyRegisterConfig.Status != 1 {
-	    return fmt.Errorf("transaction failed with status: %d", receiptVerifyRegisterConfig.Status)
+		return fmt.Errorf("transaction failed with status: %d", receiptVerifyRegisterConfig.Status)
 	}
 
 	fmt.Printf("Transaction confirmed in block %d\n", receiptVerifyRegisterConfig.BlockNumber.Uint64())
@@ -721,7 +713,6 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context) error {
 	}
 
 	fmt.Printf("Transaction confirmed in block %d\n", receiptRegisterCandidate.BlockNumber.Uint64())
-	
-	
+
 	return nil
 }

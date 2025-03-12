@@ -115,12 +115,6 @@ func main() {
 				Flags:  flags.VerifyRegisterCandidateFlag,
 				Action: commands.ActionVerifyRegisterCandidates(),
 			},
-			{
-				Name:   "serve",
-				Usage:  "Start the HTTP server",
-				Flags:  flags.StartServerFlag,
-				Action: commands.ActionStartServer(),
-			},
 		},
 	}
 
