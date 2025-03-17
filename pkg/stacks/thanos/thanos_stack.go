@@ -42,7 +42,6 @@ type DeployInfraInput struct {
 
 type RegisterCandidateInput struct {
 	rollupConfig string
-	l2TonAddress string
 	amount       float64
 	useTon       bool
 	memo         string
@@ -638,11 +637,16 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context) error {
 		return fmt.Errorf("failed to create contract instance: %v", err)
 	}
 
-	//TODO: Need to check and update these functionality to get system config and safe wallet address
+	//TODO: Need to check and update these functionality to get system config.
 
 	systemConfigProxy := os.Getenv("SYSTEM_CONFIG_ADDRESS")
 	if systemConfigProxy == "" {
 		return fmt.Errorf("SYSTEM_CONFIG_ADDRESS environment variable is not set")
+	}
+
+	l2TonAddress := os.Getenv("L2_TON_ADDRESS")
+	if l2TonAddress == "" {
+		return fmt.Errorf("L2_TON_ADDRESS environment variable is not set")
 	}
 
 	// Verify and register config
@@ -650,7 +654,7 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context) error {
 		auth,
 		common.HexToAddress(systemConfigProxy),
 		2, //TODO: Need to check and update this using TON
-		common.HexToAddress(registerCandidate.l2TonAddress),
+		common.HexToAddress(l2TonAddress),
 		registerCandidate.nameInfo,
 	)
 	if err != nil {

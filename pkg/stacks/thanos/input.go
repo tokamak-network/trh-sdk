@@ -192,7 +192,6 @@ func (t *ThanosStack) inputVerifyAndRegister() (bool, error) {
 func (t *ThanosStack) inputRegisterCandidate() (*RegisterCandidateInput, error) {
 	var (
 		rollupConfig string
-		l2TonAddress string
 		amount       float64
 		memo         string
 		useTon       bool
@@ -208,20 +207,6 @@ func (t *ThanosStack) inputRegisterCandidate() (*RegisterCandidateInput, error) 
 			continue
 		}
 		if !common.IsHexAddress(rollupConfig) {
-			fmt.Println("Error: Invalid Ethereum address format. Please try again")
-			continue
-		}
-		break
-	}
-
-	for {
-		fmt.Print("Please enter the l2 ton address: ")
-		l2TonAddress, err = scanner.ScanString()
-		if err != nil {
-			fmt.Printf("Error while reading l2 ton address: %s\n", err)
-			continue
-		}
-		if !common.IsHexAddress(l2TonAddress) {
 			fmt.Println("Error: Invalid Ethereum address format. Please try again")
 			continue
 		}
@@ -263,13 +248,17 @@ func (t *ThanosStack) inputRegisterCandidate() (*RegisterCandidateInput, error) 
 		fmt.Printf("Error while reading use-ton setting: %s", err)
 		return nil, err
 	}
+	//TODO: Check and update this with further updates
+	if useTon == false {
+		fmt.Printf("Currently only TON is accepted %s", err)
+		return nil, err
+	}
 
 	return &RegisterCandidateInput{
 		rollupConfig: rollupConfig,
 		amount:       amount,
-		memo:         memo,
 		useTon:       useTon,
-		l2TonAddress: l2TonAddress,
+		memo:         memo,
 		nameInfo:     nameInfo,
 	}, nil
 }
