@@ -3,13 +3,18 @@ package thanos
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"os"
 
+	"github.com/tokamak-network/trh-sdk/abis"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/dependencies"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
@@ -32,6 +37,14 @@ type DeployContractsInput struct {
 type DeployInfraInput struct {
 	ChainName   string
 	L1BeaconURL string
+}
+
+type RegisterCandidateInput struct {
+	rollupConfig string
+	amount       float64
+	useTon       bool
+	memo         string
+	nameInfo     string
 }
 
 func NewThanosStack(network string, stack string) *ThanosStack {
@@ -182,6 +195,20 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		return err
 	}
 	fmt.Printf("✅ Configuration successfully saved to: %s/settings.json", cwd)
+
+	verifyAndRegister, err := t.inputVerifyAndRegister()
+	if err != nil {
+		return err
+	}
+
+	if verifyAndRegister {
+		err = t.VerifyRegisterCandidates(ctx)
+		if err != nil {
+			fmt.Println("Failed register candidate:", err)
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -602,5 +629,146 @@ func (t *ThanosStack) UninstallPlugins(pluginNames []string, deployConfig *types
 			return t.uninstallBridge(deployConfig)
 		}
 	}
+	return nil
+}
+
+// --------------------------------------------- Register Candidates ---------------------------
+
+func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context) error {
+	registerCandidate, err := t.inputRegisterCandidate()
+	if err != nil {
+		return err
+	}
+
+	// Get RPC URL from environment
+	rpcURL := os.Getenv("RPC_URL")
+	if rpcURL == "" {
+		return fmt.Errorf("RPC_URL environment variable is not set")
+	}
+
+	// Connect to Ethereum client
+	client, err := ethclient.Dial(rpcURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to the Ethereum client: %v", err)
+	}
+
+	// Get private key from environment
+	privateKeyString := os.Getenv("PRIVATE_KEY")
+	if privateKeyString == "" {
+		return fmt.Errorf("PRIVATE_KEY environment variable is not set")
+	}
+
+	// Parse private key
+	privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKeyString, "0x"))
+	if err != nil {
+		return fmt.Errorf("invalid private key: %v", err)
+	}
+
+	// Get chain ID
+	chainID, err := client.ChainID(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get chain ID: %v", err)
+	}
+
+	// Create transaction auth
+	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, chainID)
+	if err != nil {
+		return fmt.Errorf("failed to create transaction auth: %v", err)
+	}
+
+	// Get contract address from environment
+	contractAddrStr := os.Getenv("L1_VERIFICATION_CONTRACT_ADDRESS")
+	if contractAddrStr == "" {
+		return fmt.Errorf("L1_VERIFICATION_CONTRACT_ADDRESS environment variable is not set")
+	}
+	contractAddr := common.HexToAddress(contractAddrStr)
+
+	// Create contract instance
+	contract, err := abis.NewL1ContractVerification(contractAddr, client)
+	if err != nil {
+		return fmt.Errorf("failed to create contract instance: %v", err)
+	}
+
+	//TODO: Need to check and update these functionality to get system config.
+
+	systemConfigProxy := os.Getenv("SYSTEM_CONFIG_ADDRESS")
+	if systemConfigProxy == "" {
+		return fmt.Errorf("SYSTEM_CONFIG_ADDRESS environment variable is not set")
+	}
+
+	l2TonAddress := os.Getenv("L2_TON_ADDRESS")
+	if l2TonAddress == "" {
+		return fmt.Errorf("L2_TON_ADDRESS environment variable is not set")
+	}
+
+	// Verify and register config
+	txVerifyAndRegisterConfig, err := contract.VerifyAndRegisterRollupConfig(
+		auth,
+		common.HexToAddress(systemConfigProxy),
+		2, //TODO: Need to check and update this using TON
+		common.HexToAddress(l2TonAddress),
+		registerCandidate.nameInfo,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to register candidate: %v", err)
+	}
+
+	fmt.Printf("Transaction submitted: %s\n", txVerifyAndRegisterConfig.Hash().Hex())
+
+	// Wait for transaction confirmation
+	receiptVerifyRegisterConfig, err := bind.WaitMined(ctx, client, txVerifyAndRegisterConfig)
+	if err != nil {
+		return fmt.Errorf("failed waiting for transaction confirmation: %v", err)
+	}
+
+	if receiptVerifyRegisterConfig.Status != 1 {
+		return fmt.Errorf("transaction failed with status: %d", receiptVerifyRegisterConfig.Status)
+	}
+
+	fmt.Printf("Transaction confirmed in block %d\n", receiptVerifyRegisterConfig.BlockNumber.Uint64())
+
+	// Convert amount to Wei
+	amountInWei := new(big.Float).Mul(big.NewFloat(registerCandidate.amount), big.NewFloat(1e18))
+	amountBigInt, _ := amountInWei.Int(nil)
+
+	// Get contract address from environment
+	l2ManagerAddressStr := os.Getenv("L2_MANAGER_ADDRESS")
+	if l2ManagerAddressStr == "" {
+		return fmt.Errorf("L2_MANAGER_ADDRESS environment variable is not set")
+	}
+	l2ManagerAddress := common.HexToAddress(l2ManagerAddressStr)
+
+	// Create contract instance
+	l2ManagerContract, err := abis.NewLayer2ManagerV1(l2ManagerAddress, client)
+	if err != nil {
+		return fmt.Errorf("failed to create contract instance: %v", err)
+	}
+
+	// Call registerCandidateAddOn
+	txRegisterCandidate, err := l2ManagerContract.RegisterCandidateAddOn(
+		auth,
+		common.HexToAddress(registerCandidate.rollupConfig),
+		amountBigInt,
+		registerCandidate.useTon,
+		registerCandidate.memo,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to register candidate: %v", err)
+	}
+
+	fmt.Printf("Transaction submitted: %s\n", txRegisterCandidate.Hash().Hex())
+
+	// Wait for transaction confirmation
+	receiptRegisterCandidate, err := bind.WaitMined(ctx, client, txRegisterCandidate)
+	if err != nil {
+		return fmt.Errorf("failed waiting for transaction confirmation: %v", err)
+	}
+
+	if receiptRegisterCandidate.Status != 1 {
+		return fmt.Errorf("transaction failed with status: %d", receiptRegisterCandidate.Status)
+	}
+
+	fmt.Printf("Transaction confirmed in block %d\n", receiptRegisterCandidate.BlockNumber.Uint64())
+
 	return nil
 }
