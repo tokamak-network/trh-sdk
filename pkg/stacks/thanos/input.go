@@ -249,7 +249,7 @@ func (t *ThanosStack) inputRegisterCandidate() (*RegisterCandidateInput, error) 
 		return nil, err
 	}
 	//TODO: Check and update this with further updates
-	if useTon == false {
+	if !useTon {
 		fmt.Printf("Currently only TON is accepted %s", err)
 		return nil, err
 	}
