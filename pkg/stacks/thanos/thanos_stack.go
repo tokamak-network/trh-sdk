@@ -286,18 +286,20 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 
 	// STEP 3. Create .envrc file
 	err = makeTerraformEnvFile("tokamak-thanos-stack/terraform", types.TerraformEnvConfig{
-		ThanosStackName:  inputs.ChainName,
-		AwsRegion:        awsLoginInputs.Region,
-		SequencerKey:     deployConfig.SequencerPrivateKey,
-		BatcherKey:       deployConfig.BatcherPrivateKey,
-		ProposerKey:      deployConfig.ProposerPrivateKey,
-		ChallengerKey:    deployConfig.ChallengerPrivateKey,
-		EksClusterAdmins: awsProfile.Arn,
-		DeploymentsPath:  deployConfig.DeploymentPath,
-		L1BeaconUrl:      inputs.L1BeaconURL,
-		L1RpcUrl:         deployConfig.L1RPCURL,
-		L1RpcProvider:    deployConfig.L1RPCProvider,
-		Azs:              awsProfile.AvailabilityZones,
+		ThanosStackName:     inputs.ChainName,
+		AwsRegion:           awsLoginInputs.Region,
+		SequencerKey:        deployConfig.SequencerPrivateKey,
+		BatcherKey:          deployConfig.BatcherPrivateKey,
+		ProposerKey:         deployConfig.ProposerPrivateKey,
+		ChallengerKey:       deployConfig.ChallengerPrivateKey,
+		EksClusterAdmins:    awsProfile.Arn,
+		DeploymentsPath:     deployConfig.DeploymentPath,
+		L1BeaconUrl:         inputs.L1BeaconURL,
+		L1RpcUrl:            deployConfig.L1RPCURL,
+		L1RpcProvider:       deployConfig.L1RPCProvider,
+		Azs:                 awsProfile.AvailabilityZones,
+		ThanosStackImageTag: constants.DockerImageTag[deployConfig.Network].ThanosStackImageTag,
+		OpGethImageTag:      constants.DockerImageTag[deployConfig.Network].OpGethImageTag,
 	})
 	if err != nil {
 		fmt.Println("Error generating Terraform environment configuration:", err)
@@ -311,7 +313,6 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 		cd backend &&
 		terraform init &&
 		terraform plan &&
-		terraform taint terraform_data.env_bucket_name &&
 		terraform apply -auto-approve
 		`,
 	}...)
