@@ -3,9 +3,12 @@ package thanos
 import (
 	"fmt"
 	"os"
+	"strings"
+	"time"
+
+	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
-	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
@@ -89,7 +92,7 @@ func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
 		"tokamak-thanos-stack/terraform/block-explorer",
 		".envrc",
 		types.BlockExplorerEnvs{
-			ThanosStackName:               chainName,
+			ThanosStackName:               utils.ConvertToHyphen(chainName),
 			BlockExplorerDatabasePassword: databasePassword,
 			BlockExplorerDatabaseUserName: databaseUserName,
 			BlockExplorerDatabaseName:     "blockscout",
@@ -102,37 +105,49 @@ func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
 		return err
 	}
 
-	//err = utils.ExecuteCommandStream("bash", []string{
-	//	"-c",
-	//	`cd tokamak-thanos-stack/terraform/block-explorer &&
-	//	source .envrc &&
-	//	terraform init &&
-	//	terraform plan &&
-	//	terraform apply -auto-approve
-	//	`,
-	//}...)
-	//if err != nil {
-	//	fmt.Println("Error initializing Terraform backend:", err)
-	//	return err
-	//}
+	chainReleaseName, err := utils.FilterHelmReleases(namespace, namespace)
+	if err != nil {
+		fmt.Println("Error filtering helm releases:", err)
+		return err
+	}
+	if len(chainReleaseName) == 0 {
+		fmt.Println("No helm releases found")
+		return nil
+	}
 
-	//chainReleaseName, err := utils.FilterHelmReleases(namespace, namespace)
-	//if err != nil {
-	//	fmt.Println("Error filtering helm releases:", err)
-	//	return err
-	//}
-	//if len(chainReleaseName) == 0 {
-	//	fmt.Println("No helm releases found")
-	//	return nil
-	//}
-	//
-	//releaseName := chainReleaseName[0]
-	releaseName := "nam-sdk-sepolia"
+	releaseName := chainReleaseName[0]
+
+	err = utils.ExecuteCommandStream("bash", []string{
+		"-c",
+		`cd tokamak-thanos-stack/terraform/block-explorer &&
+		source .envrc &&
+		terraform init &&
+		terraform plan &&
+		terraform apply -auto-approve
+		`,
+	}...)
+	if err != nil {
+		fmt.Println("Error initializing Terraform backend:", err)
+		return err
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Println("Error getting current working directory:", err)
 		return err
 	}
+
+	rdsConnectionUrl, err := utils.ExecuteCommand("bash", []string{
+		"-c",
+		`cd tokamak-thanos-stack/terraform/block-explorer &&
+		source .envrc &&
+		terraform output -json rds_connection_url`,
+	}...)
+	if err != nil {
+		return fmt.Errorf("failed to get terraform output for %s: %w", "vpc_id", err)
+	}
+
+	rdsConnectionUrl = strings.Trim(rdsConnectionUrl, `"`)
 
 	// generate the helm chart value file
 	envValues := fmt.Sprintf(`
@@ -145,6 +160,8 @@ func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
 		export stack_network_name=%s
 		export stack_wallet_connect_project_id=%s
 		export rollup_path=%s
+		export rds_connection_url=%s
+		export l1_beacon_rpc_url=%s
 		`,
 		deployConfig.DeploymentPath,
 		deployConfig.L1RPCURL,
@@ -155,6 +172,8 @@ func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
 		deployConfig.ChainName,
 		walletConnectID,
 		fmt.Sprintf("%s/tokamak-thanos/build/rollup.json", cwd),
+		rdsConnectionUrl,
+		deployConfig.L1BeaconURL,
 	)
 	_, err = utils.ExecuteCommand(
 		"bash",
@@ -175,43 +194,47 @@ func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
 		fmt.Print("\r❌ Make helm values failed!\n")
 		return err
 	}
+	cwd, err = os.Getwd()
+	if err != nil {
+		fmt.Println("Error getting current working directory:", err)
+		return err
+	}
 
-	//// Install backend first
-	//blockExplorerBackendReleaseName := fmt.Sprintf("%s-%d", "block-explorer-be", time.Now().Unix())
+	// Install backend first
+	blockExplorerBackendReleaseName := fmt.Sprintf("%s-%d", "block-explorer-be", time.Now().Unix())
 	fileValue := fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack/block-explorer-value.yaml", cwd)
-	//_, err = utils.ExecuteCommand("helm", []string{
-	//	"install",
-	//	blockExplorerBackendReleaseName,
-	//	"thanos-stack/block-explorer",
-	//	"--values",
-	//	fileValue,
-	//	"--namespace",
-	//	namespace,
-	//}...)
-	//if err != nil {
-	//	fmt.Println("Error installing block explorer backend component:", err)
-	//	return err
-	//}
-	//
-	//// Install the frontend
-	//// Get the ingress
-	//var blockExplorerUrl string
-	//for {
-	//	k8sIngresses, err := utils.GetAddressByIngress(namespace, blockExplorerBackendReleaseName)
-	//	if err != nil {
-	//		fmt.Println("Error retrieving ingress addresses:", err, "details:", k8sIngresses)
-	//		return err
-	//	}
-	//
-	//	if len(k8sIngresses) > 0 {
-	//		blockExplorerUrl = "http://" + k8sIngresses[0]
-	//		break
-	//	}
-	//
-	//	time.Sleep(15 * time.Second)
-	//}
+	_, err = utils.ExecuteCommand("helm", []string{
+		"install",
+		blockExplorerBackendReleaseName,
+		fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack", cwd),
+		"--values",
+		fileValue,
+		"--namespace",
+		namespace,
+	}...)
+	if err != nil {
+		fmt.Println("Error installing block explorer backend component:", err)
+		return err
+	}
+	fmt.Println("✅ Install block explorer backend component successfully")
 
-	blockExplorerUrl := "backend.com"
+	// Install the frontend
+	// Get the ingress
+	var blockExplorerUrl string
+	for {
+		k8sIngresses, err := utils.GetAddressByIngress(namespace, blockExplorerBackendReleaseName)
+		if err != nil {
+			fmt.Println("Error retrieving ingress addresses:", err, "details:", k8sIngresses)
+			return err
+		}
+
+		if len(k8sIngresses) > 0 {
+			blockExplorerUrl = k8sIngresses[0]
+			break
+		}
+
+		time.Sleep(15 * time.Second)
+	}
 
 	// update the values file
 	err = utils.UpdateYAMLField(fileValue, "blockscout.enabled", false)
@@ -238,19 +261,21 @@ func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
 		return err
 	}
 
-	//blockExplorerFrontendReleaseName := fmt.Sprintf("%s-%d", "block-explorer-fe", time.Now().Unix())
-	//_, err = utils.ExecuteCommand("helm", []string{
-	//	"install",
-	//	blockExplorerFrontendReleaseName,
-	//	"thanos-stack/block-explorer",
-	//	"--values",
-	//	fileValue,
-	//	"--namespace",
-	//	namespace,
-	//}...)
-	//if err != nil {
-	//	fmt.Println("Error installing block explorer front-end component:", err)
-	//}
+	blockExplorerFrontendReleaseName := fmt.Sprintf("%s-%d", "block-explorer-fe", time.Now().Unix())
+	_, err = utils.ExecuteCommand("helm", []string{
+		"install",
+		blockExplorerFrontendReleaseName,
+		fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack", cwd),
+		"--values",
+		fileValue,
+		"--namespace",
+		namespace,
+	}...)
+	if err != nil {
+		fmt.Println("Error installing block explorer front-end component:", err)
+	}
+
+	fmt.Printf("✅ Install block explorer frontend component successfully: %s", blockExplorerUrl)
 
 	return nil
 }

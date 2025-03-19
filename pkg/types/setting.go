@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
@@ -22,6 +21,7 @@ type Config struct {
 
 	DeploymentPath string `json:"deployment_path"`
 	L1RPCURL       string `json:"l1_rpc_url"`
+	L1BeaconURL    string `json:"l1_beacon_url"`
 	L1RPCProvider  string `json:"l1_rpc_provider"`
 	L1ChainID      uint64 `json:"l1_chain_id"`
 
@@ -84,5 +84,5 @@ func ReadConfigFromJSONFile() (*Config, error) {
 }
 
 func ConvertChainNameToNamespace(chainName string) string {
-	return strings.ToLower(strings.Join(strings.Split(chainName, " "), "-"))
+	return utils.ConvertToHyphen(chainName)
 }

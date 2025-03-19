@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"log"
+
+	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
 const (
@@ -15,9 +16,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to get Go version, err: %s", err.Error())
 	}
-	if currentVersion == expectedVersion {
-		fmt.Println("Go version is correct:", currentVersion)
-	} else {
+	if currentVersion != expectedVersion {
 		log.Fatal(fmt.Sprintf("Go version does not match expected version: %s, current version: %s", expectedVersion, currentVersion))
 	}
 

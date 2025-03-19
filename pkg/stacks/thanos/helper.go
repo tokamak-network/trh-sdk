@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tokamak-network/trh-sdk/pkg/utils"
+
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
@@ -266,7 +268,7 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	}
 	defer output.Close()
 
-	bucketName := strings.Join(strings.Split(strings.ToLower(config.ThanosStackName), " "), "-")
+	bucketName := utils.ConvertToHyphen(config.ThanosStackName)
 
 	writer := bufio.NewWriter(output)
 	writer.WriteString(fmt.Sprintf("export TF_VAR_thanos_stack_name=\"%s\"\n", bucketName))
@@ -316,8 +318,7 @@ func makeBlockExplorerEnvs(dirPath string, filename string, config types.BlockEx
 
 	filePath := filepath.Join(dirPath, filename)
 
-	// Open file in append mode, create if not exists
-	output, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	output, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		fmt.Println("Error opening environment file:", err)
 		return err
@@ -326,7 +327,6 @@ func makeBlockExplorerEnvs(dirPath string, filename string, config types.BlockEx
 
 	writer := bufio.NewWriter(output)
 
-	// Define the new environment variables to append
 	envVars := []string{
 		fmt.Sprintf("export TF_VAR_thanos_stack_name=\"%s\"\n", config.ThanosStackName),
 		fmt.Sprintf("export TF_VAR_aws_region=\"%s\"\n", config.AwsRegion),
@@ -336,7 +336,6 @@ func makeBlockExplorerEnvs(dirPath string, filename string, config types.BlockEx
 		fmt.Sprintf("export TF_VAR_vpc_id=\"%s\"\n", config.VpcId),
 	}
 
-	// Append new variables
 	for _, envVar := range envVars {
 		_, err = writer.WriteString(envVar)
 		if err != nil {
@@ -344,8 +343,7 @@ func makeBlockExplorerEnvs(dirPath string, filename string, config types.BlockEx
 		}
 	}
 
-	err = writer.Flush()
-	if err != nil {
+	if err = writer.Flush(); err != nil {
 		return err
 	}
 

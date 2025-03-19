@@ -461,6 +461,7 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 		Namespace: namespace,
 	}
 	deployConfig.L2RpcUrl = l2RPCUrl
+	deployConfig.L1BeaconURL = inputs.L1BeaconURL
 
 	err = deployConfig.WriteToJSONFile()
 	if err != nil {
