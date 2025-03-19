@@ -200,10 +200,6 @@ func (t *ThanosStack) uninstallBridge(deployConfig *types.Config) error {
 		return err
 	}
 
-	if len(releases) == 0 {
-		return nil
-	}
-
 	for _, release := range releases {
 		_, err = utils.ExecuteCommand("helm", []string{
 			"uninstall",

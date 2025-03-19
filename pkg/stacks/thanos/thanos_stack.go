@@ -602,6 +602,8 @@ func (t *ThanosStack) UninstallPlugins(pluginNames []string, deployConfig *types
 		switch pluginName {
 		case constants.PluginBridge:
 			return t.uninstallBridge(deployConfig)
+		case constants.PluginBlockExplorer:
+			return t.uninstallBlockExplorer(deployConfig)
 		}
 	}
 	return nil

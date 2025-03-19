@@ -279,3 +279,44 @@ func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
 
 	return nil
 }
+
+func (t *ThanosStack) uninstallBlockExplorer(deployConfig *types.Config) error {
+	var (
+		namespace = deployConfig.K8s.Namespace
+	)
+
+	// 1. Uninstall helm charts
+	releases, err := utils.FilterHelmReleases(namespace, "block-explorer")
+	if err != nil {
+		fmt.Println("Error to filter helm releases:", err)
+		return err
+	}
+
+	for _, release := range releases {
+		_, err = utils.ExecuteCommand("helm", []string{
+			"uninstall",
+			release,
+			"--namespace",
+			namespace,
+		}...)
+		if err != nil {
+			fmt.Println("Error uninstalling op-bridge helm chart:", err)
+			return err
+		}
+	}
+	// 2. Destroy terraform resources
+	err = utils.ExecuteCommandStream("bash", []string{
+		"-c",
+		`cd tokamak-thanos-stack/terraform/block-explorer &&
+		source .envrc &&
+		terraform destroy -auto-approve
+		`,
+	}...)
+	if err != nil {
+		fmt.Println("Error destroying Terraform block-explorer:", err)
+		return err
+	}
+
+	fmt.Println("✅ Uninstall block explorer components successfully")
+	return nil
+}
