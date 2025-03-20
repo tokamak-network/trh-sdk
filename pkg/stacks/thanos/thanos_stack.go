@@ -653,6 +653,7 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context) error {
 	txVerifyAndRegisterConfig, err := contract.VerifyAndRegisterRollupConfig(
 		auth,
 		common.HexToAddress(systemConfigProxy),
+		common.HexToAddress("0x33E6F5aa5A4cf5d0D2Cb68e43b15976D0E0234b1"), //TODO: Update this to fetch the proxy admin address from the deployed ones
 		2, //TODO: Need to check and update this using TON
 		common.HexToAddress(l2TonAddress),
 		registerCandidate.nameInfo,
