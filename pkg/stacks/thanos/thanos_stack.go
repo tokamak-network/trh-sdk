@@ -558,6 +558,19 @@ func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
 	}
 	fmt.Println("Backend terraform destroyed successfully.")
 
+	err = utils.ExecuteCommandStream("bash", []string{
+		"-c",
+		`cd tokamak-thanos-stack/terraform &&
+		source .envrc &&
+		cd block-explorer &&
+		terraform destroy -auto-approve -parallelism=50`,
+	}...)
+	if err != nil {
+		fmt.Println("Error running the terraform backend destroy:", err)
+		return err
+	}
+	fmt.Println("Block explorer terraform destroyed successfully.")
+
 	return nil
 }
 
