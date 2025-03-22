@@ -279,12 +279,18 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 		fmt.Println("Error authenticating with AWS:", err)
 		return err
 	}
-	fmt.Println("Successfully authenticated with AWS Profile:", awsProfile)
+
 	deployConfig.AWS = awsLoginInputs
 
 	inputs, err := t.inputDeployInfra()
 	if err != nil {
 		fmt.Println("Error collecting infrastructure deployment parameters:", err)
+		return err
+	}
+
+	err = t.clearTerraformState()
+	if err != nil {
+		fmt.Printf("Failed to clear the existing terraform state, err: %s", err.Error())
 		return err
 	}
 
@@ -536,46 +542,7 @@ func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
 
 	fmt.Println("Helm release removed successfully:")
 
-	err = utils.ExecuteCommandStream("bash", []string{
-		"-c",
-		`cd tokamak-thanos-stack/terraform &&
-		source .envrc &&
-		cd thanos-stack &&
-		terraform destroy -auto-approve -parallelism=50`,
-	}...)
-	if err != nil {
-		fmt.Println("Error running thanos-stack terraform destroy:", err)
-		return err
-	}
-	fmt.Println("Thanos stack terraform destroyed successfully.")
-
-	err = utils.ExecuteCommandStream("bash", []string{
-		"-c",
-		`cd tokamak-thanos-stack/terraform &&
-		source .envrc &&
-		cd backend &&
-		terraform destroy -auto-approve -parallelism=50`,
-	}...)
-	if err != nil {
-		fmt.Println("Error running the terraform backend destroy:", err)
-		return err
-	}
-	fmt.Println("Backend terraform destroyed successfully.")
-
-	err = utils.ExecuteCommandStream("bash", []string{
-		"-c",
-		`cd tokamak-thanos-stack/terraform &&
-		source .envrc &&
-		cd block-explorer &&
-		terraform destroy -auto-approve -parallelism=50`,
-	}...)
-	if err != nil {
-		fmt.Println("Error running the terraform backend destroy:", err)
-		return err
-	}
-	fmt.Println("Block explorer terraform destroyed successfully.")
-
-	return nil
+	return t.clearTerraformState()
 }
 
 // ------------------------------------------ Install plugins ---------------------------

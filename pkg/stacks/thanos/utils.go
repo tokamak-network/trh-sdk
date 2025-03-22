@@ -350,3 +350,15 @@ func makeBlockExplorerEnvs(dirPath string, filename string, config types.BlockEx
 	fmt.Println("Environment configuration file (.envrc) has been successfully updated!")
 	return nil
 }
+
+func checkDirExists(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false
+		}
+		fmt.Println("Error checking directory:", err)
+		return false
+	}
+	return info.IsDir()
+}
