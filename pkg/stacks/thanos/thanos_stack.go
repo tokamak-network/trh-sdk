@@ -205,7 +205,11 @@ func (t *ThanosStack) Deploy(ctx context.Context, deployConfig *types.Config) er
 
 		switch infraOpt {
 		case constants.AWS:
-			return t.deployNetworkToAWS(deployConfig)
+			err = t.deployNetworkToAWS(deployConfig)
+			if err != nil {
+				return t.destroyInfraOnAWS(deployConfig)
+			}
+			return nil
 		default:
 			return fmt.Errorf("Infrastructure provider %s is not supported", infraOpt)
 		}
@@ -591,7 +595,11 @@ func (t *ThanosStack) InstallPlugins(pluginNames []string, deployConfig *types.C
 
 		switch pluginName {
 		case constants.PluginBlockExplorer:
-			return t.installBlockExplorer(deployConfig)
+			err := t.installBlockExplorer(deployConfig)
+			if err != nil {
+				return t.uninstallBlockExplorer(deployConfig)
+			}
+			return nil
 		}
 	}
 	return nil
