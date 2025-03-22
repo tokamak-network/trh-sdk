@@ -51,8 +51,6 @@ func LoginAWS(accessKey, secretKey, region, formatFile string) (*AccountProfile,
 		return nil, err
 	}
 
-	fmt.Println("Available AWS availability zones:", availabilityZones)
-
 	profile.AvailabilityZones = availabilityZones
 
 	// Check requirements

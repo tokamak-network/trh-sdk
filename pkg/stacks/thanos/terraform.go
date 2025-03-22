@@ -28,30 +28,41 @@ func (t *ThanosStack) clearTerraformState() error {
 		return err
 	}
 
-	fmt.Println("Destroy the terraform resources successfully")
+	err = utils.ExecuteCommandStream("bash", []string{
+		"-c",
+		`cd tokamak-thanos-stack/terraform && rm -rf .envrc`,
+	}...)
+	if err != nil {
+		fmt.Printf("Error deleting .envrc file %v\n", err)
+		return err
+	}
 
 	return nil
 }
 
 func (t *ThanosStack) destroyTerraform(path string) error {
 	if !checkDirExists(path) {
-		fmt.Printf("Skipping %s: directory does not exist.\n", path)
+		return nil
+	}
+	exist, err := utils.CheckTerraformState(path)
+	if err != nil {
+		return err
+	}
+	if !exist {
 		return nil
 	}
 
-	err := utils.ExecuteCommandStream("bash", []string{
+	err = utils.ExecuteCommandStream("bash", []string{
 		"-c",
 		fmt.Sprintf(`cd %s && source ../.envrc && terraform destroy -auto-approve -parallelism=50`, path),
 	}...)
 	if err != nil {
 		fmt.Printf("Error running terraform destroy for %s: %v\n", path, err)
-		return err
 	}
-	fmt.Printf("%s terraform destroyed successfully.\n", path)
 
 	err = utils.ExecuteCommandStream("bash", []string{
 		"-c",
-		fmt.Sprintf(`cd %s && terraform.tfstate terraform.tfstate.backup .terraform`, path),
+		fmt.Sprintf(`cd %s && rm -rf terraform.tfstate terraform.tfstate.backup .terraform.lock.hcl .terraform/`, path),
 	}...)
 	if err != nil {
 		fmt.Printf("Error delete terraform folder for %s: %v\n", path, err)
