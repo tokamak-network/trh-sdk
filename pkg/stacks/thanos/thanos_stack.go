@@ -395,13 +395,6 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 
 	fmt.Println("EKS configuration updated:", eksSetup)
 
-	k8sPods, err := utils.GetK8sPods(namespace)
-	if err != nil {
-		fmt.Println("Error retrieving Kubernetes pods:", err, "details:", k8sPods)
-		return err
-	}
-	fmt.Println("Current Kubernetes pods: \n", k8sPods)
-
 	// ---------------------------------------- Deploy chain --------------------------//
 	// Step 8. Add Helm repository
 	helmAddOuput, err := utils.ExecuteCommand("helm", []string{
@@ -532,11 +525,13 @@ func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
 	}
 
 	for _, release := range helmReleases {
-		fmt.Printf("Uninstalling Helm release: %s in namespace: %s...\n", release, namespace)
-		_, err := utils.ExecuteCommand("helm", "uninstall", release, "--namespace", namespace)
-		if err != nil {
-			fmt.Println("Error removing Helm release:", err)
-			return err
+		if strings.Contains(release, namespace) || strings.Contains(release, "op-bridge") || strings.Contains(release, "block-explorer") {
+			fmt.Printf("Uninstalling Helm release: %s in namespace: %s...\n", release, namespace)
+			_, err := utils.ExecuteCommand("helm", "uninstall", release, "--namespace", namespace)
+			if err != nil {
+				fmt.Println("Error removing Helm release:", err)
+				return err
+			}
 		}
 	}
 

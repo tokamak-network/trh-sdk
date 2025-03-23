@@ -305,15 +305,9 @@ func (t *ThanosStack) uninstallBlockExplorer(deployConfig *types.Config) error {
 		}
 	}
 	// 2. Destroy terraform resources
-	err = utils.ExecuteCommandStream("bash", []string{
-		"-c",
-		`cd tokamak-thanos-stack/terraform/block-explorer &&
-		source .envrc &&
-		terraform destroy -auto-approve
-		`,
-	}...)
+	err = t.destroyTerraform("tokamak-thanos-stack/terraform/block-exlorer")
 	if err != nil {
-		fmt.Println("Error destroying Terraform block-explorer:", err)
+		fmt.Println("Error running block-explorer terraform destroy", err)
 		return err
 	}
 
