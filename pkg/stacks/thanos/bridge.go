@@ -146,7 +146,7 @@ func (t *ThanosStack) installBridge(deployConfig *types.Config) error {
 	_, err = utils.ExecuteCommand("helm", []string{
 		"install",
 		helmReleaseName,
-		"thanos-stack/op-bridge",
+		fmt.Sprintf("%s/tokamak-thanos-stack/charts/op-bridge", cwd),
 		"--values",
 		filePath,
 		"--namespace",

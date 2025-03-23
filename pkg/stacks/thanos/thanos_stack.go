@@ -430,7 +430,7 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 	_, err = utils.ExecuteCommand("helm", []string{
 		"install",
 		helmReleaseName,
-		"thanos-stack/thanos-stack",
+		fmt.Sprintf("%s/tokamak-thanos-stack/charts/thanos-stack", cwd),
 		"--values",
 		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", cwd),
 		"--namespace",

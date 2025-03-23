@@ -165,7 +165,6 @@ func (t *ThanosStack) cloneSourcecode(repositoryName, url string) error {
 	}
 
 	if !existingSourcecode {
-		fmt.Printf("Cloning the %s repository...", repositoryName)
 		err := utils.CloneRepo(url, repositoryName)
 		if err != nil {
 			fmt.Println("Error while cloning the repository")
