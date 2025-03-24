@@ -2,6 +2,7 @@ package thanos
 
 import (
 	"fmt"
+	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
@@ -51,6 +52,12 @@ func (t *ThanosStack) destroyTerraform(path string) error {
 	}...)
 	if err != nil {
 		fmt.Printf("Error running terraform destroy for %s: %v\n", path, err)
+	}
+
+	fmt.Println("Do you want to remove the existing Terraform state? [y/N]")
+	c, _ := scanner.ScanBool()
+	if !c {
+		return nil
 	}
 
 	err = utils.ExecuteCommandStream("bash", []string{
