@@ -20,6 +20,9 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 )
 
+var estimatedDeployContracts = new(big.Int).SetInt64(80_000_000)
+var zeroBalance = new(big.Int).SetInt64(0)
+
 var mapAccountIndexes = map[int]string{
 	0: "Admin",
 	1: "Sequencer",
@@ -35,7 +38,8 @@ func displayAccounts(accounts map[int]types.Account) {
 	}
 
 	for i, account := range sortedAccounts {
-		fmt.Printf("\t%d. %s(%s ETH)\n", i, account.Address, account.Balance)
+		balance, _ := new(big.Int).SetString(account.Balance, 10)
+		fmt.Printf("\t%d. %s(%.4f ETH)\n", i, account.Address, utils.WeiToEther(balance))
 	}
 }
 
@@ -48,8 +52,16 @@ func selectAccounts(ctx context.Context, client *ethclient.Client, enableFraudPr
 
 	selectedAccountsIndex := [5]int{-1, -1, -1, -1, -1}
 
+	// get suggestion gas
+	suggestionGas, err := client.SuggestGasPrice(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	minimumBalanceForAdmin := new(big.Int).Mul(estimatedDeployContracts, suggestionGas)
+
 	prompts := []string{
-		"Select an admin account from the following list (minimum 0.6 ETH required)",
+		fmt.Sprintf("Select an admin account from the following list (minimum %.4f ETH required)", utils.WeiToEther(minimumBalanceForAdmin)),
 		"Select a sequencer account from the following list",
 		"Select a batcher account from the following list (recommended 0.3 ETH)",
 		"Select a proposer account from the following list (recommended 0.3 ETH)",
@@ -57,10 +69,12 @@ func selectAccounts(ctx context.Context, client *ethclient.Client, enableFraudPr
 	if enableFraudProof {
 		prompts = append(prompts, "Select a challenger account from the following list (recommended 0.3 ETH)")
 	}
+
 	operators := make(types.OperatorMap)
 
 	displayAccounts(accounts)
 	for i := 0; i < len(prompts); i++ {
+		operator := types.Operator(i)
 	startLoop:
 		for {
 			fmt.Println(prompts[i])
@@ -75,6 +89,26 @@ func selectAccounts(ctx context.Context, client *ethclient.Client, enableFraudPr
 			if err != nil || selectingIndex < 0 || selectingIndex >= len(accounts) {
 				fmt.Println("Invalid selection. Please try again.")
 				goto startLoop
+			}
+
+			selectedAccount := accounts[selectingIndex]
+			selectedAccountBalance, ok := new(big.Int).SetString(selectedAccount.Balance, 10)
+			if !ok {
+				selectedAccountBalance = zeroBalance
+			}
+
+			switch operator {
+			case types.Admin:
+				if selectedAccountBalance.Cmp(minimumBalanceForAdmin) < 0 {
+					fmt.Printf("The selecting account balance(%.4f ETH) is smaller than the expecting gas(%.4f ETH) to deploy the contracts \n", utils.WeiToEther(selectedAccountBalance), utils.WeiToEther(minimumBalanceForAdmin))
+					goto startLoop
+				}
+			case types.Batcher, types.Challenger, types.Proposer:
+				if selectedAccountBalance.Cmp(zeroBalance) <= 0 {
+					fmt.Printf("The balance of %s must be greater than zero\n", mapAccountIndexes[i])
+					goto startLoop
+				}
+			default:
 			}
 
 			for j, selectedAccountIndex := range selectedAccountsIndex {
@@ -93,10 +127,10 @@ func selectAccounts(ctx context.Context, client *ethclient.Client, enableFraudPr
 			}
 
 			selectedAccountsIndex[i] = selectingIndex
-			operators[types.Operator(i)] = &types.IndexAccount{
+			operators[operator] = &types.IndexAccount{
 				Index:      selectingIndex,
-				Address:    accounts[selectingIndex].Address,
-				PrivateKey: accounts[selectingIndex].PrivateKey,
+				Address:    selectedAccount.Address,
+				PrivateKey: selectedAccount.PrivateKey,
 			}
 			break
 		}

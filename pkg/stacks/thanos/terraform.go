@@ -2,6 +2,7 @@ package thanos
 
 import (
 	"fmt"
+
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
