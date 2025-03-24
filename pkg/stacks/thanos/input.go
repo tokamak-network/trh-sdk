@@ -10,6 +10,26 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
+type DeployContractsInput struct {
+	l1Provider string
+	l1RPCurl   string
+	seed       string
+	fraudProof bool
+}
+
+type DeployInfraInput struct {
+	ChainName   string
+	L1BeaconURL string
+}
+
+type InstallBlockExplorerInput struct {
+	DatabaseUsername       string
+	DatabasePassword       string
+	CoinmarketcapKey       string
+	CoinmarketcapTokenID   string
+	WalletConnectProjectID string
+}
+
 func (t *ThanosStack) inputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
 	fmt.Println("You are about to deploy the L1 contracts.")
 	var (
@@ -154,6 +174,110 @@ func (t *ThanosStack) inputDeployInfra() (*DeployInfraInput, error) {
 	return &DeployInfraInput{
 		ChainName:   chainName,
 		L1BeaconURL: l1BeaconUrl,
+	}, nil
+}
+
+func (t *ThanosStack) inputInstallBlockExplorer() (*InstallBlockExplorerInput, error) {
+	var (
+		databaseUserName,
+		databasePassword,
+		coinmarketcapKey,
+		coinmarketcapTokenID,
+		walletConnectID string
+		err error
+	)
+
+	for {
+		fmt.Print("Please input your database username: ")
+		databaseUserName, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error scanning database name: ", err)
+			return nil, err
+		}
+
+		if databaseUserName == "" {
+			fmt.Println("Database username cannot be empty")
+			continue
+		}
+
+		if !utils.IsValidRDSUsername(databaseUserName) {
+			fmt.Println("Database user name is invalid, please try again")
+			continue
+		}
+		break
+	}
+
+	for {
+		fmt.Print("Please input your database password: ")
+		databasePassword, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error scanning database name:", err)
+			return nil, err
+		}
+
+		if databasePassword == "" {
+			fmt.Println("Database password cannot be empty")
+			continue
+		}
+
+		if !utils.IsValidRDSPassword(databasePassword) {
+			fmt.Println("Database password is invalid, please try again")
+			continue
+		}
+		break
+	}
+
+	for {
+		fmt.Print("Please input your CoinMarketCap key(read more): ")
+		coinmarketcapKey, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error scanning CoinMarketCap key:", err)
+			return nil, err
+		}
+
+		if coinmarketcapKey == "" {
+			fmt.Println("Coinmarketcap key cannot be empty")
+			continue
+		}
+		break
+	}
+
+	for {
+		fmt.Print("Please input your CoinMarketCap token id(read more): ")
+		coinmarketcapTokenID, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error scanning CoinMarketCap token id:", err)
+			return nil, err
+		}
+
+		if coinmarketcapTokenID == "" {
+			fmt.Println("Coinmarketcap ID cannot be empty")
+			continue
+		}
+		break
+	}
+
+	for {
+		fmt.Print("Please input your wallet connect id(read more): ")
+		walletConnectID, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error scanning wallet connect id:", err)
+			return nil, err
+		}
+
+		if walletConnectID == "" {
+			fmt.Println("WalletConnectID cannot be empty")
+			continue
+		}
+		break
+	}
+
+	return &InstallBlockExplorerInput{
+		DatabaseUsername:       databaseUserName,
+		DatabasePassword:       databasePassword,
+		CoinmarketcapKey:       coinmarketcapKey,
+		CoinmarketcapTokenID:   coinmarketcapTokenID,
+		WalletConnectProjectID: walletConnectID,
 	}, nil
 }
 

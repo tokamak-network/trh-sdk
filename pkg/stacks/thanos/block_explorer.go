@@ -6,8 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tokamak-network/trh-sdk/pkg/scanner"
-
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -52,40 +50,18 @@ func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
 	fmt.Println("Installing a block explorer component...")
 
 	// Make .envrc file
-	fmt.Print("Please input your database username: ")
-	databaseUserName, err := scanner.ScanString()
-	if err != nil {
-		fmt.Println("Error scanning database name: ", err)
+	installBlockExplorerInput, err := t.inputInstallBlockExplorer()
+	if err != nil || installBlockExplorerInput == nil {
+		fmt.Println("Error installing block explorer:", err)
 		return err
 	}
-
-	fmt.Print("Please input your database password: ")
-	databasePassword, err := scanner.ScanString()
-	if err != nil {
-		fmt.Println("Error scanning database name:", err)
-		return err
-	}
-
-	fmt.Print("Please input your CoinMarketCap key(read more):")
-	coinmarketcapKey, err := scanner.ScanString()
-	if err != nil {
-		fmt.Println("Error scanning CoinMarketCap key:", err)
-		return err
-	}
-	fmt.Print("Please input your CoinMarketCap token id(read more):")
-	coinmarketcapTokenId, err := scanner.ScanString()
-	if err != nil {
-		fmt.Println("Error scanning CoinMarketCap token id:", err)
-		return err
-	}
-
-	fmt.Print("Please input your wallet connect id(read more):")
-	walletConnectID, err := scanner.ScanString()
-	if err != nil {
-		fmt.Println("Error scanning wallet connect id:", err)
-		return err
-	}
-
+	var (
+		databasePassword     = installBlockExplorerInput.DatabasePassword
+		databaseUserName     = installBlockExplorerInput.DatabaseUsername
+		coinmarketcapKey     = installBlockExplorerInput.CoinmarketcapKey
+		coinmarketcapTokenID = installBlockExplorerInput.CoinmarketcapTokenID
+		walletConnectID      = installBlockExplorerInput.WalletConnectProjectID
+	)
 	err = makeBlockExplorerEnvs(
 		"tokamak-thanos-stack/terraform",
 		".envrc",
@@ -165,7 +141,7 @@ func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
 		deployConfig.L1RPCURL,
 		constants.L2ChainId,
 		coinmarketcapKey,
-		coinmarketcapTokenId,
+		coinmarketcapTokenID,
 		releaseName,
 		deployConfig.ChainName,
 		walletConnectID,

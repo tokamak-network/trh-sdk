@@ -22,18 +22,6 @@ type ThanosStack struct {
 	stack   string
 }
 
-type DeployContractsInput struct {
-	l1Provider string
-	l1RPCurl   string
-	seed       string
-	fraudProof bool
-}
-
-type DeployInfraInput struct {
-	ChainName   string
-	L1BeaconURL string
-}
-
 func NewThanosStack(network string, stack string) *ThanosStack {
 	return &ThanosStack{
 		network: network,
