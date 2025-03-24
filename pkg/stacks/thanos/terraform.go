@@ -44,15 +44,8 @@ func (t *ThanosStack) destroyTerraform(path string) error {
 	if !checkDirExists(path) {
 		return nil
 	}
-	exist, err := utils.CheckTerraformState(path)
-	if err != nil {
-		return err
-	}
-	if !exist {
-		return nil
-	}
 
-	err = utils.ExecuteCommandStream("bash", []string{
+	err := utils.ExecuteCommandStream("bash", []string{
 		"-c",
 		fmt.Sprintf(`cd %s && source ../.envrc && terraform destroy -auto-approve -parallelism=100`, path),
 	}...)

@@ -17,8 +17,6 @@ func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
 	var (
 		namespace = deployConfig.K8s.Namespace
 		vpcId     = deployConfig.AWS.VpcID
-		awsRegion = deployConfig.AWS.Region
-		chainName = deployConfig.ChainName
 	)
 
 	awsConfig := deployConfig.AWS
@@ -89,15 +87,13 @@ func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
 	}
 
 	err = makeBlockExplorerEnvs(
-		"tokamak-thanos-stack/terraform/block-explorer",
+		"tokamak-thanos-stack/terraform",
 		".envrc",
 		types.BlockExplorerEnvs{
-			ThanosStackName:               utils.ConvertToHyphen(chainName),
 			BlockExplorerDatabasePassword: databasePassword,
 			BlockExplorerDatabaseUserName: databaseUserName,
 			BlockExplorerDatabaseName:     "blockscout",
 			VpcId:                         vpcId,
-			AwsRegion:                     awsRegion,
 		},
 	)
 	if err != nil {
@@ -119,8 +115,9 @@ func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
 
 	err = utils.ExecuteCommandStream("bash", []string{
 		"-c",
-		`cd tokamak-thanos-stack/terraform/block-explorer &&
+		`cd tokamak-thanos-stack/terraform &&
 		source .envrc &&
+		cd block-explorer &&
 		terraform init &&
 		terraform plan &&
 		terraform apply -auto-approve
@@ -139,8 +136,9 @@ func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
 
 	rdsConnectionUrl, err := utils.ExecuteCommand("bash", []string{
 		"-c",
-		`cd tokamak-thanos-stack/terraform/block-explorer &&
+		`cd tokamak-thanos-stack/terraform &&
 		source .envrc &&
+		cd block-explorer &&	
 		terraform output -json rds_connection_url`,
 	}...)
 	if err != nil {
@@ -261,6 +259,12 @@ func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
 		return err
 	}
 
+	err = utils.UpdateYAMLField(fileValue, "frontend.ingress.hostname", blockExplorerUrl)
+	if err != nil {
+		fmt.Println("Error updating frontend.ingress.hostname field:", err)
+		return err
+	}
+
 	blockExplorerFrontendReleaseName := fmt.Sprintf("%s-%d", "block-explorer-fe", time.Now().Unix())
 	_, err = utils.ExecuteCommand("helm", []string{
 		"install",
@@ -305,7 +309,7 @@ func (t *ThanosStack) uninstallBlockExplorer(deployConfig *types.Config) error {
 		}
 	}
 	// 2. Destroy terraform resources
-	err = t.destroyTerraform("tokamak-thanos-stack/terraform/block-exlorer")
+	err = t.destroyTerraform("tokamak-thanos-stack/terraform/block-explorer")
 	if err != nil {
 		fmt.Println("Error running block-explorer terraform destroy", err)
 		return err

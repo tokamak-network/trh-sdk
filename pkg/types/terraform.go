@@ -25,8 +25,6 @@ type TerraformEnvConfig struct {
 }
 
 type BlockExplorerEnvs struct {
-	ThanosStackName               string
-	AwsRegion                     string
 	BlockExplorerDatabaseName     string
 	BlockExplorerDatabasePassword string
 	BlockExplorerDatabaseUserName string

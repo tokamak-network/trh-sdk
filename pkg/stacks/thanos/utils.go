@@ -318,7 +318,7 @@ func makeBlockExplorerEnvs(dirPath string, filename string, config types.BlockEx
 
 	filePath := filepath.Join(dirPath, filename)
 
-	output, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	output, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		fmt.Println("Error opening environment file:", err)
 		return err
@@ -328,8 +328,6 @@ func makeBlockExplorerEnvs(dirPath string, filename string, config types.BlockEx
 	writer := bufio.NewWriter(output)
 
 	envVars := []string{
-		fmt.Sprintf("export TF_VAR_thanos_stack_name=\"%s\"\n", config.ThanosStackName),
-		fmt.Sprintf("export TF_VAR_aws_region=\"%s\"\n", config.AwsRegion),
 		fmt.Sprintf("export TF_VAR_db_username=\"%s\"\n", config.BlockExplorerDatabaseUserName),
 		fmt.Sprintf("export TF_VAR_db_password=\"%s\"\n", config.BlockExplorerDatabasePassword),
 		fmt.Sprintf("export TF_VAR_db_name=\"%s\"\n", config.BlockExplorerDatabaseName),
