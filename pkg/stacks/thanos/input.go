@@ -52,12 +52,12 @@ func (t *ThanosStack) inputDeployContracts(ctx context.Context) (*DeployContract
 	}
 
 	fraudProof := false
-	fmt.Print("Would you like to enable the fault-proof system on your chain? [Y or N] (default: N): ")
-	fraudProof, err = scanner.ScanBool()
-	if err != nil {
-		fmt.Printf("Error while reading the fault-proof system setting: %s", err)
-		return nil, err
-	}
+	//fmt.Print("Would you like to enable the fault-proof system on your chain? [Y or N] (default: N): ")
+	//fraudProof, err = scanner.ScanBool()
+	//if err != nil {
+	//	fmt.Printf("Error while reading the fault-proof system setting: %s", err)
+	//	return nil, err
+	//}
 
 	return &DeployContractsInput{
 		l1RPCurl:   l1RPCUrl,
