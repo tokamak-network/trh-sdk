@@ -3,6 +3,7 @@ package thanos
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
@@ -194,9 +195,15 @@ func (t *ThanosStack) inputInstallBlockExplorer() (*InstallBlockExplorerInput, e
 			fmt.Println("Error scanning database name: ", err)
 			return nil, err
 		}
+		databaseUserName = strings.ToLower(databaseUserName)
 
 		if databaseUserName == "" {
 			fmt.Println("Database username cannot be empty")
+			continue
+		}
+
+		if err := utils.ValidatePostgresUsername(databaseUserName); err != nil {
+			fmt.Printf("Database username is invalid, err: %s", err.Error())
 			continue
 		}
 
