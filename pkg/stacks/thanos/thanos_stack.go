@@ -425,7 +425,7 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 		namespace,
 	}...)
 	if err != nil {
-		fmt.Println("Error installing Helm charts:", err, "details:", helmSearchOutput)
+		fmt.Println("Error installing Helm charts:", err)
 		return err
 	}
 
@@ -495,8 +495,25 @@ func (t *ThanosStack) destroyDevnet() error {
 }
 
 func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
+	var (
+		aws *types.AWSConfig
+		err error
+	)
+	if deployConfig.AWS == nil {
+		fmt.Println("You aren't logged into your AWS account.")
+		aws, err = t.inputAWSLogin()
+		if err != nil {
+			fmt.Println("Error collecting AWS credentials:", err)
+			return err
+		}
+		if aws == nil {
+			fmt.Println("Failed to collect AWS credentials. Please try again later.")
+			return nil
+		}
+	}
+
 	// login aws again because the session when logging in will be expired after a few time.
-	_, err := loginAWS(deployConfig.AWS)
+	_, err = loginAWS(aws)
 	if err != nil {
 		fmt.Println("Error getting AWS profile:", err)
 		return err
