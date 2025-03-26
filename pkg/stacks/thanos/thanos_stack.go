@@ -502,9 +502,10 @@ func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
 		return err
 	}
 
-	var (
+	var namespace string
+	if deployConfig.AWS != nil {
 		namespace = deployConfig.K8s.Namespace
-	)
+	}
 
 	helmReleases, err := utils.GetHelmReleases(namespace)
 	if err != nil {
