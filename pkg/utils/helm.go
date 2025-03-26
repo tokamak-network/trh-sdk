@@ -6,6 +6,9 @@ import (
 
 // GetHelmReleases fetches the list of Helm releases in the given namespace
 func GetHelmReleases(namespace string) ([]string, error) {
+	if namespace == "" {
+		return nil, nil
+	}
 	output, err := ExecuteCommand("helm", "list", "--namespace", namespace, "-q")
 	if err != nil {
 		return nil, err
