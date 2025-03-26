@@ -503,7 +503,7 @@ func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
 	}
 
 	var namespace string
-	if deployConfig.AWS != nil {
+	if deployConfig.K8s != nil {
 		namespace = deployConfig.K8s.Namespace
 	}
 
