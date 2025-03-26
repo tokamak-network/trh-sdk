@@ -123,6 +123,38 @@ func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
 
 	rdsConnectionUrl = strings.Trim(rdsConnectionUrl, `"`)
 
+	var opGethSVC string
+	for {
+		k8sSvc, err := utils.GetServiceNames(namespace, "op-geth")
+		if err != nil {
+			fmt.Println("Error retrieving svc:", err, "details:", k8sSvc)
+			return err
+		}
+
+		if len(k8sSvc) > 0 {
+			opGethSVC = k8sSvc[0]
+			break
+		}
+
+		time.Sleep(15 * time.Second)
+	}
+
+	var opGethPublicUrl string
+	for {
+		k8sIngresses, err := utils.GetAddressByIngress(namespace, "op-geth")
+		if err != nil {
+			fmt.Println("Error retrieving ingress addresses:", err, "details:", k8sIngresses)
+			return err
+		}
+
+		if len(k8sIngresses) > 0 {
+			opGethPublicUrl = k8sIngresses[0]
+			break
+		}
+
+		time.Sleep(15 * time.Second)
+	}
+
 	// generate the helm chart value file
 	envValues := fmt.Sprintf(`
 		export stack_deployments_path=%s
@@ -136,6 +168,8 @@ func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
 		export rollup_path=%s
 		export rds_connection_url=%s
 		export l1_beacon_rpc_url=%s
+		export op_geth_svc=%s
+		export op_geth_public_url=%s
 		`,
 		deployConfig.DeploymentPath,
 		deployConfig.L1RPCURL,
@@ -148,6 +182,8 @@ func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
 		fmt.Sprintf("%s/tokamak-thanos/build/rollup.json", cwd),
 		rdsConnectionUrl,
 		deployConfig.L1BeaconURL,
+		opGethSVC,
+		opGethPublicUrl,
 	)
 	_, err = utils.ExecuteCommand(
 		"bash",
