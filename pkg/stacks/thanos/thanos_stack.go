@@ -551,6 +551,12 @@ func (t *ThanosStack) InstallPlugins(pluginNames []string, deployConfig *types.C
 				return t.uninstallBlockExplorer(deployConfig)
 			}
 			return nil
+		case constants.PluginBridge:
+			err := t.installBridge(deployConfig)
+			if err != nil {
+				return t.uninstallBridge(deployConfig)
+			}
+			return nil
 		}
 	}
 	return nil
