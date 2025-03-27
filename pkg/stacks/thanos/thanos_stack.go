@@ -496,10 +496,10 @@ func (t *ThanosStack) destroyDevnet() error {
 
 func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
 	var (
-		aws *types.AWSConfig
+		aws = deployConfig.AWS
 		err error
 	)
-	if deployConfig.AWS == nil {
+	if aws == nil {
 		fmt.Println("You aren't logged into your AWS account.")
 		aws, err = t.inputAWSLogin()
 		if err != nil {
