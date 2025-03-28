@@ -198,7 +198,7 @@ func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
 	_, err = utils.ExecuteCommand(
 		"bash",
 		"-c",
-		"cd tokamak-thanos-stack/charts/blockscout-stack && source .env && sh ./scripts/generate-blockscout.sh",
+		"cd tokamak-thanos-stack/charts/blockscout-stack && source .env && bash ./scripts/generate-blockscout.sh",
 	)
 	if err != nil {
 		fmt.Print("\r❌ Make helm values failed!\n")
