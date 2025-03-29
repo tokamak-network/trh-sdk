@@ -287,22 +287,3 @@ func (t *ThanosStack) inputInstallBlockExplorer() (*InstallBlockExplorerInput, e
 		WalletConnectProjectID: walletConnectID,
 	}, nil
 }
-
-func (t *ThanosStack) cloneSourcecode(repositoryName, url string) error {
-	existingSourcecode, err := utils.CheckExistingSourceCode(repositoryName)
-	if err != nil {
-		fmt.Println("Error while checking existing source code")
-		return err
-	}
-
-	if !existingSourcecode {
-		err := utils.CloneRepo(url, repositoryName)
-		if err != nil {
-			fmt.Println("Error while cloning the repository")
-			return err
-		}
-	}
-	fmt.Printf("\r✅ Successfully cloned the %s repository!       \n", repositoryName)
-
-	return nil
-}

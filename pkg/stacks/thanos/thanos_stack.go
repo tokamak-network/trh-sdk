@@ -212,6 +212,7 @@ func (t *ThanosStack) deployLocalDevnet() error {
 		return err
 	}
 
+	return nil
 	err = utils.ExecuteCommandStream("bash", "-c", "cd tokamak-thanos && bash ./install-devnet-packages.sh")
 	if err != nil {
 		fmt.Print("\r❌ Package installation failed!       \n")

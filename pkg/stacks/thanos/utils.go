@@ -394,3 +394,28 @@ func checkDirExists(path string) bool {
 	}
 	return info.IsDir()
 }
+
+func (t *ThanosStack) cloneSourcecode(repositoryName, url string) error {
+	existingSourcecode, err := utils.CheckExistingSourceCode(repositoryName)
+	if err != nil {
+		fmt.Println("Error while checking existing source code")
+		return err
+	}
+
+	if !existingSourcecode {
+		err := utils.CloneRepo(url, repositoryName)
+		if err != nil {
+			fmt.Println("Error while cloning the repository")
+			return err
+		}
+	} else {
+		err := utils.PullLatestCode(repositoryName)
+		if err != nil {
+			fmt.Printf("Error while pulling the latest code for repository %s: %v\n", repositoryName, err)
+			return err
+		}
+	}
+	fmt.Printf("\r✅ Clone the %s repository successfully \n", repositoryName)
+
+	return nil
+}
