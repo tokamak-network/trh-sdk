@@ -157,7 +157,7 @@ func (t *ThanosStack) installBridge(deployConfig *types.Config) error {
 		return err
 	}
 
-	fmt.Println("✅ Bridge component installed successfully")
+	fmt.Println("✅ Bridge component installed successfully and is being initialized. Please wait for the ingress address to become available...")
 	var bridgeUrl string
 	for {
 		k8sIngresses, err := utils.GetAddressByIngress(namespace, helmReleaseName)
@@ -173,7 +173,7 @@ func (t *ThanosStack) installBridge(deployConfig *types.Config) error {
 
 		time.Sleep(15 * time.Second)
 	}
-	fmt.Printf("Network deployment completed successfully. RPC endpoint: %s", bridgeUrl)
+	fmt.Printf("✅ Bridge component is up and running. You can access it at: %s\n", bridgeUrl)
 
 	return nil
 }

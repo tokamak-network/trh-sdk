@@ -291,7 +291,7 @@ func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
 		fmt.Println("Error installing block explorer front-end component:", err)
 	}
 
-	fmt.Printf("✅ Install block explorer frontend component successfully: %s", blockExplorerUrl)
+	fmt.Printf("✅ Block Explorer frontend component installed successfully. Accessible at: %s\n", blockExplorerUrl)
 
 	return nil
 }

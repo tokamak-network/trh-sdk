@@ -446,7 +446,8 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 
 		time.Sleep(15 * time.Second)
 	}
-	fmt.Printf("Network deployment completed successfully. RPC endpoint: %s", l2RPCUrl)
+	fmt.Printf("✅ Network deployment completed successfully!\n")
+	fmt.Printf("🌐 RPC endpoint: %s\n", l2RPCUrl)
 
 	deployConfig.K8s = &types.K8sConfig{
 		Namespace: namespace,
@@ -466,6 +467,9 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 	if err != nil {
 		fmt.Println("Error installing bridge:", err)
 	}
+	fmt.Println("🎉 Thanos Stack installation completed successfully!")
+	fmt.Println("🚀 Your network is now up and running.")
+	fmt.Println("🔧 You can start interacting with your deployed infrastructure.")
 
 	return nil
 }

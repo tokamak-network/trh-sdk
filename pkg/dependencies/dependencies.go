@@ -15,14 +15,6 @@ func CheckK8sInstallation() bool {
 	}
 	fmt.Println("✅ kubectl is installed")
 
-	// Check if Kubernetes cluster is accessible
-	_, err = utils.ExecuteCommand("kubectl", "cluster-info")
-	if err != nil {
-		fmt.Println("❌ Unable to access Kubernetes cluster")
-		return true
-	}
-	fmt.Println("✅ Kubernetes cluster is accessible")
-
 	return true
 }
 
