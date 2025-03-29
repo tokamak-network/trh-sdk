@@ -199,10 +199,10 @@ func (t *ThanosStack) Deploy(ctx context.Context, deployConfig *types.Config) er
 			}
 			return nil
 		default:
-			return fmt.Errorf("Infrastructure provider %s is not supported", infraOpt)
+			return fmt.Errorf("infrastructure provider %s is not supported", infraOpt)
 		}
 	default:
-		return fmt.Errorf("Network %s is not supported", t.network)
+		return fmt.Errorf("network %s is not supported", t.network)
 	}
 }
 
@@ -212,7 +212,6 @@ func (t *ThanosStack) deployLocalDevnet() error {
 		return err
 	}
 
-	return nil
 	err = utils.ExecuteCommandStream("bash", "-c", "cd tokamak-thanos && bash ./install-devnet-packages.sh")
 	if err != nil {
 		fmt.Print("\r❌ Package installation failed!       \n")
