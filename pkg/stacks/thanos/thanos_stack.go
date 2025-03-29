@@ -208,6 +208,8 @@ func (t *ThanosStack) Deploy(ctx context.Context, deployConfig *types.Config) er
 	default:
 		return fmt.Errorf("network %s is not supported", t.network)
 	}
+
+	return nil
 }
 
 func (t *ThanosStack) deployLocalDevnet() error {
