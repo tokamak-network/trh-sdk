@@ -178,7 +178,11 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 func (t *ThanosStack) Deploy(ctx context.Context, deployConfig *types.Config) error {
 	switch t.network {
 	case constants.LocalDevnet:
-		return t.deployLocalDevnet()
+		err := t.deployLocalDevnet()
+		if err != nil {
+			fmt.Printf("Error deploying local devnet: %s", err)
+			return t.destroyDevnet()
+		}
 	case constants.Testnet, constants.Mainnet:
 		fmt.Print("Please select your infrastructure provider [AWS] (default: AWS): ")
 		input, err := scanner.ScanString()
