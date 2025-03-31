@@ -31,7 +31,7 @@ jobs:
         shell: bash
         run: go mod download
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v7
         with:
           version: v1.54.2
           args: --config=.golangci.yml --timeout=10m
