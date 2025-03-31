@@ -43,3 +43,15 @@ func CheckFileExists(filePath string) bool {
 	// Return false in case of other errors
 	return false
 }
+
+func CheckDirExists(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false
+		}
+		fmt.Println("Error checking directory:", err)
+		return false
+	}
+	return info.IsDir()
+}
