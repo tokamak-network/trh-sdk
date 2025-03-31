@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/ethereum/go-ethereum/ethclient"
+
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -94,7 +96,7 @@ func (t *ThanosStack) inputAWSLogin() (*types.AWSConfig, error) {
 		err                          error
 	)
 	for {
-		fmt.Print("Please enter your AWS access key (learn more): ")
+		fmt.Print("Please enter your AWS access key: ")
 		awsAccessKeyID, err = scanner.ScanString()
 		if err != nil {
 			fmt.Println("Error while reading AWS access key")
@@ -112,7 +114,7 @@ func (t *ThanosStack) inputAWSLogin() (*types.AWSConfig, error) {
 	}
 
 	for {
-		fmt.Print("Please enter your AWS secret key (learn more): ")
+		fmt.Print("Please enter your AWS secret key: ")
 		awsSecretKey, err = scanner.ScanString()
 		if err != nil {
 			fmt.Println("Error while reading AWS secret key")
@@ -183,7 +185,7 @@ func (t *ThanosStack) inputInstallBlockExplorer() (*InstallBlockExplorerInput, e
 		databaseUserName,
 		databasePassword,
 		coinmarketcapKey,
-		coinmarketcapTokenID,
+		//coinmarketcapTokenID,
 		walletConnectID string
 		err error
 	)
@@ -235,7 +237,7 @@ func (t *ThanosStack) inputInstallBlockExplorer() (*InstallBlockExplorerInput, e
 	}
 
 	for {
-		fmt.Print("Please input your CoinMarketCap key(read more): ")
+		fmt.Print("Please input your CoinMarketCap key: ")
 		coinmarketcapKey, err = scanner.ScanString()
 		if err != nil {
 			fmt.Println("Error scanning CoinMarketCap key:", err)
@@ -243,29 +245,29 @@ func (t *ThanosStack) inputInstallBlockExplorer() (*InstallBlockExplorerInput, e
 		}
 
 		if coinmarketcapKey == "" {
-			fmt.Println("Coinmarketcap key cannot be empty")
+			fmt.Println("CoinMarketCap key cannot be empty")
 			continue
 		}
 		break
 	}
 
-	for {
-		fmt.Print("Please input your CoinMarketCap token id(read more): ")
-		coinmarketcapTokenID, err = scanner.ScanString()
-		if err != nil {
-			fmt.Println("Error scanning CoinMarketCap token id:", err)
-			return nil, err
-		}
+	//for {
+	//	fmt.Print("Please input your CoinMarketCap Token ID: ")
+	//	coinmarketcapTokenID, err = scanner.ScanString()
+	//	if err != nil {
+	//		fmt.Println("Error scanning CoinMarketCap token id:", err)
+	//		return nil, err
+	//	}
+	//
+	//	if coinmarketcapTokenID == "" {
+	//		fmt.Println("Coinmarketcap ID cannot be empty")
+	//		continue
+	//	}
+	//	break
+	//}
 
-		if coinmarketcapTokenID == "" {
-			fmt.Println("Coinmarketcap ID cannot be empty")
-			continue
-		}
-		break
-	}
-
 	for {
-		fmt.Print("Please input your wallet connect id(read more): ")
+		fmt.Print("Please input your wallet connect id: ")
 		walletConnectID, err = scanner.ScanString()
 		if err != nil {
 			fmt.Println("Error scanning wallet connect id:", err)
@@ -283,7 +285,7 @@ func (t *ThanosStack) inputInstallBlockExplorer() (*InstallBlockExplorerInput, e
 		DatabaseUsername:       databaseUserName,
 		DatabasePassword:       databasePassword,
 		CoinmarketcapKey:       coinmarketcapKey,
-		CoinmarketcapTokenID:   coinmarketcapTokenID,
+		CoinmarketcapTokenID:   constants.TonCoinMarketCapTokenID,
 		WalletConnectProjectID: walletConnectID,
 	}, nil
 }
