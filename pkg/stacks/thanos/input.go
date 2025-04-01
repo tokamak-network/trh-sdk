@@ -3,6 +3,7 @@ package thanos
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -11,6 +12,10 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
+)
+
+var (
+	chainNameRegex = regexp.MustCompile(`^[a-zA-Z0-9 ]+$`)
 )
 
 type DeployContractsInput struct {
@@ -150,23 +155,43 @@ func (t *ThanosStack) inputAWSLogin() (*types.AWSConfig, error) {
 }
 
 func (t *ThanosStack) inputDeployInfra() (*DeployInfraInput, error) {
-	fmt.Print("Please enter your chain name: ")
-	chainName, err := scanner.ScanString()
-	if err != nil {
-		fmt.Printf("Error while reading chain name: %s", err)
-		return nil, err
+	var (
+		chainName   string
+		l1BeaconURL string
+		err         error
+	)
+	for {
+		fmt.Print("Please enter your chain name: ")
+		chainName, err = scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error while reading chain name: %s", err)
+			return nil, err
+		}
+
+		chainName = strings.Join(strings.Fields(chainName), " ")
+
+		if chainName == "" {
+			fmt.Println("Error: Chain name cannot be empty")
+			continue
+		}
+
+		if !chainNameRegex.MatchString(chainName) {
+			fmt.Println("Input must contain only letters (a-z, A-Z), numbers (0-9), spaces. Special characters are not allowed")
+			continue
+		}
+
+		break
 	}
 
-	var l1BeaconUrl string
 	for {
 		fmt.Print("Please enter your L1 beacon URL: ")
-		l1BeaconUrl, err = scanner.ScanString()
+		l1BeaconURL, err = scanner.ScanString()
 		if err != nil {
 			fmt.Printf("Error while reading L1 beacon URL: %s\n", err)
 			continue
 		}
 
-		if !utils.IsValidBeaconURL(l1BeaconUrl) {
+		if !utils.IsValidBeaconURL(l1BeaconURL) {
 			fmt.Println("Error: The URL provided does not return a valid beacon genesis response. Please enter a valid URL.")
 			continue
 		}
@@ -176,7 +201,7 @@ func (t *ThanosStack) inputDeployInfra() (*DeployInfraInput, error) {
 
 	return &DeployInfraInput{
 		ChainName:   chainName,
-		L1BeaconURL: l1BeaconUrl,
+		L1BeaconURL: l1BeaconURL,
 	}, nil
 }
 

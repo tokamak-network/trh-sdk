@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
+	"strings"
 
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
@@ -84,5 +86,12 @@ func ReadConfigFromJSONFile() (*Config, error) {
 }
 
 func ConvertChainNameToNamespace(chainName string) string {
-	return utils.ConvertToHyphen(chainName)
+	processed := strings.ToLower(chainName)
+	processed = strings.ReplaceAll(processed, " ", "-")
+	processed = regexp.MustCompile(`[^a-z0-9-]`).ReplaceAllString(processed, "")
+	processed = strings.Trim(processed, "-")
+	if len(processed) > 63 {
+		processed = processed[:63]
+	}
+	return processed
 }
