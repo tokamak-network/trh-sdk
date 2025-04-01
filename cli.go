@@ -14,26 +14,26 @@ import (
 
 func Run() {
 	cmd := &cli.Command{
-		Name:  "tokamak-sdk-cli",
-		Usage: "make an explosive entrance",
+		Name:  "trh-sdk",
+		Usage: "Ignite your own L2 development",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return nil
 		},
 		Commands: []*cli.Command{
 			{
 				Name:   "deploy-contracts",
-				Usage:  "Deploy contracts",
+				Usage:  "Deploy contracts on L1",
 				Flags:  flags.DeployContractsFlag,
 				Action: commands.ActionDeployContracts(),
 			},
 			{
 				Name:   "deploy",
-				Usage:  "Deploy infrastructure",
+				Usage:  "Deploy infrastructure and bring up the L2 network",
 				Action: commands.ActionDeploy(),
 			},
 			{
 				Name:  "dependencies",
-				Usage: "Dependencies",
+				Usage: "Check and install dependencies",
 
 				Commands: []*cli.Command{
 					{
@@ -61,7 +61,7 @@ func Run() {
 					},
 					{
 						Name:  "check",
-						Usage: "remove an existing template",
+						Usage: "Check the dependencies",
 						Action: func(ctx context.Context, cmd *cli.Command) error {
 							dependenciesCmd := commands.Dependencies{}
 							dependenciesCmd.Check(cmd.Args().Slice())
@@ -72,7 +72,7 @@ func Run() {
 			},
 			{
 				Name:   "destroy",
-				Usage:  "Destroy infrastructure",
+				Usage:  "Destroy deployed infrastructure and bring down the L2 network",
 				Action: commands.ActionDestroyInfra(),
 			},
 			{
@@ -111,7 +111,7 @@ func Run() {
 			},
 			{
 				Name:   "version",
-				Usage:  "SDK version",
+				Usage:  "Show SDK version",
 				Action: commands.ActionVersion(),
 			},
 		},
