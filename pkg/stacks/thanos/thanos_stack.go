@@ -67,6 +67,15 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		return fmt.Errorf("no operators were found")
 	}
 
+	fmt.Println(" The SDK is ready to deploy the contracts to the L1 environment. Do you want to proceed? (Y/n)")
+	confirmation, err := scanner.ScanBool(true)
+	if err != nil {
+		return err
+	}
+	if !confirmation {
+		return nil
+	}
+
 	err = makeDeployContractConfigJsonFile(ctx, l1Client, operators, deployContractsTemplate)
 	if err != nil {
 		return err

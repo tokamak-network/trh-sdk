@@ -42,7 +42,7 @@ func Run() {
 						Action: func(ctx context.Context, cmd *cli.Command) error {
 							fmt.Println("Install the dependencies...")
 							fmt.Print("Would you like to install dependencies? (y/N): ")
-							choose, err := scanner.ScanBool()
+							choose, err := scanner.ScanBool(false)
 							if err != nil {
 								return err
 							}

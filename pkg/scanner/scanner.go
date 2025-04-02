@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-func ScanBool() (bool, error) {
+func ScanBool(defaultResponse bool) (bool, error) {
 	var response string
 	n, err := fmt.Scanln(&response)
 	// Blank input, default No
@@ -16,7 +16,7 @@ func ScanBool() (bool, error) {
 	}
 
 	if strings.ToLower(response) != "n" && strings.ToLower(response) != "y" {
-		return false, fmt.Errorf("Invalid input")
+		return false, fmt.Errorf("invalid input")
 	}
 	if err != nil {
 		return false, err
@@ -25,7 +25,7 @@ func ScanBool() (bool, error) {
 	if strings.ToLower(response) == "y" {
 		return true, nil
 	}
-	return false, nil
+	return defaultResponse, nil
 }
 
 func ScanString() (string, error) {

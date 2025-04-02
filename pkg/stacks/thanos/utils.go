@@ -62,7 +62,7 @@ func selectAccounts(ctx context.Context, client *ethclient.Client, enableFraudPr
 
 	prompts := []string{
 		fmt.Sprintf("Select an admin account from the following list (minimum %.4f ETH required)", utils.WeiToEther(minimumBalanceForAdmin)),
-		"Select a sequencer account from the following list",
+		"Select a sequencer account from the following list(No minimum requirement)",
 		"Select a batcher account from the following list (recommended 0.3 ETH)",
 		"Select a proposer account from the following list (recommended 0.3 ETH)",
 	}
@@ -114,7 +114,7 @@ func selectAccounts(ctx context.Context, client *ethclient.Client, enableFraudPr
 			for j, selectedAccountIndex := range selectedAccountsIndex {
 				if selectingIndex == selectedAccountIndex {
 					fmt.Printf("You selected this account as the %s. Do you want to want to continue(y/N): ", mapAccountIndexes[j])
-					nextInput, err := scanner.ScanBool()
+					nextInput, err := scanner.ScanBool(false)
 					if err != nil {
 						return nil, err
 					}
