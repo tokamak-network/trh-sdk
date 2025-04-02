@@ -15,6 +15,8 @@ var L1ChainConfigurations = map[uint64]struct {
 	USDTAddress                      string `json:"usdt_address"`
 	ChainName                        string `json:"chain_name"`
 	BlockExplorer                    string `json:"block_explorer"`
+	L1VerificationContractAddress    string `json:"l1_verification_contract_address"`
+	L2TonAddress                     string `json:"l2_ton_address"`
 }{
 	1: {
 		L2NativeTokenAddress: "0x2be5e8c109e2197D077D13A82dAead6a9b3433C5",
@@ -28,6 +30,9 @@ var L1ChainConfigurations = map[uint64]struct {
 		USDTAddress:                      "0xdac17f958d2ee523a2206206994597c13d831ec7",
 		ChainName:                        "Ethereum Mainnet",
 		BlockExplorer:                    "https://etherscan.io",
+		L1VerificationContractAddress:    "0x0000000000000000000000000000000000000000",
+		L2TonAddress:                     "0x0000000000000000000000000000000000000000",
+
 	},
 	11155111: {
 		L2NativeTokenAddress: "0xa30fe40285b8f5c0457dbc3b7c8a280373c40044",
@@ -42,6 +47,9 @@ var L1ChainConfigurations = map[uint64]struct {
 		USDTAddress:                      "0xaa8e23fb1079ea71e0a56f48a2aa51851d8433d0",
 		ChainName:                        "Ethereum Sepolia",
 		BlockExplorer:                    "https://sepolia.etherscan.io/",
+		L1VerificationContractAddress:    "0x0000000000000000000000000000000000000000",
+		L2TonAddress:                     "0x0000000000000000000000000000000000000000",
+
 	},
 	17000: {
 		L2NativeTokenAddress: "0xe11Ad6B761D175042340a784640d3A6e373E52A5",
@@ -56,6 +64,9 @@ var L1ChainConfigurations = map[uint64]struct {
 		USDTAddress:                      "0xD6e9Cd5ef382b0830653d1b2007D5Ca6987FaA26", // use USDT from morph: https://docs.morphl2.io/docs/quick-start/faucet/#erc20-usdt
 		ChainName:                        "Ethereum Holesky",
 		BlockExplorer:                    "https://holesky.etherscan.io/",
+		L1VerificationContractAddress:    "0x0000000000000000000000000000000000000000",
+		L2TonAddress:                     "0x0000000000000000000000000000000000000000",
+
 	},
 }
 

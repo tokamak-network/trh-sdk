@@ -178,26 +178,38 @@ func (t *ThanosStack) cloneSourcecode(repositoryName, url string) error {
 	return nil
 }
 
-func (t *ThanosStack) inputVerifyAndRegister() (bool, error) {
-	fmt.Print("Would you like to verify and register the candidate? [Y or N] (default: N): ")
-	verifyAndRegister, err := scanner.ScanBool()
-	if err != nil {
-		fmt.Printf("Error while reading verification and registration choice: %s", err)
-		return false, err
-	}
-
-	return verifyAndRegister, nil
-}
-
-func (t *ThanosStack) inputRegisterCandidate() (*RegisterCandidateInput, error) {
+func (t *ThanosStack) inputRegisterCandidate(fromDeployContract bool) (*RegisterCandidateInput, error) {
 	var (
 		rollupConfig string
 		amount       float64
 		memo         string
 		useTon       bool
 		nameInfo     string
+		seed         string
 		err          error
 	)
+	for {
+		fmt.Print("Please enter the amount of TON to stake (minimum 1000.1): ")
+		amount, err = scanner.ScanFloat()
+		if err != nil {
+			fmt.Printf("Error while reading amount: %s\n", err)
+			continue
+		}
+		if amount < 1000.1 {
+			fmt.Println("Error: Amount must be at least 1000.1 TON")
+			continue
+		}
+		break
+	}
+
+	if !fromDeployContract {
+		fmt.Print("Please enter your admin seed phrase: ")
+		seed, err = scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error while reading the seed phrase: %s", err)
+			return nil, err
+		}
+	}
 
 	for {
 		fmt.Print("Please enter the rollup config address: ")
@@ -213,21 +225,6 @@ func (t *ThanosStack) inputRegisterCandidate() (*RegisterCandidateInput, error) 
 		break
 	}
 
-	for {
-		fmt.Print("Please enter the amount of TON to stake (minimum 1000.1): ")
-		amount, err = scanner.ScanFloat()
-		if err != nil {
-			fmt.Printf("Error while reading amount: %s\n", err)
-			continue
-		}
-		if amount < 1000.1 {
-			fmt.Println("Error: Amount must be at least 1000.1 TON")
-			continue
-		}
-		break
-	}
-
-	memo = ""
 	fmt.Print("Please enter a memo for the registration (optional): ")
 	memo, err = scanner.ScanString()
 	if err != nil {
@@ -235,7 +232,6 @@ func (t *ThanosStack) inputRegisterCandidate() (*RegisterCandidateInput, error) 
 		return nil, err
 	}
 
-	nameInfo = ""
 	fmt.Print("Please enter a name for the registration (optional): ")
 	nameInfo, err = scanner.ScanString()
 	if err != nil {
@@ -260,5 +256,6 @@ func (t *ThanosStack) inputRegisterCandidate() (*RegisterCandidateInput, error) 
 		useTon:       useTon,
 		memo:         memo,
 		nameInfo:     nameInfo,
+		seed:         seed,
 	}, nil
 }

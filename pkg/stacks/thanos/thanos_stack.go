@@ -46,6 +46,7 @@ type RegisterCandidateInput struct {
 	useTon       bool
 	memo         string
 	nameInfo     string
+	seed         string
 }
 
 func NewThanosStack(network string, stack string) *ThanosStack {
@@ -197,17 +198,18 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	}
 	fmt.Printf("✅ Configuration successfully saved to: %s/settings.json", cwd)
 
-	verifyAndRegister, err := t.inputVerifyAndRegister()
-	if err != nil {
-		return err
-	}
+	noCandidate := ctx.Value("no-candidate").(bool)
 
-	if verifyAndRegister {
-		err = t.VerifyRegisterCandidates(ctx)
+	// If --no-candidate flag is NOT provided, register the candidate
+	if !noCandidate {
+		fmt.Println("🔍 Verifying and registering candidate...")
+		err := t.VerifyRegisterCandidates(ctx, true)
 		if err != nil {
-			fmt.Println("Failed register candidate:", err)
-			return err
+			return fmt.Errorf("candidate registration failed: %v", err)
 		}
+		fmt.Println("✅ Candidate registration completed successfully!")
+	} else {
+		fmt.Println("ℹ️ Skipping candidate registration (--no-candidate flag provided)")
 	}
 
 	return nil
@@ -582,40 +584,43 @@ func (t *ThanosStack) InstallPlugins(pluginNames []string, deployConfig *types.C
 
 // --------------------------------------------- Register Candidates ---------------------------
 
-func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context) error {
-	registerCandidate, err := t.inputRegisterCandidate()
+// fromDeployContract flag would be true if the function would be called from the deploy contract function
+func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, fromDeployContract bool) error {
+	var privateKeyString string
+	config, err := types.ReadConfigFromJSONFile()
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %v", err)
+	}
+
+	l1Client, err := ethclient.DialContext(ctx, config.L1RPCURL)
+	if err != nil {
+		return err
+	}
+	chainID, err := l1Client.ChainID(ctx)
+	if err != nil {
+		fmt.Printf("Failed to get chain id: %s", err)
+		return err
+	}
+
+	registerCandidate, err := t.inputRegisterCandidate(fromDeployContract)
 	if err != nil {
 		return err
 	}
 
-	// Get RPC URL from environment
-	rpcURL := os.Getenv("RPC_URL")
-	if rpcURL == "" {
-		return fmt.Errorf("RPC_URL environment variable is not set")
-	}
-
-	// Connect to Ethereum client
-	client, err := ethclient.Dial(rpcURL)
-	if err != nil {
-		return fmt.Errorf("failed to connect to the Ethereum client: %v", err)
-	}
-
-	// Get private key from environment
-	privateKeyString := os.Getenv("PRIVATE_KEY")
-	if privateKeyString == "" {
-		return fmt.Errorf("PRIVATE_KEY environment variable is not set")
+	if fromDeployContract {
+		privateKeyString = config.AdminPrivateKey
+	} else {
+		operatorsSelected, err := selectAccounts(ctx, l1Client, config.EnableFraudProof, registerCandidate.seed)
+		if err != nil {
+			return err
+		}
+		privateKeyString = operatorsSelected[0].PrivateKey
 	}
 
 	// Parse private key
 	privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKeyString, "0x"))
 	if err != nil {
 		return fmt.Errorf("invalid private key: %v", err)
-	}
-
-	// Get chain ID
-	chainID, err := client.ChainID(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get chain ID: %v", err)
 	}
 
 	// Create transaction auth
@@ -625,14 +630,14 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context) error {
 	}
 
 	// Get contract address from environment
-	contractAddrStr := os.Getenv("L1_VERIFICATION_CONTRACT_ADDRESS")
+	contractAddrStr := constants.L1ChainConfigurations[chainID.Uint64()].L1VerificationContractAddress
 	if contractAddrStr == "" {
-		return fmt.Errorf("L1_VERIFICATION_CONTRACT_ADDRESS environment variable is not set")
+		return fmt.Errorf("L1_VERIFICATION_CONTRACT_ADDRESS not set in constant")
 	}
 	contractAddr := common.HexToAddress(contractAddrStr)
 
 	// Create contract instance
-	contract, err := abis.NewL1ContractVerification(contractAddr, client)
+	contract, err := abis.NewL1ContractVerification(contractAddr, l1Client)
 	if err != nil {
 		return fmt.Errorf("failed to create contract instance: %v", err)
 	}
@@ -644,7 +649,7 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context) error {
 		return fmt.Errorf("SYSTEM_CONFIG_ADDRESS environment variable is not set")
 	}
 
-	l2TonAddress := os.Getenv("L2_TON_ADDRESS")
+	l2TonAddress := constants.L1ChainConfigurations[chainID.Uint64()].L2TonAddress
 	if l2TonAddress == "" {
 		return fmt.Errorf("L2_TON_ADDRESS environment variable is not set")
 	}
@@ -665,7 +670,7 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context) error {
 	fmt.Printf("Transaction submitted: %s\n", txVerifyAndRegisterConfig.Hash().Hex())
 
 	// Wait for transaction confirmation
-	receiptVerifyRegisterConfig, err := bind.WaitMined(ctx, client, txVerifyAndRegisterConfig)
+	receiptVerifyRegisterConfig, err := bind.WaitMined(ctx, l1Client, txVerifyAndRegisterConfig)
 	if err != nil {
 		return fmt.Errorf("failed waiting for transaction confirmation: %v", err)
 	}
@@ -688,7 +693,7 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context) error {
 	l2ManagerAddress := common.HexToAddress(l2ManagerAddressStr)
 
 	// Create contract instance
-	l2ManagerContract, err := abis.NewLayer2ManagerV1(l2ManagerAddress, client)
+	l2ManagerContract, err := abis.NewLayer2ManagerV1(l2ManagerAddress, l1Client)
 	if err != nil {
 		return fmt.Errorf("failed to create contract instance: %v", err)
 	}
@@ -708,7 +713,7 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context) error {
 	fmt.Printf("Transaction submitted: %s\n", txRegisterCandidate.Hash().Hex())
 
 	// Wait for transaction confirmation
-	receiptRegisterCandidate, err := bind.WaitMined(ctx, client, txRegisterCandidate)
+	receiptRegisterCandidate, err := bind.WaitMined(ctx, l1Client, txRegisterCandidate)
 	if err != nil {
 		return fmt.Errorf("failed waiting for transaction confirmation: %v", err)
 	}
