@@ -241,7 +241,14 @@ func (t *ThanosStack) deployLocalDevnet() error {
 		shellConfigFile = "~/.bashrc"
 	}
 
+	// Source the shell configuration file
 	err = utils.ExecuteCommandStream("bash", "-c", fmt.Sprintf("source %s", shellConfigFile))
+	if err != nil {
+		return err
+	}
+
+	// Start a new shell session to ensure the profile is loaded
+	err = utils.ExecuteCommandStream("bash", "-c", "exec $SHELL")
 	if err != nil {
 		return err
 	}
