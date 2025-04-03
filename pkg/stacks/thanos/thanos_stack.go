@@ -232,6 +232,20 @@ func (t *ThanosStack) deployLocalDevnet() error {
 		fmt.Print("\r❌ Package installation failed!       \n")
 		return err
 	}
+
+	// STEP 2. Source the config file
+	var shellConfigFile string
+	if os.Getenv("SHELL") == "/bin/zsh" || os.Getenv("SHELL") == "/usr/bin/zsh" {
+		shellConfigFile = "~/.zshrc"
+	} else {
+		shellConfigFile = "~/.bashrc"
+	}
+
+	err = utils.ExecuteCommandStream("bash", "-c", fmt.Sprintf("source %s", shellConfigFile))
+	if err != nil {
+		return err
+	}
+
 	fmt.Print("\r✅ Package installation completed successfully!       \n")
 
 	err = utils.ExecuteCommandStream("bash", "-c", "cd tokamak-thanos && export DEVNET_L2OO=true && make devnet-up")
@@ -562,7 +576,8 @@ func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
 
 	fmt.Println("Helm release removed successfully:")
 
-	return t.clearTerraformState()
+	//return t.clearTerraformState()
+	return nil
 }
 
 // ------------------------------------------ Install plugins ---------------------------
