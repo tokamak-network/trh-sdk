@@ -56,6 +56,9 @@ fi
 if ! grep -q "export PATH=\"\$HOME/.local/share/pnpm:\$PATH\"" "$SHELL_CONFIG"; then
     echo "export PATH=\"\$HOME/.local/share/pnpm:\$PATH\"" >> "$SHELL_CONFIG"
 fi
+if ! grep -q "export PATH=\"\$HOME/.cargo/env:\$PATH\"" "$SHELL_CONFIG"; then
+    echo "export PATH=\"\$HOME/.cargo/env:\$PATH\"" >> "$SHELL_CONFIG"
+fi
 
 # Source shell config and set PATH temporarily for this session
 source "$SHELL_CONFIG" || true

@@ -320,6 +320,7 @@ install_aws_cli
 install_helm
 install_kubectl
 install_nodejs
+install_build_essential
 install_pnpm
 install_cargo
 install_foundry
