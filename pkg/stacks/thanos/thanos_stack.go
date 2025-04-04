@@ -38,6 +38,16 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	if t.network != constants.Testnet && t.network != constants.Mainnet {
 		return fmt.Errorf("network %s does not support", t.network)
 	}
+
+	// Check dependencies
+	if !dependencies.CheckPnpmInstallation() {
+		return fmt.Errorf("pnpm is not installed")
+	}
+
+	if !dependencies.CheckFoundryInstallation() {
+		return fmt.Errorf("foundry is not installed")
+	}
+
 	var err error
 	// STEP 1. Input the parameters
 	deployContractsConfig, err := t.inputDeployContracts(ctx)
