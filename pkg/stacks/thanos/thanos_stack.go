@@ -43,11 +43,13 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 
 	// Check dependencies
 	if !dependencies.CheckPnpmInstallation() {
-		return fmt.Errorf("❌ pnpm is not installed or not found in PATH. Try running `source %s` to set up your environment", shellConfigFile)
+		fmt.Printf("Try running `source %s` to set up your environment", shellConfigFile)
+		return nil
 	}
 
 	if !dependencies.CheckFoundryInstallation() {
-		return fmt.Errorf("❌ Foundry is not installed or not found in PATH. Try running `source %s` to set up your environment", shellConfigFile)
+		fmt.Printf("Try running `source %s` to set up your environment", shellConfigFile)
+		return nil
 	}
 
 	var err error
