@@ -39,13 +39,15 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		return fmt.Errorf("network %s does not support", t.network)
 	}
 
+	shellConfigFile := utils.GetShellConfigDefault()
+
 	// Check dependencies
 	if !dependencies.CheckPnpmInstallation() {
-		return fmt.Errorf("pnpm is not installed")
+		return fmt.Errorf("❌ pnpm is not installed or not found in PATH. Try running `source %s` to set up your environment", shellConfigFile)
 	}
 
 	if !dependencies.CheckFoundryInstallation() {
-		return fmt.Errorf("foundry is not installed")
+		return fmt.Errorf("❌ Foundry is not installed or not found in PATH. Try running `source %s` to set up your environment", shellConfigFile)
 	}
 
 	var err error
@@ -244,12 +246,7 @@ func (t *ThanosStack) deployLocalDevnet() error {
 	}
 
 	// STEP 2. Source the config file
-	var shellConfigFile string
-	if os.Getenv("SHELL") == "/bin/zsh" || os.Getenv("SHELL") == "/usr/bin/zsh" {
-		shellConfigFile = "~/.zshrc"
-	} else {
-		shellConfigFile = "~/.bashrc"
-	}
+	shellConfigFile := utils.GetShellConfigDefault()
 
 	// Source the shell configuration file
 	err = utils.ExecuteCommandStream("bash", "-c", fmt.Sprintf("source %s", shellConfigFile))
