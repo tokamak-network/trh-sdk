@@ -43,12 +43,12 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 
 	// Check dependencies
 	if !dependencies.CheckPnpmInstallation() {
-		fmt.Printf("Try running `source %s` to set up your environment", shellConfigFile)
+		fmt.Printf("Try running `source %s` to set up your environment \n", shellConfigFile)
 		return nil
 	}
 
 	if !dependencies.CheckFoundryInstallation() {
-		fmt.Printf("Try running `source %s` to set up your environment", shellConfigFile)
+		fmt.Printf("Try running `source %s` to set up your environment \n", shellConfigFile)
 		return nil
 	}
 
