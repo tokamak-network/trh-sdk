@@ -14,8 +14,8 @@ import (
 
 func Run() {
 	cmd := &cli.Command{
-		Name:  "tokamak-sdk-cli",
-		Usage: "make an explosive entrance",
+		Name:  "trh-sdk",
+		Usage: "Tokamak Rollup Hub SDK",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return nil
 		},
