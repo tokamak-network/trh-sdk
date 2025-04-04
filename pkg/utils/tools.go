@@ -85,7 +85,6 @@ func CheckChainIDUsage(chainID int64) (bool, error) {
 }
 
 // GenerateL2ChainId generates a unique L2 Chain ID and returns it.
-// If unable to generate a unique ID within maxAttempts, an error is returned.
 func GenerateL2ChainId() uint64 {
 	const base uint64 = 111551119876
 	for {
