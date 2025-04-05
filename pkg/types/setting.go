@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"os"
 	"regexp"
 	"strings"
 
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
+
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 type K8sConfig struct {

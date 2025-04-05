@@ -579,21 +579,22 @@ func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
 	helmReleases, err := utils.GetHelmReleases(namespace)
 	if err != nil {
 		fmt.Println("Error retrieving Helm releases:", err)
-		return err
 	}
 
-	for _, release := range helmReleases {
-		if strings.Contains(release, namespace) || strings.Contains(release, "op-bridge") || strings.Contains(release, "block-explorer") {
-			fmt.Printf("Uninstalling Helm release: %s in namespace: %s...\n", release, namespace)
-			_, err := utils.ExecuteCommand("helm", "uninstall", release, "--namespace", namespace)
-			if err != nil {
-				fmt.Println("Error removing Helm release:", err)
-				return err
+	if len(helmReleases) > 0 {
+		for _, release := range helmReleases {
+			if strings.Contains(release, namespace) || strings.Contains(release, "op-bridge") || strings.Contains(release, "block-explorer") {
+				fmt.Printf("Uninstalling Helm release: %s in namespace: %s...\n", release, namespace)
+				_, err := utils.ExecuteCommand("helm", "uninstall", release, "--namespace", namespace)
+				if err != nil {
+					fmt.Println("Error removing Helm release:", err)
+					return err
+				}
 			}
 		}
-	}
 
-	fmt.Println("Helm release removed successfully:")
+		fmt.Println("Helm release removed successfully")
+	}
 
 	return t.clearTerraformState()
 }
