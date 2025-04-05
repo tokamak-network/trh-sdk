@@ -595,8 +595,7 @@ func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
 
 	fmt.Println("Helm release removed successfully:")
 
-	//return t.clearTerraformState()
-	return nil
+	return t.clearTerraformState()
 }
 
 // ------------------------------------------ Install plugins ---------------------------
