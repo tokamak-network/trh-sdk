@@ -501,7 +501,7 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 		fmt.Println("Error saving configuration file:", err)
 		return err
 	}
-	fmt.Printf("Configuration saved successfully to: %s/settings.json", cwd)
+	fmt.Printf("Configuration saved successfully to: %s/settings.json \n", cwd)
 
 	// After installing the infra successfully, we install the bridge
 	err = t.installBridge(deployConfig)
