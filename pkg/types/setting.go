@@ -1,8 +1,10 @@
 package types
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"os"
 	"regexp"
 	"strings"
@@ -83,6 +85,23 @@ func ReadConfigFromJSONFile() (*Config, error) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, err
 	}
+
+	// If L2ChainId doesn't exist, fetch it from the L2 RPC
+	if config.L2ChainID == 0 {
+		l2Provider, err := ethclient.Dial(config.L2RpcUrl)
+		if err != nil {
+			fmt.Println("Error connecting to L2 blockchain:", err)
+			return nil, err
+		}
+
+		chainId, err := l2Provider.ChainID(context.Background())
+		if err != nil || chainId == nil {
+			fmt.Println("Error getting L2 chain id:", err)
+			return nil, err
+		}
+		config.L2ChainID = chainId.Uint64()
+	}
+
 	return &config, nil
 }
 
