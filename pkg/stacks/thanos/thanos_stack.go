@@ -87,7 +87,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		return fmt.Errorf("no operators were found")
 	}
 
-	fmt.Print(" The SDK is ready to deploy the contracts to the L1 environment. Do you want to proceed(Y/n)? ")
+	fmt.Print("The SDK is ready to deploy the contracts to the L1 environment. Do you want to proceed(Y/n)? ")
 	confirmation, err := scanner.ScanBool(true)
 	if err != nil {
 		return err
@@ -199,7 +199,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		fmt.Println("Failed to write settings file:", err)
 		return err
 	}
-	fmt.Printf("✅ Configuration successfully saved to: %s/settings.json", cwd)
+	fmt.Printf("✅ Configuration successfully saved to: %s/settings.json \n", cwd)
 	return nil
 }
 
