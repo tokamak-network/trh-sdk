@@ -1,7 +1,5 @@
 package constants
 
-import "fmt"
-
 var L1ChainConfigurations = map[uint64]struct {
 	L2NativeTokenAddress string `json:"native_token_address"`
 
@@ -59,7 +57,4 @@ var L1ChainConfigurations = map[uint64]struct {
 	},
 }
 
-const L2ChainId = 111551119876
-
-var basebatchInboxAddress = "0xff00000000000000000000000000000000000000"
-var BatchInboxAddress = fmt.Sprintf("%s%d", basebatchInboxAddress[:len(basebatchInboxAddress)-len(fmt.Sprintf("%d", L2ChainId))], L2ChainId)
+var BaseBatchInboxAddress = "0xff00000000000000000000000000000000000000"
