@@ -201,7 +201,7 @@ func makeDeployContractConfigJsonFile(ctx context.Context, l1Provider *ethclient
 	return nil
 }
 
-func initDeployConfigTemplate(enableFraudProof bool, chainId *big.Int) *types.DeployConfigTemplate {
+func initDeployConfigTemplate(enableFraudProof bool, chainId *big.Int, l2ChainID uint64) *types.DeployConfigTemplate {
 	l1ChainId := chainId.Uint64()
 
 	defaultTemplate := &types.DeployConfigTemplate{
@@ -209,13 +209,13 @@ func initDeployConfigTemplate(enableFraudProof bool, chainId *big.Int) *types.De
 		NativeTokenSymbol:                        "TON",
 		NativeTokenAddress:                       constants.L1ChainConfigurations[l1ChainId].L2NativeTokenAddress,
 		L1ChainID:                                l1ChainId,
-		L2ChainID:                                constants.L2ChainId,
+		L2ChainID:                                l2ChainID,
 		L2BlockTime:                              2,
 		L1BlockTime:                              12,
 		MaxSequencerDrift:                        600,
 		SequencerWindowSize:                      3600,
 		ChannelTimeout:                           300,
-		BatchInboxAddress:                        constants.BatchInboxAddress,
+		BatchInboxAddress:                        utils.GenerateBatchInboxAddress(l2ChainID),
 		L2OutputOracleSubmissionInterval:         constants.L1ChainConfigurations[l1ChainId].L2OutputOracleSubmissionInterval,
 		L2OutputOracleStartingBlockNumber:        0,
 		FinalizationPeriodSeconds:                constants.L1ChainConfigurations[l1ChainId].FinalizationPeriodSeconds,

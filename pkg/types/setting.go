@@ -26,6 +26,7 @@ type Config struct {
 	L1BeaconURL    string `json:"l1_beacon_url"`
 	L1RPCProvider  string `json:"l1_rpc_provider"`
 	L1ChainID      uint64 `json:"l1_chain_id"`
+	L2ChainID      uint64 `json:"l2_chain_id"`
 
 	Stack            string `json:"stack"`
 	Network          string `json:"network"`

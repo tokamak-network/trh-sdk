@@ -63,13 +63,19 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	chainID, err := l1Client.ChainID(ctx)
+	l1ChainID, err := l1Client.ChainID(ctx)
 	if err != nil {
 		fmt.Printf("Failed to get chain id: %s", err)
 		return err
 	}
 
-	deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig.fraudProof, chainID)
+	l2ChainID, err := utils.GenerateL2ChainId()
+	if err != nil {
+		fmt.Printf("Failed to generate L2ChainID: %s", err)
+		return err
+	}
+
+	deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig.fraudProof, l1ChainID, l2ChainID)
 
 	// Select operators Accounts
 	operators, err := selectAccounts(ctx, l1Client, deployContractsConfig.fraudProof, deployContractsConfig.seed)
@@ -181,7 +187,8 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		ChallengerPrivateKey: challengerPrivateKey,
 		DeploymentPath:       fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", cwd, deployContractsTemplate.L1ChainID),
 		L1RPCProvider:        deployContractsConfig.l1Provider,
-		L1ChainID:            chainID.Uint64(),
+		L1ChainID:            l1ChainID.Uint64(),
+		L2ChainID:            l2ChainID,
 		L1RPCURL:             deployContractsConfig.l1RPCurl,
 		Stack:                t.stack,
 		Network:              t.network,

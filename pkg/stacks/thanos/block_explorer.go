@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
@@ -173,7 +172,7 @@ func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
 		`,
 		deployConfig.DeploymentPath,
 		deployConfig.L1RPCURL,
-		constants.L2ChainId,
+		deployConfig.L2ChainID,
 		coinmarketcapKey,
 		coinmarketcapTokenID,
 		releaseName,

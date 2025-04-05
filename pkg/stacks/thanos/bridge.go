@@ -87,7 +87,7 @@ func (t *ThanosStack) installBridge(deployConfig *types.Config) error {
 	opBridgeConfig.OpBridge.Env.L1USDCAddress = constants.L1ChainConfigurations[l1ChainID].USDCAddress
 
 	opBridgeConfig.OpBridge.Env.L2ChainName = chainName
-	opBridgeConfig.OpBridge.Env.L2ChainID = fmt.Sprintf("%d", constants.L2ChainId)
+	opBridgeConfig.OpBridge.Env.L2ChainID = fmt.Sprintf("%d", deployConfig.L2ChainID)
 	opBridgeConfig.OpBridge.Env.L2RPC = deployConfig.L2RpcUrl
 	opBridgeConfig.OpBridge.Env.L2NativeCurrencyName = "Tokamak Network Token"
 	opBridgeConfig.OpBridge.Env.L2NativeCurrencySymbol = "TON"

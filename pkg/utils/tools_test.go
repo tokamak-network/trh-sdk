@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // clearChainListCache resets the cached chain list data.
@@ -63,7 +65,7 @@ func TestCheckChainIDUsage(t *testing.T) {
 // Test function of GenerateL2ChainId()
 func TestGenerateL2ChainId(t *testing.T) {
 	// For testing: empty chain list JSON (i.e. assuming all candidates are unused)
-	emptyChains := []ChainInfo{}
+	var emptyChains []ChainInfo
 	jsonData, err := json.Marshal(emptyChains)
 	if err != nil {
 		t.Fatalf("JSON marshaling failed: %v", err)
@@ -84,10 +86,12 @@ func TestGenerateL2ChainId(t *testing.T) {
 	}()
 
 	// call GenerateL2ChainId()
-	candidate := GenerateL2ChainId()
+	candidate, err := GenerateL2ChainId()
+	require.NoError(t, err)
 
-	// Check the range of candidate values ​​based on the base value and the 5-digit random number range
-	const base = 111551119876
+	t.Logf("Generated L2 Chain ID: %d\n", candidate)
+
+	// Check the range of candidate values based on the base value and the 5-digit random number range
 	minCandidate := base + 10000
 	maxCandidate := base + 99999
 
@@ -95,15 +99,19 @@ func TestGenerateL2ChainId(t *testing.T) {
 		t.Errorf("Generated candidate %d is not in the expected range [%d, %d].", candidate, minCandidate, maxCandidate)
 	}
 
-	// Check that multiple calls produce different values ​​each time.
-	candidate2 := GenerateL2ChainId()
+	// Check that multiple calls produce different values each time.
+	candidate2, err := GenerateL2ChainId()
+	require.NoError(t, err)
+
+	t.Logf("Regenerated L2 Chain ID: %d\n", candidate2)
 	if candidate == candidate2 {
 		t.Errorf("The same candidate was generated in consecutive calls: %d", candidate)
 	}
 
 	// Check if the results come out within a certain amount of time when making repeated calls.
 	start := time.Now()
-	_ = GenerateL2ChainId()
+	_, err = GenerateL2ChainId()
+	require.NoError(t, err)
 	elapsed := time.Since(start)
 	if elapsed > 5*time.Second {
 		t.Errorf("GenerateL2ChainId() function took too long to execute: %v", elapsed)

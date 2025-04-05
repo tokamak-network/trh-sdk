@@ -13,6 +13,11 @@ import (
 	"time"
 )
 
+const (
+	base             = 111551119876
+	retriedThreshold = 5
+)
+
 var chainListURL = "https://chainid.network/chains.json"
 
 var httpClient = &http.Client{Timeout: 10 * time.Second}
@@ -85,13 +90,17 @@ func CheckChainIDUsage(chainID int64) (bool, error) {
 }
 
 // GenerateL2ChainId generates a unique L2 Chain ID and returns it.
-func GenerateL2ChainId() uint64 {
-	const base uint64 = 111551119876
-	for {
+func GenerateL2ChainId() (uint64, error) {
+	retried := 0
+	for retried < retriedThreshold {
 		// Generate a 5-digit random number
 		n, err := rand.Int(rand.Reader, big.NewInt(90000))
 		if err != nil {
-			panic("failed to generate random 5-digit number: " + err.Error())
+			// If failed, regenerate again
+			fmt.Printf("Error initializing random number: %s \n", err.Error())
+			retried++
+			time.Sleep(100 * time.Millisecond)
+			continue
 		}
 		randomFive := uint64(n.Int64()) + 10000
 		candidate := base + randomFive
@@ -102,10 +111,13 @@ func GenerateL2ChainId() uint64 {
 			panic(fmt.Sprintf("failed to check chain id usage: %v", err))
 		}
 		if !inUse {
-			return candidate
+			return candidate, nil
 		}
+		retried++
 		time.Sleep(100 * time.Millisecond)
 	}
+
+	return 0, fmt.Errorf("failed to generate chain id")
 }
 
 func GetGoVersion() (string, error) {

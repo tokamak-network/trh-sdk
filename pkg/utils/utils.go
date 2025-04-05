@@ -1,7 +1,10 @@
 package utils
 
 import (
+	"fmt"
 	"math/big"
+
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 
 	"github.com/ethereum/go-ethereum/params"
 )
@@ -22,4 +25,8 @@ func GWeiToEther(gwei *big.Int) *big.Float {
 
 func GWeiToWei(gwei *big.Int) *big.Int {
 	return new(big.Int).Mul(gwei, new(big.Int).SetUint64(params.GWei))
+}
+
+func GenerateBatchInboxAddress(l2ChainId uint64) string {
+	return fmt.Sprintf("%s%d", constants.BaseBatchInboxAddress[:len(constants.BaseBatchInboxAddress)-len(fmt.Sprintf("%d", l2ChainId))], l2ChainId)
 }
