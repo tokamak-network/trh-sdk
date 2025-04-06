@@ -1,6 +1,7 @@
 package thanos
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -10,18 +11,13 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
-func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
+func (t *ThanosStack) installBlockExplorer(ctx context.Context, deployConfig *types.Config) error {
 	var (
 		namespace = deployConfig.K8s.Namespace
 		vpcId     = deployConfig.AWS.VpcID
 	)
 
-	awsConfig := deployConfig.AWS
-	if awsConfig == nil {
-		return fmt.Errorf("AWS configuration is missing")
-	}
-
-	_, err := loginAWS(awsConfig)
+	_, _, err := t.loginAWS(ctx, deployConfig)
 	if err != nil {
 		fmt.Println("Error to login in AWS:", err)
 		return err
@@ -295,7 +291,7 @@ func (t *ThanosStack) installBlockExplorer(deployConfig *types.Config) error {
 	return nil
 }
 
-func (t *ThanosStack) uninstallBlockExplorer(deployConfig *types.Config) error {
+func (t *ThanosStack) uninstallBlockExplorer(ctx context.Context, deployConfig *types.Config) error {
 	var (
 		namespace = deployConfig.K8s.Namespace
 	)

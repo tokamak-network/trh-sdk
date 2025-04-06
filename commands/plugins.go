@@ -39,7 +39,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 			switch stack {
 			case constants.ThanosStack:
 				thanosStack := thanos.NewThanosStack(network, stack)
-				return thanosStack.InstallPlugins(plugins, config)
+				return thanosStack.InstallPlugins(ctx, plugins, config)
 			default:
 				return nil
 			}
@@ -47,7 +47,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 			switch stack {
 			case constants.ThanosStack:
 				thanosStack := thanos.NewThanosStack(network, stack)
-				return thanosStack.UninstallPlugins(plugins, config)
+				return thanosStack.UninstallPlugins(ctx, plugins, config)
 			default:
 				return nil
 			}

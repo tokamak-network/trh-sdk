@@ -14,7 +14,6 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
@@ -277,16 +276,6 @@ func initDeployConfigTemplate(enableFraudProof bool, chainId *big.Int, l2ChainId
 
 	return defaultTemplate
 
-}
-
-func loginAWS(awsLoginInputs *types.AWSConfig) (*aws.AccountProfile, error) {
-	fmt.Println("Authenticating AWS account...")
-	awsProfileAccount, err := aws.LoginAWS(awsLoginInputs.AccessKey, awsLoginInputs.SecretKey, awsLoginInputs.Region, awsLoginInputs.DefaultFormat)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to authenticate AWS credentials: %s", err)
-	}
-
-	return awsProfileAccount, nil
 }
 
 func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error {

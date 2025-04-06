@@ -1,6 +1,7 @@
 package thanos
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,7 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func (t *ThanosStack) installBridge(deployConfig *types.Config) error {
+func (t *ThanosStack) installBridge(ctx context.Context, deployConfig *types.Config) error {
 	var (
 		namespace = deployConfig.K8s.Namespace
 		chainName = deployConfig.ChainName
@@ -21,12 +22,7 @@ func (t *ThanosStack) installBridge(deployConfig *types.Config) error {
 		l1RPC     = deployConfig.L1RPCURL
 	)
 
-	awsConfig := deployConfig.AWS
-	if awsConfig == nil {
-		return fmt.Errorf("AWS configuration is missing")
-	}
-
-	_, err := loginAWS(awsConfig)
+	_, _, err := t.loginAWS(ctx, deployConfig)
 	if err != nil {
 		fmt.Println("Error to login in AWS:", err)
 		return err
@@ -178,17 +174,12 @@ func (t *ThanosStack) installBridge(deployConfig *types.Config) error {
 	return nil
 }
 
-func (t *ThanosStack) uninstallBridge(deployConfig *types.Config) error {
+func (t *ThanosStack) uninstallBridge(ctx context.Context, deployConfig *types.Config) error {
 	var (
 		namespace = deployConfig.K8s.Namespace
 	)
 
-	awsConfig := deployConfig.AWS
-	if awsConfig == nil {
-		return fmt.Errorf("AWS configuration is missing")
-	}
-
-	_, err := loginAWS(awsConfig)
+	_, _, err := t.loginAWS(ctx, deployConfig)
 	if err != nil {
 		fmt.Println("Error to login in AWS:", err)
 		return err

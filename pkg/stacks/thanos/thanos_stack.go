@@ -16,8 +16,6 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
-
-	"github.com/aws/aws-sdk-go-v2/config"
 )
 
 type ThanosStack struct {
@@ -309,25 +307,13 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 	}
 
 	// STEP 2. AWS Authentication
-	awsLoginInputs, err := t.inputAWSLogin()
-	if err != nil {
-		fmt.Println("Error collecting AWS credentials:", err)
-		return err
-	}
-
-	awsProfile, err := loginAWS(awsLoginInputs)
+	awsProfile, awsLoginInputs, err := t.loginAWS(ctx, deployConfig)
 	if err != nil {
 		fmt.Println("Error authenticating with AWS:", err)
 		return err
 	}
 
-	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(awsLoginInputs.Region))
-	if err != nil {
-		fmt.Println("Error loading AWS configuration:", err)
-		return err
-	}
-
-	t.s3Client = s3.NewFromConfig(cfg)
+	deployConfig.AWS = awsLoginInputs
 
 	fmt.Println("⚡️Removing the previous deployment state...")
 	err = t.clearTerraformState(ctx)
@@ -337,8 +323,6 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 	}
 
 	fmt.Println("✅ Removed the previous deployment state...")
-
-	deployConfig.AWS = awsLoginInputs
 
 	inputs, err := t.inputDeployInfra()
 	if err != nil {
@@ -527,7 +511,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 	fmt.Printf("Configuration saved successfully to: %s/settings.json \n", cwd)
 
 	// After installing the infra successfully, we install the bridge
-	err = t.installBridge(deployConfig)
+	err = t.installBridge(ctx, deployConfig)
 	if err != nil {
 		fmt.Println("Error installing bridge:", err)
 	}
@@ -564,24 +548,9 @@ func (t *ThanosStack) destroyDevnet() error {
 
 func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context, deployConfig *types.Config) error {
 	var (
-		aws = deployConfig.AWS
 		err error
 	)
-	if aws == nil {
-		fmt.Println("You aren't logged into your AWS account.")
-		aws, err = t.inputAWSLogin()
-		if err != nil {
-			fmt.Println("Error collecting AWS credentials:", err)
-			return err
-		}
-		if aws == nil {
-			fmt.Println("Failed to collect AWS credentials. Please try again later.")
-			return nil
-		}
-	}
-
-	// login aws again because the session when logging in will be expired after a few time.
-	_, err = loginAWS(aws)
+	_, _, err = t.loginAWS(ctx, deployConfig)
 	if err != nil {
 		fmt.Println("Error getting AWS profile:", err)
 		return err
@@ -623,7 +592,7 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context, deployConfig *types
 
 // ------------------------------------------ Install plugins ---------------------------
 
-func (t *ThanosStack) InstallPlugins(pluginNames []string, deployConfig *types.Config) error {
+func (t *ThanosStack) InstallPlugins(ctx context.Context, pluginNames []string, deployConfig *types.Config) error {
 	var (
 		namespace = deployConfig.K8s.Namespace
 	)
@@ -638,15 +607,15 @@ func (t *ThanosStack) InstallPlugins(pluginNames []string, deployConfig *types.C
 
 		switch pluginName {
 		case constants.PluginBlockExplorer:
-			err := t.installBlockExplorer(deployConfig)
+			err := t.installBlockExplorer(ctx, deployConfig)
 			if err != nil {
-				return t.uninstallBlockExplorer(deployConfig)
+				return t.uninstallBlockExplorer(ctx, deployConfig)
 			}
 			return nil
 		case constants.PluginBridge:
-			err := t.installBridge(deployConfig)
+			err := t.installBridge(ctx, deployConfig)
 			if err != nil {
-				return t.uninstallBridge(deployConfig)
+				return t.uninstallBridge(ctx, deployConfig)
 			}
 			return nil
 		}
@@ -656,7 +625,7 @@ func (t *ThanosStack) InstallPlugins(pluginNames []string, deployConfig *types.C
 
 // ------------------------------------------ Uninstall plugins ---------------------------
 
-func (t *ThanosStack) UninstallPlugins(pluginNames []string, deployConfig *types.Config) error {
+func (t *ThanosStack) UninstallPlugins(ctx context.Context, pluginNames []string, deployConfig *types.Config) error {
 	var (
 		namespace = deployConfig.K8s.Namespace
 	)
@@ -671,9 +640,9 @@ func (t *ThanosStack) UninstallPlugins(pluginNames []string, deployConfig *types
 
 		switch pluginName {
 		case constants.PluginBridge:
-			return t.uninstallBridge(deployConfig)
+			return t.uninstallBridge(ctx, deployConfig)
 		case constants.PluginBlockExplorer:
-			return t.uninstallBlockExplorer(deployConfig)
+			return t.uninstallBlockExplorer(ctx, deployConfig)
 		}
 	}
 	return nil
