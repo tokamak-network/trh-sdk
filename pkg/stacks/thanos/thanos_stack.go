@@ -282,21 +282,28 @@ func (t *ThanosStack) deployLocalDevnet() error {
 }
 
 func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *types.Config) error {
+	shellConfigFile := utils.GetShellConfigDefault()
+
+	// Check dependencies
 	// STEP 1. Verify required dependencies
 	if !dependencies.CheckTerraformInstallation() {
-		return fmt.Errorf("terraform is not installed")
+		fmt.Printf("Try running `source %s` to set up your environment \n", shellConfigFile)
+		return nil
 	}
 
 	if !dependencies.CheckHelmInstallation() {
-		return fmt.Errorf("helm is not installed")
+		fmt.Printf("Try running `source %s` to set up your environment \n", shellConfigFile)
+		return nil
 	}
 
 	if !dependencies.CheckAwsCLIInstallation() {
-		return fmt.Errorf("AWS CLI is not installed")
+		fmt.Printf("Try running `source %s` to set up your environment \n", shellConfigFile)
+		return nil
 	}
 
 	if !dependencies.CheckK8sInstallation() {
-		return fmt.Errorf("kubectl is not installed")
+		fmt.Printf("Try running `source %s` to set up your environment \n", shellConfigFile)
+		return nil
 	}
 
 	// STEP 1. Clone the charts repository
