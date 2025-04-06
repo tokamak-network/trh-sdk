@@ -9,7 +9,7 @@ import (
 
 func (t *ThanosStack) clearTerraformState(ctx context.Context) error {
 	// STEP 1: Destroy tokamak-thanos-stack/terraform/block-explorer resources
-	err := t.destroyTerraform("tokamak-thanos-stack/terraform/block-exlorer")
+	err := t.destroyTerraform("tokamak-thanos-stack/terraform/block-explorer")
 	fmt.Println("Destroying block-explorer terraform resources")
 	if err != nil {
 		fmt.Println("Error running block-explorer terraform destroy", err)
