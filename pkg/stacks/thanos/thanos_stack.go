@@ -589,11 +589,15 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context, deployConfig *types
 	}
 
 	// Delete namespace before destroying the infrastructure
-	_, err = utils.ExecuteCommand("kubectl", "delete", "namespace", namespace)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	err = t.tryToDeleteK8sNamespace(ctxTimeout, namespace)
 	if err != nil {
 		fmt.Println("Error deleting namespace:", err)
+	} else {
+		fmt.Println("✅ Namespace destroyed successfully!")
 	}
-	fmt.Print("✅ Namespace destroyed successfully!\n")
 
 	return t.clearTerraformState(ctx)
 }
