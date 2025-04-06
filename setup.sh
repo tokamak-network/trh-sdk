@@ -73,3 +73,4 @@ echo "Installing TRH SDK CLI..."
 
 echo "✅ TRH SDK has been installed successfully!"
 
+echo "Source $SHELL_CONFIG to apply changes to your current shell session."
