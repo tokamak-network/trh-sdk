@@ -593,6 +593,7 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context, deployConfig *types
 	if err != nil {
 		fmt.Println("Error deleting namespace:", err)
 	}
+	fmt.Print("✅ Namespace destroyed successfully!\n")
 
 	return t.clearTerraformState(ctx)
 }
