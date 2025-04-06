@@ -1,23 +1,41 @@
 package thanos
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
-func (t *ThanosStack) clearTerraformState() error {
+func (t *ThanosStack) clearTerraformState(ctx context.Context) error {
 	// STEP 1: Destroy tokamak-thanos-stack/terraform/block-explorer resources
 	err := t.destroyTerraform("tokamak-thanos-stack/terraform/block-exlorer")
 	if err != nil {
 		fmt.Println("Error running block-explorer terraform destroy", err)
 		return err
 	}
+
 	// STEP 2: Destroy tokamak-thanos-stack/terraform/thanos-stack resources
-	err = t.destroyTerraform("tokamak-thanos-stack/terraform/thanos-stack")
-	if err != nil {
-		fmt.Println("Error running thanos-stack terraform destroy:", err)
-		return err
+	// Check the bucket name in the state file exists
+	// If it doesn't exist, we need to delete the state file to prevent conflicts when reinstalling the stack
+	thanosStackTerraformPath := "tokamak-thanos-stack/terraform/thanos-stack/.terraform/terraform.tfstate"
+	if utils.CheckFileExists(thanosStackTerraformPath) {
+		state, err := utils.ReadThanosStackTerraformState(thanosStackTerraformPath)
+		if err != nil {
+			fmt.Println("Error reading terraform state file", err)
+			return err
+		}
+
+		fmt.Println("Checking bucket existence", state.Backend.Config.Bucket)
+
+		bucketExist := utils.BucketExists(ctx, t.s3Client, state.Backend.Config.Bucket)
+		if bucketExist {
+			err = t.destroyTerraform("tokamak-thanos-stack/terraform/thanos-stack")
+			if err != nil {
+				fmt.Println("Error running thanos-stack terraform destroy:", err)
+				return err
+			}
+		}
 	}
 
 	// STEP 3: Destroy tokamak-thanos-stack/terraform/backend resources
@@ -34,7 +52,7 @@ func (t *ThanosStack) clearTerraformState() error {
 		`cd tokamak-thanos-stack/terraform/thanos-stack && rm -rf terraform.tfstate terraform.tfstate.backup .terraform.lock.hcl .terraform/`,
 	}...)
 	if err != nil {
-		fmt.Printf("Error deleting .envrc file %v\n", err)
+		fmt.Println("Error deleting thanos-stack terraform state", err)
 		return err
 	}
 

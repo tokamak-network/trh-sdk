@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"os"
@@ -15,11 +16,15 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
+
+	"github.com/aws/aws-sdk-go-v2/config"
 )
 
 type ThanosStack struct {
 	network string
 	stack   string
+
+	s3Client *s3.Client
 }
 
 func NewThanosStack(network string, stack string) *ThanosStack {
@@ -227,9 +232,9 @@ func (t *ThanosStack) Deploy(ctx context.Context, deployConfig *types.Config) er
 
 		switch infraOpt {
 		case constants.AWS:
-			err = t.deployNetworkToAWS(deployConfig)
+			err = t.deployNetworkToAWS(ctx, deployConfig)
 			if err != nil {
-				return t.destroyInfraOnAWS(deployConfig)
+				return t.destroyInfraOnAWS(ctx, deployConfig)
 			}
 			return nil
 		default:
@@ -278,7 +283,7 @@ func (t *ThanosStack) deployLocalDevnet() error {
 	return nil
 }
 
-func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
+func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *types.Config) error {
 	// STEP 1. Verify required dependencies
 	if !dependencies.CheckTerraformInstallation() {
 		return fmt.Errorf("terraform is not installed")
@@ -316,17 +321,25 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 		return err
 	}
 
+	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(awsLoginInputs.Region))
+	if err != nil {
+		fmt.Println("Error loading AWS configuration:", err)
+		return err
+	}
+
+	t.s3Client = s3.NewFromConfig(cfg)
+
+	err = t.clearTerraformState(ctx)
+	if err != nil {
+		fmt.Printf("Failed to clear the existing terraform state, err: %s", err.Error())
+		return err
+	}
+
 	deployConfig.AWS = awsLoginInputs
 
 	inputs, err := t.inputDeployInfra()
 	if err != nil {
 		fmt.Println("Error collecting infrastructure deployment parameters:", err)
-		return err
-	}
-
-	err = t.clearTerraformState()
-	if err != nil {
-		fmt.Printf("Failed to clear the existing terraform state, err: %s", err.Error())
 		return err
 	}
 
@@ -414,7 +427,7 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 		return fmt.Errorf("configuration file thanos-stack-values.yaml not found")
 	}
 
-	namespace := types.ConvertChainNameToNamespace(inputs.ChainName)
+	namespace := utils.ConvertChainNameToNamespace(inputs.ChainName)
 	deployConfig.ChainName = inputs.ChainName
 
 	// Step 7. Configure EKS access
@@ -524,12 +537,12 @@ func (t *ThanosStack) deployNetworkToAWS(deployConfig *types.Config) error {
 
 // --------------------------------------------- Destroy command -------------------------------------//
 
-func (t *ThanosStack) Destroy(deployConfig *types.Config) error {
+func (t *ThanosStack) Destroy(ctx context.Context, deployConfig *types.Config) error {
 	switch t.network {
 	case constants.LocalDevnet:
 		return t.destroyDevnet()
 	case constants.Testnet, constants.Mainnet:
-		return t.destroyInfraOnAWS(deployConfig)
+		return t.destroyInfraOnAWS(ctx, deployConfig)
 	}
 	return nil
 }
@@ -546,7 +559,7 @@ func (t *ThanosStack) destroyDevnet() error {
 	return nil
 }
 
-func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
+func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context, deployConfig *types.Config) error {
 	var (
 		aws = deployConfig.AWS
 		err error
@@ -602,7 +615,7 @@ func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
 		fmt.Println("Error deleting namespace:", err)
 	}
 
-	return t.clearTerraformState()
+	return t.clearTerraformState(ctx)
 }
 
 // ------------------------------------------ Install plugins ---------------------------

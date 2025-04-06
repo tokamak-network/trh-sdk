@@ -1,8 +1,11 @@
 package utils
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+
+	"github.com/tokamak-network/trh-sdk/pkg/types"
 )
 
 func CheckTerraformState(dir string) (bool, error) {
@@ -17,4 +20,18 @@ func CheckTerraformState(dir string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+func ReadThanosStackTerraformState(filePath string) (types.ThanosStackTerraformState, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return types.ThanosStackTerraformState{}, fmt.Errorf("failed to read file: %w", err)
+	}
+
+	var state types.ThanosStackTerraformState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return types.ThanosStackTerraformState{}, fmt.Errorf("failed to parse JSON: %w", err)
+	}
+
+	return state, nil
 }
