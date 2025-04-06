@@ -596,6 +596,12 @@ func (t *ThanosStack) destroyInfraOnAWS(deployConfig *types.Config) error {
 		fmt.Println("Helm release removed successfully")
 	}
 
+	// Delete namespace before destroying the infrastructure
+	_, err = utils.ExecuteCommand("kubectl", "delete", "namespace", namespace)
+	if err != nil {
+		fmt.Println("Error deleting namespace:", err)
+	}
+
 	return t.clearTerraformState()
 }
 
