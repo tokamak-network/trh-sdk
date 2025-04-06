@@ -329,11 +329,14 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 
 	t.s3Client = s3.NewFromConfig(cfg)
 
+	fmt.Println("⚡️Removing the previous deployment state...")
 	err = t.clearTerraformState(ctx)
 	if err != nil {
 		fmt.Printf("Failed to clear the existing terraform state, err: %s", err.Error())
 		return err
 	}
+
+	fmt.Println("✅ Removed the previous deployment state...")
 
 	deployConfig.AWS = awsLoginInputs
 
