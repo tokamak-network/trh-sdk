@@ -10,7 +10,7 @@ fi
 set -e
 
 # Grab the foundry commit hash.
-SHA=63fff3510408b552f11efb8196f48cfe6c1da664
+SHA=e144b82070619b6e10485c38734b4d4d45aebe04
 
 # Check if there is a nightly tag corresponding to the commit hash
 TAG="nightly-$SHA"
