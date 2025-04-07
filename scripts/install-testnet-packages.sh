@@ -407,7 +407,7 @@ if [[ "$OS_TYPE" == "Darwin" ]]; then
             echo "curl not found, installing..."
             brew install curl
         fi
-        if curl -L https://foundry.paradigm.xyz | bash && curl -fsSL https://raw.githubusercontent.com/tokamak-network/trh-sdk/2142d64d40f5ccc51f15d89ea554d42f548eac86/scripts/install-foundry.sh | bash; then \
+        if curl -L https://foundry.paradigm.xyz | bash && curl -fsSL https://raw.githubusercontent.com/tokamak-network/trh-sdk/main/scripts/install-foundry.sh | bash; then \
             echo "✅ Foundry has been installed successfully!"
             forge --version
             cast --version 
@@ -764,7 +764,7 @@ elif [[ "$OS_TYPE" == "Linux" ]]; then
             echo "curl not found, installing..."
             sudo apt-get install -y curl
         fi
-        if curl -L https://foundry.paradigm.xyz | bash && curl -fsSL https://raw.githubusercontent.com/tokamak-network/trh-sdk/2142d64d40f5ccc51f15d89ea554d42f548eac86/scripts/install-foundry.sh | bash; then \
+        if curl -L https://foundry.paradigm.xyz | bash && curl -fsSL https://raw.githubusercontent.com/tokamak-network/trh-sdk/main/scripts/install-foundry.sh | bash; then \
             echo "✅ Foundry has been installed successfully!"
             forge --version
             cast --version 

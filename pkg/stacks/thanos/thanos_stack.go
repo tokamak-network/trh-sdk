@@ -43,6 +43,12 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	}
 	var err error
 
+	// Download testnet dependencies file
+	err = utils.ExecuteCommandStream("bash", "-c", "curl -o ./scripts/install-testnet-packages.sh https://raw.githubusercontent.com/tokamak-network/trh-sdk/refs/heads/main/scripts/install-testnet-packages.sh https://raw.githubusercontent.com/tokamak-network/tokamak-thanos/main/scripts/install-testnet-packages.sh")
+	if err != nil {
+		fmt.Println("\r❌ Failed to download testnet dependencies file!")
+	}
+
 	// Install the dependencies
 	err = utils.ExecuteCommandStream("bash", "-c", "cd ./scripts && bash ./install-testnet-packages.sh")
 	if err != nil {
