@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# Re-run with the correct interpreter depending on the OS
+# Use SKIP_SHEBANG_CHECK variable to prevent infinite loop if already re-run
+if [ "$(uname)" = "Darwin" ] && [ -z "$SKIP_SHEBANG_CHECK" ]; then
+  export SKIP_SHEBANG_CHECK=1
+  echo "macOS detected. Switching to zsh interpreter......"
+  exec /bin/zsh "$0" "$@"
+fi
+
 # Detect OS
 # Detect Operating System
 OS_TYPE=$(uname)
@@ -56,17 +64,19 @@ else
     exit 1
 fi
 
-
 # Set Config File
 if [ "$SHELL_NAME" = "zsh" ]; then
     CONFIG_FILE="$HOME/.zshrc"
     PROFILE_FILE="$HOME/.zshrc"
+    # check config & profile
+    echo "The shell name is $SHELL_NAME"
+    echo "The config file name is $CONFIG_FILE"
+    echo "The profile name is $PROFILE_FILE"
 elif [ "$SHELL_NAME" = "bash" ]; then
     CONFIG_FILE="$HOME/.bashrc"
     PROFILE_FILE="$HOME/.profile"
 fi
 
-echo
 
 
 # Setup Go version
@@ -241,6 +251,8 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
     else
         echo "Go 1.22.6 is already installed."
     fi
+
+echo $OS_TYPE
 
 # Linux specific steps
 elif [[ "$OS_TYPE" == "linux" ]]; then
@@ -433,6 +445,7 @@ fi
 
 # Source shell config and set PATH temporarily for this session
 source "$CONFIG_FILE"
+echo $CONFIG_FILE
 
 echo "✅ Go has been installed successfully!"
 # Verify Go installation
