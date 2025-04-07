@@ -41,6 +41,13 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	if t.network != constants.Testnet && t.network != constants.Mainnet {
 		return fmt.Errorf("network %s does not support", t.network)
 	}
+	var err error
+
+	// Install the dependencies
+	err = utils.ExecuteCommandStream("bash", "-c", "cd ./scripts && bash ./install-testnet-packages.sh")
+	if err != nil {
+		fmt.Println("\r❌ Failed to install testnet dependencies!")
+	}
 
 	shellConfigFile := utils.GetShellConfigDefault()
 
@@ -55,7 +62,6 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		return nil
 	}
 
-	var err error
 	// STEP 1. Input the parameters
 	deployContractsConfig, err := t.inputDeployContracts(ctx)
 	if err != nil {
