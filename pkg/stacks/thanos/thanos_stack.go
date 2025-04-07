@@ -43,6 +43,12 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	}
 	var err error
 
+	// STEP 1. Input the parameters
+	deployContractsConfig, err := t.inputDeployContracts(ctx)
+	if err != nil {
+		return err
+	}
+
 	// Download testnet dependencies file
 	err = utils.ExecuteCommandStream("bash", "-c", "curl -o ./install-testnet-packages.sh https://raw.githubusercontent.com/tokamak-network/trh-sdk/refs/heads/main/scripts/install-testnet-packages.sh https://raw.githubusercontent.com/tokamak-network/tokamak-thanos/main/scripts/install-testnet-packages.sh")
 	if err != nil {
@@ -66,12 +72,6 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	if !dependencies.CheckFoundryInstallation() {
 		fmt.Printf("Try running `source %s` to set up your environment \n", shellConfigFile)
 		return nil
-	}
-
-	// STEP 1. Input the parameters
-	deployContractsConfig, err := t.inputDeployContracts(ctx)
-	if err != nil {
-		return err
 	}
 
 	l1Client, err := ethclient.DialContext(ctx, deployContractsConfig.l1RPCurl)
