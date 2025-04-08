@@ -324,6 +324,7 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_l1_beacon_url=\"%s\"\n", config.L1BeaconUrl))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_op_geth_image_tag=\"%s\"\n", config.OpGethImageTag))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_thanos_stack_image_tag=\"%s\"\n", config.ThanosStackImageTag))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_max_channel_duration=\"%s\"\n", config.MaxChannelDuration))
 
 	err = writer.Flush()
 	if err != nil {

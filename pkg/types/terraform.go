@@ -22,6 +22,7 @@ type TerraformEnvConfig struct {
 	L1BeaconUrl         string
 	OpGethImageTag      string
 	ThanosStackImageTag string
+	MaxChannelDuration  string
 }
 
 type BlockExplorerEnvs struct {
