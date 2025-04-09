@@ -3,6 +3,7 @@ package thanos
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
@@ -71,7 +72,13 @@ func (t *ThanosStack) destroyTerraform(path string) error {
 		return nil
 	}
 
-	err := utils.ExecuteCommandStream("bash", []string{
+	// Check state before destroying
+	output, err := utils.ExecuteCommand("bash", "-c", fmt.Sprintf("cd %s && source ../.envrc &&  terraform state list", path))
+	if err != nil || strings.TrimSpace(output) == "" {
+		return nil
+	}
+
+	err = utils.ExecuteCommandStream("bash", []string{
 		"-c",
 		fmt.Sprintf(`cd %s && source ../.envrc && terraform destroy -auto-approve -parallelism=100`, path),
 	}...)
