@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 
-	"github.com/joho/godotenv"
 	"github.com/tokamak-network/trh-sdk/commands"
 	"github.com/tokamak-network/trh-sdk/flags"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
@@ -15,10 +14,6 @@ import (
 )
 
 func main() {
-	if err := godotenv.Load(); err != nil {
-		fmt.Println("Error loading .env file:", err)
-	}
-
 	cmd := &cli.Command{
 		Name:  "tokamak-sdk-cli",
 		Usage: "make an explosive entrance",

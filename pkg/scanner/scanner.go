@@ -11,6 +11,11 @@ import (
 func ScanBool() (bool, error) {
 	var response string
 	n, err := fmt.Scanln(&response)
+
+	if err != nil {
+		return false, err
+	}
+
 	// Blank input, default No
 	if n == 0 {
 		return false, nil
@@ -18,9 +23,6 @@ func ScanBool() (bool, error) {
 
 	if strings.ToLower(response) != "n" && strings.ToLower(response) != "y" {
 		return false, fmt.Errorf("Invalid input")
-	}
-	if err != nil {
-		return false, err
 	}
 
 	if strings.ToLower(response) == "y" {

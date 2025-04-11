@@ -180,13 +180,14 @@ func (t *ThanosStack) cloneSourcecode(repositoryName, url string) error {
 
 func (t *ThanosStack) inputRegisterCandidate(fromDeployContract bool) (*RegisterCandidateInput, error) {
 	var (
-		rollupConfig string
-		amount       float64
-		memo         string
-		useTon       bool
-		nameInfo     string
-		seed         string
-		err          error
+		rollupConfig      string
+		amount            float64
+		memo              string
+		useTon            bool
+		nameInfo          string
+		seed              string
+		safeWalletAddress string
+		err               error
 	)
 	for {
 		fmt.Print("Please enter the amount of TON to stake (minimum 1000.1): ")
@@ -238,24 +239,40 @@ func (t *ThanosStack) inputRegisterCandidate(fromDeployContract bool) (*Register
 		fmt.Printf("Error while reading name: %s", err)
 		return nil, err
 	}
-	fmt.Print("Would you like to use TON instead of WTON for staking? [Y or N] (default: N): ")
-	useTon, err = scanner.ScanBool()
+	fmt.Print("Would you like to use WTON instead of TON for staking? [Y or N] (default: N): ")
+	boolValue, err := scanner.ScanBool()
 	if err != nil {
 		fmt.Printf("Error while reading use-ton setting: %s", err)
 		return nil, err
 	}
+	useTon = !boolValue
 	//TODO: Check and update this with further updates
 	if !useTon {
 		fmt.Printf("Currently only TON is accepted %s", err)
 		return nil, err
 	}
 
+	for {
+		fmt.Print("Please enter the safe wallet address: ")
+		safeWalletAddress, err = scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error while reading safe wallet: %s\n", err)
+			continue
+		}
+		if !common.IsHexAddress(safeWalletAddress) {
+			fmt.Println("Error: Invalid address format. Please try again")
+			continue
+		}
+		break
+	}
+
 	return &RegisterCandidateInput{
-		rollupConfig: rollupConfig,
-		amount:       amount,
-		useTon:       useTon,
-		memo:         memo,
-		nameInfo:     nameInfo,
-		seed:         seed,
+		rollupConfig:      rollupConfig,
+		amount:            amount,
+		useTon:            useTon,
+		memo:              memo,
+		nameInfo:          nameInfo,
+		seed:              seed,
+		safeWalletAddress: safeWalletAddress,
 	}, nil
 }

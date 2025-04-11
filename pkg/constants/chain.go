@@ -17,6 +17,8 @@ var L1ChainConfigurations = map[uint64]struct {
 	BlockExplorer                    string `json:"block_explorer"`
 	L1VerificationContractAddress    string `json:"l1_verification_contract_address"`
 	L2TonAddress                     string `json:"l2_ton_address"`
+	L2ManagerAddress                 string `json:"l2_manager_address"`
+	L1BridgeRegistry                 string `json:"l1_bridge_registry"`
 }{
 	1: {
 		L2NativeTokenAddress: "0x2be5e8c109e2197D077D13A82dAead6a9b3433C5",
@@ -32,7 +34,8 @@ var L1ChainConfigurations = map[uint64]struct {
 		BlockExplorer:                    "https://etherscan.io",
 		L1VerificationContractAddress:    "0x0000000000000000000000000000000000000000",
 		L2TonAddress:                     "0x0000000000000000000000000000000000000000",
-
+		L2ManagerAddress:                 "0x0000000000000000000000000000000000000000",
+		L1BridgeRegistry:                 "0x0000000000000000000000000000000000000000",
 	},
 	11155111: {
 		L2NativeTokenAddress: "0xa30fe40285b8f5c0457dbc3b7c8a280373c40044",
@@ -49,7 +52,8 @@ var L1ChainConfigurations = map[uint64]struct {
 		BlockExplorer:                    "https://sepolia.etherscan.io/",
 		L1VerificationContractAddress:    "0x0000000000000000000000000000000000000000",
 		L2TonAddress:                     "0x0000000000000000000000000000000000000000",
-
+		L2ManagerAddress:                 "0x0000000000000000000000000000000000000000",
+		L1BridgeRegistry:                 "0x0000000000000000000000000000000000000000",
 	},
 	17000: {
 		L2NativeTokenAddress: "0xe11Ad6B761D175042340a784640d3A6e373E52A5",
@@ -66,7 +70,8 @@ var L1ChainConfigurations = map[uint64]struct {
 		BlockExplorer:                    "https://holesky.etherscan.io/",
 		L1VerificationContractAddress:    "0x0000000000000000000000000000000000000000",
 		L2TonAddress:                     "0x0000000000000000000000000000000000000000",
-
+		L2ManagerAddress:                 "0x0000000000000000000000000000000000000000",
+		L1BridgeRegistry:                 "0x0000000000000000000000000000000000000000",
 	},
 }
 

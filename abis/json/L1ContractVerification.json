@@ -1,326 +1,560 @@
 [
+  { "type": "constructor", "inputs": [], "stateMutability": "nonpayable" },
   {
-    "inputs": [
-      { "internalType": "address", "name": "_tokenAddress", "type": "address" }
-    ],
-    "stateMutability": "nonpayable",
-    "type": "constructor"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "bridgeRegistry",
-        "type": "address"
-      }
-    ],
-    "name": "BridgeRegistryUpdated",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "string",
-        "name": "contractName",
-        "type": "string"
-      }
-    ],
-    "name": "ConfigurationSet",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "tokenAddress",
-        "type": "address"
-      }
-    ],
-    "name": "NativeTokenSet",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "previousOwner",
-        "type": "address"
-      },
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "newOwner",
-        "type": "address"
-      }
-    ],
-    "name": "OwnershipTransferred",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": false,
-        "internalType": "bytes32",
-        "name": "codehash",
-        "type": "bytes32"
-      }
-    ],
-    "name": "ProxyAdminCodehashSet",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "verifier",
-        "type": "address"
-      }
-    ],
-    "name": "RegistrationSuccess",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "tokamakDAO",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "foundation",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "threshold",
-        "type": "uint256"
-      }
-    ],
-    "name": "SafeConfigSet",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "verifier",
-        "type": "address"
-      }
-    ],
-    "name": "VerificationSuccess",
-    "type": "event"
-  },
-  {
+    "type": "function",
+    "name": "ADMIN_ROLE",
     "inputs": [],
+    "outputs": [{ "name": "", "type": "bytes32", "internalType": "bytes32" }],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "DEFAULT_ADMIN_ROLE",
+    "inputs": [],
+    "outputs": [{ "name": "", "type": "bytes32", "internalType": "bytes32" }],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "addAdmin",
+    "inputs": [
+      { "name": "_admin", "type": "address", "internalType": "address" }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "expectedNativeToken",
-    "outputs": [{ "internalType": "address", "name": "", "type": "address" }],
-    "stateMutability": "view",
-    "type": "function"
+    "inputs": [],
+    "outputs": [{ "name": "", "type": "address", "internalType": "address" }],
+    "stateMutability": "view"
   },
   {
+    "type": "function",
+    "name": "getRoleAdmin",
+    "inputs": [
+      { "name": "role", "type": "bytes32", "internalType": "bytes32" }
+    ],
+    "outputs": [{ "name": "", "type": "bytes32", "internalType": "bytes32" }],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "grantRole",
+    "inputs": [
+      { "name": "role", "type": "bytes32", "internalType": "bytes32" },
+      { "name": "account", "type": "address", "internalType": "address" }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "hasRole",
+    "inputs": [
+      { "name": "role", "type": "bytes32", "internalType": "bytes32" },
+      { "name": "account", "type": "address", "internalType": "address" }
+    ],
+    "outputs": [{ "name": "", "type": "bool", "internalType": "bool" }],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "initialize",
+    "inputs": [
+      {
+        "name": "_tokenAddress",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_initialAdmin",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "isVerificationPossible",
     "inputs": [],
+    "outputs": [{ "name": "", "type": "bool", "internalType": "bool" }],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "l1BridgeRegistryAddress",
-    "outputs": [{ "internalType": "address", "name": "", "type": "address" }],
-    "stateMutability": "view",
-    "type": "function"
+    "inputs": [],
+    "outputs": [{ "name": "", "type": "address", "internalType": "address" }],
+    "stateMutability": "view"
   },
   {
-    "inputs": [],
+    "type": "function",
     "name": "l1CrossDomainMessenger",
+    "inputs": [],
     "outputs": [
-      { "internalType": "address", "name": "logicAddress", "type": "address" },
-      { "internalType": "bytes32", "name": "proxyCodehash", "type": "bytes32" }
+      {
+        "name": "logicAddress",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "proxyCodehash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
     ],
-    "stateMutability": "view",
-    "type": "function"
+    "stateMutability": "view"
   },
   {
-    "inputs": [],
+    "type": "function",
     "name": "l1StandardBridge",
+    "inputs": [],
     "outputs": [
-      { "internalType": "address", "name": "logicAddress", "type": "address" },
-      { "internalType": "bytes32", "name": "proxyCodehash", "type": "bytes32" }
+      {
+        "name": "logicAddress",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "proxyCodehash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
     ],
-    "stateMutability": "view",
-    "type": "function"
+    "stateMutability": "view"
   },
   {
-    "inputs": [],
+    "type": "function",
     "name": "optimismPortal",
+    "inputs": [],
     "outputs": [
-      { "internalType": "address", "name": "logicAddress", "type": "address" },
-      { "internalType": "bytes32", "name": "proxyCodehash", "type": "bytes32" }
+      {
+        "name": "logicAddress",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "proxyCodehash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
     ],
-    "stateMutability": "view",
-    "type": "function"
+    "stateMutability": "view"
   },
   {
-    "inputs": [],
-    "name": "owner",
-    "outputs": [{ "internalType": "address", "name": "", "type": "address" }],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
+    "type": "function",
     "name": "proxyAdminCodehash",
-    "outputs": [{ "internalType": "bytes32", "name": "", "type": "bytes32" }],
-    "stateMutability": "view",
-    "type": "function"
+    "inputs": [],
+    "outputs": [{ "name": "", "type": "bytes32", "internalType": "bytes32" }],
+    "stateMutability": "view"
   },
   {
-    "inputs": [],
-    "name": "renounceOwnership",
+    "type": "function",
+    "name": "removeAdmin",
+    "inputs": [
+      { "name": "_admin", "type": "address", "internalType": "address" }
+    ],
     "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
+    "stateMutability": "nonpayable"
   },
   {
+    "type": "function",
+    "name": "renounceRole",
+    "inputs": [
+      { "name": "role", "type": "bytes32", "internalType": "bytes32" },
+      { "name": "account", "type": "address", "internalType": "address" }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "revokeRole",
+    "inputs": [
+      { "name": "role", "type": "bytes32", "internalType": "bytes32" },
+      { "name": "account", "type": "address", "internalType": "address" }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "safeWalletConfig",
     "inputs": [],
-    "name": "safeWallet",
     "outputs": [
+      { "name": "tokamakDAO", "type": "address", "internalType": "address" },
+      { "name": "foundation", "type": "address", "internalType": "address" },
       {
-        "internalType": "address",
-        "name": "safeWalletAddress",
-        "type": "address"
-      },
-      { "internalType": "address", "name": "tokamakDAO", "type": "address" },
-      { "internalType": "address", "name": "foundation", "type": "address" },
-      {
-        "internalType": "bytes32",
         "name": "implementationCodehash",
-        "type": "bytes32"
+        "type": "bytes32",
+        "internalType": "bytes32"
       },
-      { "internalType": "bytes32", "name": "proxyCodehash", "type": "bytes32" },
       {
-        "internalType": "uint256",
+        "name": "proxyCodehash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "requiredThreshold",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
-    "stateMutability": "view",
-    "type": "function"
+    "stateMutability": "view"
   },
   {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "_bridgeRegistry",
-        "type": "address"
-      }
-    ],
+    "type": "function",
     "name": "setBridgeRegistryAddress",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
     "inputs": [
       {
-        "internalType": "address",
-        "name": "_systemConfigProxy",
-        "type": "address"
-      },
-      { "internalType": "address", "name": "_proxyAdmin", "type": "address" }
+        "name": "_bridgeRegistry",
+        "type": "address",
+        "internalType": "address"
+      }
     ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "setLogicContractInfo",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      { "internalType": "address", "name": "_proxyAdmin", "type": "address" }
-    ],
-    "name": "setProxyAdminCodeHash",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      { "internalType": "address", "name": "_tokamakDAO", "type": "address" },
-      { "internalType": "address", "name": "_foundation", "type": "address" },
-      { "internalType": "uint256", "name": "_threshold", "type": "uint256" },
-      { "internalType": "address", "name": "_proxyAdmin", "type": "address" },
-      {
-        "internalType": "bytes32",
-        "name": "_implementationCodehash",
-        "type": "bytes32"
-      },
-      { "internalType": "bytes32", "name": "_proxyCodehash", "type": "bytes32" }
-    ],
-    "name": "setSafeConfig",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "systemConfig",
-    "outputs": [
-      { "internalType": "address", "name": "logicAddress", "type": "address" },
-      { "internalType": "bytes32", "name": "proxyCodehash", "type": "bytes32" }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      { "internalType": "address", "name": "newOwner", "type": "address" }
-    ],
-    "name": "transferOwnership",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
     "inputs": [
       {
-        "internalType": "address",
         "name": "_systemConfigProxy",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       },
-      { "internalType": "address", "name": "_proxyAdmin", "type": "address" },
-      { "internalType": "uint8", "name": "_type", "type": "uint8" },
-      { "internalType": "address", "name": "_l2TON", "type": "address" },
-      { "internalType": "string", "name": "_name", "type": "string" }
+      { "name": "_proxyAdmin", "type": "address", "internalType": "address" }
     ],
-    "name": "verifyAndRegisterRollupConfig",
-    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
-    "stateMutability": "nonpayable",
-    "type": "function"
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
+    "type": "function",
+    "name": "setSafeConfig",
+    "inputs": [
+      { "name": "_tokamakDAO", "type": "address", "internalType": "address" },
+      { "name": "_foundation", "type": "address", "internalType": "address" },
+      { "name": "_threshold", "type": "uint256", "internalType": "uint256" },
+      {
+        "name": "_implementationCodehash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "_proxyCodehash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setVerificationPossible",
     "inputs": [
       {
-        "internalType": "address",
-        "name": "systemConfigProxy",
-        "type": "address"
-      },
-      { "internalType": "address", "name": "proxyAdmin", "type": "address" }
+        "name": "_isVerificationPossible",
+        "type": "bool",
+        "internalType": "bool"
+      }
     ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "supportsInterface",
+    "inputs": [
+      { "name": "interfaceId", "type": "bytes4", "internalType": "bytes4" }
+    ],
+    "outputs": [{ "name": "", "type": "bool", "internalType": "bool" }],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "systemConfig",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "logicAddress",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "proxyCodehash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "verifyAndRegisterRollupConfig",
+    "inputs": [
+      {
+        "name": "_systemConfigProxy",
+        "type": "address",
+        "internalType": "address"
+      },
+      { "name": "_proxyAdmin", "type": "address", "internalType": "address" },
+      { "name": "_type", "type": "uint8", "internalType": "uint8" },
+      { "name": "_l2TON", "type": "address", "internalType": "address" },
+      { "name": "_name", "type": "string", "internalType": "string" },
+      {
+        "name": "_safeWalletAddress",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [{ "name": "", "type": "bool", "internalType": "bool" }],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "verifyL1Contracts",
-    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
-    "stateMutability": "nonpayable",
-    "type": "function"
+    "inputs": [
+      {
+        "name": "systemConfigProxy",
+        "type": "address",
+        "internalType": "address"
+      },
+      { "name": "proxyAdmin", "type": "address", "internalType": "address" },
+      {
+        "name": "safeWalletAddress",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [{ "name": "", "type": "bool", "internalType": "bool" }],
+    "stateMutability": "view"
+  },
+  {
+    "type": "event",
+    "name": "BridgeRegistryUpdated",
+    "inputs": [
+      {
+        "name": "bridgeRegistry",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ConfigurationSet",
+    "inputs": [
+      {
+        "name": "contractName",
+        "type": "string",
+        "indexed": true,
+        "internalType": "string"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Initialized",
+    "inputs": [
+      {
+        "name": "version",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "uint8"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "NativeTokenSet",
+    "inputs": [
+      {
+        "name": "tokenAddress",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ProxyAdminCodehashSet",
+    "inputs": [
+      {
+        "name": "codehash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RegistrationSuccess",
+    "inputs": [
+      {
+        "name": "safeWalletAddress",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RoleAdminChanged",
+    "inputs": [
+      {
+        "name": "role",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "previousAdminRole",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "newAdminRole",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RoleGranted",
+    "inputs": [
+      {
+        "name": "role",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "sender",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RoleRevoked",
+    "inputs": [
+      {
+        "name": "role",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "sender",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SafeConfigSet",
+    "inputs": [
+      {
+        "name": "tokamakDAO",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "foundation",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "threshold",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "VerificationPossibleSet",
+    "inputs": [
+      {
+        "name": "isVerificationPossible",
+        "type": "bool",
+        "indexed": true,
+        "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "VerificationSuccess",
+    "inputs": [
+      {
+        "name": "safeWalletAddress",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "systemConfigProxy",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "proxyAdmin",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "timestamp",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
   }
 ]
