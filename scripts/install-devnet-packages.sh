@@ -362,10 +362,35 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
     STEP=$((STEP + 1))
     echo
 
+    # 8. Install and Run Docker
+    echo "[$STEP/$TOTAL_STEPS] ----- Installing Docker Engine..."
+    if ! command -v docker &> /dev/null; then
+        echo "Docker not found, installing..."
+        brew install --cask docker
+    else
+        echo "Docker is already installed."
+    fi
+
+    # Run Docker Daemon
+    echo "Starting Docker Daemon..."
+    open -a Docker
+    sudo chmod 666 /var/run/docker.sock
+
+    echo "[$STEP/$TOTAL_STEPS] ----- Installing Docker Compose..."
+    if ! command -v docker-compose &> /dev/null; then
+        echo "Docker Compose not found, installing..."
+        brew install docker-compose
+    else
+        echo "Docker Compose is already installed."
+    fi
+
+    STEP=$((STEP + 1))
+    echo
+
     # 7. Install Cargo (v1.83.0)
     echo "[$STEP/$TOTAL_STEPS] ----- Installing Cargo (v1.83.0)..."
     source "$HOME/.cargo/env"
-    if ! cargo --version | grep "1.83.0" &> /dev/null; then
+    if ! cargo --version | grep -q "1.83.0" &> /dev/null; then
         echo "Cargo 1.83.0 not found, installing..."
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
@@ -398,67 +423,37 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
     STEP=$((STEP + 1))
     echo
 
-    # 8. Install and Run Docker
-    echo "[$STEP/$TOTAL_STEPS] ----- Installing Docker Engine..."
-    if ! command -v docker &> /dev/null; then
-        echo "Docker not found, installing..."
-        brew install --cask docker
-    else
-        echo "Docker is already installed."
-    fi
+    # 9. Install Foundry
+    echo "[$STEP/$TOTAL_STEPS] ----- Installing Foundry..."
+    echo "Installing Foundry..."
 
-    # Run Docker Daemon
-    echo "Starting Docker Daemon..."
-    open -a Docker
-    sudo chmod 666 /var/run/docker.sock
-
-    echo "[$STEP/$TOTAL_STEPS] ----- Installing Docker Compose..."
-    if ! command -v docker-compose &> /dev/null; then
-        echo "Docker Compose not found, installing..."
-        brew install docker-compose
-    else
-        echo "Docker Compose is already installed."
-    fi
-
-    STEP=$((STEP + 1))
-    echo
-
-    # 9. Install Foundry using Pnpm
-    echo "[$STEP/$TOTAL_STEPS] ----- Installing Foundry using Pnpm..."
+    # Check if jq is installed
     if ! command -v jq &> /dev/null; then
         echo "jq not found, installing..."
-        brew install jq
+        sudo apt-get install -y jq
     else
-        echo "jq is already installed."
+        echo "✅ jq is already installed"
     fi
 
-    if pnpm check:foundry | grep -q "Foundry version matches the expected version."; then
-        echo "Foundry is already installed with the expected version. Skipping installation."
+    # Check if Foundry is already installed with expected version
+    if forge --version &> /dev/null && cast --version &> /dev/null; then
+        echo "✅ Foundry is already installed"
     else
-      if pnpm install:foundry; then
-          # Check if the foundry configuration is already in the CONFIG_FILE
-          if ! grep -Fq 'export PATH="$PATH:$HOME/.foundry/bin"' "$CONFIG_FILE"; then
-
-              # If the configuration is not found, add foundry to the current shell session
-              {
-                  echo ''
-                  echo 'export PATH="$PATH:$HOME/.foundry/bin"'
-              } >> "$CONFIG_FILE"
-          fi
-
-          # Check if the foundry configuration is already in the PROFILE_FILE
-          if ! grep -Fq 'export PATH="$PATH:$HOME/.foundry/bin"' "$PROFILE_FILE"; then
-              # If the configuration is not found, add foundry to the current shell session
-              {
-                  echo ''
-                  echo 'export PATH="$PATH:$HOME/.foundry/bin"'
-              } >> "$PROFILE_FILE"
-          fi
-          export PATH="$PATH:$HOME/.foundry/bin"
-          source $CONFIG_FILE
-      else
-          exit
-      fi
+        # Install Foundry
+        echo "Installing/updating Foundry..."
+        if ! command -v curl &> /dev/null; then
+            echo "curl not found, installing..."
+            sudo apt-get install -y curl
+        fi
+        if curl -L https://foundry.paradigm.xyz | bash && curl -fsSL https://raw.githubusercontent.com/tokamak-network/trh-sdk/main/scripts/install-foundry.sh | bash; then \
+            echo "✅ Foundry has been installed successfully!"
+            forge --version
+            cast --version 
+            anvil --version
+        else
+            echo "❌ Foundry installation failed"
+            exit 1
+        fi
     fi
 
     SUCCESS="true"
@@ -768,6 +763,42 @@ elif [[ "$OS_TYPE" == "linux" ]]; then
         STEP=$((STEP + 1))
         echo
 
+        # 9. Install Foundry
+        echo "[$STEP/$TOTAL_STEPS] ----- Installing Foundry..."
+        echo "Installing Foundry..."
+
+        # Check if jq is installed
+        if ! command -v jq &> /dev/null; then
+            echo "jq not found, installing..."
+            sudo apt-get install -y jq
+        else
+            echo "✅ jq is already installed"
+        fi
+
+        # Check if Foundry is already installed with expected version
+        if forge --version &> /dev/null && cast --version &> /dev/null; then
+            echo "✅ Foundry is already installed"
+        else
+            # Install Foundry
+            echo "Installing/updating Foundry..."
+            if ! command -v curl &> /dev/null; then
+                echo "curl not found, installing..."
+                sudo apt-get install -y curl
+            fi
+            if curl -L https://foundry.paradigm.xyz | bash && curl -fsSL https://raw.githubusercontent.com/tokamak-network/trh-sdk/main/scripts/install-foundry.sh | bash; then \
+                echo "✅ Foundry has been installed successfully!"
+                forge --version
+                cast --version 
+                anvil --version
+            else
+                echo "❌ Foundry installation failed"
+                exit 1
+            fi
+        fi
+
+        STEP=$((STEP + 1))
+        echo
+
         # 8. Install and Run Docker
         echo "[$STEP/$TOTAL_STEPS] ----- Installing Docker Engine..."
         if ! command -v docker &> /dev/null; then
@@ -799,44 +830,6 @@ elif [[ "$OS_TYPE" == "linux" ]]; then
 
         STEP=$((STEP + 1))
         echo
-
-        # 9. Install Foundry using Pnpm
-        echo "[$STEP/$TOTAL_STEPS] ----- Installing Foundry using Pnpm..."
-        if ! command -v jq &> /dev/null; then
-            echo "jq not found, installing..."
-            sudo apt-get install -y jq
-        else
-            echo "jq is already installed."
-        fi
-
-        if pnpm check:foundry | grep -q "Foundry version matches the expected version."; then
-            echo "Foundry is already installed with the expected version. Skipping installation."
-        else
-          if pnpm install:foundry; then
-              # Check if the foundry configuration is already in the CONFIG_FILE
-              if ! grep -Fq 'export PATH="$PATH:$HOME/.foundry/bin"' "$CONFIG_FILE"; then
-
-                  # If the configuration is not found, add foundry to the current shell session
-                  {
-                      echo ''
-                      echo 'export PATH="$PATH:$HOME/.foundry/bin"'
-                  } >> "$CONFIG_FILE"
-              fi
-
-              # Check if the foundry configuration is already in the PROFILE_FILE
-              if ! grep -Fq 'export PATH="$PATH:$HOME/.foundry/bin"' "$PROFILE_FILE"; then
-                  # If the configuration is not found, add foundry to the current shell session
-                  {
-                      echo ''
-                      echo 'export PATH="$PATH:$HOME/.foundry/bin"'
-                  } >> "$PROFILE_FILE"
-              fi
-              export PATH="$PATH:$HOME/.foundry/bin"
-              source $CONFIG_FILE
-          else
-              exit
-          fi
-        fi
 
         SUCCESS="true"
         echo
