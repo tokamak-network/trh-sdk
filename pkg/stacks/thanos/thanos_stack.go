@@ -50,7 +50,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	}
 
 	// Download testnet dependencies file
-	err = utils.ExecuteCommandStream("bash", "-c", "curl -o ./install-testnet-packages.sh https://raw.githubusercontent.com/tokamak-network/trh-sdk/refs/heads/main/scripts/install-testnet-packages.sh https://raw.githubusercontent.com/tokamak-network/tokamak-thanos/main/scripts/install-testnet-packages.sh")
+	err = utils.ExecuteCommandStream("bash", "-c", "curl -o ./install-testnet-packages.sh https://raw.githubusercontent.com/tokamak-network/trh-sdk/refs/heads/main/scripts/install-testnet-packages.sh && chmod +x ./install-testnet-packages.sh")
 	if err != nil {
 		fmt.Println("\r❌ Failed to download testnet dependencies file!")
 	}
@@ -258,14 +258,20 @@ func (t *ThanosStack) Deploy(ctx context.Context, deployConfig *types.Config) er
 }
 
 func (t *ThanosStack) deployLocalDevnet() error {
-	err := t.cloneSourcecode("tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
+	// Download testnet dependencies file
+	err := utils.ExecuteCommandStream("bash", "-c", "curl -o ./install-devnet-packages.sh https://raw.githubusercontent.com/tokamak-network/trh-sdk/refs/heads/main/scripts/install-devnet-packages.sh && chmod +x ./install-devnet-packages.sh")
 	if err != nil {
-		return err
+		fmt.Println("\r❌ Failed to download devnet dependencies file!")
 	}
 
-	err = utils.ExecuteCommandStream("bash", "-c", "cd tokamak-thanos && bash ./install-devnet-packages.sh")
+	// Install the dependencies
+	err = utils.ExecuteCommandStream("bash", "-c", "bash ./install-devnet-packages.sh")
 	if err != nil {
-		fmt.Print("\r❌ Package installation failed!       \n")
+		fmt.Println("\r❌ Failed to install devnet dependencies!")
+	}
+
+	err = t.cloneSourcecode("tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
+	if err != nil {
 		return err
 	}
 
