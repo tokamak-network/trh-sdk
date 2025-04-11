@@ -148,13 +148,15 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
     STEP=$((STEP + 1))
     echo
 
-    # 3. Install Xcode Command Line Tools(Inclue make)
-    echo "[$STEP/$TOTAL_STEPS] ----- Installing Xcode Command Line Tools..."
+    # 3. Install or Upgrade Xcode Command Line Tools (Include make)
+    echo "[$STEP/$TOTAL_STEPS] ----- Installing or Upgrading Xcode Command Line Tools..."
     if ! xcode-select -p &> /dev/null; then
         echo "Xcode Command Line Tools not found, installing..."
         xcode-select --install
     else
-        echo "Xcode Command Line Tools are already installed."
+        echo "Xcode Command Line Tools are already installed. Checking for updates..."
+        sudo rm -rf /Library/Developer/CommandLineTools
+        xcode-select --install
     fi
 
     STEP=$((STEP + 1))

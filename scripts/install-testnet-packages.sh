@@ -102,7 +102,9 @@ if [[ "$OS_TYPE" == "Darwin" ]]; then
         echo "Xcode Command Line Tools not found, installing..."
         xcode-select --install
     else
-        echo "Xcode Command Line Tools are already installed."
+        echo "Xcode Command Line Tools are already installed. Checking for updates..."
+        sudo rm -rf /Library/Developer/CommandLineTools
+        xcode-select --install
     fi
 
     STEP=$((STEP + 1))
