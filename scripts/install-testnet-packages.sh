@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 # Re-run with the correct interpreter depending on the OS
 # Use SKIP_SHEBANG_CHECK variable to prevent infinite loop if already re-run
+# Get machine architecture
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64)
+        ARCH="x86_64"
+        ;;
+    aarch64|arm64)
+        ARCH="arm64"
+        ;;
+    *)
+        echo "Unsupported architecture: $ARCH"
+        exit 1
+        ;;
+esac
 if [ "$(uname)" = "Darwin" ] && [ -z "$SKIP_SHEBANG_CHECK" ]; then
   export SKIP_SHEBANG_CHECK=1
   echo "macOS detected. Switching to zsh interpreter......"
@@ -500,8 +514,15 @@ elif [[ "$OS_TYPE" == "Linux" ]]; then
             sudo apt-get update && sudo apt-get install -y unzip
         fi
 
-        # Download AWS CLI v2 installer
-        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+        # Download AWS CLI v2 installer based on architecture
+        if [ "$ARCH" = "x86_64" ]; then
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+        elif [ "$ARCH" = "arm64" ]; then
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o "awscliv2.zip"
+        else
+            echo "❌ Unsupported architecture: $ARCH"
+            exit 1
+        fi
 
         # Unzip the installer
         unzip awscliv2.zip
@@ -569,11 +590,14 @@ elif [[ "$OS_TYPE" == "Linux" ]]; then
         kubectl version --client
     else
         echo "Installing kubectl..."
-        # Download latest kubectl binary
-        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-
-        # Download kubectl checksum file
-        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl.sha256"
+        # Download latest kubectl binary based on architecture
+        if [[ "$ARCH" == "arm64" ]]; then
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/arm64/kubectl"
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/arm64/kubectl.sha256"
+        else
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl.sha256"
+        fi
 
         # Validate binary against checksum
         if echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check; then
