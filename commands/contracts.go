@@ -7,7 +7,7 @@ import (
 	"github.com/tokamak-network/trh-sdk/flags"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
-	"github.com/urfave/cli/v3"
+	cli "github.com/urfave/cli/v3"
 )
 
 func ActionDeployContracts() cli.ActionFunc {
