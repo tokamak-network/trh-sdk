@@ -699,7 +699,7 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, fromDeployCo
 			return fmt.Errorf("failed to register candidate: %v", err)
 		}
 
-		fmt.Printf("Transaction submitted: %s\n", txVerifyAndRegisterConfig.Hash().Hex())
+		fmt.Printf("Verification and register config transaction submitted: %s\n", txVerifyAndRegisterConfig.Hash().Hex())
 
 		// Wait for transaction confirmation
 		receiptVerifyRegisterConfig, err := bind.WaitMined(ctx, l1Client, txVerifyAndRegisterConfig)
@@ -732,7 +732,7 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, fromDeployCo
 			return fmt.Errorf("failed to register candidate: %v", err)
 		}
 
-		fmt.Printf("Transaction submitted: %s\n", txRegisterConfig.Hash().Hex())
+		fmt.Printf("Register config transaction submitted: %s\n", txRegisterConfig.Hash().Hex())
 
 		// Wait for transaction confirmation
 		receiptRegisterConfig, err := bind.WaitMined(ctx, l1Client, txRegisterConfig)
@@ -776,7 +776,7 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, fromDeployCo
 		return fmt.Errorf("failed to register candidate: %v", err)
 	}
 
-	fmt.Printf("Transaction submitted: %s\n", txRegisterCandidate.Hash().Hex())
+	fmt.Printf("Register Candidate transaction submitted: %s\n", txRegisterCandidate.Hash().Hex())
 
 	// Wait for transaction confirmation
 	receiptRegisterCandidate, err := bind.WaitMined(ctx, l1Client, txRegisterCandidate)
