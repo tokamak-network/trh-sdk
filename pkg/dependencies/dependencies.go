@@ -15,14 +15,6 @@ func CheckK8sInstallation() bool {
 	}
 	fmt.Println("✅ kubectl is installed")
 
-	// Check if Kubernetes cluster is accessible
-	_, err = utils.ExecuteCommand("kubectl", "cluster-info")
-	if err != nil {
-		fmt.Println("❌ Unable to access Kubernetes cluster")
-		return true
-	}
-	fmt.Println("✅ Kubernetes cluster is accessible")
-
 	return true
 }
 
@@ -85,5 +77,37 @@ func CheckDirenvInstallation() bool {
 	}
 
 	fmt.Println("✅ direnv is installed")
+	return true
+}
+
+func CheckPnpmInstallation() bool {
+	_, err := utils.ExecuteCommand("pnpm", "--version")
+	if err != nil {
+		fmt.Println("❌ pnpm is not installed or not found in PATH")
+		return false
+	}
+	fmt.Println("✅ pnpm is installed")
+	return true
+}
+
+func CheckFoundryInstallation() bool {
+	_, err := utils.ExecuteCommand("forge", "--version")
+	if err != nil {
+		fmt.Println("❌ forge is not installed or not found in PATH")
+		return false
+	}
+
+	_, err = utils.ExecuteCommand("anvil", "--version")
+	if err != nil {
+		fmt.Println("❌ anvil is not installed or not found in PATH")
+		return false
+	}
+
+	_, err = utils.ExecuteCommand("cast", "--version")
+	if err != nil {
+		fmt.Println("❌ cast is not installed or not found in PATH")
+		return false
+	}
+	fmt.Println("✅ Foundry is installed")
 	return true
 }

@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
-
-	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
+
+type K8sConfig struct {
+	Namespace string `json:"namespace"`
+}
 
 type Config struct {
 	AdminPrivateKey      string `json:"admin_private_key"`
@@ -18,25 +19,28 @@ type Config struct {
 
 	DeploymentPath string `json:"deployment_path"`
 	L1RPCURL       string `json:"l1_rpc_url"`
+	L1BeaconURL    string `json:"l1_beacon_url"`
 	L1RPCProvider  string `json:"l1_rpc_provider"`
 	L1ChainID      uint64 `json:"l1_chain_id"`
+	L2ChainID      uint64 `json:"l2_chain_id"`
 
 	Stack            string `json:"stack"`
 	Network          string `json:"network"`
 	EnableFraudProof bool   `json:"enable_fraud_proof"`
 
 	// these fields are added after installing the infrastructure successfully
-	K8sNamespace    string `json:"k8s_namespace"`
-	HelmReleaseName string `json:"helm_release_name"`
-	L2RpcUrl        string `json:"l2_rpc_url"`
+	L2RpcUrl string `json:"l2_rpc_url"`
 
 	// AWS config
-	AWS *AWSLogin `json:"aws"`
+	AWS *AWSConfig `json:"aws"`
+
+	// K8s config
+	K8s *K8sConfig `json:"k8s"`
 
 	ChainName string `json:"chain_name"`
 }
 
-const configFileName = "settings.json"
+const ConfigFileName = "settings.json"
 
 func (c *Config) WriteToJSONFile() error {
 	data, err := json.MarshalIndent(c, "", "  ")
@@ -46,43 +50,11 @@ func (c *Config) WriteToJSONFile() error {
 	}
 
 	// Write JSON to a file
-	err = os.WriteFile(configFileName, data, 0644)
+	err = os.WriteFile(ConfigFileName, data, 0644)
 	if err != nil {
 		fmt.Println("Error writing JSON file:", err)
 		return err
 	}
 
 	return nil
-}
-
-func ReadConfigFromJSONFile() (*Config, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
-
-	fileExist := utils.CheckFileExists(fmt.Sprintf("%s/%s", cwd, configFileName))
-	if !fileExist {
-		return nil, nil
-	}
-
-	data, err := os.ReadFile(configFileName)
-	if err != nil {
-		return nil, err
-	}
-
-	var config Config
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, err
-	}
-	return &config, nil
-}
-
-func ConvertChainNameToNamespace(chainName string) string {
-	words := strings.Split(chainName, " ")
-	namespace := ""
-	for _, word := range words {
-		namespace = fmt.Sprintf("%s-%s", namespace, strings.ToLower(word))
-	}
-	return namespace
 }

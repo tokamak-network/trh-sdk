@@ -11,12 +11,16 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tokamak-network/trh-sdk/pkg/utils"
+
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 )
+
+var estimatedDeployContracts = new(big.Int).SetInt64(80_000_000)
+var zeroBalance = new(big.Int).SetInt64(0)
 
 var mapAccountIndexes = map[int]string{
 	0: "Admin",
@@ -33,7 +37,8 @@ func displayAccounts(accounts map[int]types.Account) {
 	}
 
 	for i, account := range sortedAccounts {
-		fmt.Printf("\t%d. %s(%s ETH)\n", i, account.Address, account.Balance)
+		balance, _ := new(big.Int).SetString(account.Balance, 10)
+		fmt.Printf("\t%d. %s(%.4f ETH)\n", i, account.Address, utils.WeiToEther(balance))
 	}
 }
 
@@ -46,19 +51,29 @@ func selectAccounts(ctx context.Context, client *ethclient.Client, enableFraudPr
 
 	selectedAccountsIndex := [5]int{-1, -1, -1, -1, -1}
 
+	// get suggestion gas
+	suggestionGas, err := client.SuggestGasPrice(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	minimumBalanceForAdmin := new(big.Int).Mul(estimatedDeployContracts, suggestionGas)
+
 	prompts := []string{
-		"Select an admin account from the following list (minimum 0.6 ETH required)",
-		"Select a sequencer account from the following list",
+		fmt.Sprintf("Select an admin account from the following list (minimum %.4f ETH required)", utils.WeiToEther(minimumBalanceForAdmin)),
+		"Select a sequencer account from the following list(No minimum requirement)",
 		"Select a batcher account from the following list (recommended 0.3 ETH)",
 		"Select a proposer account from the following list (recommended 0.3 ETH)",
 	}
 	if enableFraudProof {
 		prompts = append(prompts, "Select a challenger account from the following list (recommended 0.3 ETH)")
 	}
+
 	operators := make(types.OperatorMap)
 
 	displayAccounts(accounts)
 	for i := 0; i < len(prompts); i++ {
+		operator := types.Operator(i)
 	startLoop:
 		for {
 			fmt.Println(prompts[i])
@@ -75,10 +90,30 @@ func selectAccounts(ctx context.Context, client *ethclient.Client, enableFraudPr
 				goto startLoop
 			}
 
+			selectedAccount := accounts[selectingIndex]
+			selectedAccountBalance, ok := new(big.Int).SetString(selectedAccount.Balance, 10)
+			if !ok {
+				selectedAccountBalance = zeroBalance
+			}
+
+			switch operator {
+			case types.Admin:
+				if selectedAccountBalance.Cmp(minimumBalanceForAdmin) < 0 {
+					fmt.Printf("The selecting account balance(%.4f ETH) is smaller than the expecting gas(%.4f ETH) to deploy the contracts \n", utils.WeiToEther(selectedAccountBalance), utils.WeiToEther(minimumBalanceForAdmin))
+					goto startLoop
+				}
+			case types.Batcher, types.Challenger, types.Proposer:
+				if selectedAccountBalance.Cmp(zeroBalance) <= 0 {
+					fmt.Printf("The balance of %s must be greater than zero\n", mapAccountIndexes[i])
+					goto startLoop
+				}
+			default:
+			}
+
 			for j, selectedAccountIndex := range selectedAccountsIndex {
 				if selectingIndex == selectedAccountIndex {
 					fmt.Printf("You selected this account as the %s. Do you want to want to continue(y/N): ", mapAccountIndexes[j])
-					nextInput, err := scanner.ScanBool()
+					nextInput, err := scanner.ScanBool(false)
 					if err != nil {
 						return nil, err
 					}
@@ -91,10 +126,10 @@ func selectAccounts(ctx context.Context, client *ethclient.Client, enableFraudPr
 			}
 
 			selectedAccountsIndex[i] = selectingIndex
-			operators[types.Operator(i)] = &types.IndexAccount{
+			operators[operator] = &types.IndexAccount{
 				Index:      selectingIndex,
-				Address:    accounts[selectingIndex].Address,
-				PrivateKey: accounts[selectingIndex].PrivateKey,
+				Address:    selectedAccount.Address,
+				PrivateKey: selectedAccount.PrivateKey,
 			}
 			break
 		}
@@ -165,7 +200,7 @@ func makeDeployContractConfigJsonFile(ctx context.Context, l1Provider *ethclient
 	return nil
 }
 
-func initDeployConfigTemplate(enableFraudProof bool, chainId *big.Int) *types.DeployConfigTemplate {
+func initDeployConfigTemplate(enableFraudProof bool, chainId *big.Int, l2ChainId uint64) *types.DeployConfigTemplate {
 	l1ChainId := chainId.Uint64()
 
 	defaultTemplate := &types.DeployConfigTemplate{
@@ -173,13 +208,13 @@ func initDeployConfigTemplate(enableFraudProof bool, chainId *big.Int) *types.De
 		NativeTokenSymbol:                        "TON",
 		NativeTokenAddress:                       constants.L1ChainConfigurations[l1ChainId].L2NativeTokenAddress,
 		L1ChainID:                                l1ChainId,
-		L2ChainID:                                constants.L2ChainId,
+		L2ChainID:                                l2ChainId,
 		L2BlockTime:                              2,
 		L1BlockTime:                              12,
 		MaxSequencerDrift:                        600,
 		SequencerWindowSize:                      3600,
 		ChannelTimeout:                           300,
-		BatchInboxAddress:                        constants.BatchInboxAddress,
+		BatchInboxAddress:                        utils.GenerateBatchInboxAddress(l2ChainId),
 		L2OutputOracleSubmissionInterval:         constants.L1ChainConfigurations[l1ChainId].L2OutputOracleSubmissionInterval,
 		L2OutputOracleStartingBlockNumber:        0,
 		FinalizationPeriodSeconds:                constants.L1ChainConfigurations[l1ChainId].FinalizationPeriodSeconds,
@@ -243,16 +278,6 @@ func initDeployConfigTemplate(enableFraudProof bool, chainId *big.Int) *types.De
 
 }
 
-func loginAWS(awsLoginInputs *types.AWSLogin) (*aws.AccountProfile, error) {
-	fmt.Println("Authenticating AWS account...")
-	awsProfileAccount, err := aws.LoginAWS(awsLoginInputs.AccessKey, awsLoginInputs.SecretKey, awsLoginInputs.Region, awsLoginInputs.DefaultFormat)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to authenticate AWS credentials: %s", err)
-	}
-
-	return awsProfileAccount, nil
-}
-
 func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error {
 	if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
 		fmt.Println("Error creating directory:", err)
@@ -266,8 +291,10 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	}
 	defer output.Close()
 
+	bucketName := utils.ConvertToHyphen(config.ThanosStackName)
+
 	writer := bufio.NewWriter(output)
-	writer.WriteString(fmt.Sprintf("export TF_VAR_thanos_stack_name=\"%s\"\n", config.ThanosStackName))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_thanos_stack_name=\"%s\"\n", bucketName))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_aws_region=\"%s\"\n", config.AwsRegion))
 
 	writer.WriteString(fmt.Sprintf("export TF_VAR_backend_bucket_name=\"%s\"\n", ""))
@@ -295,11 +322,77 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_l1_rpc_url=\"%s\"\n", config.L1RpcUrl))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_l1_rpc_provider=\"%s\"\n", config.L1RpcProvider))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_l1_beacon_url=\"%s\"\n", config.L1BeaconUrl))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_op_geth_image_tag=\"%s\"\n", config.OpGethImageTag))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_thanos_stack_image_tag=\"%s\"\n", config.ThanosStackImageTag))
 
 	err = writer.Flush()
 	if err != nil {
 		return err
 	}
 	fmt.Println("Environment configuration file (.envrc) has been successfully generated!")
+	return nil
+}
+
+func makeBlockExplorerEnvs(dirPath string, filename string, config types.BlockExplorerEnvs) error {
+	if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
+		fmt.Println("Error creating directory:", err)
+		return err
+	}
+
+	filePath := filepath.Join(dirPath, filename)
+
+	output, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		fmt.Println("Error opening environment file:", err)
+		return err
+	}
+	defer output.Close()
+
+	writer := bufio.NewWriter(output)
+
+	envVars := []string{
+		fmt.Sprintf("export TF_VAR_db_username=\"%s\"\n", config.BlockExplorerDatabaseUserName),
+		fmt.Sprintf("export TF_VAR_db_password=\"%s\"\n", config.BlockExplorerDatabasePassword),
+		fmt.Sprintf("export TF_VAR_db_name=\"%s\"\n", config.BlockExplorerDatabaseName),
+		fmt.Sprintf("export TF_VAR_vpc_id=\"%s\"\n", config.VpcId),
+	}
+
+	for _, envVar := range envVars {
+		_, err = writer.WriteString(envVar)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err = writer.Flush(); err != nil {
+		return err
+	}
+
+	fmt.Println("Environment configuration file (.envrc) has been successfully updated!")
+	return nil
+}
+
+func (t *ThanosStack) cloneSourcecode(repositoryName, url string) error {
+	existingSourcecode, err := utils.CheckExistingSourceCode(repositoryName)
+	if err != nil {
+		fmt.Println("Error while checking existing source code")
+		return err
+	}
+
+	if !existingSourcecode {
+		err := utils.CloneRepo(url, repositoryName)
+		if err != nil {
+			fmt.Println("Error while cloning the repository")
+			return err
+		}
+	} else {
+		err := utils.PullLatestCode(repositoryName)
+		if err != nil {
+			fmt.Printf("Error while pulling the latest code for repository %s: %v\n", repositoryName, err)
+			return err
+		}
+	}
+	fmt.Printf("\r✅ Clone the %s repository successfully \n", repositoryName)
+
 	return nil
 }

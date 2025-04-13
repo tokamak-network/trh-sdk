@@ -4,17 +4,18 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
-	"github.com/tokamak-network/trh-sdk/pkg/types"
+	"github.com/tokamak-network/trh-sdk/pkg/utils"
+
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/urfave/cli/v3"
 )
 
-func ActionInstallPlugins() cli.ActionFunc {
+func ActionInstallationPlugins() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
 		var err error
 		var network, stack string
-		config, err := types.ReadConfigFromJSONFile()
+		config, err := utils.ReadConfigFromJSONFile()
 		if err != nil {
 			fmt.Println("Error reading settings.json")
 			return err
@@ -34,17 +35,23 @@ func ActionInstallPlugins() cli.ActionFunc {
 			return nil
 		}
 
-		return InstallPlugins(network, stack, plugins, config)
+		if cmd.Name == "install" {
+			switch stack {
+			case constants.ThanosStack:
+				thanosStack := thanos.NewThanosStack(network, stack)
+				return thanosStack.InstallPlugins(ctx, plugins, config)
+			default:
+				return nil
+			}
+		} else if cmd.Name == "uninstall" {
+			switch stack {
+			case constants.ThanosStack:
+				thanosStack := thanos.NewThanosStack(network, stack)
+				return thanosStack.UninstallPlugins(ctx, plugins, config)
+			default:
+				return nil
+			}
+		}
+		return nil
 	}
-}
-
-func InstallPlugins(network, stack string, pluginNames []string, config *types.Config) error {
-
-	switch stack {
-	case constants.ThanosStack:
-		thanosStack := thanos.NewThanosStack(network, stack)
-		return thanosStack.InstallPlugins(pluginNames, config)
-	}
-
-	return nil
 }

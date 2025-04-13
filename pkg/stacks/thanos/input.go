@@ -3,13 +3,41 @@ package thanos
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
+
+var (
+	chainNameRegex = regexp.MustCompile(`^[a-zA-Z0-9 ]+$`)
+)
+
+type DeployContractsInput struct {
+	l1Provider string
+	l1RPCurl   string
+	seed       string
+	fraudProof bool
+}
+
+type DeployInfraInput struct {
+	ChainName   string
+	L1BeaconURL string
+}
+
+type InstallBlockExplorerInput struct {
+	DatabaseUsername       string
+	DatabasePassword       string
+	CoinmarketcapKey       string
+	CoinmarketcapTokenID   string
+	WalletConnectProjectID string
+}
 
 func (t *ThanosStack) inputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
 	fmt.Println("You are about to deploy the L1 contracts.")
@@ -52,29 +80,29 @@ func (t *ThanosStack) inputDeployContracts(ctx context.Context) (*DeployContract
 		return nil, err
 	}
 
-	faultProof := false
-	fmt.Print("Would you like to enable the fault-proof system on your chain? [Y or N] (default: N): ")
-	faultProof, err = scanner.ScanBool()
-	if err != nil {
-		fmt.Printf("Error while reading the fault-proof system setting: %s", err)
-		return nil, err
-	}
+	fraudProof := false
+	//fmt.Print("Would you like to enable the fault-proof system on your chain? [Y or N] (default: N): ")
+	//fraudProof, err = scanner.ScanBool()
+	//if err != nil {
+	//	fmt.Printf("Error while reading the fault-proof system setting: %s", err)
+	//	return nil, err
+	//}
 
 	return &DeployContractsInput{
 		l1RPCurl:   l1RPCUrl,
 		l1Provider: l1RRCKind,
 		seed:       seed,
-		falutProof: faultProof,
+		fraudProof: fraudProof,
 	}, nil
 }
 
-func (t *ThanosStack) inputAWSLogin() (*types.AWSLogin, error) {
+func (t *ThanosStack) inputAWSLogin() (*types.AWSConfig, error) {
 	var (
 		awsAccessKeyID, awsSecretKey string
 		err                          error
 	)
 	for {
-		fmt.Print("Please enter your AWS access key (learn more): ")
+		fmt.Print("Please enter your AWS access key: ")
 		awsAccessKeyID, err = scanner.ScanString()
 		if err != nil {
 			fmt.Println("Error while reading AWS access key")
@@ -92,7 +120,7 @@ func (t *ThanosStack) inputAWSLogin() (*types.AWSLogin, error) {
 	}
 
 	for {
-		fmt.Print("Please enter your AWS secret key (learn more): ")
+		fmt.Print("Please enter your AWS secret key: ")
 		awsSecretKey, err = scanner.ScanString()
 		if err != nil {
 			fmt.Println("Error while reading AWS secret key")
@@ -119,7 +147,7 @@ func (t *ThanosStack) inputAWSLogin() (*types.AWSLogin, error) {
 		awsRegion = "ap-northeast-2"
 	}
 
-	return &types.AWSLogin{
+	return &types.AWSConfig{
 		SecretKey:     awsSecretKey,
 		Region:        awsRegion,
 		AccessKey:     awsAccessKeyID,
@@ -128,23 +156,43 @@ func (t *ThanosStack) inputAWSLogin() (*types.AWSLogin, error) {
 }
 
 func (t *ThanosStack) inputDeployInfra() (*DeployInfraInput, error) {
-	fmt.Print("Please enter your chain name: ")
-	chainName, err := scanner.ScanString()
-	if err != nil {
-		fmt.Printf("Error while reading chain name: %s", err)
-		return nil, err
+	var (
+		chainName   string
+		l1BeaconURL string
+		err         error
+	)
+	for {
+		fmt.Print("Please enter your chain name: ")
+		chainName, err = scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error while reading chain name: %s", err)
+			return nil, err
+		}
+
+		chainName = strings.Join(strings.Fields(chainName), " ")
+
+		if chainName == "" {
+			fmt.Println("Error: Chain name cannot be empty")
+			continue
+		}
+
+		if !chainNameRegex.MatchString(chainName) {
+			fmt.Println("Input must contain only letters (a-z, A-Z), numbers (0-9), spaces. Special characters are not allowed")
+			continue
+		}
+
+		break
 	}
 
-	var l1BeaconUrl string
 	for {
 		fmt.Print("Please enter your L1 beacon URL: ")
-		l1BeaconUrl, err = scanner.ScanString()
+		l1BeaconURL, err = scanner.ScanString()
 		if err != nil {
 			fmt.Printf("Error while reading L1 beacon URL: %s\n", err)
 			continue
 		}
 
-		if !utils.IsValidBeaconURL(l1BeaconUrl) {
+		if !utils.IsValidBeaconURL(l1BeaconURL) {
 			fmt.Println("Error: The URL provided does not return a valid beacon genesis response. Please enter a valid URL.")
 			continue
 		}
@@ -154,28 +202,118 @@ func (t *ThanosStack) inputDeployInfra() (*DeployInfraInput, error) {
 
 	return &DeployInfraInput{
 		ChainName:   chainName,
-		L1BeaconURL: l1BeaconUrl,
+		L1BeaconURL: l1BeaconURL,
 	}, nil
 }
 
-func (t *ThanosStack) cloneSourcecode(repositoryName, url string) error {
-	existingSourcecode, err := utils.CheckExistingSourceCode(repositoryName)
-	if err != nil {
-		fmt.Println("Error while checking existing source code")
-		return err
-	}
+func (t *ThanosStack) inputInstallBlockExplorer() (*InstallBlockExplorerInput, error) {
+	var (
+		databaseUserName,
+		databasePassword,
+		coinmarketcapKey,
+		//coinmarketcapTokenID,
+		walletConnectID string
+		err error
+	)
 
-	if !existingSourcecode {
-		fmt.Printf("Cloning the %s repository...", repositoryName)
-		err := utils.CloneRepo(url, repositoryName)
+	for {
+		fmt.Print("Please input your database username: ")
+		databaseUserName, err = scanner.ScanString()
 		if err != nil {
-			fmt.Println("Error while cloning the repository")
-			return err
+			fmt.Println("Error scanning database name: ", err)
+			return nil, err
 		}
-	}
-	fmt.Printf("\r✅ Successfully cloned the %s repository!       \n", repositoryName)
+		databaseUserName = strings.ToLower(databaseUserName)
 
-	return nil
+		if databaseUserName == "" {
+			fmt.Println("Database username cannot be empty")
+			continue
+		}
+
+		if err := utils.ValidatePostgresUsername(databaseUserName); err != nil {
+			fmt.Printf("Database username is invalid, err: %s", err.Error())
+			continue
+		}
+
+		if !utils.IsValidRDSUsername(databaseUserName) {
+			fmt.Println("Database user name is invalid, please try again")
+			continue
+		}
+		break
+	}
+
+	for {
+		fmt.Print("Please input your database password: ")
+		databasePassword, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error scanning database name:", err)
+			return nil, err
+		}
+
+		if databasePassword == "" {
+			fmt.Println("Database password cannot be empty")
+			continue
+		}
+
+		if !utils.IsValidRDSPassword(databasePassword) {
+			fmt.Println("Database password is invalid, please try again")
+			continue
+		}
+		break
+	}
+
+	for {
+		fmt.Print("Please input your CoinMarketCap key: ")
+		coinmarketcapKey, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error scanning CoinMarketCap key:", err)
+			return nil, err
+		}
+
+		if coinmarketcapKey == "" {
+			fmt.Println("CoinMarketCap key cannot be empty")
+			continue
+		}
+		break
+	}
+
+	//for {
+	//	fmt.Print("Please input your CoinMarketCap Token ID: ")
+	//	coinmarketcapTokenID, err = scanner.ScanString()
+	//	if err != nil {
+	//		fmt.Println("Error scanning CoinMarketCap token id:", err)
+	//		return nil, err
+	//	}
+	//
+	//	if coinmarketcapTokenID == "" {
+	//		fmt.Println("Coinmarketcap ID cannot be empty")
+	//		continue
+	//	}
+	//	break
+	//}
+
+	for {
+		fmt.Print("Please input your wallet connect id: ")
+		walletConnectID, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error scanning wallet connect id:", err)
+			return nil, err
+		}
+
+		if walletConnectID == "" {
+			fmt.Println("WalletConnectID cannot be empty")
+			continue
+		}
+		break
+	}
+
+	return &InstallBlockExplorerInput{
+		DatabaseUsername:       databaseUserName,
+		DatabasePassword:       databasePassword,
+		CoinmarketcapKey:       coinmarketcapKey,
+		CoinmarketcapTokenID:   constants.TonCoinMarketCapTokenID,
+		WalletConnectProjectID: walletConnectID,
+	}, nil
 }
 
 func (t *ThanosStack) inputRegisterCandidate(fromDeployContract bool) (*RegisterCandidateInput, error) {
@@ -240,7 +378,7 @@ func (t *ThanosStack) inputRegisterCandidate(fromDeployContract bool) (*Register
 		return nil, err
 	}
 	fmt.Print("Would you like to use WTON instead of TON for staking? [Y or N] (default: N): ")
-	boolValue, err := scanner.ScanBool()
+	boolValue, err := scanner.ScanBool(false)
 	if err != nil {
 		fmt.Printf("Error while reading use-ton setting: %s", err)
 		return nil, err

@@ -1,7 +1,5 @@
 package constants
 
-import "fmt"
-
 var L1ChainConfigurations = map[uint64]struct {
 	L2NativeTokenAddress string `json:"native_token_address"`
 
@@ -46,7 +44,7 @@ var L1ChainConfigurations = map[uint64]struct {
 
 		FinalizationPeriodSeconds:        12,
 		L2OutputOracleSubmissionInterval: 120,
-		USDCAddress:                      "0xd718826bbc28e61dc93aacae04711c8e755b4915",
+		USDCAddress:                      "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
 		USDTAddress:                      "0xaa8e23fb1079ea71e0a56f48a2aa51851d8433d0",
 		ChainName:                        "Ethereum Sepolia",
 		BlockExplorer:                    "https://sepolia.etherscan.io/",
@@ -75,7 +73,4 @@ var L1ChainConfigurations = map[uint64]struct {
 	},
 }
 
-const L2ChainId = 111551119876
-
-var basebatchInboxAddress = "0xff00000000000000000000000000000000000000"
-var BatchInboxAddress = fmt.Sprintf("%s%d", basebatchInboxAddress[:len(basebatchInboxAddress)-len(fmt.Sprintf("%d", L2ChainId))], L2ChainId)
+var BaseBatchInboxAddress = "0xff00000000000000000000000000000000000000"

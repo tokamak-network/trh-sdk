@@ -59,6 +59,60 @@ type PodsJSON struct {
 	} `json:"metadata"`
 }
 
+type SvcJSON struct {
+	APIVersion string `json:"apiVersion"`
+	Items      []struct {
+		APIVersion string `json:"apiVersion"`
+		Kind       string `json:"kind"`
+		Metadata   struct {
+			Annotations struct {
+				MetaHelmShReleaseName      string `json:"meta.helm.sh/release-name"`
+				MetaHelmShReleaseNamespace string `json:"meta.helm.sh/release-namespace"`
+			} `json:"annotations"`
+			CreationTimestamp time.Time `json:"creationTimestamp"`
+			Labels            struct {
+				AppKubernetesIoInstance    string `json:"app.kubernetes.io/instance"`
+				AppKubernetesIoManagedBy   string `json:"app.kubernetes.io/managed-by"`
+				AppKubernetesIoName        string `json:"app.kubernetes.io/name"`
+				AppKubernetesIoVersion     string `json:"app.kubernetes.io/version"`
+				ExternalSecretsIoComponent string `json:"external-secrets.io/component"`
+				HelmShChart                string `json:"helm.sh/chart"`
+			} `json:"labels"`
+			Name            string `json:"name"`
+			Namespace       string `json:"namespace"`
+			ResourceVersion string `json:"resourceVersion"`
+			UID             string `json:"uid"`
+		} `json:"metadata"`
+		Spec struct {
+			ClusterIP             string   `json:"clusterIP"`
+			ClusterIPs            []string `json:"clusterIPs"`
+			InternalTrafficPolicy string   `json:"internalTrafficPolicy"`
+			IPFamilies            []string `json:"ipFamilies"`
+			IPFamilyPolicy        string   `json:"ipFamilyPolicy"`
+			Ports                 []struct {
+				Name       string `json:"name"`
+				Port       int    `json:"port"`
+				Protocol   string `json:"protocol"`
+				TargetPort int    `json:"targetPort"`
+			} `json:"ports"`
+			Selector struct {
+				AppKubernetesIoInstance string `json:"app.kubernetes.io/instance"`
+				AppKubernetesIoName     string `json:"app.kubernetes.io/name"`
+			} `json:"selector"`
+			SessionAffinity string `json:"sessionAffinity"`
+			Type            string `json:"type"`
+		} `json:"spec"`
+		Status struct {
+			LoadBalancer struct {
+			} `json:"loadBalancer"`
+		} `json:"status"`
+	} `json:"items"`
+	Kind     string `json:"kind"`
+	Metadata struct {
+		ResourceVersion string `json:"resourceVersion"`
+	} `json:"metadata"`
+}
+
 type IngressJSON struct {
 	Items []struct {
 		Metadata struct {
@@ -102,6 +156,9 @@ func GetPodsByName(namespace string, podName string) ([]string, error) {
 func GetK8sIngresses(namespace string) (string, error) {
 	return ExecuteCommand("kubectl", "-n", namespace, "get", "ingress", "-o", "json")
 }
+func GetK8sSVC(namespace string) (string, error) {
+	return ExecuteCommand("kubectl", "-n", namespace, "get", "svc", "-o", "json")
+}
 
 func GetAddressByIngress(namespace string, ingressName string) ([]string, error) {
 	output, err := GetK8sIngresses(namespace)
@@ -116,11 +173,32 @@ func GetAddressByIngress(namespace string, ingressName string) ([]string, error)
 
 	addresses := make([]string, 0)
 	for _, item := range ingressData.Items {
-		if strings.HasPrefix(item.Metadata.Name, ingressName) {
+		if strings.Contains(item.Metadata.Name, ingressName) {
 			// Extract IP or Hostname
 			for _, ingress := range item.Status.LoadBalancer.Ingress {
 				addresses = append(addresses, ingress.Hostname)
 			}
+		}
+	}
+	return addresses, nil
+}
+
+func GetServiceNames(namespace string, serviceName string) ([]string, error) {
+	output, err := GetK8sSVC(namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	var serviceData SvcJSON
+	if err := json.Unmarshal([]byte(output), &serviceData); err != nil {
+		fmt.Println("Error parsing JSON:", err)
+		return nil, err
+	}
+
+	addresses := make([]string, 0)
+	for _, item := range serviceData.Items {
+		if strings.Contains(item.Metadata.Name, serviceName) {
+			addresses = append(addresses, item.Metadata.Name)
 		}
 	}
 	return addresses, nil
