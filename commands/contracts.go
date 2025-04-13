@@ -7,7 +7,13 @@ import (
 	"github.com/tokamak-network/trh-sdk/flags"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
-	cli "github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v3"
+)
+
+type contextKey string
+
+const (
+	noCandidateKey contextKey = "no-candidate"
 )
 
 func ActionDeployContracts() cli.ActionFunc {
@@ -16,7 +22,8 @@ func ActionDeployContracts() cli.ActionFunc {
 		network := cmd.String(flags.NetworkFlag.Name)
 		noCandidate := cmd.Bool(flags.NoCandidateFlag.Name)
 
-		ctxWithValue := context.WithValue(ctx, "no-candidate", noCandidate)
+		// Use the custom key type
+		ctxWithValue := context.WithValue(ctx, noCandidateKey, noCandidate)
 
 		switch stack {
 		case constants.ThanosStack:

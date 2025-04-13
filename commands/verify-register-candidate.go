@@ -7,7 +7,7 @@ import (
 	"github.com/tokamak-network/trh-sdk/flags"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
-	cli "github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v3"
 )
 
 func ActionVerifyRegisterCandidates() cli.ActionFunc {

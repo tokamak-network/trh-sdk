@@ -9,7 +9,7 @@ import (
 	"github.com/tokamak-network/trh-sdk/commands"
 	"github.com/tokamak-network/trh-sdk/flags"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
-	cli "github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v3"
 )
 
 func Run() {

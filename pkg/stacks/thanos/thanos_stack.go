@@ -809,6 +809,9 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, fromDeployCo
 	}
 
 	isVerificationPossible, err := contract.IsVerificationPossible(callOpts)
+	if err != nil {
+		return fmt.Errorf("failed to check if verification is possible: %v", err)
+	}
 	// Verify and register config
 	if isVerificationPossible {
 		txVerifyAndRegisterConfig, err := contract.VerifyAndRegisterRollupConfig(
