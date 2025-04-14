@@ -114,6 +114,11 @@ func Run() {
 				Usage:  "Show SDK version",
 				Action: commands.ActionVersion(),
 			},
+			{
+				Name:   "info",
+				Usage:  "Show information about the running chain",
+				Action: commands.ActionShowInformation(),
+			},
 		},
 	}
 
