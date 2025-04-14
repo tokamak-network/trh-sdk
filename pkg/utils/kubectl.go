@@ -129,12 +129,12 @@ type IngressJSON struct {
 	} `json:"items"`
 }
 
-func GetK8sPods(namespace string) (string, error) {
+func getK8sPods(namespace string) (string, error) {
 	return ExecuteCommand("kubectl", "-n", namespace, "get", "pods", "-o", "json")
 }
 
-func GetPodsByName(namespace string, podName string) ([]string, error) {
-	output, err := GetK8sPods(namespace)
+func GetK8sPods(namespace string) ([]string, error) {
+	output, err := getK8sPods(namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -146,6 +146,29 @@ func GetPodsByName(namespace string, podName string) ([]string, error) {
 
 	pods := make([]string, 0)
 	for _, item := range podData.Items {
+		if item.Status.Phase == "Running" || item.Status.Phase == "Pending" || item.Status.Phase == "Succeeded" {
+			pods = append(pods, item.Metadata.Name)
+		}
+	}
+	return pods, nil
+}
+
+func GetPodsByName(namespace string, podName string) ([]string, error) {
+	output, err := getK8sPods(namespace)
+	if err != nil {
+		return nil, err
+	}
+	var podData PodsJSON
+	if err := json.Unmarshal([]byte(output), &podData); err != nil {
+		fmt.Println("Error parsing JSON:", err)
+		return nil, err
+	}
+
+	pods := make([]string, 0)
+	for _, item := range podData.Items {
+		if item.Status.Phase != "Running" && item.Status.Phase != "Pending" && item.Status.Phase != "Succeeded" {
+			continue
+		}
 		if strings.HasPrefix(item.Metadata.Name, podName) {
 			pods = append(pods, item.Metadata.Name)
 		}
@@ -153,15 +176,44 @@ func GetPodsByName(namespace string, podName string) ([]string, error) {
 	return pods, nil
 }
 
-func GetK8sIngresses(namespace string) (string, error) {
+func getK8sIngresses(namespace string) (string, error) {
 	return ExecuteCommand("kubectl", "-n", namespace, "get", "ingress", "-o", "json")
 }
-func GetK8sSVC(namespace string) (string, error) {
+func getK8sSVC(namespace string) (string, error) {
 	return ExecuteCommand("kubectl", "-n", namespace, "get", "svc", "-o", "json")
 }
 
+func GetIngresses(namespace string) (map[string][]string, error) {
+	output, err := getK8sIngresses(namespace)
+	if err != nil {
+		return nil, err
+	}
+	var ingressData IngressJSON
+	if err := json.Unmarshal([]byte(output), &ingressData); err != nil {
+		fmt.Println("Error parsing JSON:", err)
+		return nil, err
+	}
+
+	addresses := make(map[string][]string)
+	for _, item := range ingressData.Items {
+		// Extract IP or Hostname
+		for _, ingress := range item.Status.LoadBalancer.Ingress {
+			if addresses[item.Metadata.Name] == nil {
+				addresses[item.Metadata.Name] = make([]string, 0)
+			}
+			if ingress.IP != "" {
+				addresses[item.Metadata.Name] = append(addresses[item.Metadata.Name], ingress.IP)
+			}
+			if ingress.Hostname != "" {
+				addresses[item.Metadata.Name] = append(addresses[item.Metadata.Name], ingress.Hostname)
+			}
+		}
+	}
+	return addresses, nil
+}
+
 func GetAddressByIngress(namespace string, ingressName string) ([]string, error) {
-	output, err := GetK8sIngresses(namespace)
+	output, err := getK8sIngresses(namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +236,7 @@ func GetAddressByIngress(namespace string, ingressName string) ([]string, error)
 }
 
 func GetServiceNames(namespace string, serviceName string) ([]string, error) {
-	output, err := GetK8sSVC(namespace)
+	output, err := getK8sSVC(namespace)
 	if err != nil {
 		return nil, err
 	}
