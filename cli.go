@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/tokamak-network/trh-sdk/commands"
 	"github.com/tokamak-network/trh-sdk/flags"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
+	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/urfave/cli/v3"
 )
 
@@ -119,10 +121,32 @@ func Run() {
 				Usage:  "Show information about the running chain",
 				Action: commands.ActionShowInformation(),
 			},
+			{
+				Name:  "logs",
+				Usage: "Show logs of the running chain",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:     "component",
+						Aliases:  []string{"c"},
+						Required: true,
+						Usage:    fmt.Sprintf("Component name (allowed: %s)", strings.Join(allowedComponentList(), ", ")),
+						Value:    "",
+					},
+				},
+				Action: commands.ActionShowLogs(),
+			},
 		},
 	}
 
 	if err := cmd.Run(context.Background(), os.Args); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func allowedComponentList() []string {
+	components := make([]string, 0)
+	for c := range thanos.SupportedLogsComponents {
+		components = append(components, c)
+	}
+	return components
 }
