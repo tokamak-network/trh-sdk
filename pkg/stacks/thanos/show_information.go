@@ -29,9 +29,9 @@ func (t *ThanosStack) ShowInformation(ctx context.Context, config *types.Config)
 	}
 
 	status := map[string]bool{
-		"chain":          false,
-		"bridge":         false,
-		"block-explorer": false,
+		"chain":             false,
+		"bridge":            false,
+		"block-explorer-fe": false,
 	}
 
 	for _, pod := range runningPods {
@@ -41,8 +41,8 @@ func (t *ThanosStack) ShowInformation(ctx context.Context, config *types.Config)
 		if strings.Contains(pod, "bridge") {
 			status["bridge"] = true
 		}
-		if strings.Contains(pod, "block-explorer") {
-			status["block-explorer"] = true
+		if strings.Contains(pod, "block-explorer-fe") {
+			status["block-explorer-fe"] = true
 		}
 	}
 
@@ -61,7 +61,7 @@ func (t *ThanosStack) ShowInformation(ctx context.Context, config *types.Config)
 			fmt.Printf("✅ L2 network is running on http://%s\n", ingress)
 		case strings.Contains(ingressName, "bridge") && status["bridge"]:
 			fmt.Printf("✅ Bridge is running on http://%s\n", ingress)
-		case strings.Contains(ingressName, "block-explorer") && status["block-explorer"]:
+		case strings.Contains(ingressName, "block-explorer-fe") && status["block-explorer-fe"]:
 			fmt.Printf("✅ Block Explorer is running on http://%s\n", ingress)
 		}
 	}
