@@ -18,7 +18,8 @@ esac
 if [ "$(uname)" = "Darwin" ] && [ -z "$SKIP_SHEBANG_CHECK" ]; then
   export SKIP_SHEBANG_CHECK=1
   echo "macOS detected. Switching to zsh interpreter......"
-  exec /bin/zsh "$0" "$@"
+  /bin/zsh "$0" "$@"
+  exit $?  
 fi
 
 OS_TYPE=$(uname)
