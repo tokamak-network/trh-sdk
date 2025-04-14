@@ -12,13 +12,13 @@ func ScanBool(defaultResponse bool) (bool, error) {
 	var response string
 	n, err := fmt.Scanln(&response)
 
-	if err != nil {
-		return false, err
-	}
-
 	// Blank input, default No
 	if n == 0 {
 		return defaultResponse, nil
+	}
+
+	if err != nil {
+		return false, err
 	}
 
 	if strings.ToLower(response) != "n" && strings.ToLower(response) != "y" {

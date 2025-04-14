@@ -7,6 +7,7 @@ import (
 	"github.com/tokamak-network/trh-sdk/flags"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
+	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"github.com/urfave/cli/v3"
 )
 
@@ -19,7 +20,12 @@ func ActionVerifyRegisterCandidates() cli.ActionFunc {
 		case constants.ThanosStack:
 			thanosStack := thanos.NewThanosStack(network, stack)
 
-			return thanosStack.VerifyRegisterCandidates(ctx, false)
+			config, err := utils.ReadConfigFromJSONFile()
+			if err != nil || config == nil {
+				return fmt.Errorf("failed to load configuration: %v", err)
+			}
+			_, verifyRegisterCandidateErr := thanosStack.VerifyRegisterCandidates(ctx, false, config)
+			return verifyRegisterCandidateErr
 		default:
 			return fmt.Errorf("unsupported stack: %s", stack)
 		}

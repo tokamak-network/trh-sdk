@@ -18,6 +18,7 @@ var L1ChainConfigurations = map[uint64]struct {
 	L2ManagerAddress                 string `json:"l2_manager_address"`
 	L1BridgeRegistry                 string `json:"l1_bridge_registry"`
 }{
+	//TODO: Updated the addresses for L1VerificationContractAddress, L2TonAddress, L2ManagerAddress and L1BridgeRegistry for different chains
 	1: {
 		L2NativeTokenAddress: "0x2be5e8c109e2197D077D13A82dAead6a9b3433C5",
 		NativeTokenSymbol:    "ETH",

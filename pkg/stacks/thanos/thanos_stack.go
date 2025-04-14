@@ -25,8 +25,9 @@ import (
 )
 
 type ThanosStack struct {
-	network string
-	stack   string
+	network     string
+	stack       string
+	noCandidate bool
 
 	s3Client *s3.Client
 }
@@ -43,9 +44,15 @@ type RegisterCandidateInput struct {
 
 func NewThanosStack(network string, stack string) *ThanosStack {
 	return &ThanosStack{
-		network: network,
-		stack:   stack,
+		network:     network,
+		stack:       stack,
+		noCandidate: false,
 	}
+}
+
+func (t *ThanosStack) SetNoCandidate(value bool) *ThanosStack {
+	t.noCandidate = value
+	return t
 }
 
 // ----------------------------------------- Deploy contracts command  ----------------------------- //
@@ -63,6 +70,19 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	deployContractsConfig, err := t.inputDeployContracts(ctx)
 	if err != nil {
 		return err
+	}
+
+	var config *types.Config
+	var registerCandidate *RegisterCandidateInput
+	if !t.noCandidate {
+		config, err = utils.ReadConfigFromJSONFile()
+		if err != nil || config == nil {
+			return fmt.Errorf("failed to load configuration: %v", err)
+		}
+		registerCandidate, err = t.VerifyRegisterCandidates(ctx, true, config)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Download testnet dependencies file
@@ -232,14 +252,12 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	}
 	fmt.Printf("✅ Configuration successfully saved to: %s/settings.json", cwd)
 
-	noCandidate := ctx.Value("no-candidate").(bool)
-
 	// If --no-candidate flag is NOT provided, register the candidate
-	if !noCandidate {
+	if !t.noCandidate {
 		fmt.Println("🔍 Verifying and registering candidate...")
-		err := t.VerifyRegisterCandidates(ctx, true)
-		if err != nil {
-			return fmt.Errorf("candidate registration failed: %v", err)
+		verifyRegisterError := t.verifyRegisterCandidates(ctx, true, config, registerCandidate)
+		if verifyRegisterError != nil {
+			return fmt.Errorf("candidate registration failed: %v", verifyRegisterError)
 		}
 		fmt.Println("✅ Candidate registration completed successfully!")
 	} else {
@@ -712,12 +730,8 @@ func (t *ThanosStack) UninstallPlugins(ctx context.Context, pluginNames []string
 // --------------------------------------------- Register Candidates ---------------------------
 
 // fromDeployContract flag would be true if the function would be called from the deploy contract function
-func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, fromDeployContract bool) error {
+func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, fromDeployContract bool, config *types.Config, registerCandidate *RegisterCandidateInput) error {
 	var privateKeyString string
-	config, err := utils.ReadConfigFromJSONFile()
-	if err != nil || config == nil {
-		return fmt.Errorf("failed to load configuration: %v", err)
-	}
 
 	l1Client, err := ethclient.DialContext(ctx, config.L1RPCURL)
 	if err != nil {
@@ -746,11 +760,6 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, fromDeployCo
 	decoder := json.NewDecoder(file)
 	if err := decoder.Decode(&contracts); err != nil {
 		fmt.Println("Error decoding deployment JSON file:", err)
-		return err
-	}
-
-	registerCandidate, err := t.inputRegisterCandidate(fromDeployContract)
-	if err != nil {
 		return err
 	}
 
@@ -919,4 +928,20 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, fromDeployCo
 	fmt.Printf("Transaction confirmed in block %d\n", receiptRegisterCandidate.BlockNumber.Uint64())
 
 	return nil
+}
+
+func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, fromDeployContract bool, config *types.Config) (*RegisterCandidateInput, error) {
+	registerCandidate, err := t.inputRegisterCandidate(fromDeployContract)
+	if err != nil {
+		return nil, err
+	}
+	if fromDeployContract {
+		return registerCandidate, nil
+	} else {
+		err := t.verifyRegisterCandidates(ctx, fromDeployContract, config, registerCandidate)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return nil, nil
 }
