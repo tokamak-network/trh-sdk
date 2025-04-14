@@ -316,7 +316,7 @@ func (t *ThanosStack) inputInstallBlockExplorer() (*InstallBlockExplorerInput, e
 	}, nil
 }
 
-func (t *ThanosStack) inputRegisterCandidate(fromDeployContract bool) (*RegisterCandidateInput, error) {
+func (t *ThanosStack) inputRegisterCandidate(defaultSeedPhrase string) (*RegisterCandidateInput, error) {
 	var (
 		rollupConfig      string
 		amount            float64
@@ -341,13 +341,23 @@ func (t *ThanosStack) inputRegisterCandidate(fromDeployContract bool) (*Register
 		break
 	}
 
-	if !fromDeployContract {
-		fmt.Print("Please enter your admin seed phrase: ")
-		seed, err = scanner.ScanString()
-		if err != nil {
-			fmt.Printf("Error while reading the seed phrase: %s", err)
-			return nil, err
+	if defaultSeedPhrase != "" {
+		seed = defaultSeedPhrase
+	} else {
+		for {
+			fmt.Print("Please enter your admin seed phrase: ")
+			seed, err = scanner.ScanString()
+			if err != nil {
+				fmt.Printf("Error while reading the seed phrase: %s", err)
+				return nil, err
+			}
+			if seed == "" {
+				fmt.Println("Seed phrase cannot be empty. Please try again.")
+				continue
+			}
+			break
 		}
+
 	}
 
 	for {
@@ -378,14 +388,13 @@ func (t *ThanosStack) inputRegisterCandidate(fromDeployContract bool) (*Register
 		return nil, err
 	}
 	fmt.Print("Would you like to use WTON instead of TON for staking? [Y or N] (default: N): ")
-	boolValue, err := scanner.ScanBool(false)
+	useWTON, err := scanner.ScanBool(false)
 	if err != nil {
-		fmt.Printf("Error while reading use-ton setting: %s", err)
+		fmt.Printf("Error while reading use-wton setting: %s", err)
 		return nil, err
 	}
-	useTon = !boolValue
 	//TODO: Check and update this with further updates
-	if !useTon {
+	if useWTON {
 		fmt.Printf("Currently only TON is accepted %s", err)
 		return nil, err
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tokamak-network/trh-sdk/flags"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -13,19 +12,31 @@ import (
 
 func ActionVerifyRegisterCandidates() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
-		stack := cmd.String(flags.StackFlag.Name)
-		network := cmd.String(flags.NetworkFlag.Name)
+		var err error
+		var network, stack string
+		config, err := utils.ReadConfigFromJSONFile()
+		if err != nil {
+			fmt.Println("Error reading settings.json")
+			return err
+		}
+
+		if config == nil {
+			network = constants.LocalDevnet
+			stack = constants.ThanosStack
+		} else {
+			network = config.Network
+			stack = config.Stack
+		}
+
+		if network == constants.LocalDevnet {
+			fmt.Println("Network is local devnet, skipping verification.")
+			return nil
+		}
 
 		switch stack {
 		case constants.ThanosStack:
 			thanosStack := thanos.NewThanosStack(network, stack)
-
-			config, err := utils.ReadConfigFromJSONFile()
-			if err != nil || config == nil {
-				return fmt.Errorf("failed to load configuration: %v", err)
-			}
-			_, verifyRegisterCandidateErr := thanosStack.VerifyRegisterCandidates(ctx, false, config)
-			return verifyRegisterCandidateErr
+			return thanosStack.VerifyRegisterCandidates(ctx, config)
 		default:
 			return fmt.Errorf("unsupported stack: %s", stack)
 		}
