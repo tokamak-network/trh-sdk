@@ -749,7 +749,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, fromDeployCo
 		return err
 	}
 
-	file, err := os.Open(fmt.Sprintf("%s/%s", cwd, fmt.Sprintf("%d-deploy.json"), l1chainId))
+	file, err := os.Open(fmt.Sprintf("%s/%s", cwd, fmt.Sprintf("%d-deploy.json", chainID)))
 	if err != nil {
 		fmt.Println("Error opening deployment file:", err)
 		return err
