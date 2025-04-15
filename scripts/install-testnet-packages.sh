@@ -15,11 +15,6 @@ case "$ARCH" in
         exit 1
         ;;
 esac
-if [ "$(uname)" = "Darwin" ] && [ -z "$SKIP_SHEBANG_CHECK" ]; then
-  export SKIP_SHEBANG_CHECK=1
-  echo "macOS detected. Switching to zsh interpreter......"
-  exec /bin/zsh "$0" "$@"
-fi
 
 OS_TYPE=$(uname)
 
@@ -27,6 +22,17 @@ TOTAL_MACOS_STEPS=14
 TOTAL_LINUX_STEPS=9
 STEP=1
 SUCCESS="false"
+
+if [ "$OS_TYPE" = "Darwin" ] && [ -z "$SKIP_SHEBANG_CHECK" ]; then
+  if [ -x "/bin/zsh" ]; then
+    export SKIP_SHEBANG_CHECK=1
+    echo "macOS detected. Switching to zsh interpreter......"
+    exec /bin/zsh "$0" "$@"
+  else
+    echo "Error: /bin/zsh not found. Please ensure zsh is installed." >&2
+    exit 1
+  fi
+fi
 
 # Check Shell
 SHELL_NAME=$(basename "$SHELL")
@@ -103,8 +109,6 @@ if [[ "$OS_TYPE" == "Darwin" ]]; then
         xcode-select --install
     else
         echo "Xcode Command Line Tools are already installed. Checking for updates..."
-        sudo rm -rf /Library/Developer/CommandLineTools
-        xcode-select --install
     fi
 
     STEP=$((STEP + 1))
@@ -112,7 +116,7 @@ if [[ "$OS_TYPE" == "Darwin" ]]; then
 
     # 4. Install terraform
     echo "[$STEP/$TOTAL_MACOS_STEPS] Installing Terraform..."
-    latest_version=$(curl -s https://api.github.com/repos/hashicorp/terraform/releases/latest | jq -r '.tag_name' | sed 's/^v//')
+    TERRAFORM_LATEST_VERSION=$(curl -s https://api.github.com/repos/hashicorp/terraform/releases/latest | jq -r '.tag_name' | sed 's/^v//')
     if command -v terraform &> /dev/null; then
         current_version=$(terraform --version | sed -nE 's/^Terraform v([0-9]+\.[0-9]+).*/\1/p')
         if (( $(echo "$current_version >= 1.11" | bc -l) )); then
@@ -120,29 +124,30 @@ if [[ "$OS_TYPE" == "Darwin" ]]; then
         else
             echo "Terraform v$current_version is installed but does not meet the version requirement. Updating..."
             if [[ "$ARCH" == "arm64" ]]; then
-                curl -LO "https://releases.hashicorp.com/terraform/${latest_version}/terraform_${latest_version}_darwin_arm64.zip"
-                unzip terraform_${latest_version}_darwin_arm64.zip
+                curl -LO "https://releases.hashicorp.com/terraform/${TERRAFORM_LATEST_VERSION}/terraform_${TERRAFORM_LATEST_VERSION}_darwin_arm64.zip"
+                unzip terraform_"${TERRAFORM_LATEST_VERSION}"_darwin_arm64.zip
                 sudo mv terraform /usr/local/bin/
-                rm terraform_${latest_version}_darwin_arm64.zip
+                rm terraform_"${TERRAFORM_LATEST_VERSION}"_darwin_arm64.zip
             else
-                curl -LO "https://releases.hashicorp.com/terraform/${latest_version}/terraform_${latest_version}_darwin_amd64.zip"
-                unzip terraform_${latest_version}_darwin_amd64.zip
+                curl -LO "https://releases.hashicorp.com/terraform/${TERRAFORM_LATEST_VERSION}/terraform_${TERRAFORM_LATEST_VERSION}_darwin_amd64.zip"
+                unzip terraform_"${TERRAFORM_LATEST_VERSION}"_darwin_amd64.zip
                 sudo mv terraform /usr/local/bin/
-                rm terraform_${latest_version}_darwin_amd64.zip
+                rm terraform_"${TERRAFORM_LATEST_VERSION}"_darwin_amd64.zip
             fi
         fi
     else
         echo "Terraform not found, installing..."
         if [[ "$ARCH" == "arm64" ]]; then
-            curl -LO "https://releases.hashicorp.com/terraform/${latest_version}/terraform_${latest_version}_darwin_arm64.zip"
-            unzip terraform_${latest_version}_darwin_arm64.zip
+            curl -LO "https://releases.hashicorp.com/terraform/${TERRAFORM_LATEST_VERSION}/terraform_${TERRAFORM_LATEST_VERSION}_darwin_arm64.zip"
+            unzip terraform_"${TERRAFORM_LATEST_VERSION}"_darwin_arm64.zip
             sudo mv terraform /usr/local/bin/
-            rm terraform_${latest_version}_darwin_arm64.zip
+            # shellcheck disable=SC2086
+            rm terraform_${TERRAFORM_LATEST_VERSION}_darwin_arm64.zip
         else
-            curl -LO "https://releases.hashicorp.com/terraform/${latest_version}/terraform_${latest_version}_darwin_amd64.zip"
-            unzip terraform_${latest_version}_darwin_amd64.zip
+            curl -LO "https://releases.hashicorp.com/terraform/${TERRAFORM_LATEST_VERSION}/terraform_${TERRAFORM_LATEST_VERSION}_darwin_amd64.zip"
+            unzip terraform_"${TERRAFORM_LATEST_VERSION}"_darwin_amd64.zip
             sudo mv terraform /usr/local/bin/
-            rm terraform_${latest_version}_darwin_amd64.zip
+            rm terraform_"${TERRAFORM_LATEST_VERSION}"_darwin_amd64.zip
         fi
     fi
     STEP=$((STEP + 1))

@@ -1,11 +1,4 @@
 #!/usr/bin/env bash
-# Re-run with the correct interpreter depending on the OS
-# Use SKIP_SHEBANG_CHECK variable to prevent infinite loop if already re-run
-if [ "$(uname)" = "Darwin" ] && [ -z "$SKIP_SHEBANG_CHECK" ]; then
-  export SKIP_SHEBANG_CHECK=1
-  echo "macOS detected. Switching to zsh interpreter......"
-  exec /bin/zsh "$0" "$@"
-fi
 
 TOTAL_STEPS=10
 STEP=1
@@ -13,6 +6,18 @@ SUCCESS="false"
 
 # Detect Operating System
 OS_TYPE=$(uname)
+# Re-run with the correct interpreter depending on the OS
+# Use SKIP_SHEBANG_CHECK variable to prevent infinite loop if already re-run
+if [ "$OS_TYPE" = "Darwin" ] && [ -z "$SKIP_SHEBANG_CHECK" ]; then
+  if [ -x "/bin/zsh" ]; then
+    export SKIP_SHEBANG_CHECK=1
+    echo "macOS detected. Switching to zsh interpreter......"
+    exec /bin/zsh "$0" "$@"
+  else
+    echo "Error: /bin/zsh not found. Please ensure zsh is installed." >&2
+    exit 1
+  fi
+fi
 
 # Detect Architecture
 ARCH=$(uname -m)
@@ -155,8 +160,6 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
         xcode-select --install
     else
         echo "Xcode Command Line Tools are already installed. Checking for updates..."
-        sudo rm -rf /Library/Developer/CommandLineTools
-        xcode-select --install
     fi
 
     STEP=$((STEP + 1))
