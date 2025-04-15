@@ -319,7 +319,7 @@ func (t *ThanosStack) inputRegisterCandidate() (*RegisterCandidateInput, error) 
 	var (
 		amount   float64
 		memo     string
-		useTon   bool
+		useWTON  bool
 		nameInfo string
 		err      error
 	)
@@ -351,7 +351,7 @@ func (t *ThanosStack) inputRegisterCandidate() (*RegisterCandidateInput, error) 
 		return nil, err
 	}
 	fmt.Print("Would you like to use WTON instead of TON for staking? [Y or N] (default: N): ")
-	useWTON, err := scanner.ScanBool(false)
+	useWTON, err = scanner.ScanBool(false)
 	if err != nil {
 		fmt.Printf("Error while reading use-wton setting: %s", err)
 		return nil, err
@@ -364,7 +364,7 @@ func (t *ThanosStack) inputRegisterCandidate() (*RegisterCandidateInput, error) 
 
 	return &RegisterCandidateInput{
 		amount:   amount,
-		useTon:   useTon,
+		useTon:   !useWTON,
 		memo:     memo,
 		nameInfo: nameInfo,
 	}, nil

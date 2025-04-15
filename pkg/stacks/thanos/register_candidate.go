@@ -21,8 +21,6 @@ import (
 
 // fromDeployContract flag would be true if the function would be called from the deploy contract function
 func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, config *types.Config, registerCandidate *RegisterCandidateInput) error {
-	var privateKeyString string
-
 	l1Client, err := ethclient.DialContext(ctx, config.L1RPCURL)
 	if err != nil {
 		return err
@@ -53,7 +51,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, config *type
 		return err
 	}
 
-	privateKeyString = config.AdminPrivateKey
+	privateKeyString := config.AdminPrivateKey
 
 	// Parse private key
 	privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKeyString, "0x"))
@@ -99,7 +97,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, config *type
 		return fmt.Errorf("L2TonAddress variable is not set")
 	}
 
-	safeWalletAddress := contracts.SafeSingleton
+	safeWalletAddress := contracts.SystemOwnerSafe
 	if safeWalletAddress == "" {
 		return fmt.Errorf("SafeWallet addresss is not set")
 	}
