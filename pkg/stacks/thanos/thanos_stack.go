@@ -623,6 +623,14 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context, deployConfig *types
 // ------------------------------------------ Install plugins ---------------------------
 
 func (t *ThanosStack) InstallPlugins(ctx context.Context, pluginNames []string, deployConfig *types.Config) error {
+	if t.network == constants.LocalDevnet {
+		return fmt.Errorf("network %s does not support plugin installation", constants.LocalDevnet)
+	}
+
+	if deployConfig.K8s == nil {
+		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+	}
+
 	var (
 		namespace = deployConfig.K8s.Namespace
 	)
@@ -656,6 +664,14 @@ func (t *ThanosStack) InstallPlugins(ctx context.Context, pluginNames []string, 
 // ------------------------------------------ Uninstall plugins ---------------------------
 
 func (t *ThanosStack) UninstallPlugins(ctx context.Context, pluginNames []string, deployConfig *types.Config) error {
+	if t.network == constants.LocalDevnet {
+		return fmt.Errorf("network %s does not support plugin installation", constants.LocalDevnet)
+	}
+
+	if deployConfig.K8s == nil {
+		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+	}
+
 	var (
 		namespace = deployConfig.K8s.Namespace
 	)
