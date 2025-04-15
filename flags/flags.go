@@ -45,8 +45,3 @@ var DeployContractsFlag = []cli.Flag{
 	SaveConfigFlag,
 	NoCandidateFlag,
 }
-
-var VerifyRegisterCandidateFlag = []cli.Flag{
-	StackFlag,
-	NetworkFlag,
-}

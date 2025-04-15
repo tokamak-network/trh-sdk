@@ -27,13 +27,10 @@ type ThanosStack struct {
 }
 
 type RegisterCandidateInput struct {
-	rollupConfig      string
-	amount            float64
-	useTon            bool
-	memo              string
-	nameInfo          string
-	seed              string
-	safeWalletAddress string
+	amount   float64
+	useTon   bool
+	memo     string
+	nameInfo string
 }
 
 func NewThanosStack(network string, stack string) *ThanosStack {
@@ -68,7 +65,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 
 	var registerCandidate *RegisterCandidateInput
 	if !t.noCandidate {
-		registerCandidate, err = t.VerifyRegisterCandidates(ctx, true, nil)
+		registerCandidate, err = t.inputRegisterCandidate()
 		if err != nil {
 			return err
 		}
@@ -239,7 +236,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		fmt.Println("Failed to write settings file:", err)
 		return err
 	}
-	fmt.Printf("✅ Configuration successfully saved to: %s/settings.json", cwd)
+	fmt.Printf("✅ Configuration successfully saved to: %s/settings.json\n", cwd)
 
 	// If --no-candidate flag is NOT provided, register the candidate
 	if !t.noCandidate {
@@ -248,7 +245,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		if err != nil || config == nil {
 			return fmt.Errorf("failed to load configuration: %v", err)
 		}
-		verifyRegisterError := t.verifyRegisterCandidates(ctx, true, config, registerCandidate)
+		verifyRegisterError := t.verifyRegisterCandidates(ctx, config, registerCandidate)
 		if verifyRegisterError != nil {
 			return fmt.Errorf("candidate registration failed: %v", verifyRegisterError)
 		}

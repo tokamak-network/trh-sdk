@@ -20,7 +20,7 @@ import (
 )
 
 // fromDeployContract flag would be true if the function would be called from the deploy contract function
-func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, fromDeployContract bool, config *types.Config, registerCandidate *RegisterCandidateInput) error {
+func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, config *types.Config, registerCandidate *RegisterCandidateInput) error {
 	var privateKeyString string
 
 	l1Client, err := ethclient.DialContext(ctx, config.L1RPCURL)
@@ -39,7 +39,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, fromDeployCo
 		return err
 	}
 
-	file, err := os.Open(fmt.Sprintf("%s/%s", cwd, fmt.Sprintf("%d-deploy.json", chainID)))
+	file, err := os.Open(fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%s", cwd, fmt.Sprintf("%d-deploy.json", chainID)))
 	if err != nil {
 		fmt.Println("Error opening deployment file:", err)
 		return err
@@ -53,15 +53,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, fromDeployCo
 		return err
 	}
 
-	if fromDeployContract {
-		privateKeyString = config.AdminPrivateKey
-	} else {
-		operatorsSelected, err := selectAccounts(ctx, l1Client, config.EnableFraudProof, registerCandidate.seed)
-		if err != nil {
-			return err
-		}
-		privateKeyString = operatorsSelected[0].PrivateKey
-	}
+	privateKeyString = config.AdminPrivateKey
 
 	// Parse private key
 	privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKeyString, "0x"))
@@ -107,6 +99,11 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, fromDeployCo
 		return fmt.Errorf("L2TonAddress variable is not set")
 	}
 
+	safeWalletAddress := contracts.SafeSingleton
+	if safeWalletAddress == "" {
+		return fmt.Errorf("SafeWallet addresss is not set")
+	}
+
 	isVerificationPossible, err := contract.IsVerificationPossible(callOpts)
 	if err != nil {
 		return fmt.Errorf("failed to check if verification is possible: %v", err)
@@ -120,7 +117,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, fromDeployCo
 			2, //TODO: Need to check and update this using TON
 			common.HexToAddress(l2TonAddress),
 			registerCandidate.nameInfo,
-			common.HexToAddress(registerCandidate.safeWalletAddress),
+			common.HexToAddress(safeWalletAddress),
 		)
 		if err != nil {
 			return fmt.Errorf("failed to register candidate: %v", err)
@@ -194,7 +191,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, fromDeployCo
 	// Call registerCandidateAddOn
 	txRegisterCandidate, err := l2ManagerContract.RegisterCandidateAddOn(
 		auth,
-		common.HexToAddress(registerCandidate.rollupConfig),
+		common.HexToAddress(systemConfigProxy),
 		amountBigInt,
 		registerCandidate.useTon,
 		registerCandidate.memo,
@@ -220,18 +217,15 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, fromDeployCo
 	return nil
 }
 
-func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, fromDeployContract bool, config *types.Config) (*RegisterCandidateInput, error) {
-	registerCandidate, err := t.inputRegisterCandidate(fromDeployContract)
+func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, config *types.Config) (*RegisterCandidateInput, error) {
+	var err error
+	registerCandidate, err := t.inputRegisterCandidate()
 	if err != nil {
 		return nil, err
 	}
-	if fromDeployContract {
-		return registerCandidate, nil
-	} else {
-		err := t.verifyRegisterCandidates(ctx, fromDeployContract, config, registerCandidate)
-		if err != nil {
-			return nil, err
-		}
+	err = t.verifyRegisterCandidates(ctx, config, registerCandidate)
+	if err != nil {
+		return nil, err
 	}
 	return nil, nil
 }

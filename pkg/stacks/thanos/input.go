@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
@@ -316,16 +315,13 @@ func (t *ThanosStack) inputInstallBlockExplorer() (*InstallBlockExplorerInput, e
 	}, nil
 }
 
-func (t *ThanosStack) inputRegisterCandidate(fromDeployContract bool) (*RegisterCandidateInput, error) {
+func (t *ThanosStack) inputRegisterCandidate() (*RegisterCandidateInput, error) {
 	var (
-		rollupConfig      string
-		amount            float64
-		memo              string
-		useTon            bool
-		nameInfo          string
-		seed              string
-		safeWalletAddress string
-		err               error
+		amount   float64
+		memo     string
+		useTon   bool
+		nameInfo string
+		err      error
 	)
 	for {
 		fmt.Print("Please enter the amount of TON to stake (minimum 1000.1): ")
@@ -336,29 +332,6 @@ func (t *ThanosStack) inputRegisterCandidate(fromDeployContract bool) (*Register
 		}
 		if amount < 1000.1 {
 			fmt.Println("Error: Amount must be at least 1000.1 TON")
-			continue
-		}
-		break
-	}
-
-	if !fromDeployContract {
-		fmt.Print("Please enter your admin seed phrase: ")
-		seed, err = scanner.ScanString()
-		if err != nil {
-			fmt.Printf("Error while reading the seed phrase: %s", err)
-			return nil, err
-		}
-	}
-
-	for {
-		fmt.Print("Please enter the rollup config address: ")
-		rollupConfig, err = scanner.ScanString()
-		if err != nil {
-			fmt.Printf("Error while reading rollup config address: %s\n", err)
-			continue
-		}
-		if !common.IsHexAddress(rollupConfig) {
-			fmt.Println("Error: Invalid Ethereum address format. Please try again")
 			continue
 		}
 		break
@@ -378,39 +351,21 @@ func (t *ThanosStack) inputRegisterCandidate(fromDeployContract bool) (*Register
 		return nil, err
 	}
 	fmt.Print("Would you like to use WTON instead of TON for staking? [Y or N] (default: N): ")
-	boolValue, err := scanner.ScanBool(false)
+	useWTON, err := scanner.ScanBool(false)
 	if err != nil {
-		fmt.Printf("Error while reading use-ton setting: %s", err)
+		fmt.Printf("Error while reading use-wton setting: %s", err)
 		return nil, err
 	}
-	useTon = !boolValue
 	//TODO: Check and update this with further updates
-	if !useTon {
+	if useWTON {
 		fmt.Printf("Currently only TON is accepted %s", err)
 		return nil, err
 	}
 
-	for {
-		fmt.Print("Please enter the safe wallet address: ")
-		safeWalletAddress, err = scanner.ScanString()
-		if err != nil {
-			fmt.Printf("Error while reading safe wallet: %s\n", err)
-			continue
-		}
-		if !common.IsHexAddress(safeWalletAddress) {
-			fmt.Println("Error: Invalid address format. Please try again")
-			continue
-		}
-		break
-	}
-
 	return &RegisterCandidateInput{
-		rollupConfig:      rollupConfig,
-		amount:            amount,
-		useTon:            useTon,
-		memo:              memo,
-		nameInfo:          nameInfo,
-		seed:              seed,
-		safeWalletAddress: safeWalletAddress,
+		amount:   amount,
+		useTon:   useTon,
+		memo:     memo,
+		nameInfo: nameInfo,
 	}, nil
 }

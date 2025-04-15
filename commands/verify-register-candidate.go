@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tokamak-network/trh-sdk/flags"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -13,21 +12,19 @@ import (
 
 func ActionVerifyRegisterCandidates() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
-		stack := cmd.String(flags.StackFlag.Name)
-		network := cmd.String(flags.NetworkFlag.Name)
+		config, err := utils.ReadConfigFromJSONFile()
+		if err != nil || config == nil {
+			return fmt.Errorf("Check if contracts deployed on L1, use `deploy-contracts` command for that: %v", err)
+		}
 
-		switch stack {
+		switch config.Stack {
 		case constants.ThanosStack:
-			thanosStack := thanos.NewThanosStack(network, stack)
+			thanosStack := thanos.NewThanosStack(config.Network, config.Stack)
 
-			config, err := utils.ReadConfigFromJSONFile()
-			if err != nil || config == nil {
-				return fmt.Errorf("failed to load configuration: %v", err)
-			}
-			_, verifyRegisterCandidateErr := thanosStack.VerifyRegisterCandidates(ctx, false, config)
+			_, verifyRegisterCandidateErr := thanosStack.VerifyRegisterCandidates(ctx, config)
 			return verifyRegisterCandidateErr
 		default:
-			return fmt.Errorf("unsupported stack: %s", stack)
+			return fmt.Errorf("unsupported stack: %s", config.Stack)
 		}
 	}
 }
