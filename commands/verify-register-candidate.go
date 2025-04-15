@@ -12,6 +12,7 @@ import (
 
 func ActionVerifyRegisterCandidates() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
+		var err error
 		config, err := utils.ReadConfigFromJSONFile()
 		if err != nil || config == nil {
 			return fmt.Errorf("Check if contracts deployed on L1, use `deploy-contracts` command for that: %v", err)
@@ -21,8 +22,8 @@ func ActionVerifyRegisterCandidates() cli.ActionFunc {
 		case constants.ThanosStack:
 			thanosStack := thanos.NewThanosStack(config.Network, config.Stack)
 
-			_, verifyRegisterCandidateErr := thanosStack.VerifyRegisterCandidates(ctx, config)
-			return verifyRegisterCandidateErr
+			err = thanosStack.VerifyRegisterCandidates(ctx, config)
+			return err
 		default:
 			return fmt.Errorf("unsupported stack: %s", config.Stack)
 		}

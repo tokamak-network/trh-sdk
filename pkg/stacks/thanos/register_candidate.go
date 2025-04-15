@@ -215,15 +215,15 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, config *type
 	return nil
 }
 
-func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, config *types.Config) (*RegisterCandidateInput, error) {
+func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, config *types.Config) error {
 	var err error
 	registerCandidate, err := t.inputRegisterCandidate()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	err = t.verifyRegisterCandidates(ctx, config, registerCandidate)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return nil, nil
+	return nil
 }

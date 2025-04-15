@@ -19,9 +19,9 @@ import (
 )
 
 type ThanosStack struct {
-	network     string
-	stack       string
-	noCandidate bool
+	network           string
+	stack             string
+	registerCandidate bool
 
 	s3Client *s3.Client
 }
@@ -35,14 +35,14 @@ type RegisterCandidateInput struct {
 
 func NewThanosStack(network string, stack string) *ThanosStack {
 	return &ThanosStack{
-		network:     network,
-		stack:       stack,
-		noCandidate: false,
+		network:           network,
+		stack:             stack,
+		registerCandidate: true,
 	}
 }
 
 func (t *ThanosStack) SetNoCandidate(value bool) *ThanosStack {
-	t.noCandidate = value
+	t.registerCandidate = value
 	return t
 }
 
@@ -64,7 +64,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	}
 
 	var registerCandidate *RegisterCandidateInput
-	if !t.noCandidate {
+	if t.registerCandidate {
 		registerCandidate, err = t.inputRegisterCandidate()
 		if err != nil {
 			return err
@@ -239,7 +239,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	fmt.Printf("✅ Configuration successfully saved to: %s/settings.json\n", cwd)
 
 	// If --no-candidate flag is NOT provided, register the candidate
-	if !t.noCandidate {
+	if t.registerCandidate {
 		fmt.Println("🔍 Verifying and registering candidate...")
 		config, err := utils.ReadConfigFromJSONFile()
 		if err != nil || config == nil {
