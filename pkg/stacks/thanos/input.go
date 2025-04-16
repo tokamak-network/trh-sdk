@@ -39,37 +39,10 @@ type InstallBlockExplorerInput struct {
 }
 
 func (t *ThanosStack) inputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
-	fmt.Println("You are about to deploy the L1 contracts.")
-	var (
-		l1RPCUrl  string
-		l1RRCKind string
-		err       error
-	)
-	for {
-		fmt.Print("Please enter your L1 RPC URL: ")
-		l1RPCUrl, err = scanner.ScanString()
-		if err != nil {
-			fmt.Printf("Error while reading L1 RPC URL: %s", err)
-			return nil, err
-		}
-
-		client, err := ethclient.Dial(l1RPCUrl)
-		if err != nil {
-			fmt.Printf("Invalid L1 RPC URL: %s. Please try again", l1RPCUrl)
-			continue
-		}
-		blockNo, err := client.BlockNumber(ctx)
-		if err != nil {
-			fmt.Printf("Failed to retrieve block number: %s", err)
-			continue
-		}
-		if blockNo == 0 {
-			fmt.Printf("The L1 RPC URL is not returning any blocks. Please try again")
-			continue
-		}
-
-		l1RRCKind = utils.DetectRPCKind(l1RPCUrl)
-		break
+	l1RPCUrl, l1RRCKind, err := t.inputL1RPC(ctx)
+	if err != nil {
+		fmt.Printf("Error while reading L1 RPC URL: %s", err)
+		return nil, err
 	}
 
 	fmt.Print("Please enter your admin seed phrase: ")
@@ -93,6 +66,42 @@ func (t *ThanosStack) inputDeployContracts(ctx context.Context) (*DeployContract
 		seed:       seed,
 		fraudProof: fraudProof,
 	}, nil
+}
+
+func (t *ThanosStack) inputL1RPC(ctx context.Context) (string, string, error) {
+	var (
+		l1RPCUrl  string
+		l1RRCKind string
+		err       error
+	)
+	for {
+		fmt.Print("Please enter your L1 RPC URL: ")
+		l1RPCUrl, err = scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error while reading L1 RPC URL: %s", err)
+			return "", "", err
+		}
+
+		client, err := ethclient.Dial(l1RPCUrl)
+		if err != nil {
+			fmt.Printf("Invalid L1 RPC URL: %s. Please try again", l1RPCUrl)
+			continue
+		}
+		blockNo, err := client.BlockNumber(ctx)
+		if err != nil {
+			fmt.Printf("Failed to retrieve block number: %s", err)
+			continue
+		}
+		if blockNo == 0 {
+			fmt.Printf("The L1 RPC URL is not returning any blocks. Please try again")
+			continue
+		}
+
+		l1RRCKind = utils.DetectRPCKind(l1RPCUrl)
+		break
+	}
+
+	return l1RPCUrl, l1RRCKind, nil
 }
 
 func (t *ThanosStack) inputAWSLogin() (*types.AWSConfig, error) {

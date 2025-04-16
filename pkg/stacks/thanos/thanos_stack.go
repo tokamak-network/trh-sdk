@@ -44,6 +44,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	var err error
 
 	// STEP 1. Input the parameters
+	fmt.Println("You are about to deploy the L1 contracts.")
 	deployContractsConfig, err := t.inputDeployContracts(ctx)
 	if err != nil {
 		return err
@@ -229,6 +230,43 @@ func (t *ThanosStack) Deploy(ctx context.Context, deployConfig *types.Config) er
 			return t.destroyDevnet()
 		}
 	case constants.Testnet, constants.Mainnet:
+		// Check L1 RPC URL
+		if deployConfig.L1RPCURL == "" {
+			return fmt.Errorf("L1 RPC URL is not set. Please run the deploy-contracts command first")
+		}
+
+		var (
+			blockNo uint64
+			err     error
+		)
+
+		ctxTimeout, cancel := context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+		client, err := ethclient.DialContext(ctxTimeout, deployConfig.L1RPCURL)
+		if client != nil {
+			blockNo, err = client.BlockNumber(ctxTimeout)
+			if err != nil {
+				fmt.Printf("❌ Failed to retrieve block number: %s \n", err)
+			} else {
+				fmt.Printf("✅ Successfully connected to L1 RPC, current block number: %d \n", blockNo)
+			}
+		}
+		if err != nil {
+			fmt.Printf("❌ Can't connect to L1 RPC. Please try again: %s \n", err)
+			l1RPC, l1RPCKind, err := t.inputL1RPC(ctx)
+			if err != nil {
+				fmt.Printf("Error while getting L1 RPC URL: %s", err)
+				return err
+			}
+			deployConfig.L1RPCURL = l1RPC
+			deployConfig.L1RPCProvider = l1RPCKind
+			err = deployConfig.WriteToJSONFile()
+			if err != nil {
+				fmt.Println("Failed to write settings file after getting L1 RPC", err)
+				return err
+			}
+		}
+
 		fmt.Print("Please select your infrastructure provider [AWS] (default: AWS): ")
 		input, err := scanner.ScanString()
 		if err != nil {
