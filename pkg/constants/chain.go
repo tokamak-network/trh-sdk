@@ -17,6 +17,7 @@ var L1ChainConfigurations = map[uint64]struct {
 	L2TonAddress                     string `json:"l2_ton_address"`
 	L2ManagerAddress                 string `json:"l2_manager_address"`
 	L1BridgeRegistry                 string `json:"l1_bridge_registry"`
+	TON                              string `json:"ton"`
 }{
 	//TODO: Updated the addresses for L1VerificationContractAddress, L2TonAddress, L2ManagerAddress and L1BridgeRegistry for different chains
 	1: {
@@ -35,6 +36,7 @@ var L1ChainConfigurations = map[uint64]struct {
 		L2TonAddress:                     "0x0000000000000000000000000000000000000000",
 		L2ManagerAddress:                 "0x0000000000000000000000000000000000000000",
 		L1BridgeRegistry:                 "0x0000000000000000000000000000000000000000",
+		TON:                              "0x0000000000000000000000000000000000000000",
 	},
 	11155111: {
 		L2NativeTokenAddress: "0xa30fe40285b8f5c0457dbc3b7c8a280373c40044",
@@ -49,10 +51,11 @@ var L1ChainConfigurations = map[uint64]struct {
 		USDTAddress:                      "0xaa8e23fb1079ea71e0a56f48a2aa51851d8433d0",
 		ChainName:                        "Ethereum Sepolia",
 		BlockExplorer:                    "https://sepolia.etherscan.io/",
-		L1VerificationContractAddress:    "0x3E45cAB2dc6324226fECD9Ae975ce0d3f0d23Cbb",
+		L1VerificationContractAddress:    "0x919DD1710EFbd45232a8d9aef90ed4284303f227",
 		L2TonAddress:                     "0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000",
-		L2ManagerAddress:                 "0x027Dd0FC59c82D09392F99B56F615A6D86c735a7",
-		L1BridgeRegistry:                 "0xbBb386Ef8Fa6908258b3f0277C58bf79df568cAb",
+		L2ManagerAddress:                 "0xb5e7b66D695485C96cb7Cf33ceE75383B8800D14",
+		L1BridgeRegistry:                 "0x472591A35A0c43Ad1942C6c47d1939BCcA7F6c13",
+		TON:                              "0x33a66929dE3559315c928556FcFF449b3E708c62",
 	},
 	17000: {
 		L2NativeTokenAddress: "0xe11Ad6B761D175042340a784640d3A6e373E52A5",
@@ -71,6 +74,7 @@ var L1ChainConfigurations = map[uint64]struct {
 		L2TonAddress:                     "0x0000000000000000000000000000000000000000",
 		L2ManagerAddress:                 "0x0000000000000000000000000000000000000000",
 		L1BridgeRegistry:                 "0x0000000000000000000000000000000000000000",
+		TON:                              "0x0000000000000000000000000000000000000000",
 	},
 }
 

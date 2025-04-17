@@ -180,6 +180,34 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, config *type
 	}
 	l2ManagerAddress := common.HexToAddress(l2ManagerAddressStr)
 
+	tonAddressStr := constants.L1ChainConfigurations[chainID.Uint64()].TON
+	if tonAddressStr == "" {
+		return fmt.Errorf("TON variable is not set")
+	}
+	tonAddress := common.HexToAddress(tonAddressStr)
+
+	// Create TON contract instance
+	tonContract, err := abis.NewTON(tonAddress, l1Client)
+	if err != nil {
+		return fmt.Errorf("failed to create TON contract instance: %v", err)
+	}
+
+	// Approve transaction
+	txApprove, err := tonContract.Approve(auth, l2ManagerAddress, amountBigInt)
+	if err != nil {
+		return fmt.Errorf("failed to approve TON: %v", err)
+	}
+
+	fmt.Printf("Approve TON transaction submitted: %s\n", txApprove.Hash().Hex())
+
+	// Wait for transaction confirmation
+	receiptApprove, err := bind.WaitMined(ctx, l1Client, txApprove)
+	if err != nil {
+		return fmt.Errorf("failed waiting for transaction confirmation: %v", err)
+	}
+
+	fmt.Printf("Transaction confirmed in block %d\n", receiptApprove.BlockNumber.Uint64())
+
 	// Create contract instance
 	l2ManagerContract, err := abis.NewLayer2ManagerV1(l2ManagerAddress, l1Client)
 	if err != nil {
@@ -225,5 +253,6 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, config *type
 	if err != nil {
 		return err
 	}
+	fmt.Println("✅ Candidate registration completed successfully!")
 	return nil
 }

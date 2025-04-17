@@ -21,7 +21,6 @@ func ActionVerifyRegisterCandidates() cli.ActionFunc {
 		switch config.Stack {
 		case constants.ThanosStack:
 			thanosStack := thanos.NewThanosStack(config.Network, config.Stack)
-
 			err = thanosStack.VerifyRegisterCandidates(ctx, config)
 			return err
 		default:

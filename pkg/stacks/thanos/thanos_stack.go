@@ -41,7 +41,7 @@ func NewThanosStack(network string, stack string) *ThanosStack {
 	}
 }
 
-func (t *ThanosStack) SetNoCandidate(value bool) *ThanosStack {
+func (t *ThanosStack) SetRegisterCandidate(value bool) *ThanosStack {
 	t.registerCandidate = value
 	return t
 }
@@ -241,11 +241,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	// If --no-candidate flag is NOT provided, register the candidate
 	if t.registerCandidate {
 		fmt.Println("🔍 Verifying and registering candidate...")
-		config, err := utils.ReadConfigFromJSONFile()
-		if err != nil || config == nil {
-			return fmt.Errorf("failed to load configuration: %v", err)
-		}
-		verifyRegisterError := t.verifyRegisterCandidates(ctx, config, registerCandidate)
+		verifyRegisterError := t.verifyRegisterCandidates(ctx, cfg, registerCandidate)
 		if verifyRegisterError != nil {
 			return fmt.Errorf("candidate registration failed: %v", verifyRegisterError)
 		}
