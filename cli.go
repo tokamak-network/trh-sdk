@@ -135,6 +135,11 @@ func Run() {
 				},
 				Action: commands.ActionShowLogs(),
 			},
+			{
+				Name:   "verify-register-candidate",
+				Usage:  "Verify and Register Candidate",
+				Action: commands.ActionVerifyRegisterCandidates(),
+			},
 		},
 	}
 
