@@ -20,6 +20,10 @@ var SupportedLogsComponents = map[string]bool{
 }
 
 func (t *ThanosStack) ShowInformation(ctx context.Context, config *types.Config) error {
+	if config.K8s == nil {
+		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+	}
+
 	namespace := config.K8s.Namespace
 
 	// Step 1: Get pods
@@ -70,7 +74,9 @@ func (t *ThanosStack) ShowInformation(ctx context.Context, config *types.Config)
 }
 
 func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, component string) error {
-	namespace := config.K8s.Namespace
+	if config.K8s == nil {
+		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+	}
 
 	if !SupportedLogsComponents[component] {
 		return fmt.Errorf("unsupported component: %s", component)
@@ -102,6 +108,10 @@ func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, compon
 }
 
 func (t *ThanosStack) getRunningPods(ctx context.Context, config *types.Config) ([]string, error) {
+	if config.K8s == nil {
+		return nil, fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+	}
+
 	namespace := config.K8s.Namespace
 
 	// Step 1: Login AWS

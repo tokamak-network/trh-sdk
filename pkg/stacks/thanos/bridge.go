@@ -15,18 +15,22 @@ import (
 )
 
 func (t *ThanosStack) installBridge(ctx context.Context, deployConfig *types.Config) error {
-	var (
-		namespace = deployConfig.K8s.Namespace
-		chainName = deployConfig.ChainName
-		l1ChainID = deployConfig.L1ChainID
-		l1RPC     = deployConfig.L1RPCURL
-	)
+	if deployConfig.K8s == nil {
+		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+	}
 
 	_, _, err := t.loginAWS(ctx, deployConfig)
 	if err != nil {
 		fmt.Println("Error to login in AWS:", err)
 		return err
 	}
+
+	var (
+		namespace = deployConfig.K8s.Namespace
+		chainName = deployConfig.ChainName
+		l1ChainID = deployConfig.L1ChainID
+		l1RPC     = deployConfig.L1RPCURL
+	)
 
 	opBridgePods, err := utils.GetPodsByName(namespace, "op-bridge")
 	if err != nil {
@@ -175,6 +179,10 @@ func (t *ThanosStack) installBridge(ctx context.Context, deployConfig *types.Con
 }
 
 func (t *ThanosStack) uninstallBridge(ctx context.Context, deployConfig *types.Config) error {
+	if deployConfig.K8s == nil {
+		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+	}
+
 	var (
 		namespace = deployConfig.K8s.Namespace
 	)
@@ -183,6 +191,10 @@ func (t *ThanosStack) uninstallBridge(ctx context.Context, deployConfig *types.C
 	if err != nil {
 		fmt.Println("Error to login in AWS:", err)
 		return err
+	}
+
+	if deployConfig.AWS == nil {
+		return fmt.Errorf("AWS configuration is not set. Please run the deploy command first")
 	}
 
 	releases, err := utils.FilterHelmReleases(namespace, "op-bridge")

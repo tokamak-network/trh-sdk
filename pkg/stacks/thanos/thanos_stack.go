@@ -613,6 +613,10 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context, deployConfig *types
 	var (
 		err error
 	)
+
+	if deployConfig.K8s == nil {
+		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+	}
 	_, _, err = t.loginAWS(ctx, deployConfig)
 	if err != nil {
 		fmt.Println("Error getting AWS profile:", err)
