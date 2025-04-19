@@ -78,6 +78,10 @@ func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, compon
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
+	var (
+		namespace = config.K8s.Namespace
+	)
+
 	if !SupportedLogsComponents[component] {
 		return fmt.Errorf("unsupported component: %s", component)
 	}
