@@ -377,6 +377,9 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 	}
 
 	deployConfig.AWS = awsLoginInputs
+	if err := deployConfig.WriteToJSONFile(); err != nil {
+		return fmt.Errorf("failed to write settings file: %w", err)
+	}
 
 	fmt.Println("⚡️Removing the previous deployment state...")
 	err = t.clearTerraformState(ctx)
@@ -471,6 +474,9 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 	}
 
 	deployConfig.AWS.VpcID = strings.Trim(vpcIdOutput, `"`)
+	if err := deployConfig.WriteToJSONFile(); err != nil {
+		return fmt.Errorf("failed to write settings file: %w", err)
+	}
 
 	thanosStackValueFileExist := utils.CheckFileExists("tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml")
 	if !thanosStackValueFileExist {
@@ -479,6 +485,9 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 
 	namespace := utils.ConvertChainNameToNamespace(inputs.ChainName)
 	deployConfig.ChainName = inputs.ChainName
+	if err := deployConfig.WriteToJSONFile(); err != nil {
+		return fmt.Errorf("failed to write settings file: %w", err)
+	}
 
 	// Step 7. Configure EKS access
 	eksSetup, err := utils.ExecuteCommand("aws", []string{
@@ -614,9 +623,6 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context, deployConfig *types
 		err error
 	)
 
-	if deployConfig.K8s == nil {
-		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
-	}
 	_, _, err = t.loginAWS(ctx, deployConfig)
 	if err != nil {
 		fmt.Println("Error getting AWS profile:", err)
