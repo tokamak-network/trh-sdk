@@ -1,5 +1,13 @@
 package types
 
+type UpdateTerraformEnvConfig struct {
+	L1RpcUrl            string
+	L1RpcProvider       string
+	L1BeaconUrl         string
+	OpGethImageTag      string
+	ThanosStackImageTag string
+}
+
 type TerraformEnvConfig struct {
 	ThanosStackName     string
 	AwsRegion           string

@@ -69,12 +69,7 @@ func (t *ThanosStack) inputDeployContracts(ctx context.Context) (*DeployContract
 	}, nil
 }
 
-func (t *ThanosStack) inputL1RPC(ctx context.Context) (string, string, error) {
-	var (
-		l1RPCUrl  string
-		l1RRCKind string
-		err       error
-	)
+func (t *ThanosStack) inputL1RPC(ctx context.Context) (l1RPCUrl string, l1RRCKind string, err error) {
 	for {
 		fmt.Print("Please enter your L1 RPC URL: ")
 		l1RPCUrl, err = scanner.ScanString()
@@ -194,20 +189,10 @@ func (t *ThanosStack) inputDeployInfra(l1ChainID uint64) (*DeployInfraInput, err
 		break
 	}
 
-	for {
-		fmt.Print("Please enter your L1 beacon URL: ")
-		l1BeaconURL, err = scanner.ScanString()
-		if err != nil {
-			fmt.Printf("Error while reading L1 beacon URL: %s\n", err)
-			continue
-		}
-
-		if !utils.IsValidBeaconURL(l1BeaconURL) {
-			fmt.Println("Error: The URL provided does not return a valid beacon genesis response. Please enter a valid URL.")
-			continue
-		}
-
-		break
+	l1BeaconURL, err = t.inputL1BeaconURL()
+	if err != nil {
+		fmt.Printf("Error while reading L1 beacon URL: %s", err)
+		return nil, err
 	}
 
 	fmt.Print("Do you want to set MAX_CHANNEL_DURATION? [y/N]: ")
@@ -239,6 +224,30 @@ func (t *ThanosStack) inputDeployInfra(l1ChainID uint64) (*DeployInfraInput, err
 		L1BeaconURL:        l1BeaconURL,
 		MaxChannelDuration: maxChannelDuration,
 	}, nil
+}
+
+func (t *ThanosStack) inputL1BeaconURL() (string, error) {
+	var (
+		l1BeaconURL string
+		err         error
+	)
+	for {
+		fmt.Print("Please enter your L1 beacon URL: ")
+		l1BeaconURL, err = scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error while reading L1 beacon URL: %s\n", err)
+			continue
+		}
+
+		if !utils.IsValidBeaconURL(l1BeaconURL) {
+			fmt.Println("Error: The URL provided does not return a valid beacon genesis response. Please enter a valid URL.")
+			continue
+		}
+
+		break
+	}
+
+	return l1BeaconURL, nil
 }
 
 func (t *ThanosStack) inputInstallBlockExplorer() (*InstallBlockExplorerInput, error) {

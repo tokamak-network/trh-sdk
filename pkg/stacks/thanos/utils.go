@@ -334,6 +334,87 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	return nil
 }
 
+func updateTerraformEnvFile(dirPath string, config types.UpdateTerraformEnvConfig) error {
+	if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
+		fmt.Println("Error creating directory:", err)
+		return err
+	}
+
+	filePath := filepath.Join(dirPath, ".envrc")
+
+	// Read existing file content
+	existingContent := make(map[string]string)
+	if _, err := os.Stat(filePath); err == nil {
+		file, err := os.Open(filePath)
+		if err != nil {
+			fmt.Println("Error reading environment file:", err)
+			return err
+		}
+		defer file.Close()
+
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "export ") {
+				parts := strings.SplitN(line, "=", 2)
+				if len(parts) == 2 {
+					key := strings.TrimSpace(parts[0][7:]) // Remove "export " prefix
+					value := strings.Trim(strings.TrimSpace(parts[1]), "\"")
+					existingContent[key] = value
+				}
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			fmt.Println("Error scanning environment file:", err)
+			return err
+		}
+	}
+
+	// Prepare new values
+	newValues := map[string]string{
+		"TF_VAR_stack_l1_rpc_url":             config.L1RpcUrl,
+		"TF_VAR_stack_l1_rpc_provider":        config.L1RpcProvider,
+		"TF_VAR_stack_l1_beacon_url":          config.L1BeaconUrl,
+		"TF_VAR_stack_op_geth_image_tag":      config.OpGethImageTag,
+		"TF_VAR_stack_thanos_stack_image_tag": config.ThanosStackImageTag,
+	}
+
+	// Update or add new values
+	for key, value := range newValues {
+		existingContent[key] = value
+	}
+
+	// Write updated content back to the file
+	output, err := os.Create(filePath)
+	if err != nil {
+		fmt.Println("Error opening environment file for writing:", err)
+		return err
+	}
+	defer output.Close()
+
+	writer := bufio.NewWriter(output)
+	for key, value := range existingContent {
+		// Two special cases, they are flatted arrays(convert from arrays to strings). We keep this format, don't put the quotes
+		if key == "TF_VAR_azs" || key == "TF_VAR_eks_cluster_admins" {
+			writer.WriteString(fmt.Sprintf("export %s=%s\n", key, value))
+
+			continue
+		}
+
+		_, err := writer.WriteString(fmt.Sprintf("export %s=\"%s\"\n", key, value))
+		if err != nil {
+			return err
+		}
+	}
+
+	if err = writer.Flush(); err != nil {
+		return err
+	}
+
+	fmt.Println("Environment configuration file (.envrc) has been successfully updated!")
+	return nil
+}
+
 func makeBlockExplorerEnvs(dirPath string, filename string, config types.BlockExplorerEnvs) error {
 	if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
 		fmt.Println("Error creating directory:", err)

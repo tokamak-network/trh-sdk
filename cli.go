@@ -135,6 +135,11 @@ func Run() {
 				},
 				Action: commands.ActionShowLogs(),
 			},
+			{
+				Name:   "update",
+				Usage:  "Update the config of the running chain",
+				Action: commands.ActionUpdateNetwork(),
+			},
 		},
 	}
 
