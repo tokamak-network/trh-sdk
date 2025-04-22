@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
@@ -20,6 +21,22 @@ var SupportedLogsComponents = map[string]bool{
 }
 
 func (t *ThanosStack) ShowInformation(ctx context.Context, config *types.Config) error {
+	if t.network == constants.LocalDevnet {
+		// Check the devnet network running
+		runningContainers, err := utils.GetDockerContainers(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get docker containers: %w", err)
+		}
+		if len(runningContainers) == 0 {
+			fmt.Println("No running containers found. Please run the deploy command first")
+			return nil
+		}
+		fmt.Println("✅ L1 and L2 networks are running on local devnet")
+		fmt.Println("L1 network is running on http://localhost:8545")
+		fmt.Println("L2 network is running on http://localhost:9545")
+		return nil
+	}
+
 	if config.K8s == nil {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
