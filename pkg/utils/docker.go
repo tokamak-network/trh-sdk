@@ -34,6 +34,10 @@ func GetDockerContainers(ctx context.Context) ([]string, error) {
 	containersStr := strings.Split(strings.TrimSpace(containersOutput), "\n")
 	for _, str := range containersStr {
 		var container DockerContainer
+		if strings.TrimSpace(str) == "" {
+			continue
+		}
+
 		if err := json.Unmarshal([]byte(str), &container); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal docker container: %w", err)
 		}
