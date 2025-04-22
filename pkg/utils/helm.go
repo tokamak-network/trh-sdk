@@ -5,11 +5,11 @@ import (
 )
 
 // GetHelmReleases fetches the list of Helm releases in the given namespace
-func GetHelmReleases(namespace string) ([]string, error) {
+func GetHelmReleases(namespace string, logFileName string) ([]string, error) {
 	if namespace == "" {
 		return nil, nil
 	}
-	output, err := ExecuteCommand("helm", "list", "--namespace", namespace, "-q")
+	output, err := ExecuteCommand("helm", logFileName, "list", "--namespace", namespace, "-q")
 	if err != nil {
 		return nil, err
 	}
@@ -21,8 +21,8 @@ func GetHelmReleases(namespace string) ([]string, error) {
 	return strings.Split(output, "\n"), nil
 }
 
-func FilterHelmReleases(namespace string, releaseName string) ([]string, error) {
-	releases, err := GetHelmReleases(namespace)
+func FilterHelmReleases(namespace string, releaseName string, logFileName string) ([]string, error) {
+	releases, err := GetHelmReleases(namespace, logFileName)
 	if err != nil {
 		return nil, err
 	}

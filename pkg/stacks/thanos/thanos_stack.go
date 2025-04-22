@@ -68,12 +68,12 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	shellConfigFile := utils.GetShellConfigDefault()
 
 	// Check dependencies
-	if !dependencies.CheckPnpmInstallation() {
+	if !dependencies.CheckPnpmInstallation(logFileName) {
 		utils.LogToFile(logFileName, fmt.Sprintf("Try running `source %s` to set up your environment", shellConfigFile), true)
 		return nil
 	}
 
-	if !dependencies.CheckFoundryInstallation() {
+	if !dependencies.CheckFoundryInstallation(logFileName) {
 		utils.LogToFile(logFileName, fmt.Sprintf("Try running `source %s` to set up your environment", shellConfigFile), true)
 		return nil
 	}
@@ -159,6 +159,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	// STEP 4.1. Generate the .env file
 	_, err = utils.ExecuteCommand(
 		"bash",
+		logFileName,
 		"-c",
 		fmt.Sprintf("cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && echo '%s' > .env", envValues),
 	)
@@ -358,22 +359,22 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 
 	// Check dependencies
 	// STEP 1. Verify required dependencies
-	if !dependencies.CheckTerraformInstallation() {
+	if !dependencies.CheckTerraformInstallation(logFileName) {
 		utils.LogToFile(logFileName, fmt.Sprintf("Try running `source %s` to set up your environment \n", shellConfigFile), true)
 		return nil
 	}
 
-	if !dependencies.CheckHelmInstallation() {
+	if !dependencies.CheckHelmInstallation(logFileName) {
 		utils.LogToFile(logFileName, fmt.Sprintf("Try running `source %s` to set up your environment \n", shellConfigFile), true)
 		return nil
 	}
 
-	if !dependencies.CheckAwsCLIInstallation() {
+	if !dependencies.CheckAwsCLIInstallation(logFileName) {
 		utils.LogToFile(logFileName, fmt.Sprintf("Try running `source %s` to set up your environment \n", shellConfigFile), true)
 		return nil
 	}
 
-	if !dependencies.CheckK8sInstallation() {
+	if !dependencies.CheckK8sInstallation(logFileName) {
 		utils.LogToFile(logFileName, fmt.Sprintf("Try running `source %s` to set up your environment \n", shellConfigFile), true)
 		return nil
 	}
@@ -486,13 +487,13 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 		terraform output -json vpc_id`,
 	}...)
 	if err != nil {
-		utils.LogToFile(logFileName, fmt.Sprintf("failed to get terraform output for %s: %w", "vpc_id", err), true)
+		utils.LogToFile(logFileName, fmt.Sprintf("failed to get terraform output for %s: %s", "vpc_id", err), true)
 		return err
 	}
 
 	deployConfig.AWS.VpcID = strings.Trim(vpcIdOutput, `"`)
 	if err := deployConfig.WriteToJSONFile(); err != nil {
-		utils.LogToFile(logFileName, fmt.Sprintf("failed to write settings file: %w", err), true)
+		utils.LogToFile(logFileName, fmt.Sprintf("failed to write settings file: %s", err), true)
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
@@ -505,7 +506,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 	namespace := utils.ConvertChainNameToNamespace(inputs.ChainName)
 	deployConfig.ChainName = inputs.ChainName
 	if err := deployConfig.WriteToJSONFile(); err != nil {
-		utils.LogToFile(logFileName, fmt.Sprintf("failed to write settings file: %w", err), true)
+		utils.LogToFile(logFileName, fmt.Sprintf("failed to write settings file: %s", err), true)
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
@@ -573,7 +574,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 
 	var l2RPCUrl string
 	for {
-		k8sIngresses, err := utils.GetAddressByIngress(namespace, helmReleaseName)
+		k8sIngresses, err := utils.GetAddressByIngress(namespace, helmReleaseName, logFileName)
 		if err != nil {
 			utils.LogToFile(logFileName, fmt.Sprintf("Error retrieving ingress addresses: %s, details: %s", err, k8sIngresses), true)
 			return err
@@ -659,7 +660,7 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context, deployConfig *types
 		namespace = deployConfig.K8s.Namespace
 	}
 
-	helmReleases, err := utils.GetHelmReleases(namespace)
+	helmReleases, err := utils.GetHelmReleases(namespace, logFileName)
 	if err != nil {
 		utils.LogToFile(logFileName, fmt.Sprintf("Error retrieving Helm releases: %s", err), true)
 	}
@@ -688,7 +689,7 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context, deployConfig *types
 	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	err = t.tryToDeleteK8sNamespace(ctxTimeout, namespace)
+	err = t.tryToDeleteK8sNamespace(ctxTimeout, namespace, logFileName)
 	if err != nil {
 		utils.LogToFile(logFileName, fmt.Sprintf("Error deleting namespace: %s", err), true)
 	} else {

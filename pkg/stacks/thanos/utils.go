@@ -380,13 +380,13 @@ func (t *ThanosStack) cloneSourcecode(repositoryName, url, logFileName string) e
 	}
 
 	if !existingSourcecode {
-		err := utils.CloneRepo(url, repositoryName)
+		err := utils.CloneRepo(url, repositoryName, logFileName)
 		if err != nil {
 			utils.LogToFile(logFileName, "Error while cloning the repository", true)
 			return err
 		}
 	} else {
-		err := utils.PullLatestCode(repositoryName)
+		err := utils.PullLatestCode(repositoryName, logFileName)
 		if err != nil {
 			utils.LogToFile(logFileName, fmt.Sprintf("Error while pulling the latest code for repository %s: %v\n", repositoryName, err), true)
 			return err

@@ -21,13 +21,13 @@ type K8sNamespaceStatus struct {
 	} `json:"status"`
 }
 
-func (t *ThanosStack) tryToDeleteK8sNamespace(ctx context.Context, namespace string) error {
+func (t *ThanosStack) tryToDeleteK8sNamespace(ctx context.Context, namespace string, logFileName string) error {
 	if namespace == "" {
 		return nil
 	}
-	output, err := utils.ExecuteCommand("kubectl", "get", "namespace", namespace, "-o", "json")
+	output, err := utils.ExecuteCommand("kubectl", logFileName, "get", "namespace", namespace, "-o", "json")
 	if err != nil {
-		fmt.Println("Error getting namespace status:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error getting namespace status: %s", err), true)
 	}
 
 	var status K8sNamespaceStatus
@@ -36,14 +36,14 @@ func (t *ThanosStack) tryToDeleteK8sNamespace(ctx context.Context, namespace str
 	}
 
 	if status.Status.Phase == "Terminating" {
-		fmt.Println("Namespace is already terminating")
+		utils.LogToFile(logFileName, "Namespace is already terminating", true)
 		// Replace the state to pass on stucking deleted namespace
 		status.Spec["finalizers"] = make([]string, 0)
 
 		// write to the temporary file
 		tmpFile, err := os.Create("/tmp/namespace.json")
 		if err != nil {
-			fmt.Println("Error creating temporary file:", err)
+			utils.LogToFile(logFileName, fmt.Sprintf("Error creating temporary file: %s", err), true)
 			return err
 		}
 		defer tmpFile.Close()
@@ -56,9 +56,9 @@ func (t *ThanosStack) tryToDeleteK8sNamespace(ctx context.Context, namespace str
 		}
 
 		// apply the changes
-		_, err = utils.ExecuteCommand("kubectl", "replace", "--raw", fmt.Sprintf("/api/v1/namespaces/%s/finalize", namespace), "-f", "/tmp/namespace.json")
+		_, err = utils.ExecuteCommand("kubectl", logFileName, "replace", "--raw", fmt.Sprintf("/api/v1/namespaces/%s/finalize", namespace), "-f", "/tmp/namespace.json")
 		if err != nil {
-			fmt.Println("Error applying changes to namespace:", err)
+			utils.LogToFile(logFileName, fmt.Sprintf("Error applying changes to namespace: %s", err), true)
 			return err
 		}
 
@@ -74,9 +74,9 @@ func (t *ThanosStack) tryToDeleteK8sNamespace(ctx context.Context, namespace str
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := utils.ExecuteCommand("kubectl", "delete", "namespace", namespace)
+		_, err := utils.ExecuteCommand("kubectl", logFileName, "delete", "namespace", namespace)
 		if err != nil {
-			fmt.Println("Error deleting namespace:", err)
+			utils.LogToFile(logFileName, fmt.Sprintf("Error deleting namespace: %s", err), true)
 			done <- err
 			return
 		}
@@ -87,7 +87,7 @@ func (t *ThanosStack) tryToDeleteK8sNamespace(ctx context.Context, namespace str
 	case err := <-done:
 		return err
 	case <-ctxWithTimeout.Done():
-		fmt.Println("Timeout reached while deleting namespace")
+		utils.LogToFile(logFileName, "Timeout reached while deleting namespace", true)
 		return ctxWithTimeout.Err()
 	}
 }

@@ -158,10 +158,10 @@ func (t *ThanosStack) installBridge(ctx context.Context, deployConfig *types.Con
 		return err
 	}
 
-	fmt.Println("✅ Bridge component installed successfully and is being initialized. Please wait for the ingress address to become available...")
+	utils.LogToFile(logFileName, "✅ Bridge component installed successfully and is being initialized. Please wait for the ingress address to become available...", true)
 	var bridgeUrl string
 	for {
-		k8sIngresses, err := utils.GetAddressByIngress(namespace, helmReleaseName)
+		k8sIngresses, err := utils.GetAddressByIngress(namespace, helmReleaseName, logFileName)
 		if err != nil {
 			utils.LogToFile(logFileName, fmt.Sprintf("Error retrieving ingress addresses: %s, details: %s", err, k8sIngresses), true)
 			return err
@@ -198,7 +198,7 @@ func (t *ThanosStack) uninstallBridge(ctx context.Context, deployConfig *types.C
 		return fmt.Errorf("AWS configuration is not set. Please run the deploy command first")
 	}
 
-	releases, err := utils.FilterHelmReleases(namespace, "op-bridge")
+	releases, err := utils.FilterHelmReleases(namespace, "op-bridge", logFileName)
 	if err != nil {
 		utils.LogToFile(logFileName, fmt.Sprintf("Error to filter helm releases: %s", err), true)
 		return err

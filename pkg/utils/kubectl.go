@@ -130,7 +130,7 @@ type IngressJSON struct {
 }
 
 func getK8sPods(namespace string) (string, error) {
-	return ExecuteCommand("kubectl", "-n", namespace, "get", "pods", "-o", "json")
+	return ExecuteCommand("kubectl", "", "-n", namespace, "get", "pods", "-o", "json")
 }
 
 func GetK8sPods(namespace string) ([]string, error) {
@@ -176,21 +176,24 @@ func GetPodsByName(namespace string, podName string) ([]string, error) {
 	return pods, nil
 }
 
-func getK8sIngresses(namespace string) (string, error) {
-	return ExecuteCommand("kubectl", "-n", namespace, "get", "ingress", "-o", "json")
+func getK8sIngresses(namespace string, logFileName string) (string, error) {
+	LogToFile(logFileName, fmt.Sprintf("Getting ingress addresses in namespace %s", namespace), true)
+	return ExecuteCommand("kubectl", logFileName, "-n", namespace, "get", "ingress", "-o", "json")
 }
-func getK8sSVC(namespace string) (string, error) {
-	return ExecuteCommand("kubectl", "-n", namespace, "get", "svc", "-o", "json")
+func getK8sSVC(namespace string, logFileName string) (string, error) {
+	LogToFile(logFileName, fmt.Sprintf("Getting service addresses in namespace %s", namespace), true)
+	return ExecuteCommand("kubectl", logFileName, "-n", namespace, "get", "svc", "-o", "json")
 }
 
-func GetIngresses(namespace string) (map[string][]string, error) {
-	output, err := getK8sIngresses(namespace)
+func GetIngresses(namespace string, logFileName string) (map[string][]string, error) {
+	LogToFile(logFileName, fmt.Sprintf("Getting ingress addresses in namespace %s", namespace), true)
+	output, err := getK8sIngresses(namespace, logFileName)
 	if err != nil {
 		return nil, err
 	}
 	var ingressData IngressJSON
 	if err := json.Unmarshal([]byte(output), &ingressData); err != nil {
-		fmt.Println("Error parsing JSON:", err)
+		LogToFile(logFileName, fmt.Sprintf("Error parsing JSON: %s", err), true)
 		return nil, err
 	}
 
@@ -212,14 +215,15 @@ func GetIngresses(namespace string) (map[string][]string, error) {
 	return addresses, nil
 }
 
-func GetAddressByIngress(namespace string, ingressName string) ([]string, error) {
-	output, err := getK8sIngresses(namespace)
+func GetAddressByIngress(namespace string, ingressName string, logFileName string) ([]string, error) {
+	LogToFile(logFileName, fmt.Sprintf("Getting ingress addresses for %s in namespace %s", ingressName, namespace), true)
+	output, err := getK8sIngresses(namespace, logFileName)
 	if err != nil {
 		return nil, err
 	}
 	var ingressData IngressJSON
 	if err := json.Unmarshal([]byte(output), &ingressData); err != nil {
-		fmt.Println("Error parsing JSON:", err)
+		LogToFile(logFileName, fmt.Sprintf("Error parsing JSON: %s", err), true)
 		return nil, err
 	}
 
@@ -235,15 +239,16 @@ func GetAddressByIngress(namespace string, ingressName string) ([]string, error)
 	return addresses, nil
 }
 
-func GetServiceNames(namespace string, serviceName string) ([]string, error) {
-	output, err := getK8sSVC(namespace)
+func GetServiceNames(namespace string, serviceName string, logFileName string) ([]string, error) {
+	LogToFile(logFileName, fmt.Sprintf("Getting service addresses for %s in namespace %s", serviceName, namespace), true)
+	output, err := getK8sSVC(namespace, logFileName)
 	if err != nil {
 		return nil, err
 	}
 
 	var serviceData SvcJSON
 	if err := json.Unmarshal([]byte(output), &serviceData); err != nil {
-		fmt.Println("Error parsing JSON:", err)
+		LogToFile(logFileName, fmt.Sprintf("Error parsing JSON: %s", err), true)
 		return nil, err
 	}
 

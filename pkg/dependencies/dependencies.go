@@ -6,108 +6,108 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
-func CheckK8sInstallation() bool {
+func CheckK8sInstallation(logFileName string) bool {
 	// Check if kubectl is installed
-	_, err := utils.ExecuteCommand("kubectl", "version", "--client")
+	_, err := utils.ExecuteCommand("kubectl", logFileName, "version", "--client")
 	if err != nil {
-		fmt.Println("❌ kubectl is not installed or not found in PATH")
+		utils.LogToFile(logFileName, "❌ kubectl is not installed or not found in PATH", true)
 		return false
 	}
-	fmt.Println("✅ kubectl is installed")
+	utils.LogToFile(logFileName, "✅ kubectl is installed", true)
 
 	return true
 }
 
-func CheckHelmInstallation() bool {
-	_, err := utils.ExecuteCommand("helm", "version")
+func CheckHelmInstallation(logFileName string) bool {
+	_, err := utils.ExecuteCommand("helm", logFileName, "version")
 	if err != nil {
-		fmt.Println("❌ Helm is not installed or not found in PATH")
+		utils.LogToFile(logFileName, "❌ Helm is not installed or not found in PATH", true)
 		return false
 	}
-	fmt.Println("✅ Helm is installed")
+	utils.LogToFile(logFileName, "✅ Helm is installed", true)
 	return true
 }
 
-func CheckDockerInstallation() bool {
+func CheckDockerInstallation(logFileName string) bool {
 	// Check if Docker is installed
-	_, err := utils.ExecuteCommand("docker", "--version")
+	_, err := utils.ExecuteCommand("docker", logFileName, "--version")
 	if err != nil {
-		fmt.Println("❌ Docker is not installed or not found in PATH")
+		utils.LogToFile(logFileName, "❌ Docker is not installed or not found in PATH", true)
 		return false
 	}
-	fmt.Println("✅ Docker is installed")
+	utils.LogToFile(logFileName, "✅ Docker is installed", true)
 
 	// Check if Docker daemon is running
-	_, err = utils.ExecuteCommand("docker", "info")
+	_, err = utils.ExecuteCommand("docker", logFileName, "info")
 	if err != nil {
-		fmt.Println("❌ Docker is installed but the daemon is not running")
+		utils.LogToFile(logFileName, "❌ Docker is installed but the daemon is not running", true)
 		return true
 	}
 
-	fmt.Println("✅ Docker daemon is running")
+	utils.LogToFile(logFileName, "✅ Docker daemon is running", true)
 
 	return true
 }
 
-func CheckTerraformInstallation() bool {
-	_, err := utils.ExecuteCommand("terraform", "--version")
+func CheckTerraformInstallation(logFileName string) bool {
+	_, err := utils.ExecuteCommand("terraform", logFileName, "--version")
 	if err != nil {
-		fmt.Println("❌ Terraform is not installed or not found in PATH")
+		utils.LogToFile(logFileName, "❌ Terraform is not installed or not found in PATH", true)
 		return false
 	}
-	fmt.Println("✅ Terraform is installed")
+	utils.LogToFile(logFileName, "✅ Terraform is installed", true)
 	return true
 }
 
-func CheckAwsCLIInstallation() bool {
-	_, err := utils.ExecuteCommand("aws", "--version")
+func CheckAwsCLIInstallation(logFileName string) bool {
+	_, err := utils.ExecuteCommand("aws", logFileName, "--version")
 	if err != nil {
-		fmt.Println("❌ AWS CLI is not installed or not found in PATH")
+		utils.LogToFile(logFileName, "❌ AWS CLI is not installed or not found in PATH", true)
 		return false
 	}
-	fmt.Println("✅ AWS CLI is installed")
+	utils.LogToFile(logFileName, "✅ AWS CLI is installed", true)
 	return true
 }
 
-func CheckDirenvInstallation() bool {
-	_, err := utils.ExecuteCommand("direnv", "--version")
+func CheckDirenvInstallation(logFileName string) bool {
+	_, err := utils.ExecuteCommand("direnv", logFileName, "--version")
 	if err != nil {
-		fmt.Println("❌ direnv is not installed or not found in PATH")
+		utils.LogToFile(logFileName, "❌ direnv is not installed or not found in PATH", true)
 		return false
 	}
 
-	fmt.Println("✅ direnv is installed")
+	utils.LogToFile(logFileName, "✅ direnv is installed", true)
 	return true
 }
 
-func CheckPnpmInstallation() bool {
-	_, err := utils.ExecuteCommand("pnpm", "--version")
+func CheckPnpmInstallation(logFileName string) bool {
+	_, err := utils.ExecuteCommand("pnpm", logFileName, "--version")
 	if err != nil {
-		fmt.Println("❌ pnpm is not installed or not found in PATH")
+		utils.LogToFile(logFileName, fmt.Sprintf("❌ pnpm is not installed or not found in PATH: %v", err), true)
 		return false
 	}
-	fmt.Println("✅ pnpm is installed")
+	utils.LogToFile(logFileName, "✅ pnpm is installed", true)
 	return true
 }
 
-func CheckFoundryInstallation() bool {
-	_, err := utils.ExecuteCommand("forge", "--version")
+func CheckFoundryInstallation(logFileName string) bool {
+	_, err := utils.ExecuteCommand("forge", logFileName, "--version")
 	if err != nil {
-		fmt.Println("❌ forge is not installed or not found in PATH")
+		utils.LogToFile(logFileName, "❌ forge is not installed or not found in PATH", true)
 		return false
 	}
 
-	_, err = utils.ExecuteCommand("anvil", "--version")
+	_, err = utils.ExecuteCommand("anvil", logFileName, "--version")
 	if err != nil {
-		fmt.Println("❌ anvil is not installed or not found in PATH")
+		utils.LogToFile(logFileName, "❌ anvil is not installed or not found in PATH", true)
 		return false
 	}
 
-	_, err = utils.ExecuteCommand("cast", "--version")
+	_, err = utils.ExecuteCommand("cast", logFileName, "--version")
 	if err != nil {
-		fmt.Println("❌ cast is not installed or not found in PATH")
+		utils.LogToFile(logFileName, "❌ cast is not installed or not found in PATH", true)
 		return false
 	}
-	fmt.Println("✅ Foundry is installed")
+	utils.LogToFile(logFileName, "✅ Foundry is installed", true)
 	return true
 }

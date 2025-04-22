@@ -66,7 +66,7 @@ func Run() {
 						Usage: "Check the dependencies",
 						Action: func(ctx context.Context, cmd *cli.Command) error {
 							dependenciesCmd := commands.Dependencies{}
-							dependenciesCmd.Check(cmd.Args().Slice())
+							dependenciesCmd.Check(cmd.Args().Slice(), "")
 							return nil
 						},
 					},

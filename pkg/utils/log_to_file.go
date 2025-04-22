@@ -10,6 +10,9 @@ import (
 // LogToFile writes log messages to a file with timestamp
 func LogToFile(filePath, message string, toBePrinted bool) error {
 	// Create directory if it doesn't exist
+	if filePath == "" {
+		return nil
+	}
 	if toBePrinted {
 		fmt.Println(message)
 	}

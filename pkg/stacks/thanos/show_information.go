@@ -50,7 +50,7 @@ func (t *ThanosStack) ShowInformation(ctx context.Context, config *types.Config)
 		}
 	}
 
-	ingresses, err := utils.GetIngresses(namespace)
+	ingresses, err := utils.GetIngresses(namespace, "")
 	if err != nil {
 		return fmt.Errorf("failed to get ingresses: %w", err)
 	}
@@ -102,7 +102,7 @@ func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, compon
 		runningPodName = pod
 	}
 
-	err = utils.ExecuteCommandStream("bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f", namespace, runningPodName))
+	err = utils.ExecuteCommandStream("bash", "", "-c", fmt.Sprintf("kubectl -n %s logs %s -f", namespace, runningPodName))
 	if err != nil {
 		fmt.Printf("failed to show logs: %s \n", err.Error())
 		return err
