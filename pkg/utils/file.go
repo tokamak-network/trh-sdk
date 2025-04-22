@@ -13,10 +13,11 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 )
 
-func CopyFile(src, dst string) error {
+func CopyFile(src, dst string, logFileName string) error {
 	// Open the source file
 	sourceFile, err := os.Open(src)
 	if err != nil {
+		LogToFile(logFileName, fmt.Sprintf("failed to open source file: %v", err), true)
 		return fmt.Errorf("failed to open source file: %v", err)
 	}
 	defer sourceFile.Close()
@@ -24,6 +25,7 @@ func CopyFile(src, dst string) error {
 	// Create the destination file
 	destinationFile, err := os.Create(dst)
 	if err != nil {
+		LogToFile(logFileName, fmt.Sprintf("failed to create destination file: %v", err), true)
 		return fmt.Errorf("failed to create destination file: %v", err)
 	}
 	defer destinationFile.Close()
@@ -31,6 +33,7 @@ func CopyFile(src, dst string) error {
 	// Copy the content from source to destination
 	_, err = io.Copy(destinationFile, sourceFile)
 	if err != nil {
+		LogToFile(logFileName, fmt.Sprintf("failed to copy content: %v", err), true)
 		return fmt.Errorf("failed to copy content: %v", err)
 	}
 

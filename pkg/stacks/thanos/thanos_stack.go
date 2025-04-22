@@ -35,59 +35,63 @@ func NewThanosStack(network string, stack string) *ThanosStack {
 // ----------------------------------------- Deploy contracts command  ----------------------------- //
 
 func (t *ThanosStack) DeployContracts(ctx context.Context) error {
+	logFileName := fmt.Sprintf("logs/deploy_contracts_%s_%s_%s.log", t.network, t.stack, time.Now().Format("2006-01-02_15-04-05"))
 	if t.network == constants.LocalDevnet {
+		utils.LogToFile(logFileName, fmt.Sprintf("network %s does not require contract deployment, please run `trh-sdk deploy` instead", constants.LocalDevnet), false)
 		return fmt.Errorf("network %s does not require contract deployment, please run `trh-sdk deploy` instead", constants.LocalDevnet)
 	}
 	if t.network != constants.Testnet && t.network != constants.Mainnet {
+		utils.LogToFile(logFileName, fmt.Sprintf("network %s does not support", t.network), false)
 		return fmt.Errorf("network %s does not support", t.network)
 	}
 	var err error
 
 	// STEP 1. Input the parameters
-	fmt.Println("You are about to deploy the L1 contracts.")
+	utils.LogToFile(logFileName, "You are about to deploy the L1 contracts.", true)
 	deployContractsConfig, err := t.inputDeployContracts(ctx)
 	if err != nil {
 		return err
 	}
 
 	// Download testnet dependencies file
-	err = utils.ExecuteCommandStream("bash", "-c", "curl -o ./install-testnet-packages.sh https://raw.githubusercontent.com/tokamak-network/trh-sdk/refs/heads/main/scripts/install-testnet-packages.sh && chmod +x ./install-testnet-packages.sh")
+	err = utils.ExecuteCommandStream("bash", logFileName, "-c", "curl -o ./install-testnet-packages.sh https://raw.githubusercontent.com/tokamak-network/trh-sdk/refs/heads/main/scripts/install-testnet-packages.sh && chmod +x ./install-testnet-packages.sh")
 	if err != nil {
-		fmt.Println("\r❌ Failed to download testnet dependencies file!")
+		utils.LogToFile(logFileName, fmt.Sprintf("\r❌ Failed to download testnet dependencies file: %v", err), true)
 	}
 
 	// Install the dependencies
-	err = utils.ExecuteCommandStream("bash", "-c", "bash ./install-testnet-packages.sh")
+	err = utils.ExecuteCommandStream("bash", logFileName, "-c", "bash ./install-testnet-packages.sh")
 	if err != nil {
-		fmt.Println("\r❌ Failed to install testnet dependencies!")
+		utils.LogToFile(logFileName, fmt.Sprintf("\r❌ Failed to install testnet dependencies: %v", err), true)
 	}
 
 	shellConfigFile := utils.GetShellConfigDefault()
 
 	// Check dependencies
 	if !dependencies.CheckPnpmInstallation() {
-		fmt.Printf("Try running `source %s` to set up your environment \n", shellConfigFile)
+		utils.LogToFile(logFileName, fmt.Sprintf("Try running `source %s` to set up your environment", shellConfigFile), true)
 		return nil
 	}
 
 	if !dependencies.CheckFoundryInstallation() {
-		fmt.Printf("Try running `source %s` to set up your environment \n", shellConfigFile)
+		utils.LogToFile(logFileName, fmt.Sprintf("Try running `source %s` to set up your environment", shellConfigFile), true)
 		return nil
 	}
 
 	l1Client, err := ethclient.DialContext(ctx, deployContractsConfig.l1RPCurl)
 	if err != nil {
+		utils.LogToFile(logFileName, fmt.Sprintf("Failed to connect to L1 client: %v", err), true)
 		return err
 	}
 	l1ChainID, err := l1Client.ChainID(ctx)
 	if err != nil {
-		fmt.Printf("Failed to get chain id: %s", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Failed to get chain id: %s", err), true)
 		return err
 	}
 
 	l2ChainID, err := utils.GenerateL2ChainId()
 	if err != nil {
-		fmt.Printf("Failed to generate L2ChainID: %s", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Failed to generate L2ChainID: %s", err), true)
 		return err
 	}
 
@@ -96,48 +100,54 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	// Select operators Accounts
 	operators, err := selectAccounts(ctx, l1Client, deployContractsConfig.fraudProof, deployContractsConfig.seed)
 	if err != nil {
+		utils.LogToFile(logFileName, fmt.Sprintf("Failed to select accounts: %v", err), true)
 		return err
 	}
 
 	if len(operators) == 0 {
+		utils.LogToFile(logFileName, "no operators were found", true)
 		return fmt.Errorf("no operators were found")
 	}
 
-	fmt.Print("The SDK is ready to deploy the contracts to the L1 environment. Do you want to proceed(Y/n)? ")
+	utils.LogToFile(logFileName, "The SDK is ready to deploy the contracts to the L1 environment. Do you want to proceed(Y/n)? ", true)
 	confirmation, err := scanner.ScanBool(true)
 	if err != nil {
+		utils.LogToFile(logFileName, fmt.Sprintf("Error getting confirmation: %v", err), true)
 		return err
 	}
 	if !confirmation {
+		utils.LogToFile(logFileName, "User did not confirm the deployment", true)
 		return nil
 	}
 
 	err = makeDeployContractConfigJsonFile(ctx, l1Client, operators, deployContractsTemplate)
 	if err != nil {
+		utils.LogToFile(logFileName, fmt.Sprintf("Failed to make deploy contract config file: %v", err), true)
 		return err
 	}
 
 	// STEP 2. Clone the repository
-	err = t.cloneSourcecode("tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
+	err = t.cloneSourcecode("tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git", logFileName)
 	if err != nil {
+		utils.LogToFile(logFileName, fmt.Sprintf("Failed to clone repository: %v", err), true)
 		return err
 	}
 
 	// STEP 3. Build the contracts
-	fmt.Println("Building smart contracts...")
-	err = utils.ExecuteCommandStream("bash", "-c", "cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh build")
+	utils.LogToFile(logFileName, "Building smart contracts...", true)
+	err = utils.ExecuteCommandStream("bash", logFileName, "-c", "cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh build")
 	if err != nil {
-		fmt.Print("\r❌ Build the contracts failed!       \n")
+		utils.LogToFile(logFileName, "\r❌ Build the contracts failed!", true)
 		return err
 	}
-	fmt.Print("\r✅ Build the contracts completed!       \n")
+	utils.LogToFile(logFileName, "\r✅ Build the contracts completed!", true)
 
 	// STEP 4. Deploy the contracts
-	fmt.Println("Deploying the contracts...")
+	utils.LogToFile(logFileName, "Deploying the contracts...", true)
 
 	gasPriceWei, err := l1Client.SuggestGasPrice(ctx)
 	if err != nil {
-		fmt.Printf("Failed to get gas price: %v\n", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Failed to get gas price: %v", err), true)
 	}
 
 	envValues := fmt.Sprintf("export GS_ADMIN_PRIVATE_KEY=%s\nexport L1_RPC_URL=%s\n", operators[0].PrivateKey, deployContractsConfig.l1RPCurl)
@@ -153,40 +163,40 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		fmt.Sprintf("cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && echo '%s' > .env", envValues),
 	)
 	if err != nil {
-		fmt.Print("\r❌ Make .env file failed!       \n")
+		utils.LogToFile(logFileName, "\r❌ Make .env file failed!", true)
 		return err
 	}
 
 	// STEP 4.2. Copy the config file into the scripts folder
-	err = utils.ExecuteCommandStream("bash", "-c", "cp ./deploy-config.json tokamak-thanos/packages/tokamak/contracts-bedrock/scripts")
+	err = utils.ExecuteCommandStream("bash", logFileName, "-c", "cp ./deploy-config.json tokamak-thanos/packages/tokamak/contracts-bedrock/scripts")
 	if err != nil {
-		fmt.Print("\r❌ Copy the config file successfully!       \n")
+		utils.LogToFile(logFileName, "\r❌ Copy the config file successfully!", true)
 		return err
 	}
 
 	// STEP 4.3. Deploy contracts
-	err = utils.ExecuteCommandStream("bash", "-c", "cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh deploy -e .env -c deploy-config.json")
+	err = utils.ExecuteCommandStream("bash", logFileName, "-c", "cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh deploy -e .env -c deploy-config.json")
 	if err != nil {
-		fmt.Print("\r❌ Contract deployment failed!       \n")
+		utils.LogToFile(logFileName, "\r❌ Contract deployment failed!", true)
 		return err
 	}
-	fmt.Print("\r✅ Contract deployment completed successfully!       \n")
+	utils.LogToFile(logFileName, "\r✅ Contract deployment completed successfully!", true)
 
 	// STEP 5: Generate the genesis and rollup files
-	err = utils.ExecuteCommandStream("bash", "-c", "cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh generate -e .env -c deploy-config.json")
-	fmt.Println("Generating the rollup and genesis files...")
+	err = utils.ExecuteCommandStream("bash", logFileName, "-c", "cd tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh generate -e .env -c deploy-config.json")
+	utils.LogToFile(logFileName, "Generating the rollup and genesis files...", true)
 	if err != nil {
-		fmt.Print("\r❌ Failed to generate rollup and genesis files!       \n")
+		utils.LogToFile(logFileName, "\r❌ Failed to generate rollup and genesis files!", true)
 		return err
 	}
-	fmt.Print("\r✅ Successfully generated rollup and genesis files!       \n")
+	utils.LogToFile(logFileName, "\r✅ Successfully generated rollup and genesis files!", true)
 	cwd, err := os.Getwd()
 	if err != nil {
-		fmt.Println("Error obtaining current working directory:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error obtaining current working directory: %v", err), true)
 		return err
 	}
-	fmt.Printf("\r Genesis file path: %s/tokamak-thanos/build/genesis.json\n", cwd)
-	fmt.Printf("\r Rollup file path: %s/tokamak-thanos/build/rollup.json\n", cwd)
+	utils.LogToFile(logFileName, fmt.Sprintf("\r Genesis file path: %s/tokamak-thanos/build/genesis.json\n", cwd), true)
+	utils.LogToFile(logFileName, fmt.Sprintf("\r Rollup file path: %s/tokamak-thanos/build/rollup.json\n", cwd), true)
 
 	var challengerPrivateKey string
 	if deployContractsConfig.fraudProof {
@@ -212,26 +222,28 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	}
 	err = cfg.WriteToJSONFile()
 	if err != nil {
-		fmt.Println("Failed to write settings file:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Failed to write settings file: %v", err), true)
 		return err
 	}
-	fmt.Printf("✅ Configuration successfully saved to: %s/settings.json \n", cwd)
+	utils.LogToFile(logFileName, fmt.Sprintf("✅ Configuration successfully saved to: %s/settings.json \n", cwd), true)
 	return nil
 }
 
 // ----------------------------------------- Deploy command  ----------------------------- //
 
 func (t *ThanosStack) Deploy(ctx context.Context, deployConfig *types.Config) error {
+	logFileName := fmt.Sprintf("logs/deploy_%s_%s_%s.log", t.network, t.stack, time.Now().Format("2006-01-02_15-04-05"))
 	switch t.network {
 	case constants.LocalDevnet:
 		err := t.deployLocalDevnet()
 		if err != nil {
-			fmt.Printf("Error deploying local devnet: %s", err)
+			utils.LogToFile(logFileName, fmt.Sprintf("Error deploying local devnet: %s", err), true)
 			return t.destroyDevnet()
 		}
 	case constants.Testnet, constants.Mainnet:
 		// Check L1 RPC URL
 		if deployConfig.L1RPCURL == "" {
+			utils.LogToFile(logFileName, "L1 RPC URL is not set. Please run the deploy-contracts command first", true)
 			return fmt.Errorf("L1 RPC URL is not set. Please run the deploy-contracts command first")
 		}
 
@@ -246,31 +258,31 @@ func (t *ThanosStack) Deploy(ctx context.Context, deployConfig *types.Config) er
 		if client != nil {
 			blockNo, err = client.BlockNumber(ctxTimeout)
 			if err != nil {
-				fmt.Printf("❌ Failed to retrieve block number: %s \n", err)
+				utils.LogToFile(logFileName, fmt.Sprintf("❌ Failed to retrieve block number: %s \n", err), true)
 			} else {
-				fmt.Printf("✅ Successfully connected to L1 RPC, current block number: %d \n", blockNo)
+				utils.LogToFile(logFileName, fmt.Sprintf("✅ Successfully connected to L1 RPC, current block number: %d \n", blockNo), true)
 			}
 		}
 		if err != nil {
-			fmt.Printf("❌ Can't connect to L1 RPC. Please try again: %s \n", err)
+			utils.LogToFile(logFileName, fmt.Sprintf("❌ Can't connect to L1 RPC. Please try again: %s \n", err), true)
 			l1RPC, l1RPCKind, err := t.inputL1RPC(ctx)
 			if err != nil {
-				fmt.Printf("Error while getting L1 RPC URL: %s", err)
+				utils.LogToFile(logFileName, fmt.Sprintf("Error while getting L1 RPC URL: %s", err), true)
 				return err
 			}
 			deployConfig.L1RPCURL = l1RPC
 			deployConfig.L1RPCProvider = l1RPCKind
 			err = deployConfig.WriteToJSONFile()
 			if err != nil {
-				fmt.Println("Failed to write settings file after getting L1 RPC", err)
+				utils.LogToFile(logFileName, fmt.Sprintf("Failed to write settings file after getting L1 RPC: %s", err), true)
 				return err
 			}
 		}
 
-		fmt.Print("Please select your infrastructure provider [AWS] (default: AWS): ")
+		utils.LogToFile(logFileName, "Please select your infrastructure provider [AWS] (default: AWS): ", true)
 		input, err := scanner.ScanString()
 		if err != nil {
-			fmt.Printf("Error reading infrastructure selection: %s", err)
+			utils.LogToFile(logFileName, fmt.Sprintf("Error reading infrastructure selection: %s", err), true)
 			return err
 		}
 		infraOpt := strings.ToLower(input)
@@ -280,15 +292,17 @@ func (t *ThanosStack) Deploy(ctx context.Context, deployConfig *types.Config) er
 
 		switch infraOpt {
 		case constants.AWS:
-			err = t.deployNetworkToAWS(ctx, deployConfig)
+			err = t.deployNetworkToAWS(ctx, deployConfig, logFileName)
 			if err != nil {
 				return t.destroyInfraOnAWS(ctx, deployConfig)
 			}
 			return nil
 		default:
+			utils.LogToFile(logFileName, fmt.Sprintf("infrastructure provider %s is not supported", infraOpt), true)
 			return fmt.Errorf("infrastructure provider %s is not supported", infraOpt)
 		}
 	default:
+		utils.LogToFile(logFileName, fmt.Sprintf("network %s is not supported", t.network), true)
 		return fmt.Errorf("network %s is not supported", t.network)
 	}
 
@@ -296,20 +310,22 @@ func (t *ThanosStack) Deploy(ctx context.Context, deployConfig *types.Config) er
 }
 
 func (t *ThanosStack) deployLocalDevnet() error {
+	logFileName := fmt.Sprintf("logs/deploy_local_devnet_%s_%s_%s.log", t.network, t.stack, time.Now().Format("2006-01-02_15-04-05"))
 	// Download testnet dependencies file
-	err := utils.ExecuteCommandStream("bash", "-c", "curl -o ./install-devnet-packages.sh https://raw.githubusercontent.com/tokamak-network/trh-sdk/refs/heads/main/scripts/install-devnet-packages.sh && chmod +x ./install-devnet-packages.sh")
+	err := utils.ExecuteCommandStream("bash", logFileName, "-c", "curl -o ./install-devnet-packages.sh https://raw.githubusercontent.com/tokamak-network/trh-sdk/refs/heads/main/scripts/install-devnet-packages.sh && chmod +x ./install-devnet-packages.sh")
 	if err != nil {
-		fmt.Println("\r❌ Failed to download devnet dependencies file!")
+		utils.LogToFile(logFileName, "\r❌ Failed to download devnet dependencies file!", true)
 	}
 
 	// Install the dependencies
-	err = utils.ExecuteCommandStream("bash", "-c", "bash ./install-devnet-packages.sh")
+	err = utils.ExecuteCommandStream("bash", logFileName, "-c", "bash ./install-devnet-packages.sh")
 	if err != nil {
-		fmt.Println("\r❌ Failed to install devnet dependencies!")
+		utils.LogToFile(logFileName, "\r❌ Failed to install devnet dependencies!", true)
 	}
 
-	err = t.cloneSourcecode("tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
+	err = t.cloneSourcecode("tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git", logFileName)
 	if err != nil {
+		utils.LogToFile(logFileName, fmt.Sprintf("Failed to clone repository: %s", err), true)
 		return err
 	}
 
@@ -317,62 +333,62 @@ func (t *ThanosStack) deployLocalDevnet() error {
 	shellConfigFile := utils.GetShellConfigDefault()
 
 	// Source the shell configuration file
-	err = utils.ExecuteCommandStream("bash", "-c", fmt.Sprintf("source %s", shellConfigFile))
+	err = utils.ExecuteCommandStream("bash", logFileName, "-c", fmt.Sprintf("source %s", shellConfigFile))
 	if err != nil {
 		return err
 	}
 
 	// STEP 3. Start the devnet
-	fmt.Println("Starting the devnet...")
-	fmt.Print("\r✅ Package installation completed successfully!       \n")
+	utils.LogToFile(logFileName, "Starting the devnet...", true)
+	utils.LogToFile(logFileName, "\r✅ Package installation completed successfully!       \n", true)
 
-	err = utils.ExecuteCommandStream("bash", "-l", "-c", "cd tokamak-thanos && export DEVNET_L2OO=true && make devnet-up")
+	err = utils.ExecuteCommandStream("bash", logFileName, "-l", "-c", "cd tokamak-thanos && export DEVNET_L2OO=true && make devnet-up")
 	if err != nil {
-		fmt.Print("\r❌ Failed to start devnet!       \n")
+		utils.LogToFile(logFileName, "\r❌ Failed to start devnet!", true)
 		return err
 	}
 
-	fmt.Print("\r✅ Devnet started successfully!       \n")
+	utils.LogToFile(logFileName, "\r✅ Devnet started successfully!       \n", true)
 
 	return nil
 }
 
-func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *types.Config) error {
+func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *types.Config, logFileName string) error {
 	shellConfigFile := utils.GetShellConfigDefault()
 
 	// Check dependencies
 	// STEP 1. Verify required dependencies
 	if !dependencies.CheckTerraformInstallation() {
-		fmt.Printf("Try running `source %s` to set up your environment \n", shellConfigFile)
+		utils.LogToFile(logFileName, fmt.Sprintf("Try running `source %s` to set up your environment \n", shellConfigFile), true)
 		return nil
 	}
 
 	if !dependencies.CheckHelmInstallation() {
-		fmt.Printf("Try running `source %s` to set up your environment \n", shellConfigFile)
+		utils.LogToFile(logFileName, fmt.Sprintf("Try running `source %s` to set up your environment \n", shellConfigFile), true)
 		return nil
 	}
 
 	if !dependencies.CheckAwsCLIInstallation() {
-		fmt.Printf("Try running `source %s` to set up your environment \n", shellConfigFile)
+		utils.LogToFile(logFileName, fmt.Sprintf("Try running `source %s` to set up your environment \n", shellConfigFile), true)
 		return nil
 	}
 
 	if !dependencies.CheckK8sInstallation() {
-		fmt.Printf("Try running `source %s` to set up your environment \n", shellConfigFile)
+		utils.LogToFile(logFileName, fmt.Sprintf("Try running `source %s` to set up your environment \n", shellConfigFile), true)
 		return nil
 	}
 
 	// STEP 1. Clone the charts repository
-	err := t.cloneSourcecode("tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git")
+	err := t.cloneSourcecode("tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git", logFileName)
 	if err != nil {
-		fmt.Println("Error cloning repository:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error cloning repository: %s", err), true)
 		return err
 	}
 
 	// STEP 2. AWS Authentication
 	awsProfile, awsLoginInputs, err := t.loginAWS(ctx, deployConfig)
 	if err != nil {
-		fmt.Println("Error authenticating with AWS:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error authenticating with AWS: %s", err), true)
 		return err
 	}
 
@@ -381,18 +397,18 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
-	fmt.Println("⚡️Removing the previous deployment state...")
-	err = t.clearTerraformState(ctx)
+	utils.LogToFile(logFileName, "⚡️Removing the previous deployment state...", true)
+	err = t.clearTerraformState(ctx, logFileName)
 	if err != nil {
-		fmt.Printf("Failed to clear the existing terraform state, err: %s", err.Error())
+		utils.LogToFile(logFileName, fmt.Sprintf("Failed to clear the existing terraform state, err: %s", err.Error()), true)
 		return err
 	}
 
-	fmt.Println("✅ Removed the previous deployment state...")
+	utils.LogToFile(logFileName, "✅ Removed the previous deployment state...", true)
 
 	inputs, err := t.inputDeployInfra()
 	if err != nil {
-		fmt.Println("Error collecting infrastructure deployment parameters:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error collecting infrastructure deployment parameters: %s", err), true)
 		return err
 	}
 
@@ -414,11 +430,11 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 		OpGethImageTag:      constants.DockerImageTag[deployConfig.Network].OpGethImageTag,
 	})
 	if err != nil {
-		fmt.Println("Error generating Terraform environment configuration:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error generating Terraform environment configuration: %s", err), true)
 		return err
 	}
 	// STEP 4. Initialize Terraform backend
-	err = utils.ExecuteCommandStream("bash", []string{
+	err = utils.ExecuteCommandStream("bash", logFileName, []string{
 		"-c",
 		`cd tokamak-thanos-stack/terraform &&
 		source .envrc &&
@@ -429,25 +445,25 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 		`,
 	}...)
 	if err != nil {
-		fmt.Println("Error initializing Terraform backend:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error initializing Terraform backend: %s", err), true)
 		return err
 	}
 
 	// STEP 5. Copy configuration files
-	err = utils.CopyFile("tokamak-thanos/build/rollup.json", "tokamak-thanos-stack/terraform/thanos-stack/config-files/rollup.json")
+	err = utils.CopyFile("tokamak-thanos/build/rollup.json", "tokamak-thanos-stack/terraform/thanos-stack/config-files/rollup.json", logFileName)
 	if err != nil {
-		fmt.Println("Error copying rollup configuration:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error copying rollup configuration: %s", err), true)
 		return err
 	}
-	err = utils.CopyFile("tokamak-thanos/build/genesis.json", "tokamak-thanos-stack/terraform/thanos-stack/config-files/genesis.json")
+	err = utils.CopyFile("tokamak-thanos/build/genesis.json", "tokamak-thanos-stack/terraform/thanos-stack/config-files/genesis.json", logFileName)
 	if err != nil {
-		fmt.Println("Error copying genesis configuration:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error copying genesis configuration: %s", err), true)
 		return err
 	}
 
-	fmt.Println("Deploying Thanos stack infrastructure")
+	utils.LogToFile(logFileName, "Deploying Thanos stack infrastructure", true)
 	// STEP 6. Deploy Thanos stack infrastructure
-	err = utils.ExecuteCommandStream("bash", []string{
+	err = utils.ExecuteCommandStream("bash", logFileName, []string{
 		"-c",
 		`cd tokamak-thanos-stack/terraform &&
 		source .envrc &&
@@ -457,12 +473,12 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 		terraform apply -auto-approve`,
 	}...)
 	if err != nil {
-		fmt.Println("Error deploying Thanos stack infrastructure:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error deploying Thanos stack infrastructure: %s", err), true)
 		return err
 	}
 
 	// Get VPC ID
-	vpcIdOutput, err := utils.ExecuteCommand("bash", []string{
+	vpcIdOutput, err := utils.ExecuteCommand("bash", logFileName, []string{
 		"-c",
 		`cd tokamak-thanos-stack/terraform &&
 		source .envrc &&
@@ -470,63 +486,67 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 		terraform output -json vpc_id`,
 	}...)
 	if err != nil {
-		return fmt.Errorf("failed to get terraform output for %s: %w", "vpc_id", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("failed to get terraform output for %s: %w", "vpc_id", err), true)
+		return err
 	}
 
 	deployConfig.AWS.VpcID = strings.Trim(vpcIdOutput, `"`)
 	if err := deployConfig.WriteToJSONFile(); err != nil {
+		utils.LogToFile(logFileName, fmt.Sprintf("failed to write settings file: %w", err), true)
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
 	thanosStackValueFileExist := utils.CheckFileExists("tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml")
 	if !thanosStackValueFileExist {
+		utils.LogToFile(logFileName, "configuration file thanos-stack-values.yaml not found", true)
 		return fmt.Errorf("configuration file thanos-stack-values.yaml not found")
 	}
 
 	namespace := utils.ConvertChainNameToNamespace(inputs.ChainName)
 	deployConfig.ChainName = inputs.ChainName
 	if err := deployConfig.WriteToJSONFile(); err != nil {
+		utils.LogToFile(logFileName, fmt.Sprintf("failed to write settings file: %w", err), true)
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
 	// Step 7. Configure EKS access
-	eksSetup, err := utils.ExecuteCommand("aws", []string{
+	eksSetup, err := utils.ExecuteCommand("aws", logFileName, []string{
 		"eks",
 		"update-kubeconfig",
 		"--region", awsLoginInputs.Region,
 		"--name", namespace,
 	}...)
 	if err != nil {
-		fmt.Println("Error configuring EKS access:", err, "details:", eksSetup)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error configuring EKS access: %s", err), true)
 		return err
 	}
 
-	fmt.Println("EKS configuration updated:", eksSetup)
+	utils.LogToFile(logFileName, fmt.Sprintf("EKS configuration updated: %s", eksSetup), true)
 
 	// ---------------------------------------- Deploy chain --------------------------//
 	// Step 8. Add Helm repository
-	helmAddOuput, err := utils.ExecuteCommand("helm", []string{
+	helmAddOuput, err := utils.ExecuteCommand("helm", logFileName, []string{
 		"repo",
 		"add",
 		"thanos-stack",
 		"https://tokamak-network.github.io/tokamak-thanos-stack",
 	}...)
 	if err != nil {
-		fmt.Println("Error adding Helm repository:", err, "details:", helmAddOuput)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error adding Helm repository: %s, details: %s", err, helmAddOuput), true)
 		return err
 	}
 
 	// Step 8.1 Search available Helm charts
-	helmSearchOutput, err := utils.ExecuteCommand("helm", []string{
+	helmSearchOutput, err := utils.ExecuteCommand("helm", logFileName, []string{
 		"search",
 		"repo",
 		"thanos-stack",
 	}...)
 	if err != nil {
-		fmt.Println("Error searching Helm charts:", err, "details:", helmSearchOutput)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error searching Helm charts: %s, details: %s", err, helmSearchOutput), true)
 		return err
 	}
-	fmt.Println("Helm repository added successfully: \n", helmSearchOutput)
+	utils.LogToFile(logFileName, fmt.Sprintf("Helm repository added successfully: \n%s", helmSearchOutput), true)
 
 	// Step 8.2. Install Helm charts
 	cwd, err := os.Getwd()
@@ -535,7 +555,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 	}
 
 	helmReleaseName := fmt.Sprintf("%s-%d", namespace, time.Now().Unix())
-	_, err = utils.ExecuteCommand("helm", []string{
+	_, err = utils.ExecuteCommand("helm", logFileName, []string{
 		"install",
 		helmReleaseName,
 		fmt.Sprintf("%s/tokamak-thanos-stack/charts/thanos-stack", cwd),
@@ -545,17 +565,17 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 		namespace,
 	}...)
 	if err != nil {
-		fmt.Println("Error installing Helm charts:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error installing Helm charts: %s", err), true)
 		return err
 	}
 
-	fmt.Println("✅ Helm charts installed successfully")
+	utils.LogToFile(logFileName, "✅ Helm charts installed successfully", true)
 
 	var l2RPCUrl string
 	for {
 		k8sIngresses, err := utils.GetAddressByIngress(namespace, helmReleaseName)
 		if err != nil {
-			fmt.Println("Error retrieving ingress addresses:", err, "details:", k8sIngresses)
+			utils.LogToFile(logFileName, fmt.Sprintf("Error retrieving ingress addresses: %s, details: %s", err, k8sIngresses), true)
 			return err
 		}
 
@@ -566,8 +586,8 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 
 		time.Sleep(15 * time.Second)
 	}
-	fmt.Printf("✅ Network deployment completed successfully!\n")
-	fmt.Printf("🌐 RPC endpoint: %s\n", l2RPCUrl)
+	utils.LogToFile(logFileName, "✅ Network deployment completed successfully!\n", true)
+	utils.LogToFile(logFileName, fmt.Sprintf("🌐 RPC endpoint: %s\n", l2RPCUrl), true)
 
 	deployConfig.K8s = &types.K8sConfig{
 		Namespace: namespace,
@@ -577,19 +597,19 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 
 	err = deployConfig.WriteToJSONFile()
 	if err != nil {
-		fmt.Println("Error saving configuration file:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error saving configuration file: %s", err), true)
 		return err
 	}
-	fmt.Printf("Configuration saved successfully to: %s/settings.json \n", cwd)
+	utils.LogToFile(logFileName, fmt.Sprintf("Configuration saved successfully to: %s/settings.json \n", cwd), true)
 
 	// After installing the infra successfully, we install the bridge
-	err = t.installBridge(ctx, deployConfig)
+	err = t.installBridge(ctx, deployConfig, logFileName)
 	if err != nil {
-		fmt.Println("Error installing bridge:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error installing bridge: %s", err), true)
 	}
-	fmt.Println("🎉 Thanos Stack installation completed successfully!")
-	fmt.Println("🚀 Your network is now up and running.")
-	fmt.Println("🔧 You can start interacting with your deployed infrastructure.")
+	utils.LogToFile(logFileName, "🎉 Thanos Stack installation completed successfully!", true)
+	utils.LogToFile(logFileName, "🚀 Your network is now up and running.", true)
+	utils.LogToFile(logFileName, "🔧 You can start interacting with your deployed infrastructure.", true)
 
 	return nil
 }
@@ -607,25 +627,30 @@ func (t *ThanosStack) Destroy(ctx context.Context, deployConfig *types.Config) e
 }
 
 func (t *ThanosStack) destroyDevnet() error {
-	output, err := utils.ExecuteCommand("bash", "-c", "cd tokamak-thanos && make nuke")
+	logFileName := fmt.Sprintf("logs/destroy_%s_%s_%s.log", t.network, t.stack, time.Now().Format("2006-01-02_15-04-05"))
+	output, err := utils.ExecuteCommand("bash", logFileName, []string{
+		"-c",
+		"cd tokamak-thanos && make nuke",
+	}...)
 	if err != nil {
-		fmt.Printf("\r❌ Devnet cleanup failed!       \n Details: %s", output)
+		utils.LogToFile(logFileName, fmt.Sprintf("\r❌ Devnet cleanup failed!       \n Details: %s", output), true)
 		return err
 	}
 
-	fmt.Print("\r✅ Devnet network destroyed successfully!       \n")
+	utils.LogToFile(logFileName, "\r✅ Devnet network destroyed successfully!       \n", true)
 
 	return nil
 }
 
 func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context, deployConfig *types.Config) error {
+	logFileName := fmt.Sprintf("logs/destroy_%s_%s_%s.log", t.network, t.stack, time.Now().Format("2006-01-02_15-04-05"))
 	var (
 		err error
 	)
 
 	_, _, err = t.loginAWS(ctx, deployConfig)
 	if err != nil {
-		fmt.Println("Error getting AWS profile:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error getting AWS profile: %s", err), true)
 		return err
 	}
 
@@ -636,22 +661,27 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context, deployConfig *types
 
 	helmReleases, err := utils.GetHelmReleases(namespace)
 	if err != nil {
-		fmt.Println("Error retrieving Helm releases:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error retrieving Helm releases: %s", err), true)
 	}
 
 	if len(helmReleases) > 0 {
 		for _, release := range helmReleases {
 			if strings.Contains(release, namespace) || strings.Contains(release, "op-bridge") || strings.Contains(release, "block-explorer") {
-				fmt.Printf("Uninstalling Helm release: %s in namespace: %s...\n", release, namespace)
-				_, err := utils.ExecuteCommand("helm", "uninstall", release, "--namespace", namespace)
+				utils.LogToFile(logFileName, fmt.Sprintf("Uninstalling Helm release: %s in namespace: %s...\n", release, namespace), true)
+				_, err := utils.ExecuteCommand("helm", logFileName, []string{
+					"uninstall",
+					release,
+					"--namespace",
+					namespace,
+				}...)
 				if err != nil {
-					fmt.Println("Error removing Helm release:", err)
+					utils.LogToFile(logFileName, fmt.Sprintf("Error removing Helm release: %s", err), true)
 					return err
 				}
 			}
 		}
 
-		fmt.Println("Helm release removed successfully")
+		utils.LogToFile(logFileName, "Helm release removed successfully", true)
 	}
 
 	// Delete namespace before destroying the infrastructure
@@ -660,22 +690,25 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context, deployConfig *types
 
 	err = t.tryToDeleteK8sNamespace(ctxTimeout, namespace)
 	if err != nil {
-		fmt.Println("Error deleting namespace:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error deleting namespace: %s", err), true)
 	} else {
-		fmt.Println("✅ Namespace destroyed successfully!")
+		utils.LogToFile(logFileName, "✅ Namespace destroyed successfully!", true)
 	}
 
-	return t.clearTerraformState(ctx)
+	return t.clearTerraformState(ctx, logFileName)
 }
 
 // ------------------------------------------ Install plugins ---------------------------
 
 func (t *ThanosStack) InstallPlugins(ctx context.Context, pluginNames []string, deployConfig *types.Config) error {
+	logFileName := fmt.Sprintf("logs/install_%s_%s_%s.log", t.network, t.stack, time.Now().Format("2006-01-02_15-04-05"))
 	if t.network == constants.LocalDevnet {
+		utils.LogToFile(logFileName, fmt.Sprintf("network %s does not support plugin installation", constants.LocalDevnet), true)
 		return fmt.Errorf("network %s does not support plugin installation", constants.LocalDevnet)
 	}
 
 	if deployConfig.K8s == nil {
+		utils.LogToFile(logFileName, "K8s configuration is not set. Please run the deploy command first", true)
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
@@ -685,24 +718,26 @@ func (t *ThanosStack) InstallPlugins(ctx context.Context, pluginNames []string, 
 
 	for _, pluginName := range pluginNames {
 		if !constants.SupportedPlugins[pluginName] {
-			fmt.Printf("Plugin %s is not supported for this stack.\n", pluginName)
+			utils.LogToFile(logFileName, fmt.Sprintf("Plugin %s is not supported for this stack.", pluginName), true)
 			continue
 		}
 
-		fmt.Printf("Installing plugin: %s in namespace: %s...\n", pluginName, namespace)
+		utils.LogToFile(logFileName, fmt.Sprintf("Installing plugin: %s in namespace: %s...", pluginName, namespace), true)
 
 		switch pluginName {
 		case constants.PluginBlockExplorer:
-			err := t.installBlockExplorer(ctx, deployConfig)
+			err := t.installBlockExplorer(ctx, deployConfig, logFileName)
 			if err != nil {
-				return t.uninstallBlockExplorer(ctx, deployConfig)
+				return t.uninstallBlockExplorer(ctx, deployConfig, logFileName)
 			}
+			utils.LogToFile(logFileName, fmt.Sprintf("Plugin %s installed successfully", pluginName), true)
 			return nil
 		case constants.PluginBridge:
-			err := t.installBridge(ctx, deployConfig)
+			err := t.installBridge(ctx, deployConfig, logFileName)
 			if err != nil {
-				return t.uninstallBridge(ctx, deployConfig)
+				return t.uninstallBridge(ctx, deployConfig, logFileName)
 			}
+			utils.LogToFile(logFileName, fmt.Sprintf("Plugin %s installed successfully", pluginName), true)
 			return nil
 		}
 	}
@@ -712,6 +747,7 @@ func (t *ThanosStack) InstallPlugins(ctx context.Context, pluginNames []string, 
 // ------------------------------------------ Uninstall plugins ---------------------------
 
 func (t *ThanosStack) UninstallPlugins(ctx context.Context, pluginNames []string, deployConfig *types.Config) error {
+	logFileName := fmt.Sprintf("logs/uninstall_%s_%s_%s.log", t.network, t.stack, time.Now().Format("2006-01-02_15-04-05"))
 	if t.network == constants.LocalDevnet {
 		return fmt.Errorf("network %s does not support plugin installation", constants.LocalDevnet)
 	}
@@ -734,9 +770,9 @@ func (t *ThanosStack) UninstallPlugins(ctx context.Context, pluginNames []string
 
 		switch pluginName {
 		case constants.PluginBridge:
-			return t.uninstallBridge(ctx, deployConfig)
+			return t.uninstallBridge(ctx, deployConfig, logFileName)
 		case constants.PluginBlockExplorer:
-			return t.uninstallBlockExplorer(ctx, deployConfig)
+			return t.uninstallBlockExplorer(ctx, deployConfig, logFileName)
 		}
 	}
 	return nil

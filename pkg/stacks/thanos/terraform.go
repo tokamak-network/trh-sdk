@@ -8,9 +8,9 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
-func (t *ThanosStack) clearTerraformState(ctx context.Context) error {
+func (t *ThanosStack) clearTerraformState(ctx context.Context, logFileName string) error {
 	// STEP 1: Destroy tokamak-thanos-stack/terraform/block-explorer resources
-	err := t.destroyTerraform("tokamak-thanos-stack/terraform/block-explorer")
+	err := t.destroyTerraform("tokamak-thanos-stack/terraform/block-explorer", logFileName)
 	fmt.Println("Destroying block-explorer terraform resources")
 	if err != nil {
 		fmt.Println("Error running block-explorer terraform destroy", err)
@@ -33,7 +33,7 @@ func (t *ThanosStack) clearTerraformState(ctx context.Context) error {
 		bucketExist := utils.BucketExists(ctx, t.s3Client, state.Backend.Config.Bucket)
 		if bucketExist {
 			fmt.Println("Destroying thanos-stack terraform resources")
-			err = t.destroyTerraform("tokamak-thanos-stack/terraform/thanos-stack")
+			err = t.destroyTerraform("tokamak-thanos-stack/terraform/thanos-stack", logFileName)
 			if err != nil {
 				fmt.Println("Error running thanos-stack terraform destroy:", err)
 				return err
@@ -43,7 +43,7 @@ func (t *ThanosStack) clearTerraformState(ctx context.Context) error {
 
 	// STEP 3: Destroy tokamak-thanos-stack/terraform/backend resources
 	fmt.Println("Destroying backend terraform resources")
-	err = t.destroyTerraform("tokamak-thanos-stack/terraform/backend")
+	err = t.destroyTerraform("tokamak-thanos-stack/terraform/backend", logFileName)
 	if err != nil {
 		fmt.Println("Error running backend terraform destroy", err)
 		return err
@@ -51,7 +51,7 @@ func (t *ThanosStack) clearTerraformState(ctx context.Context) error {
 
 	// STEP 4: delete the `tokamak-thanos-stack/thanos-stack` state to prevent conflicts when reinstalling the stack
 	// This is a workaround for the issue where the bucket name is deleted but the state file remains containing the old bucket name.
-	err = utils.ExecuteCommandStream("bash", []string{
+	err = utils.ExecuteCommandStream("bash", logFileName, []string{
 		"-c",
 		`cd tokamak-thanos-stack/terraform/thanos-stack && rm -rf terraform.tfstate terraform.tfstate.backup .terraform.lock.hcl .terraform/`,
 	}...)
@@ -63,7 +63,7 @@ func (t *ThanosStack) clearTerraformState(ctx context.Context) error {
 	return nil
 }
 
-func (t *ThanosStack) destroyTerraform(path string) error {
+func (t *ThanosStack) destroyTerraform(path string, logFileName string) error {
 	if !utils.CheckDirExists(path) {
 		return nil
 	}
@@ -73,12 +73,12 @@ func (t *ThanosStack) destroyTerraform(path string) error {
 	}
 
 	// Check state before destroying
-	output, err := utils.ExecuteCommand("bash", "-c", fmt.Sprintf("cd %s && source ../.envrc &&  terraform state list", path))
+	output, err := utils.ExecuteCommand("bash", logFileName, "-c", fmt.Sprintf("cd %s && source ../.envrc &&  terraform state list", path))
 	if err != nil || strings.TrimSpace(output) == "" {
 		return nil
 	}
 
-	err = utils.ExecuteCommandStream("bash", []string{
+	err = utils.ExecuteCommandStream("bash", logFileName, []string{
 		"-c",
 		fmt.Sprintf(`cd %s && source ../.envrc && terraform destroy -auto-approve -parallelism=100`, path),
 	}...)

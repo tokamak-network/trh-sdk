@@ -372,27 +372,27 @@ func makeBlockExplorerEnvs(dirPath string, filename string, config types.BlockEx
 	return nil
 }
 
-func (t *ThanosStack) cloneSourcecode(repositoryName, url string) error {
+func (t *ThanosStack) cloneSourcecode(repositoryName, url, logFileName string) error {
 	existingSourcecode, err := utils.CheckExistingSourceCode(repositoryName)
 	if err != nil {
-		fmt.Println("Error while checking existing source code")
+		utils.LogToFile(logFileName, "Error while checking existing source code", true)
 		return err
 	}
 
 	if !existingSourcecode {
 		err := utils.CloneRepo(url, repositoryName)
 		if err != nil {
-			fmt.Println("Error while cloning the repository")
+			utils.LogToFile(logFileName, "Error while cloning the repository", true)
 			return err
 		}
 	} else {
 		err := utils.PullLatestCode(repositoryName)
 		if err != nil {
-			fmt.Printf("Error while pulling the latest code for repository %s: %v\n", repositoryName, err)
+			utils.LogToFile(logFileName, fmt.Sprintf("Error while pulling the latest code for repository %s: %v\n", repositoryName, err), true)
 			return err
 		}
 	}
-	fmt.Printf("\r✅ Clone the %s repository successfully \n", repositoryName)
+	utils.LogToFile(logFileName, fmt.Sprintf("\r✅ Clone the %s repository successfully \n", repositoryName), true)
 
 	return nil
 }

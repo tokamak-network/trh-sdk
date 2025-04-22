@@ -14,14 +14,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func (t *ThanosStack) installBridge(ctx context.Context, deployConfig *types.Config) error {
+func (t *ThanosStack) installBridge(ctx context.Context, deployConfig *types.Config, logFileName string) error {
 	if deployConfig.K8s == nil {
+		utils.LogToFile(logFileName, "K8s configuration is not set. Please run the deploy command first", true)
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
 	_, _, err := t.loginAWS(ctx, deployConfig)
 	if err != nil {
-		fmt.Println("Error to login in AWS:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error to login in AWS: %s", err), true)
 		return err
 	}
 
@@ -34,28 +35,28 @@ func (t *ThanosStack) installBridge(ctx context.Context, deployConfig *types.Con
 
 	opBridgePods, err := utils.GetPodsByName(namespace, "op-bridge")
 	if err != nil {
-		fmt.Println("Error to get op bridge pods:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error to get op bridge pods: %s", err), true)
 		return err
 	}
 	if len(opBridgePods) > 0 {
-		fmt.Printf("OP Bridge is running: \n")
+		utils.LogToFile(logFileName, "OP Bridge is running: \n", true)
 		for _, pod := range opBridgePods {
-			fmt.Println(pod)
+			utils.LogToFile(logFileName, pod, true)
 		}
 		return nil
 	}
 
-	fmt.Println("Installing a bridge component...")
+	utils.LogToFile(logFileName, "Installing a bridge component...", true)
 
 	cwd, err := os.Getwd()
 	if err != nil {
-		fmt.Println("Error determining current directory:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error determining current directory: %s", err), true)
 		return err
 	}
 
 	file, err := os.Open(fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%s", cwd, fmt.Sprintf("%d-deploy.json", l1ChainID)))
 	if err != nil {
-		fmt.Println("Error opening deployment file:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error opening deployment file: %s", err), true)
 		return err
 	}
 	defer file.Close()
@@ -64,7 +65,7 @@ func (t *ThanosStack) installBridge(ctx context.Context, deployConfig *types.Con
 	var contracts types.Contracts
 	decoder := json.NewDecoder(file)
 	if err := decoder.Decode(&contracts); err != nil {
-		fmt.Println("Error decoding deployment JSON file:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error decoding deployment JSON file: %s", err), true)
 		return err
 	}
 
@@ -124,13 +125,13 @@ func (t *ThanosStack) installBridge(ctx context.Context, deployConfig *types.Con
 
 	data, err := yaml.Marshal(&opBridgeConfig)
 	if err != nil {
-		fmt.Println("Error marshalling op-bridge values YAML file:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error marshalling op-bridge values YAML file: %s", err), true)
 		return err
 	}
 
 	configFileDir := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", cwd)
 	if err := os.MkdirAll(configFileDir, os.ModePerm); err != nil {
-		fmt.Println("Error creating directory:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error creating directory: %s", err), true)
 		return err
 	}
 
@@ -138,12 +139,12 @@ func (t *ThanosStack) installBridge(ctx context.Context, deployConfig *types.Con
 	filePath := filepath.Join(configFileDir, "/op-bridge-values.yaml")
 	err = os.WriteFile(filePath, data, 0644)
 	if err != nil {
-		fmt.Println("Error writing file:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error writing file: %s", err), true)
 		return nil
 	}
 
 	helmReleaseName := fmt.Sprintf("op-bridge-%d", time.Now().Unix())
-	_, err = utils.ExecuteCommand("helm", []string{
+	_, err = utils.ExecuteCommand("helm", logFileName, []string{
 		"install",
 		helmReleaseName,
 		fmt.Sprintf("%s/tokamak-thanos-stack/charts/op-bridge", cwd),
@@ -153,7 +154,7 @@ func (t *ThanosStack) installBridge(ctx context.Context, deployConfig *types.Con
 		namespace,
 	}...)
 	if err != nil {
-		fmt.Println("Error installing Helm charts:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error installing Helm charts: %s", err), true)
 		return err
 	}
 
@@ -162,7 +163,7 @@ func (t *ThanosStack) installBridge(ctx context.Context, deployConfig *types.Con
 	for {
 		k8sIngresses, err := utils.GetAddressByIngress(namespace, helmReleaseName)
 		if err != nil {
-			fmt.Println("Error retrieving ingress addresses:", err, "details:", k8sIngresses)
+			utils.LogToFile(logFileName, fmt.Sprintf("Error retrieving ingress addresses: %s, details: %s", err, k8sIngresses), true)
 			return err
 		}
 
@@ -173,12 +174,12 @@ func (t *ThanosStack) installBridge(ctx context.Context, deployConfig *types.Con
 
 		time.Sleep(15 * time.Second)
 	}
-	fmt.Printf("✅ Bridge component is up and running. You can access it at: %s\n", bridgeUrl)
+	utils.LogToFile(logFileName, fmt.Sprintf("✅ Bridge component is up and running. You can access it at: %s\n", bridgeUrl), true)
 
 	return nil
 }
 
-func (t *ThanosStack) uninstallBridge(ctx context.Context, deployConfig *types.Config) error {
+func (t *ThanosStack) uninstallBridge(ctx context.Context, deployConfig *types.Config, logFileName string) error {
 	if deployConfig.K8s == nil {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
@@ -189,7 +190,7 @@ func (t *ThanosStack) uninstallBridge(ctx context.Context, deployConfig *types.C
 
 	_, _, err := t.loginAWS(ctx, deployConfig)
 	if err != nil {
-		fmt.Println("Error to login in AWS:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error to login in AWS: %s", err), true)
 		return err
 	}
 
@@ -199,24 +200,24 @@ func (t *ThanosStack) uninstallBridge(ctx context.Context, deployConfig *types.C
 
 	releases, err := utils.FilterHelmReleases(namespace, "op-bridge")
 	if err != nil {
-		fmt.Println("Error to filter helm releases:", err)
+		utils.LogToFile(logFileName, fmt.Sprintf("Error to filter helm releases: %s", err), true)
 		return err
 	}
 
 	for _, release := range releases {
-		_, err = utils.ExecuteCommand("helm", []string{
+		_, err = utils.ExecuteCommand("helm", logFileName, []string{
 			"uninstall",
 			release,
 			"--namespace",
 			namespace,
 		}...)
 		if err != nil {
-			fmt.Println("Error uninstalling op-bridge helm chart:", err)
+			utils.LogToFile(logFileName, fmt.Sprintf("Error uninstalling op-bridge helm chart: %s", err), true)
 			return err
 		}
 	}
 
-	fmt.Println("Uninstall a bridge component successfully")
+	utils.LogToFile(logFileName, "Uninstall a bridge component successfully", true)
 
 	return nil
 }
