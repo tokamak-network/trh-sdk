@@ -14,11 +14,12 @@ func ActionDeployContracts() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
 		stack := cmd.String(flags.StackFlag.Name)
 		network := cmd.String(flags.NetworkFlag.Name)
+		registerCandidate := !cmd.Bool(flags.NoCandidateFlag.Name)
 
 		switch stack {
 		case constants.ThanosStack:
 			thanosStack := thanos.NewThanosStack(network, stack)
-
+			thanosStack.SetRegisterCandidate(registerCandidate)
 			return thanosStack.DeployContracts(ctx)
 		default:
 			return fmt.Errorf("unsupported stack: %s", stack)
