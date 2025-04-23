@@ -12,8 +12,11 @@ import (
 func ExecuteCommand(command string, args ...string) (string, error) {
 	cmd := exec.Command(command, args...)
 	output, err := cmd.CombinedOutput()
-	logging.Info(strings.TrimSpace(string(output)))
-	return strings.TrimSpace(string(output)), err
+
+	trimmedOutput := strings.TrimSpace(string(output))
+	logging.Info(trimmedOutput)
+
+	return trimmedOutput, err
 }
 
 // ExecuteCommandStream executes a command and streams its output in real-time
