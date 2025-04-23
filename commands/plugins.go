@@ -3,7 +3,10 @@ package commands
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
+	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 
@@ -39,6 +42,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 			switch stack {
 			case constants.ThanosStack:
 				thanosStack := thanos.NewThanosStack(network, stack)
+				logging.InitLogger(fmt.Sprintf("logs/install_plugin_%s_%s_%s_%d.log", stack, network, strings.Join(plugins, "_"), time.Now().Unix()))
 				return thanosStack.InstallPlugins(ctx, plugins, config)
 			default:
 				return nil
@@ -47,6 +51,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 			switch stack {
 			case constants.ThanosStack:
 				thanosStack := thanos.NewThanosStack(network, stack)
+				logging.InitLogger(fmt.Sprintf("logs/uninstall_plugin_%s_%s_%s_%d.log", stack, network, strings.Join(plugins, "_"), time.Now().Unix()))
 				return thanosStack.UninstallPlugins(ctx, plugins, config)
 			default:
 				return nil

@@ -3,9 +3,11 @@ package commands
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/tokamak-network/trh-sdk/flags"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
+	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/urfave/cli/v3"
 )
@@ -18,7 +20,7 @@ func ActionDeployContracts() cli.ActionFunc {
 		switch stack {
 		case constants.ThanosStack:
 			thanosStack := thanos.NewThanosStack(network, stack)
-
+			logging.InitLogger(fmt.Sprintf("logs/contracts_%s_%s_%d.log", stack, network, time.Now().Unix()))
 			return thanosStack.DeployContracts(ctx)
 		default:
 			return fmt.Errorf("unsupported stack: %s", stack)
