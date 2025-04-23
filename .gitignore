@@ -37,5 +37,5 @@ deploy-config.json
 settings.json
 
 nam@tokamak.network_accessKeys.csv
-logs/*
+logs/
 *.log

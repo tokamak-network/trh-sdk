@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
+	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
@@ -21,6 +23,9 @@ var SupportedLogsComponents = map[string]bool{
 }
 
 func (t *ThanosStack) ShowInformation(ctx context.Context, config *types.Config) error {
+	fileName := fmt.Sprintf("logs/show_information_%s_%s_%d.log", t.stack, t.network, time.Now().Unix())
+	logging.InitLogger(fileName)
+
 	if t.network == constants.LocalDevnet {
 		// Check the devnet network running
 		runningContainers, err := utils.GetDockerContainers(ctx)
@@ -91,6 +96,9 @@ func (t *ThanosStack) ShowInformation(ctx context.Context, config *types.Config)
 }
 
 func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, component string) error {
+	fileName := fmt.Sprintf("logs/show_logs_%s_%s_%s_%d.log", t.stack, t.network, component, time.Now().Unix())
+	logging.InitLogger(fileName)
+
 	if config.K8s == nil {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}

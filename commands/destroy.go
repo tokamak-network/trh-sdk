@@ -3,10 +3,8 @@ package commands
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
-	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -30,7 +28,6 @@ func ActionDestroyInfra() cli.ActionFunc {
 			network = config.Network
 			stack = config.Stack
 		}
-		logging.InitLogger(fmt.Sprintf("logs/destroy_%s_%s_%d.log", stack, network, time.Now().Unix()))
 		return Destroy(ctx, network, stack, config)
 	}
 }

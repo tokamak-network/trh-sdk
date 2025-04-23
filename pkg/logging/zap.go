@@ -61,20 +61,40 @@ func GetLogger() *zap.Logger {
 	return logger
 }
 
+func Infof(format string, args ...interface{}) {
+	GetLogger().Sugar().Infof(format, args...)
+}
+
 func Info(msg string, fields ...zap.Field) {
 	GetLogger().Info(msg, fields...)
+}
+
+func Errorf(format string, args ...interface{}) {
+	GetLogger().Sugar().Errorf(format, args...)
 }
 
 func Error(msg string, fields ...zap.Field) {
 	GetLogger().Error(msg, fields...)
 }
 
+func Debugf(format string, args ...interface{}) {
+	GetLogger().Sugar().Debugf(format, args...)
+}
+
 func Debug(msg string, fields ...zap.Field) {
 	GetLogger().Debug(msg, fields...)
 }
 
+func Warnf(format string, args ...interface{}) {
+	GetLogger().Sugar().Warnf(format, args...)
+}
+
 func Warn(msg string, fields ...zap.Field) {
 	GetLogger().Warn(msg, fields...)
+}
+
+func Fatalf(format string, args ...interface{}) {
+	GetLogger().Sugar().Fatalf(format, args...)
 }
 
 func Fatal(msg string, fields ...zap.Field) {
