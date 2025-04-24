@@ -2,16 +2,21 @@ package utils
 
 import (
 	"bufio"
-	"fmt"
 	"io"
 	"os/exec"
 	"strings"
+
+	"github.com/tokamak-network/trh-sdk/pkg/logging"
 )
 
 func ExecuteCommand(command string, args ...string) (string, error) {
 	cmd := exec.Command(command, args...)
 	output, err := cmd.CombinedOutput()
-	return strings.TrimSpace(string(output)), err
+
+	trimmedOutput := strings.TrimSpace(string(output))
+	logging.Info(trimmedOutput)
+
+	return trimmedOutput, err
 }
 
 // ExecuteCommandStream executes a command and streams its output in real-time
@@ -61,6 +66,6 @@ func ExecuteCommandStream(command string, args ...string) error {
 func streamOutput(pipe io.ReadCloser) {
 	scanner := bufio.NewScanner(pipe)
 	for scanner.Scan() {
-		fmt.Println(scanner.Text()) // Print each line in real-time
+		logging.Info(scanner.Text()) // Print each line in real-time
 	}
 }

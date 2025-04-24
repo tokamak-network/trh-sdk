@@ -13,6 +13,7 @@ import (
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/dependencies"
+	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -35,6 +36,8 @@ func NewThanosStack(network string, stack string) *ThanosStack {
 // ----------------------------------------- Deploy contracts command  ----------------------------- //
 
 func (t *ThanosStack) DeployContracts(ctx context.Context) error {
+	fileName := fmt.Sprintf("logs/deploy_thanos_%s_%s_%d.log", t.stack, t.network, time.Now().Unix())
+	logging.InitLogger(fileName)
 	if t.network == constants.LocalDevnet {
 		return fmt.Errorf("network %s does not require contract deployment, please run `trh-sdk deploy` instead", constants.LocalDevnet)
 	}
@@ -222,6 +225,8 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 // ----------------------------------------- Deploy command  ----------------------------- //
 
 func (t *ThanosStack) Deploy(ctx context.Context, deployConfig *types.Config) error {
+	fileName := fmt.Sprintf("logs/deploy_thanos_%s_%s_%d.log", t.stack, t.network, time.Now().Unix())
+	logging.InitLogger(fileName)
 	switch t.network {
 	case constants.LocalDevnet:
 		err := t.deployLocalDevnet()
@@ -597,6 +602,8 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 // --------------------------------------------- Destroy command -------------------------------------//
 
 func (t *ThanosStack) Destroy(ctx context.Context, deployConfig *types.Config) error {
+	fileName := fmt.Sprintf("logs/destroy_thanos_%s_%s_%d.log", t.stack, t.network, time.Now().Unix())
+	logging.InitLogger(fileName)
 	switch t.network {
 	case constants.LocalDevnet:
 		return t.destroyDevnet()
@@ -671,6 +678,8 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context, deployConfig *types
 // ------------------------------------------ Install plugins ---------------------------
 
 func (t *ThanosStack) InstallPlugins(ctx context.Context, pluginNames []string, deployConfig *types.Config) error {
+	fileName := fmt.Sprintf("logs/install_plugins_%s_%s_%d.log", t.stack, t.network, time.Now().Unix())
+	logging.InitLogger(fileName)
 	if t.network == constants.LocalDevnet {
 		return fmt.Errorf("network %s does not support plugin installation", constants.LocalDevnet)
 	}
@@ -712,6 +721,8 @@ func (t *ThanosStack) InstallPlugins(ctx context.Context, pluginNames []string, 
 // ------------------------------------------ Uninstall plugins ---------------------------
 
 func (t *ThanosStack) UninstallPlugins(ctx context.Context, pluginNames []string, deployConfig *types.Config) error {
+	fileName := fmt.Sprintf("logs/uninstall_plugins_%s_%s_%d.log", t.stack, t.network, time.Now().Unix())
+	logging.InitLogger(fileName)
 	if t.network == constants.LocalDevnet {
 		return fmt.Errorf("network %s does not support plugin installation", constants.LocalDevnet)
 	}
