@@ -26,8 +26,9 @@ type DeployContractsInput struct {
 }
 
 type DeployInfraInput struct {
-	ChainName   string
-	L1BeaconURL string
+	ChainName          string
+	L1BeaconURL        string
+	MaxChannelDuration uint64
 }
 
 type InstallBlockExplorerInput struct {
@@ -163,11 +164,12 @@ func (t *ThanosStack) inputAWSLogin() (*types.AWSConfig, error) {
 	}, nil
 }
 
-func (t *ThanosStack) inputDeployInfra() (*DeployInfraInput, error) {
+func (t *ThanosStack) inputDeployInfra(l1ChainID uint64) (*DeployInfraInput, error) {
 	var (
-		chainName   string
-		l1BeaconURL string
-		err         error
+		chainName          string
+		l1BeaconURL        string
+		maxChannelDuration uint64
+		err                error
 	)
 	for {
 		fmt.Print("Please enter your chain name: ")
@@ -208,9 +210,34 @@ func (t *ThanosStack) inputDeployInfra() (*DeployInfraInput, error) {
 		break
 	}
 
+	fmt.Print("Do you want to set MAX_CHANNEL_DURATION? [y/N]: ")
+	wantUpdate, err := scanner.ScanBool(false)
+	if err != nil {
+		fmt.Printf("Error while reading MAX_CHANNEL_DURATION: %s\n", err)
+		return nil, err
+	}
+
+	if wantUpdate {
+		for {
+			fmt.Print("Please enter your MAX_CHANNEL_DURATION (default: 120): ")
+			value, err := scanner.ScanInt()
+			if err != nil {
+				fmt.Printf("Error while reading MAX_CHANNEL_DURATION: %s\n", err)
+				continue
+			}
+			if value > 0 {
+				maxChannelDuration = uint64(value)
+			} else {
+				maxChannelDuration = constants.L1ChainConfigurations[l1ChainID].MaxChannelDuration
+			}
+			break
+		}
+	}
+
 	return &DeployInfraInput{
-		ChainName:   chainName,
-		L1BeaconURL: l1BeaconURL,
+		ChainName:          chainName,
+		L1BeaconURL:        l1BeaconURL,
+		MaxChannelDuration: maxChannelDuration,
 	}, nil
 }
 

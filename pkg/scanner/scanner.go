@@ -38,3 +38,22 @@ func ScanString() (string, error) {
 	return strings.TrimSpace(input), nil
 
 }
+
+func ScanInt() (int, error) {
+	input, err := ScanString()
+	if err != nil {
+		return 0, err
+	}
+
+	if input == "" {
+		return 0, nil
+	}
+
+	var num int
+	_, err = fmt.Sscanf(input, "%d", &num)
+	if err != nil {
+		return 0, fmt.Errorf("invalid input: %s", input)
+	}
+
+	return num, nil
+}
