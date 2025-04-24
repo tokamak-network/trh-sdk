@@ -395,7 +395,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 
 	fmt.Println("✅ Removed the previous deployment state...")
 
-	inputs, err := t.inputDeployInfra()
+	inputs, err := t.inputDeployInfra(deployConfig.L1ChainID)
 	if err != nil {
 		fmt.Println("Error collecting infrastructure deployment parameters:", err)
 		return err
@@ -417,11 +417,13 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 		Azs:                 awsProfile.AvailabilityZones,
 		ThanosStackImageTag: constants.DockerImageTag[deployConfig.Network].ThanosStackImageTag,
 		OpGethImageTag:      constants.DockerImageTag[deployConfig.Network].OpGethImageTag,
+		MaxChannelDuration:  inputs.MaxChannelDuration,
 	})
 	if err != nil {
 		fmt.Println("Error generating Terraform environment configuration:", err)
 		return err
 	}
+
 	// STEP 4. Initialize Terraform backend
 	err = utils.ExecuteCommandStream("bash", []string{
 		"-c",
