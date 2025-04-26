@@ -163,19 +163,26 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
             echo "curl is already installed."
         fi
 
-        GO_FILE_NAME="go1.22.6.darwin-${ARCH}.tar.gz"
+        # Define Go version and installation paths
+        GO_VERSION="1.22.6"
+        GO_INSTALL_PATH="/usr/local/go"
+        GO_PATH_EXPORT='export PATH="$PATH:/usr/local/go/bin"'
+        
+        # Download and install Go
+        GO_FILE_NAME="go${GO_VERSION}.darwin-${ARCH}.tar.gz"
         GO_DOWNLOAD_URL="https://go.dev/dl/${GO_FILE_NAME}"
-
+        
         sudo curl -L -o "${GO_FILE_NAME}" "${GO_DOWNLOAD_URL}"
-
-        sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf "${GO_FILE_NAME}"
-
-        # Check if the Go configuration is already in the CONFIG_FILE
-        if ! grep -Fxq 'export PATH="$PATH:/usr/local/go/bin"' "$CONFIG_FILE"; then
-            # If the configuration is not found, add Go to the current shell session
+        sudo rm -rf "${GO_INSTALL_PATH}" && sudo tar -C /usr/local -xzf "${GO_FILE_NAME}"
+        
+        # Clean up downloaded file
+        sudo rm "${GO_FILE_NAME}"
+        
+        # Add Go to PATH if not already configured
+        if ! grep -Fxq "${GO_PATH_EXPORT}" "$CONFIG_FILE"; then
             {
                 echo ''
-                echo 'export PATH="$PATH:/usr/local/go/bin"'
+                echo "${GO_PATH_EXPORT}"
             } >> "$CONFIG_FILE"
         fi
 
@@ -263,12 +270,23 @@ elif [[ "$OS_TYPE" == "linux" ]]; then
                 echo "curl is already installed."
             fi
 
-            GO_FILE_NAME="go1.22.6.linux-${ARCH}.tar.gz"
+            # Define Go version and create download URL
+            GO_VERSION="1.22.6"
+            GO_FILE_NAME="go${GO_VERSION}.linux-${ARCH}.tar.gz"
             GO_DOWNLOAD_URL="https://go.dev/dl/${GO_FILE_NAME}"
 
-            sudo curl -L -o "${GO_FILE_NAME}" "${GO_DOWNLOAD_URL}"
+            # Download Go archive
+            echo "Downloading Go ${GO_VERSION}..."
+            sudo curl -L -o "/tmp/${GO_FILE_NAME}" "${GO_DOWNLOAD_URL}"
 
-            sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf "${GO_FILE_NAME}"
+            # Remove existing Go installation and extract new version
+            echo "Installing Go ${GO_VERSION}..."
+            sudo rm -rf /usr/local/go
+            sudo tar -C /usr/local -xzf "/tmp/${GO_FILE_NAME}"
+
+            # Cleanup downloaded archive
+            sudo rm "/tmp/${GO_FILE_NAME}"
+            echo "Go ${GO_VERSION} installation complete"
 
             # Check if the Go configuration is already in the CONFIG_FILE
             if ! grep -Fxq 'export PATH="$PATH:/usr/local/go/bin"' "$CONFIG_FILE"; then
@@ -340,7 +358,6 @@ echo "✅ Go has been installed successfully!"
 echo "Verifying Go installation..."
 go version
 
-
 # Install TRH SDK CLI
 echo "Installing TRH SDK CLI..."
 # Use full path to go binary since PATH may not be updated yet
@@ -348,7 +365,7 @@ go install github.com/tokamak-network/trh-sdk@latest
 
 echo "✅ TRH SDK has been installed successfully!"
 
-echo "Verifying TRH SDK installation..."
-trh-sdk version
+# remove go in the current directory
+sudo rm -rf go
 
 echo -e "\033[1;32msource $CONFIG_FILE\033[0m to apply changes to your current shell session."
