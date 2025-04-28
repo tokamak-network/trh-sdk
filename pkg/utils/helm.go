@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"strings"
 )
 
@@ -57,7 +58,8 @@ func CheckK8sApiHealth(namespace string) (bool, error) {
 }
 
 func CheckPVCStatus(namespace string) (bool, error) {
-	pvcStatus, err := ExecuteCommand("kubectl", "get", "pvc", "-n", namespace, "-o", "jsonpath='{range .items[*]}{.status.phase}{end}'")
+	pvcStatus, err := ExecuteCommand("bash", "-c", fmt.Sprintf("if kubectl get pvc -n %s -o jsonpath='{range .items[*]}{.status.phase}{\"\\n\"}{end}' | grep -qv Bound; then echo 'There are unbound PVCs'; else echo 'Bound'; fi", namespace))
+	fmt.Println("PVC status:", pvcStatus)
 	if err != nil {
 		return false, err
 	}
