@@ -200,8 +200,22 @@ func makeDeployContractConfigJsonFile(ctx context.Context, l1Provider *ethclient
 	return nil
 }
 
-func initDeployConfigTemplate(enableFraudProof bool, chainId *big.Int, l2ChainId uint64) *types.DeployConfigTemplate {
-	l1ChainId := chainId.Uint64()
+func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l2ChainId uint64) *types.DeployConfigTemplate {
+	var (
+		chainConfiguration = deployConfigInputs.ChainConfiguration
+	)
+
+	if chainConfiguration == nil {
+		panic("ChainConfiguration is empty")
+	}
+
+	var (
+		l2BlockTime                      = chainConfiguration.L2BlockTime
+		l1ChainId                        = deployConfigInputs.l1ChainID
+		l2OutputOracleSubmissionInterval = chainConfiguration.GetL2OutputOracleSubmissionInterval()
+		finalizationPeriods              = chainConfiguration.GetFinalizationPeriodSeconds()
+		enableFraudProof                 = deployConfigInputs.fraudProof
+	)
 
 	defaultTemplate := &types.DeployConfigTemplate{
 		NativeTokenName:                          "Tokamak Network Token",
@@ -209,15 +223,15 @@ func initDeployConfigTemplate(enableFraudProof bool, chainId *big.Int, l2ChainId
 		NativeTokenAddress:                       constants.L1ChainConfigurations[l1ChainId].L2NativeTokenAddress,
 		L1ChainID:                                l1ChainId,
 		L2ChainID:                                l2ChainId,
-		L2BlockTime:                              2,
+		L2BlockTime:                              l2BlockTime,
 		L1BlockTime:                              12,
 		MaxSequencerDrift:                        600,
 		SequencerWindowSize:                      3600,
 		ChannelTimeout:                           300,
 		BatchInboxAddress:                        utils.GenerateBatchInboxAddress(l2ChainId),
-		L2OutputOracleSubmissionInterval:         constants.L1ChainConfigurations[l1ChainId].L2OutputOracleSubmissionInterval,
+		L2OutputOracleSubmissionInterval:         l2OutputOracleSubmissionInterval,
 		L2OutputOracleStartingBlockNumber:        0,
-		FinalizationPeriodSeconds:                constants.L1ChainConfigurations[l1ChainId].FinalizationPeriodSeconds,
+		FinalizationPeriodSeconds:                finalizationPeriods,
 		BaseFeeVaultMinimumWithdrawalAmount:      "0x8ac7230489e80000",
 		L1FeeVaultMinimumWithdrawalAmount:        "0x8ac7230489e80000",
 		SequencerFeeVaultMinimumWithdrawalAmount: "0x8ac7230489e80000",

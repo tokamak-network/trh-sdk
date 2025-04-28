@@ -82,11 +82,6 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	l1ChainID, err := l1Client.ChainID(ctx)
-	if err != nil {
-		fmt.Printf("Failed to get chain id: %s", err)
-		return err
-	}
 
 	l2ChainID, err := utils.GenerateL2ChainId()
 	if err != nil {
@@ -94,7 +89,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		return err
 	}
 
-	deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig.fraudProof, l1ChainID, l2ChainID)
+	deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig, l2ChainID)
 
 	// Select operators Accounts
 	operators, err := selectAccounts(ctx, l1Client, deployContractsConfig.fraudProof, deployContractsConfig.seed)
@@ -206,12 +201,13 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		ChallengerPrivateKey: challengerPrivateKey,
 		DeploymentPath:       fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", cwd, deployContractsTemplate.L1ChainID),
 		L1RPCProvider:        deployContractsConfig.l1Provider,
-		L1ChainID:            l1ChainID.Uint64(),
+		L1ChainID:            deployContractsConfig.l1ChainID,
 		L2ChainID:            l2ChainID,
 		L1RPCURL:             deployContractsConfig.l1RPCurl,
 		Stack:                t.stack,
 		Network:              t.network,
 		EnableFraudProof:     deployContractsConfig.fraudProof,
+		ChainConfiguration:   deployContractsConfig.ChainConfiguration,
 	}
 	err = cfg.WriteToJSONFile()
 	if err != nil {
@@ -258,7 +254,7 @@ func (t *ThanosStack) Deploy(ctx context.Context, deployConfig *types.Config) er
 		}
 		if err != nil {
 			fmt.Printf("❌ Can't connect to L1 RPC. Please try again: %s \n", err)
-			l1RPC, l1RPCKind, err := t.inputL1RPC(ctx)
+			l1RPC, l1RPCKind, _, err := t.inputL1RPC(ctx)
 			if err != nil {
 				fmt.Printf("Error while getting L1 RPC URL: %s", err)
 				return err
@@ -401,6 +397,14 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 		return err
 	}
 
+	var (
+		chainConfiguration = deployConfig.ChainConfiguration
+	)
+
+	if chainConfiguration == nil {
+		return fmt.Errorf("chain configuration is not set")
+	}
+
 	// STEP 3. Create .envrc file
 	err = makeTerraformEnvFile("tokamak-thanos-stack/terraform", types.TerraformEnvConfig{
 		ThanosStackName:     inputs.ChainName,
@@ -417,7 +421,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 		Azs:                 awsProfile.AvailabilityZones,
 		ThanosStackImageTag: constants.DockerImageTag[deployConfig.Network].ThanosStackImageTag,
 		OpGethImageTag:      constants.DockerImageTag[deployConfig.Network].OpGethImageTag,
-		MaxChannelDuration:  inputs.MaxChannelDuration,
+		MaxChannelDuration:  chainConfiguration.GetMaxChannelDuration(),
 	})
 	if err != nil {
 		fmt.Println("Error generating Terraform environment configuration:", err)
