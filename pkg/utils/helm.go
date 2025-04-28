@@ -36,6 +36,26 @@ func FilterHelmReleases(namespace string, releaseName string) ([]string, error) 
 	return helmReleases, nil
 }
 
+func CheckK8sReady(namespace string) (bool, error) {
+	pvcStatus, err := CheckPVCStatus(namespace)
+	if err != nil {
+		return false, err
+	}
+	apiHealth, err := CheckK8sApiHealth(namespace)
+	if err != nil {
+		return false, err
+	}
+	return pvcStatus && apiHealth, nil
+}
+
+func CheckK8sApiHealth(namespace string) (bool, error) {
+	apiHealth, err := ExecuteCommand("kubectl", "get", "--raw=/readyz?verbose")
+	if err != nil {
+		return false, err
+	}
+	return apiHealth != "", nil
+}
+
 func CheckPVCStatus(namespace string) (bool, error) {
 	pvcStatus, err := ExecuteCommand("kubectl", "get", "pvc", "-n", namespace, "-o", "jsonpath='{range .items[*]}{.status.phase}{end}'")
 	if err != nil {

@@ -510,24 +510,23 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 
 	fmt.Println("EKS configuration updated:", eksSetup)
 
-	// Step 7.1. Check if all PVCs are bound
-	fmt.Println("Checking PVC binding status...")
+	// Step 7.1. Check if K8s cluster is ready
+	fmt.Println("Checking if K8s cluster is ready...")
 	maxRetries := 10
 	retryInterval := 20 * time.Second
-
+	k8sReady := false
 	for i := 0; i < maxRetries; i++ {
-		pvcStatus, err := utils.CheckPVCStatus(namespace)
-
+		k8sReady, err = utils.CheckK8sReady(namespace)
 		if err != nil {
-			fmt.Printf("Error checking PVC status (attempt %d/%d): %v\n", i+1, maxRetries, err)
-		} else if pvcStatus {
-			fmt.Println("✅ All PVCs are bound")
+			fmt.Printf("Error checking K8s cluster readiness (attempt %d/%d): %v\n", i+1, maxRetries, err)
+		} else if k8sReady {
+			fmt.Println("✅ K8s cluster is ready")
 			break
 		} else {
 			if i == maxRetries-1 {
-				return fmt.Errorf("PVCs failed to bind after %d attempts", maxRetries)
+				return fmt.Errorf("K8s cluster is not ready after %d attempts", maxRetries)
 			}
-			fmt.Printf("Some PVCs are not bound yet. Retrying in %v... (attempt %d/%d)\n", retryInterval, i+1, maxRetries)
+			fmt.Printf("K8s cluster is not ready yet. Retrying in %v... (attempt %d/%d)\n", retryInterval, i+1, maxRetries)
 			time.Sleep(retryInterval)
 		}
 	}
