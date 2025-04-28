@@ -35,3 +35,11 @@ func FilterHelmReleases(namespace string, releaseName string) ([]string, error) 
 	}
 	return helmReleases, nil
 }
+
+func CheckPVCStatus(namespace string) (bool, error) {
+	pvcStatus, err := ExecuteCommand("kubectl", "get", "pvc", "-n", namespace, "-o", "jsonpath='{range .items[*]}{.status.phase}{end}'")
+	if err != nil {
+		return false, err
+	}
+	return pvcStatus == "Bound", nil
+}

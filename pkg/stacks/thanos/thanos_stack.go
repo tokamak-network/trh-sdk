@@ -510,6 +510,28 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 
 	fmt.Println("EKS configuration updated:", eksSetup)
 
+	// Step 7.1. Check if all PVCs are bound
+	fmt.Println("Checking PVC binding status...")
+	maxRetries := 10
+	retryInterval := 20 * time.Second
+
+	for i := 0; i < maxRetries; i++ {
+		pvcStatus, err := utils.CheckPVCStatus(namespace)
+
+		if err != nil {
+			fmt.Printf("Error checking PVC status (attempt %d/%d): %v\n", i+1, maxRetries, err)
+		} else if pvcStatus {
+			fmt.Println("✅ All PVCs are bound")
+			break
+		} else {
+			if i == maxRetries-1 {
+				return fmt.Errorf("PVCs failed to bind after %d attempts", maxRetries)
+			}
+			fmt.Printf("Some PVCs are not bound yet. Retrying in %v... (attempt %d/%d)\n", retryInterval, i+1, maxRetries)
+			time.Sleep(retryInterval)
+		}
+	}
+
 	// ---------------------------------------- Deploy chain --------------------------//
 	// Step 8. Add Helm repository
 	helmAddOuput, err := utils.ExecuteCommand("helm", []string{
