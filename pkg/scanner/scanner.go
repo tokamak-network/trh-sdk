@@ -22,10 +22,14 @@ func ScanBool(defaultResponse bool) (bool, error) {
 		return false, err
 	}
 
-	if strings.ToLower(response) == "y" {
+	switch strings.ToLower(strings.TrimSpace(response)) {
+	case "y":
 		return true, nil
+	case "n":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid input: must be 'y' or 'n'")
 	}
-	return defaultResponse, nil
 }
 
 func ScanString() (string, error) {
