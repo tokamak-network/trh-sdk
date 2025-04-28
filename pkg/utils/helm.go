@@ -39,24 +39,22 @@ func FilterHelmReleases(namespace string, releaseName string) ([]string, error) 
 }
 
 func CheckK8sReady(namespace string) (bool, error) {
+	// TODO: these values can be adjusted if it is not enough
 	maxRetries := 10
 	retryInterval := 20 * time.Second
 
-	var pvcStatus, apiHealth bool
+	var isPVCReady, isAPiReady bool
 	var err error
 
 	for i := 0; i < maxRetries; i++ {
-		pvcStatus, err = CheckPVCStatus(namespace)
+		isPVCReady, err = CheckPVCStatus(namespace)
 		if err != nil {
-			if i == maxRetries-1 {
-				return false, err
-			}
 			fmt.Printf("PVC status check failed (attempt %d/%d): %v\n", i+1, maxRetries, err)
 			time.Sleep(retryInterval)
 			continue
 		}
 
-		apiHealth, err = CheckK8sApiHealth(namespace)
+		isAPiReady, err = CheckK8sApiHealth(namespace)
 		if err != nil {
 			if i == maxRetries-1 {
 				return false, err
@@ -66,25 +64,23 @@ func CheckK8sReady(namespace string) (bool, error) {
 			continue
 		}
 
-		if pvcStatus && apiHealth {
+		if isPVCReady && isAPiReady {
 			return true, nil
 		}
 
-		if i < maxRetries-1 {
-			fmt.Printf("K8s not ready yet. Retrying in %v... (attempt %d/%d)\n", retryInterval, i+1, maxRetries)
-			time.Sleep(retryInterval)
-		}
+		fmt.Printf("K8s not ready yet. Retrying in %v... (attempt %d/%d)\n", retryInterval, i+1, maxRetries)
+		time.Sleep(retryInterval)
 	}
 
 	return false, fmt.Errorf("K8s not ready after %d attempts", maxRetries)
 }
 
 func CheckK8sApiHealth(namespace string) (bool, error) {
-	apiHealth, err := ExecuteCommand("kubectl", "get", "--raw=/readyz?verbose")
+	apiHealth, err := ExecuteCommand("kubectl", "get", "--raw=/readyz")
 	if err != nil {
 		return false, err
 	}
-	return apiHealth != "", nil
+	return apiHealth == "ok", nil
 }
 
 func CheckPVCStatus(namespace string) (bool, error) {
