@@ -56,9 +56,6 @@ func CheckK8sReady(namespace string) (bool, error) {
 
 		isAPiReady, err = CheckK8sApiHealth(namespace)
 		if err != nil {
-			if i == maxRetries-1 {
-				return false, err
-			}
 			fmt.Printf("K8s API health check failed (attempt %d/%d): %v\n", i+1, maxRetries, err)
 			time.Sleep(retryInterval)
 			continue
