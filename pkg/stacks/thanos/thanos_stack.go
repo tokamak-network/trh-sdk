@@ -510,6 +510,15 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 
 	fmt.Println("EKS configuration updated:", eksSetup)
 
+	// Step 7.1. Check if K8s cluster is ready
+	fmt.Println("Checking if K8s cluster is ready...")
+	k8sReady, err := utils.CheckK8sReady(namespace)
+	if err != nil {
+		fmt.Println("❌ Error checking K8s cluster readiness:", err)
+		return err
+	}
+	fmt.Printf("✅ K8s cluster is ready: %t\n", k8sReady)
+
 	// ---------------------------------------- Deploy chain --------------------------//
 	// Step 8. Add Helm repository
 	helmAddOuput, err := utils.ExecuteCommand("helm", []string{
