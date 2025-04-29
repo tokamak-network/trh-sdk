@@ -95,7 +95,7 @@ func (t *ThanosStack) ShowInformation(ctx context.Context, config *types.Config)
 	return nil
 }
 
-func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, component string) error {
+func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, component string, isTroubleshoot bool) error {
 	fileName := fmt.Sprintf("logs/show_logs_%s_%s_%s_%d.log", t.stack, t.network, component, time.Now().Unix())
 	logging.InitLogger(fileName)
 
@@ -127,10 +127,18 @@ func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, compon
 		runningPodName = pod
 	}
 
-	err = utils.ExecuteCommandStream("bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f", namespace, runningPodName))
-	if err != nil {
-		fmt.Printf("failed to show logs: %s \n", err.Error())
-		return err
+	if isTroubleshoot {
+		err = utils.ExecuteCommandStream("bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f | grep -iE 'error|fail|panic|critical'", namespace, runningPodName))
+		if err != nil {
+			fmt.Printf("failed to show logs: %s \n", err.Error())
+			return err
+		}
+	} else {
+		err = utils.ExecuteCommandStream("bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f", namespace, runningPodName))
+		if err != nil {
+			fmt.Printf("failed to show logs: %s \n", err.Error())
+			return err
+		}
 	}
 
 	return nil

@@ -22,6 +22,7 @@ func ActionShowLogs() cli.ActionFunc {
 		}
 
 		component := cmd.String("component")
+		isTroubleshoot := cmd.Bool("troubleshoot")
 
 		if config == nil {
 			network = constants.LocalDevnet
@@ -30,16 +31,16 @@ func ActionShowLogs() cli.ActionFunc {
 			network = config.Network
 			stack = config.Stack
 		}
-		return ShowLogs(ctx, network, stack, component, config)
+		return ShowLogs(ctx, network, stack, component, isTroubleshoot, config)
 	}
 }
 
-func ShowLogs(ctx context.Context, network, stack string, component string, config *types.Config) error {
+func ShowLogs(ctx context.Context, network, stack string, component string, isTroubleshoot bool, config *types.Config) error {
 
 	switch stack {
 	case constants.ThanosStack:
 		thanosStack := thanos.NewThanosStack(network, stack)
-		return thanosStack.ShowLogs(ctx, config, component)
+		return thanosStack.ShowLogs(ctx, config, component, isTroubleshoot)
 	}
 
 	return nil
