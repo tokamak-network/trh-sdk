@@ -39,9 +39,6 @@ func (t *ThanosStack) installBridge(ctx context.Context, deployConfig *types.Con
 	}
 	if len(opBridgePods) > 0 {
 		fmt.Printf("OP Bridge is running: \n")
-		for _, pod := range opBridgePods {
-			fmt.Println(pod)
-		}
 		return nil
 	}
 

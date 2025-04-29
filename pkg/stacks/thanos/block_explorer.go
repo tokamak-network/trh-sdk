@@ -32,9 +32,6 @@ func (t *ThanosStack) installBlockExplorer(ctx context.Context, deployConfig *ty
 	}
 	if len(blockExplorerPods) > 0 {
 		fmt.Printf("Block Explorer is running: \n")
-		for _, pod := range blockExplorerPods {
-			fmt.Println(pod)
-		}
 		return nil
 	}
 
