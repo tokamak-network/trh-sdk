@@ -132,6 +132,12 @@ func Run() {
 						Usage:    fmt.Sprintf("Component name (allowed: %s)", strings.Join(allowedComponentList(), ", ")),
 						Value:    "",
 					},
+					&cli.BoolFlag{
+						Name:     "troubleshoot",
+						Aliases:  []string{"t"},
+						Required: false,
+						Usage:    "Show logs of the running chain with troubleshoot mode",
+					},
 				},
 				Action: commands.ActionShowLogs(),
 			},

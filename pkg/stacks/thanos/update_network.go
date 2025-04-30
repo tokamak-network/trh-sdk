@@ -169,7 +169,6 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, deployConfig *types.Con
 	}
 
 	for _, release := range helmReleases {
-		fmt.Println(release)
 		var (
 			fileValuesPath string
 			chartPath      string
