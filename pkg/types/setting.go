@@ -13,7 +13,7 @@ type K8sConfig struct {
 type ChainConfiguration struct {
 	BatchSubmissionFrequency uint64 `json:"batch_submission_frequency"` // = l1BlockTime * maxChannelDuration
 	ChallengePeriod          uint64 `json:"challenge_period"`           // = finalizationPeriodSeconds
-	OutputFrequency          uint64 `json:"output_frequency"`           // = l2BlockTime * l2OutputOracleSubmissionInterval
+	OutputRootFrequency      uint64 `json:"output_root_frequency"`      // = l2BlockTime * l2OutputOracleSubmissionInterval
 	L2BlockTime              uint64 `json:"l2_block_time"`
 	L1BlockTime              uint64 `json:"l1_block_time"`
 }
@@ -22,7 +22,7 @@ func (c *ChainConfiguration) GetL2OutputOracleSubmissionInterval() uint64 {
 	if c.L2BlockTime == 0 {
 		panic("L2BlockTime is not set")
 	}
-	return c.OutputFrequency / c.L2BlockTime
+	return c.OutputRootFrequency / c.L2BlockTime
 }
 
 func (c *ChainConfiguration) GetMaxChannelDuration() uint64 {

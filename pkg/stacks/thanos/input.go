@@ -181,7 +181,7 @@ func (t *ThanosStack) inputDeployContracts(ctx context.Context) (*DeployContract
 			L1BlockTime:              l1BlockTime,
 			BatchSubmissionFrequency: batchSubmissionFrequency,
 			ChallengePeriod:          challengePeriod,
-			OutputFrequency:          outputFrequency,
+			OutputRootFrequency:      outputFrequency,
 		},
 	}, nil
 }

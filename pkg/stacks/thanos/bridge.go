@@ -101,6 +101,11 @@ func (t *ThanosStack) installBridge(ctx context.Context, deployConfig *types.Con
 	opBridgeConfig.OpBridge.Env.L2OutputOracleAddress = contracts.L2OutputOracleProxy
 	opBridgeConfig.OpBridge.Env.L1USDCBridgeAddress = contracts.L1UsdcBridgeProxy
 	opBridgeConfig.OpBridge.Env.DisputeGameFactoryAddress = contracts.DisputeGameFactoryProxy
+	opBridgeConfig.OpBridge.Env.BlockSubmissionFrequency = deployConfig.ChainConfiguration.BatchSubmissionFrequency
+	opBridgeConfig.OpBridge.Env.L1BlockTime = deployConfig.ChainConfiguration.L1BlockTime
+	opBridgeConfig.OpBridge.Env.L2BlockTime = deployConfig.ChainConfiguration.L2BlockTime
+	opBridgeConfig.OpBridge.Env.OutputRootFrequency = deployConfig.ChainConfiguration.OutputRootFrequency
+	opBridgeConfig.OpBridge.Env.ChallengePeriod = deployConfig.ChainConfiguration.ChallengePeriod
 
 	// input from users
 
