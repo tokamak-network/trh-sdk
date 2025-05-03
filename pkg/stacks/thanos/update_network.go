@@ -45,7 +45,7 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, deployConfig *types.Con
 		return err
 	}
 	if wantUpdateL1RPC {
-		l1RPC, l1Kind, err := t.inputL1RPC(ctx)
+		l1RPC, l1Kind, _, err := t.inputL1RPC(ctx)
 		if err != nil {
 			fmt.Println("Error scanning the L1 RPC URL", err)
 			return err

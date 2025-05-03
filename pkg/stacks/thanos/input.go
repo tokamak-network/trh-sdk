@@ -19,16 +19,17 @@ var (
 )
 
 type DeployContractsInput struct {
-	l1Provider string
-	l1RPCurl   string
-	seed       string
-	fraudProof bool
+	l1Provider         string
+	l1RPCurl           string
+	l1ChainID          uint64
+	seed               string
+	fraudProof         bool
+	ChainConfiguration *types.ChainConfiguration
 }
 
 type DeployInfraInput struct {
-	ChainName          string
-	L1BeaconURL        string
-	MaxChannelDuration uint64
+	ChainName   string
+	L1BeaconURL string
 }
 
 type InstallBlockExplorerInput struct {
@@ -40,7 +41,7 @@ type InstallBlockExplorerInput struct {
 }
 
 func (t *ThanosStack) inputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
-	l1RPCUrl, l1RRCKind, err := t.inputL1RPC(ctx)
+	l1RPCUrl, l1RRCKind, l1ChainID, err := t.inputL1RPC(ctx)
 	if err != nil {
 		fmt.Printf("Error while reading L1 RPC URL: %s", err)
 		return nil, err
@@ -61,21 +62,137 @@ func (t *ThanosStack) inputDeployContracts(ctx context.Context) (*DeployContract
 	//	return nil, err
 	//}
 
+	fmt.Print("Would you like to perform advanced configurations? (Refer to the SDK Guide for more details) (Y/n): ")
+	wantAdvancedConfigs, err := scanner.ScanBool(true)
+	if err != nil {
+		fmt.Printf("Error while reading advanced configurations option: %s", err)
+		return nil, err
+	}
+
+	var (
+		maxChannelDuration               uint64 = constants.L1ChainConfigurations[l1ChainID].MaxChannelDuration
+		l2OutputOracleSubmissionInterval uint64 = constants.L1ChainConfigurations[l1ChainID].L2OutputOracleSubmissionInterval
+		finalizationPeriodSeconds        uint64 = constants.L1ChainConfigurations[l1ChainID].FinalizationPeriodSeconds
+		l1BlockTime                      uint64 = constants.L1ChainConfigurations[l1ChainID].BlockTimeInSeconds
+
+		l2BlockTime              uint64
+		batchSubmissionFrequency uint64
+		outputFrequency          uint64
+		challengePeriod          uint64
+	)
+
+	if wantAdvancedConfigs {
+		for {
+			fmt.Printf("L2 Block Time (default: %d seconds): ", constants.DefaultL2BlockTimeInSeconds)
+			value, err := scanner.ScanInt()
+			if err != nil {
+				fmt.Printf("Error while reading L2 block time: %s", err)
+				continue
+			}
+
+			if value < 0 {
+				fmt.Println("Error: L2 block time must be greater than 0")
+				continue
+			} else if value > 0 {
+				l2BlockTime = uint64(value)
+			} else {
+				l2BlockTime = constants.DefaultL2BlockTimeInSeconds
+			}
+
+			break
+		}
+
+		for {
+			fmt.Printf("Batch Submission Frequency (Default: %d L1 blocks ≈ %d seconds, must be a multiple of %d): ", maxChannelDuration, l1BlockTime*maxChannelDuration, l1BlockTime)
+			value, err := scanner.ScanInt()
+			if err != nil {
+				fmt.Printf("Error while reading batch submission frequency: %s", err)
+				continue
+			}
+
+			if value < 0 {
+				fmt.Println("Error: Batch submission frequency must be greater than 0")
+				continue
+			} else if (uint64(value) % l1BlockTime) != 0 {
+				fmt.Printf("Error: Batch submission frequency must be a multiple of %d \n", l1BlockTime)
+				continue
+			} else if value > 0 {
+				batchSubmissionFrequency = uint64(value)
+			} else {
+				batchSubmissionFrequency = maxChannelDuration * l1BlockTime
+			}
+
+			break
+		}
+
+		for {
+			fmt.Printf("Output Root Frequency (Default: %d L2 blocks ≈ %d seconds, must be a multiple of %d): ",
+				l2OutputOracleSubmissionInterval, l2OutputOracleSubmissionInterval*l2BlockTime, l2BlockTime)
+			value, err := scanner.ScanInt()
+			if err != nil {
+				fmt.Printf("Error while reading output frequency: %s", err)
+				continue
+			}
+
+			if value < 0 {
+				fmt.Println("Error: Output frequency must be greater than 0")
+				continue
+			} else if (uint64(value) % l2BlockTime) != 0 {
+				fmt.Printf("Error: Output frequency must be a multiple of %d \n", l2BlockTime)
+				continue
+			} else if value > 0 {
+				outputFrequency = uint64(value)
+			} else {
+				outputFrequency = l2OutputOracleSubmissionInterval * l2BlockTime
+			}
+
+			break
+		}
+
+		for {
+			fmt.Printf("Challenge Period (Default: %d seconds): ", finalizationPeriodSeconds)
+			value, err := scanner.ScanInt()
+			if err != nil {
+				fmt.Printf("Error while reading challenge period: %s", err)
+				continue
+			}
+
+			if value < 0 {
+				fmt.Println("Error: Challenge period must be greater than 0")
+				continue
+			} else if value > 0 {
+				challengePeriod = uint64(value)
+			} else {
+				challengePeriod = finalizationPeriodSeconds
+			}
+			break
+		}
+
+	}
+
 	return &DeployContractsInput{
 		l1RPCurl:   l1RPCUrl,
 		l1Provider: l1RRCKind,
+		l1ChainID:  l1ChainID,
 		seed:       seed,
 		fraudProof: fraudProof,
+		ChainConfiguration: &types.ChainConfiguration{
+			L2BlockTime:              l2BlockTime,
+			L1BlockTime:              l1BlockTime,
+			BatchSubmissionFrequency: batchSubmissionFrequency,
+			ChallengePeriod:          challengePeriod,
+			OutputRootFrequency:      outputFrequency,
+		},
 	}, nil
 }
 
-func (t *ThanosStack) inputL1RPC(ctx context.Context) (l1RPCUrl string, l1RRCKind string, err error) {
+func (t *ThanosStack) inputL1RPC(ctx context.Context) (l1RPCUrl string, l1RRCKind string, l1ChainID uint64, err error) {
 	for {
 		fmt.Print("Please enter your L1 RPC URL: ")
 		l1RPCUrl, err = scanner.ScanString()
 		if err != nil {
 			fmt.Printf("Error while reading L1 RPC URL: %s", err)
-			return "", "", err
+			return "", "", 0, err
 		}
 
 		client, err := ethclient.Dial(l1RPCUrl)
@@ -94,10 +211,19 @@ func (t *ThanosStack) inputL1RPC(ctx context.Context) (l1RPCUrl string, l1RRCKin
 		}
 
 		l1RRCKind = utils.DetectRPCKind(l1RPCUrl)
+
+		// Fetch L1 ChainId
+		chainID, err := client.ChainID(ctx)
+		if err != nil || chainID == nil {
+			fmt.Printf("Failed to retrieve chain ID: %s", err)
+			continue
+		}
+
+		l1ChainID = chainID.Uint64()
 		break
 	}
 
-	return l1RPCUrl, l1RRCKind, nil
+	return l1RPCUrl, l1RRCKind, l1ChainID, nil
 }
 
 func (t *ThanosStack) inputAWSLogin() (*types.AWSConfig, error) {
@@ -161,10 +287,9 @@ func (t *ThanosStack) inputAWSLogin() (*types.AWSConfig, error) {
 
 func (t *ThanosStack) inputDeployInfra(l1ChainID uint64) (*DeployInfraInput, error) {
 	var (
-		chainName          string
-		l1BeaconURL        string
-		maxChannelDuration uint64
-		err                error
+		chainName   string
+		l1BeaconURL string
+		err         error
 	)
 	for {
 		fmt.Print("Please enter your chain name: ")
@@ -195,34 +320,9 @@ func (t *ThanosStack) inputDeployInfra(l1ChainID uint64) (*DeployInfraInput, err
 		return nil, err
 	}
 
-	fmt.Print("Do you want to set MAX_CHANNEL_DURATION? [y/N]: ")
-	wantUpdate, err := scanner.ScanBool(false)
-	if err != nil {
-		fmt.Printf("Error while reading MAX_CHANNEL_DURATION: %s\n", err)
-		return nil, err
-	}
-
-	if wantUpdate {
-		for {
-			fmt.Print("Please enter your MAX_CHANNEL_DURATION (default: 120): ")
-			value, err := scanner.ScanInt()
-			if err != nil {
-				fmt.Printf("Error while reading MAX_CHANNEL_DURATION: %s\n", err)
-				continue
-			}
-			if value > 0 {
-				maxChannelDuration = uint64(value)
-			} else {
-				maxChannelDuration = constants.L1ChainConfigurations[l1ChainID].MaxChannelDuration
-			}
-			break
-		}
-	}
-
 	return &DeployInfraInput{
-		ChainName:          chainName,
-		L1BeaconURL:        l1BeaconURL,
-		MaxChannelDuration: maxChannelDuration,
+		ChainName:   chainName,
+		L1BeaconURL: l1BeaconURL,
 	}, nil
 }
 

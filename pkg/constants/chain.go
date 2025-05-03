@@ -1,6 +1,7 @@
 package constants
 
 var L1ChainConfigurations = map[uint64]struct {
+	BlockTimeInSeconds   uint64 `json:"block_time_in_seconds"`
 	L2NativeTokenAddress string `json:"native_token_address"`
 
 	NativeTokenSymbol   string `json:"native_token_symbol"`
@@ -17,6 +18,7 @@ var L1ChainConfigurations = map[uint64]struct {
 	BlockExplorer string `json:"block_explorer"`
 }{
 	1: {
+		BlockTimeInSeconds:   12,
 		L2NativeTokenAddress: "0x2be5e8c109e2197D077D13A82dAead6a9b3433C5",
 		NativeTokenSymbol:    "ETH",
 		NativeTokenDecimals:  18,
@@ -32,6 +34,7 @@ var L1ChainConfigurations = map[uint64]struct {
 		BlockExplorer: "https://etherscan.io",
 	},
 	11155111: {
+		BlockTimeInSeconds:   12,
 		L2NativeTokenAddress: "0xa30fe40285b8f5c0457dbc3b7c8a280373c40044",
 
 		NativeTokenSymbol:   "ETH",
@@ -48,6 +51,7 @@ var L1ChainConfigurations = map[uint64]struct {
 		BlockExplorer: "https://sepolia.etherscan.io/",
 	},
 	17000: {
+		BlockTimeInSeconds:   12,
 		L2NativeTokenAddress: "0xe11Ad6B761D175042340a784640d3A6e373E52A5",
 
 		NativeTokenSymbol:   "ETH",
@@ -66,3 +70,5 @@ var L1ChainConfigurations = map[uint64]struct {
 }
 
 var BaseBatchInboxAddress = "0xff00000000000000000000000000000000000000"
+
+var DefaultL2BlockTimeInSeconds uint64 = 2
