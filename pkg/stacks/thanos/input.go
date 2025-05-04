@@ -54,6 +54,11 @@ func (t *ThanosStack) inputDeployContracts(ctx context.Context) (*DeployContract
 		return nil, err
 	}
 
+	if seed == "" {
+		fmt.Println("Error: Seed phrase cannot be empty")
+		return nil, fmt.Errorf("seed phrase cannot be empty")
+	}
+
 	fraudProof := false
 	//fmt.Print("Would you like to enable the fault-proof system on your chain? [Y or N] (default: N): ")
 	//fraudProof, err = scanner.ScanBool()
@@ -75,10 +80,10 @@ func (t *ThanosStack) inputDeployContracts(ctx context.Context) (*DeployContract
 		finalizationPeriodSeconds        uint64 = constants.L1ChainConfigurations[l1ChainID].FinalizationPeriodSeconds
 		l1BlockTime                      uint64 = constants.L1ChainConfigurations[l1ChainID].BlockTimeInSeconds
 
-		l2BlockTime              uint64
-		batchSubmissionFrequency uint64
-		outputFrequency          uint64
-		challengePeriod          uint64
+		l2BlockTime              uint64 = constants.DefaultL2BlockTimeInSeconds
+		batchSubmissionFrequency uint64 = maxChannelDuration * l1BlockTime
+		outputFrequency          uint64 = l2OutputOracleSubmissionInterval * l2BlockTime
+		challengePeriod          uint64 = finalizationPeriodSeconds
 	)
 
 	if wantAdvancedConfigs {

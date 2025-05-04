@@ -39,6 +39,18 @@ func (c *ChainConfiguration) GetFinalizationPeriodSeconds() uint64 {
 	return c.ChallengePeriod
 }
 
+type DeployContractStatus int
+
+const (
+	DeployContractStatusInProgress = iota + 1
+	DeployContractStatusCompleted
+)
+
+type DeployContractState struct {
+	Status DeployContractStatus `json:"status"`
+	Error  string               `json:"error,omitempty"`
+}
+
 type Config struct {
 	AdminPrivateKey      string `json:"admin_private_key"`
 	SequencerPrivateKey  string `json:"sequencer_private_key"`
@@ -69,6 +81,9 @@ type Config struct {
 	ChainName string `json:"chain_name"`
 
 	ChainConfiguration *ChainConfiguration `json:"chain_configuration"`
+
+	// Deployments
+	DeployContractState *DeployContractState `json:"deploy_contract_state"`
 }
 
 const ConfigFileName = "settings.json"
