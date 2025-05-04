@@ -3,10 +3,12 @@ package thanos
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"os"
@@ -172,15 +174,6 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployConfig *types.C
 		deployConfig.EnableFraudProof = deployContractsConfig.fraudProof
 		deployConfig.ChainConfiguration = deployContractsConfig.ChainConfiguration
 
-		fmt.Print("The SDK is ready to deploy the contracts to the L1 environment. Do you want to proceed(Y/n)? ")
-		confirmation, err := scanner.ScanBool(true)
-		if err != nil {
-			return err
-		}
-		if !confirmation {
-			return nil
-		}
-
 		err = makeDeployContractConfigJsonFile(ctx, l1Client, operators, deployContractsTemplate)
 		if err != nil {
 			return err
@@ -202,6 +195,45 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployConfig *types.C
 		fmt.Print("\r✅ Build the contracts completed!       \n")
 
 		// STEP 4. Deploy the contracts
+		// Check admin balance and estimated deployment cost
+		adminAddress := operators[0].Address
+		balance, err := l1Client.BalanceAt(ctx, common.HexToAddress(adminAddress), nil)
+		if err != nil {
+			fmt.Printf("❌ Failed to retrieve admin account balance: %v\n", err)
+			return err
+		}
+		fmt.Printf("Admin account balance: %.2f ETH\n", utils.WeiToEther(balance))
+
+		// Estimate gas price
+		gasPriceWei, err := l1Client.SuggestGasPrice(ctx)
+		if err != nil {
+			fmt.Printf("❌ Failed to get gas price: %v\n", err)
+			return err
+		}
+		fmt.Printf("⛽ Current gas price: %.4f Gwei\n", new(big.Float).Quo(new(big.Float).SetInt(gasPriceWei), big.NewFloat(1e9)))
+
+		// Estimate deployment cost
+		estimatedCost := new(big.Int).Mul(gasPriceWei, estimatedDeployContracts)
+		estimatedCost.Mul(estimatedCost, big.NewInt(2))
+		fmt.Printf("💰 Estimated deployment cost: %.4f ETH\n", utils.WeiToEther(estimatedCost))
+
+		// Check if balance is sufficient
+		if balance.Cmp(estimatedCost) < 0 {
+			fmt.Println("❌ Insufficient balance for deployment.")
+			return fmt.Errorf("admin account balance (%.4f ETH) is less than estimated deployment cost (%.4f  ETH)", utils.WeiToEther(balance), utils.WeiToEther(estimatedCost))
+		} else {
+			fmt.Println("✅ The admin account has sufficient balance to proceed with deployment.")
+		}
+
+		fmt.Print("🔎 The SDK is ready to deploy the contracts to the L1 network. Do you want to proceed(Y/n)? ")
+		confirmation, err := scanner.ScanBool(true)
+		if err != nil {
+			return err
+		}
+		if !confirmation {
+			return nil
+		}
+
 		deployConfig.DeployContractState = &types.DeployContractState{
 			Status: types.DeployContractStatusInProgress,
 		}
@@ -210,6 +242,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployConfig *types.C
 			fmt.Println("Failed to write settings file:", err)
 			return err
 		}
+
 		err = t.deployContracts(ctx, l1Client, deployConfig, false)
 		if err != nil {
 			fmt.Print("\r❌ Deploy the contracts failed!       \n")
