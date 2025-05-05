@@ -56,6 +56,8 @@ func selectAccounts(ctx context.Context, client *ethclient.Client, enableFraudPr
 	if err != nil {
 		return nil, err
 	}
+	// We are using the gas price of 2x of the suggestion gas
+	suggestionGas = new(big.Int).Mul(suggestionGas, big.NewInt(2))
 
 	minimumBalanceForAdmin := new(big.Int).Mul(estimatedDeployContracts, suggestionGas)
 
