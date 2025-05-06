@@ -214,7 +214,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployConfig *types.C
 
 		// Estimate deployment cost
 		estimatedCost := new(big.Int).Mul(gasPriceWei, estimatedDeployContracts)
-		estimatedCost.Mul(estimatedCost, big.NewInt(2))
+		// estimatedCost.Mul(estimatedCost, big.NewInt(2))
 		fmt.Printf("💰 Estimated deployment cost: %.4f ETH\n", utils.WeiToEther(estimatedCost))
 
 		// Check if balance is sufficient
@@ -264,27 +264,25 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployConfig *types.C
 	return nil
 }
 
-func (t *ThanosStack) deployContracts(ctx context.Context,
-	l1Client *ethclient.Client, deployConfig *types.Config,
-	isResume bool,
-) error {
+func (t *ThanosStack) deployContracts(_ context.Context, _ *ethclient.Client, deployConfig *types.Config, isResume bool) error {
 	var (
 		adminPrivateKey = deployConfig.AdminPrivateKey
 		l1RPC           = deployConfig.L1RPCURL
+		err             error
 	)
 
 	fmt.Println("Deploying the contracts...")
 
-	gasPriceWei, err := l1Client.SuggestGasPrice(ctx)
-	if err != nil {
-		fmt.Printf("Failed to get gas price: %v\n", err)
-	}
+	// gasPriceWei, err := l1Client.SuggestGasPrice(ctx)
+	// if err != nil {
+	// 	fmt.Printf("Failed to get gas price: %v\n", err)
+	// }
 
 	envValues := fmt.Sprintf("export GS_ADMIN_PRIVATE_KEY=%s\nexport L1_RPC_URL=%s\n", adminPrivateKey, l1RPC)
-	if gasPriceWei != nil && gasPriceWei.Uint64() > 0 {
-		// double gas price
-		envValues += fmt.Sprintf("export GAS_PRICE=%d\n", gasPriceWei.Uint64()*2)
-	}
+	// if gasPriceWei != nil && gasPriceWei.Uint64() > 0 {
+	// 	// double gas price
+	// 	envValues += fmt.Sprintf("export GAS_PRICE=%d\n", gasPriceWei.Uint64()*2)
+	// }
 
 	// STEP 4.1. Generate the .env file
 	_, err = utils.ExecuteCommand(
