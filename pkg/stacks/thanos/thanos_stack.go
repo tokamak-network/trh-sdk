@@ -798,7 +798,14 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context, deployConfig *types
 		fmt.Println("✅ Namespace destroyed successfully!")
 	}
 
-	return t.clearTerraformState(ctx)
+	err = t.clearTerraformState(ctx)
+	if err != nil {
+		fmt.Printf("Failed to clear the existing terraform state, err: %s", err.Error())
+		return err
+	}
+
+	fmt.Println("✅The chain has been destroyed successfully!")
+	return nil
 }
 
 // ------------------------------------------ Install plugins ---------------------------
