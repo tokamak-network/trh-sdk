@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/creack/pty"
+
 	"github.com/tokamak-network/trh-sdk/pkg/logging"
 )
 
@@ -19,53 +21,48 @@ func ExecuteCommand(command string, args ...string) (string, error) {
 	return trimmedOutput, err
 }
 
-// ExecuteCommandStream executes a command and streams its output in real-time
 func ExecuteCommandStream(command string, args ...string) error {
 	cmd := exec.Command(command, args...)
 
-	// Get stdout and stderr pipes
-	stdout, err := cmd.StdoutPipe()
+	// Start the command with a pseudo-terminal
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		logging.Errorf("Failed to start command: %v", err)
+		return err
+	}
+	defer ptmx.Close()
+
+	err = streamOutput(ptmx)
 	if err != nil {
 		return err
 	}
-	stderr, err := cmd.StderrPipe()
+	// Wait for the command to finish
+	err = cmd.Wait()
 	if err != nil {
+		logging.Errorf("Command execution failed: %v", err)
 		return err
 	}
 
-	// Start the command execution
-	if err := cmd.Start(); err != nil {
+	// Check the exit code
+	if cmd.ProcessState.ExitCode() != 0 {
+		logging.Errorf("Command exited with non-zero status: %d", cmd.ProcessState.ExitCode())
 		return err
 	}
 
-	// Create channels to signal goroutine completion
-	stdoutDone := make(chan struct{})
-	stderrDone := make(chan struct{})
-
-	// Stream stdout concurrently
-	go func() {
-		streamOutput(stdout)
-		close(stdoutDone)
-	}()
-
-	// Stream stderr concurrently
-	go func() {
-		streamOutput(stderr)
-		close(stderrDone)
-	}()
-
-	// Wait for both streamOutput goroutines to finish
-	<-stdoutDone
-	<-stderrDone
-
-	// Wait for the command to complete
-	return cmd.Wait()
+	return nil
 }
 
 // streamOutput reads and prints the command output line by line
-func streamOutput(pipe io.ReadCloser) {
+func streamOutput(pipe io.ReadCloser) error {
 	scanner := bufio.NewScanner(pipe)
 	for scanner.Scan() {
-		logging.Info(scanner.Text()) // Print each line in real-time
+		logging.Info(scanner.Text())
 	}
+
+	if err := scanner.Err(); err != nil {
+		logging.Errorf("Reading scanner output failed: %v", err)
+		return err
+	}
+
+	return nil
 }

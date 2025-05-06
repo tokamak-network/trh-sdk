@@ -40,6 +40,7 @@ require (
 	github.com/consensys/gnark-crypto v0.14.0 // indirect
 	github.com/crate-crypto/go-ipa v0.0.0-20240724233137-53bbb0ceb27a // indirect
 	github.com/crate-crypto/go-kzg-4844 v1.1.0 // indirect
+	github.com/creack/pty v1.1.24 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/deckarep/golang-set/v2 v2.7.0 // indirect
 	github.com/decred/dcrd/crypto/blake256 v1.1.0 // indirect
