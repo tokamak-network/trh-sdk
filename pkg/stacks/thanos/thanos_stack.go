@@ -108,6 +108,38 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployConfig *types.C
 			return err
 		}
 
+		l1Client, err := ethclient.DialContext(ctx, deployContractsConfig.l1RPCurl)
+		if err != nil {
+			return err
+		}
+
+		l2ChainID, err := utils.GenerateL2ChainId()
+		if err != nil {
+			fmt.Printf("Failed to generate L2ChainID: %s", err)
+			return err
+		}
+
+		deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig, l2ChainID)
+
+		// Select operators Accounts
+		operators, err := selectAccounts(ctx, l1Client, deployContractsConfig.fraudProof, deployContractsConfig.seed)
+		if err != nil {
+			return err
+		}
+
+		if len(operators) == 0 {
+			return fmt.Errorf("no operators were found")
+		}
+
+		fmt.Print("🔎 The SDK is ready to deploy the contracts to the L1 network. Do you want to proceed(Y/n)? ")
+		confirmation, err := scanner.ScanBool(true)
+		if err != nil {
+			return err
+		}
+		if !confirmation {
+			return nil
+		}
+
 		// Download testnet dependencies file
 		err = utils.ExecuteCommandStream("bash", "-c", "curl -o ./install-testnet-packages.sh https://raw.githubusercontent.com/tokamak-network/trh-sdk/refs/heads/main/scripts/install-testnet-packages.sh && chmod +x ./install-testnet-packages.sh")
 		if err != nil {
@@ -131,29 +163,6 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployConfig *types.C
 		if !dependencies.CheckFoundryInstallation() {
 			fmt.Printf("Try running `source %s` to set up your environment \n", shellConfigFile)
 			return nil
-		}
-
-		l1Client, err := ethclient.DialContext(ctx, deployContractsConfig.l1RPCurl)
-		if err != nil {
-			return err
-		}
-
-		l2ChainID, err := utils.GenerateL2ChainId()
-		if err != nil {
-			fmt.Printf("Failed to generate L2ChainID: %s", err)
-			return err
-		}
-
-		deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig, l2ChainID)
-
-		// Select operators Accounts
-		operators, err := selectAccounts(ctx, l1Client, deployContractsConfig.fraudProof, deployContractsConfig.seed)
-		if err != nil {
-			return err
-		}
-
-		if len(operators) == 0 {
-			return fmt.Errorf("no operators were found")
 		}
 
 		deployConfig.AdminPrivateKey = operators[0].PrivateKey
@@ -223,15 +232,6 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployConfig *types.C
 			return fmt.Errorf("admin account balance (%.4f ETH) is less than estimated deployment cost (%.4f  ETH)", utils.WeiToEther(balance), utils.WeiToEther(estimatedCost))
 		} else {
 			fmt.Println("✅ The admin account has sufficient balance to proceed with deployment.")
-		}
-
-		fmt.Print("🔎 The SDK is ready to deploy the contracts to the L1 network. Do you want to proceed(Y/n)? ")
-		confirmation, err := scanner.ScanBool(true)
-		if err != nil {
-			return err
-		}
-		if !confirmation {
-			return nil
 		}
 
 		deployConfig.DeployContractState = &types.DeployContractState{
@@ -502,7 +502,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 
 	fmt.Println("✅ Removed the previous deployment state...")
 
-	inputs, err := t.inputDeployInfra(deployConfig.L1ChainID)
+	inputs, err := t.inputDeployInfra()
 	if err != nil {
 		fmt.Println("Error collecting infrastructure deployment parameters:", err)
 		return err

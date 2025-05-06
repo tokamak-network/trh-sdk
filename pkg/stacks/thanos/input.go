@@ -290,7 +290,7 @@ func (t *ThanosStack) inputAWSLogin() (*types.AWSConfig, error) {
 	}, nil
 }
 
-func (t *ThanosStack) inputDeployInfra(l1ChainID uint64) (*DeployInfraInput, error) {
+func (t *ThanosStack) inputDeployInfra() (*DeployInfraInput, error) {
 	var (
 		chainName   string
 		l1BeaconURL string
