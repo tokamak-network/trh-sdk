@@ -3,12 +3,13 @@ package utils
 import (
 	"bufio"
 	"fmt"
-	"github.com/creack/pty"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
 	"sync"
+
+	"github.com/creack/pty"
 
 	"github.com/tokamak-network/trh-sdk/pkg/logging"
 )
@@ -31,55 +32,48 @@ func ExecuteCommandStream(command string, args ...string) error {
 	cmd := exec.Command(command, args...)
 
 	var (
-		scanner *bufio.Scanner
-		ptmx    *os.File
-		err     error
-		wg      sync.WaitGroup
+		ptmx *os.File
+		err  error
+		wg   sync.WaitGroup
+		r    io.Reader
 	)
 
 	// Try to start with PTY
 	ptmx, err = pty.Start(cmd)
 	if err == nil {
-		scanner = bufio.NewScanner(ptmx)
+		r = ptmx
 		defer func() {
 			wg.Wait()
 			_ = ptmx.Close()
 		}()
-
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := streamOutput(scanner); err != nil {
-				logging.Errorf("Error streaming PTY output: %v", err)
-			}
-		}()
 	} else {
-		// Fallback to stdout pipe
+		// Fallback to StdoutPipe
 		var rd io.ReadCloser
 		rd, err = cmd.StdoutPipe()
 		if err != nil {
 			logging.Errorf("Error creating StdoutPipe: %v", err)
 			return err
 		}
-		scanner = bufio.NewScanner(rd)
-
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := streamOutput(scanner); err != nil {
-				logging.Errorf("Error streaming output: %v", err)
-			}
-		}()
+		r = rd
 	}
 
-	// Wait for the command to finish
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := streamOutput(r); err != nil {
+			if err.Error() != ErrorPseudoTerminalExist {
+				logging.Errorf("Error streaming output: %v", err)
+			}
+		}
+	}()
+
+	// Wait for command to complete
 	err = cmd.Wait()
 	if err != nil {
 		logging.Errorf("Command execution failed: %v", err)
 		return err
 	}
 
-	// Wait for stream to finish
 	wg.Wait()
 
 	// Check exit code
@@ -92,19 +86,19 @@ func ExecuteCommandStream(command string, args ...string) error {
 }
 
 // streamOutput reads and prints the command output line by line
-func streamOutput(scanner *bufio.Scanner) error {
-	for scanner.Scan() {
-		logging.Info(scanner.Text())
-	}
+func streamOutput(r io.Reader) error {
+	reader := bufio.NewReader(r)
+	for {
+		line, err := reader.ReadString('\n') // or use a custom delimiter
+		if line != "" {
+			logging.Info(strings.TrimSuffix(line, "\n"))
+		}
+		if err != nil {
+			if err != io.EOF {
+				return nil
+			}
 
-	if err := scanner.Err(); err != nil {
-		// when using github.com/creack/pty,
-		// it's common to encounter an input/output error (/dev/ptmx: input/output error) when the process running in the pseudo-terminal (PTY) exits.
-		// This happens because once the subprocess is done and the PTY master has no more data to read,
-		// Read() returns an I/O error instead of the expected EOF. This is behavior by design in some Linux versions and kernels.
-		if !(ErrorPseudoTerminalExist == err.Error()) {
 			return err
 		}
 	}
-	return nil
 }
