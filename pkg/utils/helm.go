@@ -81,10 +81,33 @@ func CheckK8sApiHealth(namespace string) (bool, error) {
 }
 
 func CheckPVCStatus(namespace string) (bool, error) {
-	pvcStatus, err := ExecuteCommand("bash", "-c", fmt.Sprintf("if kubectl get pvc -n %s -o jsonpath='{range .items[*]}{.status.phase}{\"\\n\"}{end}' | grep -qv Bound; then echo 'There are unbound PVCs'; else echo 'Bound'; fi", namespace))
-	fmt.Println("PVC status:", pvcStatus)
-	if err != nil {
-		return false, err
+	cmd := []string{
+		"get", "pvc",
+		"-n", namespace,
+		"-o", "jsonpath={range .items[*]}{.status.phase}{\"\\n\"}{end}",
 	}
-	return pvcStatus == "Bound", nil
+
+	output, err := ExecuteCommand("kubectl", cmd...)
+	if err != nil {
+		return false, fmt.Errorf("failed to get PVC status: %w", err)
+	}
+	fmt.Println("PVC status:", output)
+
+	// Split output into lines and check each PVC status
+	pvcStatuses := strings.Split(strings.TrimSpace(output), "\n")
+
+	if len(pvcStatuses) == 0 {
+		return false, fmt.Errorf("no PVCs found in namespace %s", namespace)
+	}
+
+	for _, status := range pvcStatuses {
+		if status != "Bound" {
+			fmt.Printf("❌ Found PVC with status: %s\n", status)
+			return false, nil
+		}
+	}
+
+	fmt.Println("✅ All PVCs are bound")
+
+	return true, nil
 }
