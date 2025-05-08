@@ -79,7 +79,6 @@ func (t *ThanosStack) installBridge(ctx context.Context, deployConfig *types.Con
 	opBridgeConfig.OpBridge.Env.NativeTokenL1Address = constants.L1ChainConfigurations[l1ChainID].L2NativeTokenAddress
 
 	opBridgeConfig.OpBridge.Env.L1BlockExplorer = constants.L1ChainConfigurations[l1ChainID].BlockExplorer
-	opBridgeConfig.OpBridge.Env.L1USDCBridgeAddress = constants.L1ChainConfigurations[l1ChainID].USDCAddress
 	opBridgeConfig.OpBridge.Env.L1USDTAddress = constants.L1ChainConfigurations[l1ChainID].USDTAddress
 	opBridgeConfig.OpBridge.Env.L1USDCAddress = constants.L1ChainConfigurations[l1ChainID].USDCAddress
 
@@ -98,7 +97,7 @@ func (t *ThanosStack) installBridge(ctx context.Context, deployConfig *types.Con
 	opBridgeConfig.OpBridge.Env.L2OutputOracleAddress = contracts.L2OutputOracleProxy
 	opBridgeConfig.OpBridge.Env.L1USDCBridgeAddress = contracts.L1UsdcBridgeProxy
 	opBridgeConfig.OpBridge.Env.DisputeGameFactoryAddress = contracts.DisputeGameFactoryProxy
-	opBridgeConfig.OpBridge.Env.BlockSubmissionFrequency = deployConfig.ChainConfiguration.BatchSubmissionFrequency
+	opBridgeConfig.OpBridge.Env.BatchSubmissionFrequency = deployConfig.ChainConfiguration.BatchSubmissionFrequency
 	opBridgeConfig.OpBridge.Env.L1BlockTime = deployConfig.ChainConfiguration.L1BlockTime
 	opBridgeConfig.OpBridge.Env.L2BlockTime = deployConfig.ChainConfiguration.L2BlockTime
 	opBridgeConfig.OpBridge.Env.OutputRootFrequency = deployConfig.ChainConfiguration.OutputRootFrequency
