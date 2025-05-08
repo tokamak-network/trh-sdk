@@ -141,13 +141,23 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, deployConfig *types.Con
 
 	// Update the L1 RPC URL in the block-explorer-values.yaml file
 	if utils.CheckFileExists(blockExplorerValuesFilePath) {
+		err = utils.UpdateYAMLField(blockExplorerValuesFilePath, "frontend.enabled", false)
+		if err != nil {
+			fmt.Println("Error updating frontend.enabled field:", err)
+			return err
+		}
+
+		err = utils.UpdateYAMLField(blockExplorerValuesFilePath, "blockscout.enabled", true)
+		if err != nil {
+			fmt.Println("Error updating blockscout.enabled field:", err)
+			return err
+		}
+
 		// Update the L1 RPC URL in the block-explorer-values.yaml file
-		if utils.CheckFileExists(blockExplorerValuesFilePath) {
-			err = utils.UpdateYAMLField(blockExplorerValuesFilePath, "blockscout.env.INDEXER_OPTIMISM_L1_RPC", deployConfig.L1RPCURL)
-			if err != nil {
-				fmt.Println("Error updating L1_RPC field:", err)
-				return err
-			}
+		err = utils.UpdateYAMLField(blockExplorerValuesFilePath, "blockscout.env.INDEXER_OPTIMISM_L1_RPC", deployConfig.L1RPCURL)
+		if err != nil {
+			fmt.Println("Error updating L1_RPC field:", err)
+			return err
 		}
 
 		err = utils.UpdateYAMLField(blockExplorerValuesFilePath, "blockscout.env.INDEXER_BEACON_RPC_URL", deployConfig.L1BeaconURL)
@@ -179,7 +189,7 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, deployConfig *types.Con
 		} else if strings.Contains(release, "op-bridge") {
 			fileValuesPath = bridgeValuesFilePath
 			chartPath = bridgeChartPath
-		} else if strings.Contains(release, "block-explorer") {
+		} else if strings.Contains(release, "block-explorer-be") {
 			fileValuesPath = blockExplorerValuesFilePath
 			chartPath = blockExplorerChartPath
 		}
