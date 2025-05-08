@@ -283,6 +283,7 @@ func (t *ThanosStack) installBlockExplorer(ctx context.Context, deployConfig *ty
 	}...)
 	if err != nil {
 		fmt.Println("Error installing block explorer front-end component:", err)
+		return err
 	}
 
 	fmt.Printf("✅ Block Explorer frontend component installed successfully. Accessible at: %s\n", fmt.Sprintf("http://%s", blockExplorerUrl))
