@@ -2,6 +2,7 @@ package dependencies
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
@@ -50,12 +51,27 @@ func CheckDockerInstallation() bool {
 }
 
 func CheckTerraformInstallation() bool {
-	_, err := utils.ExecuteCommand("terraform", "--version")
+	terraformVersion, err := utils.ExecuteCommand("terraform", "--version")
 	if err != nil {
 		fmt.Println("❌ Terraform is not installed or not found in PATH")
 		return false
 	}
-	fmt.Println("✅ Terraform is installed")
+
+	// Get machine architecture
+	arch, err := utils.ExecuteCommand("uname", "-m")
+	if err != nil {
+		fmt.Println("❌ Failed to get machine architecture")
+		return false
+	}
+
+	// Check if the architecture is supported
+	if strings.Contains(terraformVersion, arch) {
+		fmt.Println("✅ Terraform is installed and the architecture is supported")
+	} else {
+		fmt.Println("❌ Terraform is installed but the architecture is not supported")
+		return false
+	}
+
 	return true
 }
 
