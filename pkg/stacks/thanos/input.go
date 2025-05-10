@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	chainNameRegex = regexp.MustCompile(`^[a-zA-Z0-9 ]+$`)
+	chainNameRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9 ]*$`)
 )
 
 type DeployContractsInput struct {
