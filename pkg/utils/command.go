@@ -94,10 +94,9 @@ func streamOutput(r io.Reader) error {
 			logging.Info(strings.TrimSuffix(line, "\n"))
 		}
 		if err != nil {
-			if err != io.EOF {
+			if err == io.EOF || err.Error() == "EOF" {
 				return nil
 			}
-
 			return err
 		}
 	}
