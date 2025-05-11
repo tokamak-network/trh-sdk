@@ -611,6 +611,9 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
+	// Sleep for 30 seconds to allow the infrastructure to be fully deployed
+	time.Sleep(30 * time.Second)
+
 	// Step 7. Configure EKS access
 	eksSetup, err := utils.ExecuteCommand("aws", []string{
 		"eks",
