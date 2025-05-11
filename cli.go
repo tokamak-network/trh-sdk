@@ -146,6 +146,11 @@ func Run() {
 				Usage:  "Update the config of the running chain",
 				Action: commands.ActionUpdateNetwork(),
 			},
+			{
+				Name:   "upgrade",
+				Usage:  "Upgrade the trh-sdk latest version",
+				Action: commands.ActionUpgrade(),
+			},
 		},
 	}
 
