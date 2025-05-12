@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+
+	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
 type AccountProfile struct {
@@ -150,4 +152,33 @@ func createDynamoDBTable(region, tableName string) error {
 
 	fmt.Println("✅ Table created successfully:", string(output))
 	return nil
+}
+
+func getAvailableRegions() ([]string, error) {
+	cmd := exec.Command("aws", "ec2", "describe-regions", "--query", "Regions[].RegionName", "--output", "json")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Println("Error fetching AWS regions:", err)
+		return nil, err
+	}
+
+	var availableRegions []string
+	err = json.Unmarshal(output, &availableRegions)
+	if err != nil {
+		fmt.Printf("❌ Error parsing JSON: %v\n", err)
+		return nil, err
+	}
+
+	return availableRegions, nil
+}
+
+func IsAvailableRegion(accessKey, secretKey, region string) bool {
+	configureAWS("aws", "configure", "set", "aws_access_key_id", accessKey)
+	configureAWS("aws", "configure", "set", "aws_secret_access_key", secretKey)
+	configureAWS("aws", "configure", "set", "region", region)
+	availableRegions, err := getAvailableRegions()
+	if err != nil {
+		return false
+	}
+	return utils.IsAvailableRegion(region, availableRegions)
 }
