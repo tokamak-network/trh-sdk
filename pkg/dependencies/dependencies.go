@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
@@ -50,6 +51,31 @@ func CheckDockerInstallation() bool {
 	return true
 }
 
+func GetArchitecture() (string, error) {
+	// Get machine architecture
+	arch, err := utils.ExecuteCommand("uname", "-m")
+	if err != nil {
+		fmt.Println("❌ Failed to get machine architecture")
+		return "", err
+	}
+
+	// Check if the architecture is supported
+	if strings.Contains(arch, "x86_64") {
+		arch = "amd64"
+	} else if strings.Contains(arch, "aarch64") || strings.Contains(arch, "arm64") {
+		arch = "arm64"
+	} else if strings.Contains(arch, "armv61") {
+		arch = "armv61"
+	} else if strings.Contains(arch, "i386") {
+		arch = "386"
+	} else {
+		fmt.Println("❌ Unsupported architecture:", arch)
+		return "", fmt.Errorf("unsupported architecture: %s", arch)
+	}
+
+	return arch, nil
+}
+
 func CheckTerraformInstallation() bool {
 	terraformVersion, err := utils.ExecuteCommand("terraform", "--version")
 	if err != nil {
@@ -57,21 +83,17 @@ func CheckTerraformInstallation() bool {
 		return false
 	}
 
-	// Get machine architecture
-	arch, err := utils.ExecuteCommand("uname", "-m")
+	arch, err := GetArchitecture()
 	if err != nil {
-		fmt.Println("❌ Failed to get machine architecture")
+		logging.Errorf("Failed to get architecture: %v", err)
 		return false
 	}
 
-	// Check if the architecture is supported
-	if strings.Contains(terraformVersion, arch) {
-		fmt.Println("✅ Terraform is installed and the architecture is supported")
-	} else {
-		fmt.Println("❌ Terraform is installed but the architecture is not supported")
+	if !strings.Contains(terraformVersion, arch) {
+		fmt.Printf("❌ Terraform version does not match architecture: %s\n", terraformVersion)
 		return false
 	}
-
+	fmt.Println("✅ Terraform is installed and architecture matches")
 	return true
 }
 

@@ -23,7 +23,6 @@ func ExecuteCommand(command string, args ...string) (string, error) {
 	output, err := cmd.CombinedOutput()
 
 	trimmedOutput := strings.TrimSpace(string(output))
-	logging.Info(trimmedOutput)
 
 	return trimmedOutput, err
 }
