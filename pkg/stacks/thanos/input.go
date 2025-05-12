@@ -8,6 +8,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/ethclient"
 
+	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
@@ -233,8 +234,8 @@ func (t *ThanosStack) inputL1RPC(ctx context.Context) (l1RPCUrl string, l1RRCKin
 
 func (t *ThanosStack) inputAWSLogin() (*types.AWSConfig, error) {
 	var (
-		awsAccessKeyID, awsSecretKey string
-		err                          error
+		awsAccessKeyID, awsSecretKey, awsRegion string
+		err                                     error
 	)
 	for {
 		fmt.Print("Please enter your AWS access key: ")
@@ -272,14 +273,22 @@ func (t *ThanosStack) inputAWSLogin() (*types.AWSConfig, error) {
 		break
 	}
 
-	fmt.Print("Please enter your AWS region (default: ap-northeast-2): ")
-	awsRegion, err := scanner.ScanString()
-	if err != nil {
-		fmt.Println("Error while reading AWS region")
-		return nil, err
-	}
-	if awsRegion == "" {
-		awsRegion = "ap-northeast-2"
+	for {
+		fmt.Print("Please enter your AWS region (default: ap-northeast-2): ")
+		awsRegion, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error while reading AWS region")
+			return nil, err
+		}
+		if awsRegion == "" {
+			awsRegion = "ap-northeast-2"
+		}
+		fmt.Println("Verifying region availability...")
+		if !aws.IsAvailableRegion(awsAccessKeyID, awsSecretKey, awsRegion) {
+			fmt.Println("Error: The AWS region is not available. Please try again.")
+			continue
+		}
+		break
 	}
 
 	return &types.AWSConfig{
