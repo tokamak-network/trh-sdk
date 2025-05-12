@@ -668,19 +668,39 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 		return err
 	}
 
-	helmReleaseName := fmt.Sprintf("%s-%d", namespace, time.Now().Unix())
-	_, err = utils.ExecuteCommand("helm", []string{
-		"install",
-		helmReleaseName,
-		fmt.Sprintf("%s/tokamak-thanos-stack/charts/thanos-stack", cwd),
-		"--values",
-		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", cwd),
-		"--namespace",
-		namespace,
-	}...)
+	var (
+		helmReleaseName = fmt.Sprintf("%s-%d", namespace, time.Now().Unix())
+		valuePath       = fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", cwd)
+		helmChartPath   = fmt.Sprintf("%s/tokamak-thanos-stack/charts/thanos-stack", cwd)
+	)
+
+	err = utils.InstallHelmChart(ctx, helmReleaseName, helmChartPath, valuePath, namespace)
 	if err != nil {
-		fmt.Println("Error installing Helm charts:", err)
+		fmt.Println("Error installing Helm chart:", err)
 		return err
+	}
+	// Wait until the pods are ready
+	err = utils.WaitForHelmReleaseReady(namespace, helmReleaseName)
+	if err != nil {
+		// Just in case, try to reinstall and wait again
+		err = utils.UninstallHelmChart(ctx, helmReleaseName, namespace)
+		if err != nil {
+			fmt.Println("Error uninstalling Helm chart:", err)
+			return err
+		}
+
+		err = utils.InstallHelmChart(ctx, helmReleaseName, helmChartPath, valuePath, namespace)
+		if err != nil {
+			fmt.Println("Error reinstalling Helm chart:", err)
+			return err
+		}
+
+		// Wait until the pods are ready again
+		err = utils.WaitForHelmReleaseReady(namespace, helmReleaseName)
+		if err != nil {
+			fmt.Println("Error waiting for Helm release to be ready:", err)
+			return err
+		}
 	}
 
 	fmt.Println("✅ Helm charts installed successfully")
@@ -690,7 +710,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 		k8sIngresses, err := utils.GetAddressByIngress(namespace, helmReleaseName)
 		if err != nil {
 			fmt.Println("Error retrieving ingress addresses:", err, "details:", k8sIngresses)
-			return err
+			return nil
 		}
 
 		if len(k8sIngresses) > 0 {
@@ -712,7 +732,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 	err = deployConfig.WriteToJSONFile()
 	if err != nil {
 		fmt.Println("Error saving configuration file:", err)
-		return err
+		return nil
 	}
 	fmt.Printf("Configuration saved successfully to: %s/settings.json \n", cwd)
 

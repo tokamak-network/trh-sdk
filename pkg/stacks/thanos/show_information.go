@@ -157,7 +157,7 @@ func (t *ThanosStack) getRunningPods(ctx context.Context, config *types.Config) 
 	}
 
 	// Step 2: Get pods
-	runningPods, err := utils.GetK8sPods(namespace)
+	runningPods, err := utils.GetRunningK8sPods(namespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pods: %w", err)
 	}

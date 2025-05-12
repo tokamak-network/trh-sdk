@@ -133,7 +133,7 @@ func getK8sPods(namespace string) (string, error) {
 	return ExecuteCommand("kubectl", "-n", namespace, "get", "pods", "-o", "json")
 }
 
-func GetK8sPods(namespace string) ([]string, error) {
+func GetRunningK8sPods(namespace string) ([]string, error) {
 	output, err := getK8sPods(namespace)
 	if err != nil {
 		return nil, err
@@ -146,7 +146,7 @@ func GetK8sPods(namespace string) ([]string, error) {
 
 	pods := make([]string, 0)
 	for _, item := range podData.Items {
-		if item.Status.Phase == "Running" || item.Status.Phase == "Pending" || item.Status.Phase == "Succeeded" {
+		if item.Status.Phase == "Running" || item.Status.Phase == "Succeeded" {
 			pods = append(pods, item.Metadata.Name)
 		}
 	}

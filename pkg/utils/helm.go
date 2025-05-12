@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -87,4 +89,74 @@ func CheckPVCStatus(namespace string) (bool, error) {
 		return false, err
 	}
 	return pvcStatus == "Bound", nil
+}
+
+// WaitForHelmReleaseReady waits until all pods in the namespace are ready
+func WaitForHelmReleaseReady(namespace, helmReleaseName string) error {
+
+	timeout := time.After(5 * time.Minute)
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeout:
+			return fmt.Errorf("timed out waiting for Helm release %s to be ready", helmReleaseName)
+		case <-ticker.C:
+			podsJSON, err := getK8sPods(namespace)
+			if err != nil {
+				return fmt.Errorf("failed to list pods: %w", err)
+			}
+			var pods PodsJSON
+			if err := json.Unmarshal([]byte(podsJSON), &pods); err != nil {
+				return fmt.Errorf("failed to unmarshal pods JSON: %w", err)
+			}
+
+			allReady := true
+			for _, pod := range pods.Items {
+				if pod.Status.Phase != "Running" && pod.Status.Phase != "Succeeded" {
+					allReady = false
+					break
+				}
+			}
+
+			if allReady {
+				fmt.Printf("✅ All pods for Helm release %s are ready\n", helmReleaseName)
+				return nil
+			}
+		}
+	}
+}
+
+func InstallHelmChart(ctx context.Context, helmReleaseName, helmChartPath, valueFilePath, namespace string) error {
+	_, err := ExecuteCommand("helm", []string{
+		"install",
+		helmReleaseName,
+		helmChartPath,
+		"--values",
+		valueFilePath,
+		"--namespace",
+		namespace,
+	}...)
+	if err != nil {
+		fmt.Println("Error installing Helm charts:", err)
+		return err
+	}
+
+	return nil
+}
+
+func UninstallHelmChart(ctx context.Context, helmReleaseName, namespace string) error {
+	_, err := ExecuteCommand("helm", []string{
+		"uninstall",
+		helmReleaseName,
+		"--namespace",
+		namespace,
+	}...)
+	if err != nil {
+		fmt.Println("Error uninstalling Helm charts:", err)
+		return err
+	}
+
+	return nil
 }
