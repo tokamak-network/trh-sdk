@@ -60,7 +60,7 @@ func GetArchitecture() (string, error) {
 	}
 
 	// Check if the architecture is supported
-	if strings.Contains(arch, "x86_64") {
+	if strings.Contains(arch, "x86_64") || strings.Contains(arch, "amd64") {
 		arch = "amd64"
 	} else if strings.Contains(arch, "aarch64") || strings.Contains(arch, "arm64") {
 		arch = "arm64"
