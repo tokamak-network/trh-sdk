@@ -56,6 +56,8 @@ func selectAccounts(ctx context.Context, client *ethclient.Client, enableFraudPr
 	if err != nil {
 		return nil, err
 	}
+	// We are using the gas price of 2x of the suggestion gas
+	suggestionGas = new(big.Int).Mul(suggestionGas, big.NewInt(2))
 
 	minimumBalanceForAdmin := new(big.Int).Mul(estimatedDeployContracts, suggestionGas)
 
@@ -200,8 +202,22 @@ func makeDeployContractConfigJsonFile(ctx context.Context, l1Provider *ethclient
 	return nil
 }
 
-func initDeployConfigTemplate(enableFraudProof bool, chainId *big.Int, l2ChainId uint64) *types.DeployConfigTemplate {
-	l1ChainId := chainId.Uint64()
+func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l2ChainId uint64) *types.DeployConfigTemplate {
+	var (
+		chainConfiguration = deployConfigInputs.ChainConfiguration
+	)
+
+	if chainConfiguration == nil {
+		panic("ChainConfiguration is empty")
+	}
+
+	var (
+		l2BlockTime                      = chainConfiguration.L2BlockTime
+		l1ChainId                        = deployConfigInputs.l1ChainID
+		l2OutputOracleSubmissionInterval = chainConfiguration.GetL2OutputOracleSubmissionInterval()
+		finalizationPeriods              = chainConfiguration.GetFinalizationPeriodSeconds()
+		enableFraudProof                 = deployConfigInputs.fraudProof
+	)
 
 	defaultTemplate := &types.DeployConfigTemplate{
 		NativeTokenName:                          "Tokamak Network Token",
@@ -209,15 +225,15 @@ func initDeployConfigTemplate(enableFraudProof bool, chainId *big.Int, l2ChainId
 		NativeTokenAddress:                       constants.L1ChainConfigurations[l1ChainId].L2NativeTokenAddress,
 		L1ChainID:                                l1ChainId,
 		L2ChainID:                                l2ChainId,
-		L2BlockTime:                              2,
+		L2BlockTime:                              l2BlockTime,
 		L1BlockTime:                              12,
 		MaxSequencerDrift:                        600,
 		SequencerWindowSize:                      3600,
 		ChannelTimeout:                           300,
 		BatchInboxAddress:                        utils.GenerateBatchInboxAddress(l2ChainId),
-		L2OutputOracleSubmissionInterval:         constants.L1ChainConfigurations[l1ChainId].L2OutputOracleSubmissionInterval,
+		L2OutputOracleSubmissionInterval:         l2OutputOracleSubmissionInterval,
 		L2OutputOracleStartingBlockNumber:        0,
-		FinalizationPeriodSeconds:                constants.L1ChainConfigurations[l1ChainId].FinalizationPeriodSeconds,
+		FinalizationPeriodSeconds:                finalizationPeriods,
 		BaseFeeVaultMinimumWithdrawalAmount:      "0x8ac7230489e80000",
 		L1FeeVaultMinimumWithdrawalAmount:        "0x8ac7230489e80000",
 		SequencerFeeVaultMinimumWithdrawalAmount: "0x8ac7230489e80000",
@@ -324,12 +340,94 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_l1_beacon_url=\"%s\"\n", config.L1BeaconUrl))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_op_geth_image_tag=\"%s\"\n", config.OpGethImageTag))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_thanos_stack_image_tag=\"%s\"\n", config.ThanosStackImageTag))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_max_channel_duration=\"%d\"\n", config.MaxChannelDuration))
 
 	err = writer.Flush()
 	if err != nil {
 		return err
 	}
 	fmt.Println("Environment configuration file (.envrc) has been successfully generated!")
+	return nil
+}
+
+func updateTerraformEnvFile(dirPath string, config types.UpdateTerraformEnvConfig) error {
+	if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
+		fmt.Println("Error creating directory:", err)
+		return err
+	}
+
+	filePath := filepath.Join(dirPath, ".envrc")
+
+	// Read existing file content
+	existingContent := make(map[string]string)
+	if _, err := os.Stat(filePath); err == nil {
+		file, err := os.Open(filePath)
+		if err != nil {
+			fmt.Println("Error reading environment file:", err)
+			return err
+		}
+		defer file.Close()
+
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "export ") {
+				parts := strings.SplitN(line, "=", 2)
+				if len(parts) == 2 {
+					key := strings.TrimSpace(parts[0][7:]) // Remove "export " prefix
+					value := strings.Trim(strings.TrimSpace(parts[1]), "\"")
+					existingContent[key] = value
+				}
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			fmt.Println("Error scanning environment file:", err)
+			return err
+		}
+	}
+
+	// Prepare new values
+	newValues := map[string]string{
+		"TF_VAR_stack_l1_rpc_url":             config.L1RpcUrl,
+		"TF_VAR_stack_l1_rpc_provider":        config.L1RpcProvider,
+		"TF_VAR_stack_l1_beacon_url":          config.L1BeaconUrl,
+		"TF_VAR_stack_op_geth_image_tag":      config.OpGethImageTag,
+		"TF_VAR_stack_thanos_stack_image_tag": config.ThanosStackImageTag,
+	}
+
+	// Update or add new values
+	for key, value := range newValues {
+		existingContent[key] = value
+	}
+
+	// Write updated content back to the file
+	output, err := os.Create(filePath)
+	if err != nil {
+		fmt.Println("Error opening environment file for writing:", err)
+		return err
+	}
+	defer output.Close()
+
+	writer := bufio.NewWriter(output)
+	for key, value := range existingContent {
+		// Two special cases, they are flatted arrays(convert from arrays to strings). We keep this format, don't put the quotes
+		if key == "TF_VAR_azs" || key == "TF_VAR_eks_cluster_admins" {
+			writer.WriteString(fmt.Sprintf("export %s=%s\n", key, value))
+
+			continue
+		}
+
+		_, err := writer.WriteString(fmt.Sprintf("export %s=\"%s\"\n", key, value))
+		if err != nil {
+			return err
+		}
+	}
+
+	if err = writer.Flush(); err != nil {
+		return err
+	}
+
+	fmt.Println("Environment configuration file (.envrc) has been successfully updated!")
 	return nil
 }
 

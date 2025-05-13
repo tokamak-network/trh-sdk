@@ -43,3 +43,12 @@ func BucketExists(ctx context.Context, client *s3.Client, bucketName string) boo
 
 	return err == nil
 }
+
+func IsAvailableRegion(region string, availableRegions []string) bool {
+	for _, availableRegion := range availableRegions {
+		if region == availableRegion {
+			return true
+		}
+	}
+	return false
+}

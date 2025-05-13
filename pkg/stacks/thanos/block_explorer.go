@@ -12,16 +12,18 @@ import (
 )
 
 func (t *ThanosStack) installBlockExplorer(ctx context.Context, deployConfig *types.Config) error {
-	var (
-		namespace = deployConfig.K8s.Namespace
-		vpcId     = deployConfig.AWS.VpcID
-	)
-
+	if deployConfig.K8s == nil {
+		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+	}
 	_, _, err := t.loginAWS(ctx, deployConfig)
 	if err != nil {
 		fmt.Println("Error to login in AWS:", err)
 		return err
 	}
+	var (
+		namespace = deployConfig.K8s.Namespace
+		vpcId     = deployConfig.AWS.VpcID
+	)
 
 	blockExplorerPods, err := utils.GetPodsByName(namespace, "block-explorer")
 	if err != nil {
@@ -30,9 +32,6 @@ func (t *ThanosStack) installBlockExplorer(ctx context.Context, deployConfig *ty
 	}
 	if len(blockExplorerPods) > 0 {
 		fmt.Printf("Block Explorer is running: \n")
-		for _, pod := range blockExplorerPods {
-			fmt.Println(pod)
-		}
 		return nil
 	}
 
@@ -284,6 +283,7 @@ func (t *ThanosStack) installBlockExplorer(ctx context.Context, deployConfig *ty
 	}...)
 	if err != nil {
 		fmt.Println("Error installing block explorer front-end component:", err)
+		return err
 	}
 
 	fmt.Printf("✅ Block Explorer frontend component installed successfully. Accessible at: %s\n", fmt.Sprintf("http://%s", blockExplorerUrl))
@@ -292,6 +292,14 @@ func (t *ThanosStack) installBlockExplorer(ctx context.Context, deployConfig *ty
 }
 
 func (t *ThanosStack) uninstallBlockExplorer(ctx context.Context, deployConfig *types.Config) error {
+	if deployConfig.K8s == nil {
+		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+	}
+
+	if deployConfig.AWS == nil {
+		return fmt.Errorf("AWS configuration is not set. Please run the deploy command first")
+	}
+
 	var (
 		namespace = deployConfig.K8s.Namespace
 	)

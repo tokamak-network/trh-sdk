@@ -11,7 +11,7 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-func ActionShowLogs() cli.ActionFunc {
+func ActionUpdateNetwork() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
 		var err error
 		var network, stack string
@@ -21,9 +21,6 @@ func ActionShowLogs() cli.ActionFunc {
 			return err
 		}
 
-		component := cmd.String("component")
-		isTroubleshoot := cmd.Bool("troubleshoot")
-
 		if config == nil {
 			network = constants.LocalDevnet
 			stack = constants.ThanosStack
@@ -31,16 +28,20 @@ func ActionShowLogs() cli.ActionFunc {
 			network = config.Network
 			stack = config.Stack
 		}
-		return ShowLogs(ctx, network, stack, component, isTroubleshoot, config)
+		return UpdateNetwork(ctx, network, stack, config)
 	}
 }
 
-func ShowLogs(ctx context.Context, network, stack string, component string, isTroubleshoot bool, config *types.Config) error {
+func UpdateNetwork(ctx context.Context, network, stack string, config *types.Config) error {
+	if network == constants.LocalDevnet {
+		fmt.Println("You are using the local devnet. No need to update the network.")
+		return nil
+	}
 
 	switch stack {
 	case constants.ThanosStack:
 		thanosStack := thanos.NewThanosStack(network, stack)
-		return thanosStack.ShowLogs(ctx, config, component, isTroubleshoot)
+		return thanosStack.UpdateNetwork(ctx, config)
 	}
 
 	return nil

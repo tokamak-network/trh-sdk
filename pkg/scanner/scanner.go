@@ -21,14 +21,14 @@ func ScanBool(defaultResponse bool) (bool, error) {
 		return false, err
 	}
 
-	if strings.ToLower(response) != "n" && strings.ToLower(response) != "y" {
-		return false, fmt.Errorf("invalid input")
-	}
-
-	if strings.ToLower(response) == "y" {
+	switch strings.ToLower(strings.TrimSpace(response)) {
+	case "y":
 		return true, nil
+	case "n":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid input: must be 'y' or 'n'")
 	}
-	return defaultResponse, nil
 }
 
 func ScanString() (string, error) {
@@ -57,4 +57,23 @@ func ScanFloat() (float64, error) {
 	}
 
 	return value, nil
+}
+
+func ScanInt() (int, error) {
+	input, err := ScanString()
+	if err != nil {
+		return 0, err
+	}
+
+	if input == "" {
+		return 0, nil
+	}
+
+	var num int
+	_, err = fmt.Sscanf(input, "%d", &num)
+	if err != nil {
+		return 0, fmt.Errorf("invalid input: %s", input)
+	}
+
+	return num, nil
 }

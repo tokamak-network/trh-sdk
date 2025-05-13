@@ -4,63 +4,99 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
+	"sync"
+
+	"github.com/creack/pty"
+
+	"github.com/tokamak-network/trh-sdk/pkg/logging"
+)
+
+var (
+	ErrorPseudoTerminalExist = "read /dev/ptmx: input/output error"
 )
 
 func ExecuteCommand(command string, args ...string) (string, error) {
 	cmd := exec.Command(command, args...)
 	output, err := cmd.CombinedOutput()
-	return strings.TrimSpace(string(output)), err
+
+	trimmedOutput := strings.TrimSpace(string(output))
+
+	return trimmedOutput, err
 }
 
-// ExecuteCommandStream executes a command and streams its output in real-time
 func ExecuteCommandStream(command string, args ...string) error {
 	cmd := exec.Command(command, args...)
 
-	// Get stdout and stderr pipes
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return err
+	var (
+		ptmx *os.File
+		err  error
+		wg   sync.WaitGroup
+		r    io.Reader
+	)
+
+	// Try to start with PTY
+	ptmx, err = pty.Start(cmd)
+	if err == nil {
+		r = ptmx
+		defer func() {
+			wg.Wait()
+			_ = ptmx.Close()
+		}()
+	} else {
+		// Fallback to StdoutPipe
+		var rd io.ReadCloser
+		rd, err = cmd.StdoutPipe()
+		if err != nil {
+			logging.Errorf("Error creating StdoutPipe: %v", err)
+			return err
+		}
+		r = rd
 	}
 
-	// Start the command execution
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-
-	// Create channels to signal goroutine completion
-	stdoutDone := make(chan struct{})
-	stderrDone := make(chan struct{})
-
-	// Stream stdout concurrently
+	wg.Add(1)
 	go func() {
-		streamOutput(stdout)
-		close(stdoutDone)
+		defer wg.Done()
+		if err := streamOutput(r); err != nil {
+			if err.Error() != ErrorPseudoTerminalExist {
+				logging.Errorf("Error streaming output: %v", err)
+			}
+		}
 	}()
 
-	// Stream stderr concurrently
-	go func() {
-		streamOutput(stderr)
-		close(stderrDone)
-	}()
+	// Wait for command to complete
+	err = cmd.Wait()
+	if err != nil {
+		logging.Errorf("Command execution failed: %v", err)
+		return err
+	}
 
-	// Wait for both streamOutput goroutines to finish
-	<-stdoutDone
-	<-stderrDone
+	wg.Wait()
 
-	// Wait for the command to complete
-	return cmd.Wait()
+	// Check exit code
+	if cmd.ProcessState.ExitCode() != 0 {
+		logging.Errorf("Command exited with non-zero status: %d", cmd.ProcessState.ExitCode())
+		return fmt.Errorf("command exited with status: %d", cmd.ProcessState.ExitCode())
+	}
+
+	return nil
 }
 
 // streamOutput reads and prints the command output line by line
-func streamOutput(pipe io.ReadCloser) {
-	scanner := bufio.NewScanner(pipe)
-	for scanner.Scan() {
-		fmt.Println(scanner.Text()) // Print each line in real-time
+func streamOutput(r io.Reader) error {
+	reader := bufio.NewReader(r)
+	for {
+		line, err := reader.ReadString('\n') // or use a custom delimiter
+		if line != "" {
+			logging.Info(strings.TrimSuffix(line, "\n"))
+		}
+		if err != nil {
+			if err == io.EOF || err.Error() == "EOF" {
+				return nil
+			}
+			return err
+		}
 	}
 }

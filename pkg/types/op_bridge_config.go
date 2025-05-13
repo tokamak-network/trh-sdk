@@ -27,6 +27,11 @@ type OpBridgeConfig struct {
 			L2OutputOracleAddress         string `yaml:"l2_output_oracle_address"`
 			L1USDCBridgeAddress           string `yaml:"l1_usdc_bridge_address"`
 			DisputeGameFactoryAddress     string `yaml:"dispute_game_factory_address"`
+			BatchSubmissionFrequency      uint64 `yaml:"batch_submission_frequency"`
+			L1BlockTime                   uint64 `yaml:"l1_block_time"`
+			L2BlockTime                   uint64 `yaml:"l2_block_time"`
+			OutputRootFrequency           uint64 `yaml:"output_root_frequency"`
+			ChallengePeriod               uint64 `yaml:"challenge_period"`
 		} `yaml:"env"`
 		Ingress struct {
 			Enabled     bool              `yaml:"enabled"`

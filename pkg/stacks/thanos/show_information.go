@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
+	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
@@ -20,6 +23,29 @@ var SupportedLogsComponents = map[string]bool{
 }
 
 func (t *ThanosStack) ShowInformation(ctx context.Context, config *types.Config) error {
+	fileName := fmt.Sprintf("logs/show_information_%s_%s_%d.log", t.stack, t.network, time.Now().Unix())
+	logging.InitLogger(fileName)
+
+	if t.network == constants.LocalDevnet {
+		// Check the devnet network running
+		runningContainers, err := utils.GetDockerContainers(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get docker containers: %w", err)
+		}
+		if len(runningContainers) == 0 {
+			fmt.Println("No running containers found. Please run the deploy command first")
+			return nil
+		}
+		fmt.Println("✅ L1 and L2 networks are running on local devnet")
+		fmt.Println("L1 network is running on http://localhost:8545")
+		fmt.Println("L2 network is running on http://localhost:9545")
+		return nil
+	}
+
+	if config.K8s == nil {
+		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+	}
+
 	namespace := config.K8s.Namespace
 
 	// Step 1: Get pods
@@ -69,8 +95,17 @@ func (t *ThanosStack) ShowInformation(ctx context.Context, config *types.Config)
 	return nil
 }
 
-func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, component string) error {
-	namespace := config.K8s.Namespace
+func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, component string, isTroubleshoot bool) error {
+	fileName := fmt.Sprintf("logs/show_logs_%s_%s_%s_%d.log", t.stack, t.network, component, time.Now().Unix())
+	logging.InitLogger(fileName)
+
+	if config.K8s == nil {
+		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+	}
+
+	var (
+		namespace = config.K8s.Namespace
+	)
 
 	if !SupportedLogsComponents[component] {
 		return fmt.Errorf("unsupported component: %s", component)
@@ -92,16 +127,28 @@ func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, compon
 		runningPodName = pod
 	}
 
-	err = utils.ExecuteCommandStream("bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f", namespace, runningPodName))
-	if err != nil {
-		fmt.Printf("failed to show logs: %s \n", err.Error())
-		return err
+	if isTroubleshoot {
+		err = utils.ExecuteCommandStream("bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f | grep -iE 'error|fail|panic|critical'", namespace, runningPodName))
+		if err != nil {
+			fmt.Printf("failed to show logs: %s \n", err.Error())
+			return err
+		}
+	} else {
+		err = utils.ExecuteCommandStream("bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f", namespace, runningPodName))
+		if err != nil {
+			fmt.Printf("failed to show logs: %s \n", err.Error())
+			return err
+		}
 	}
 
 	return nil
 }
 
 func (t *ThanosStack) getRunningPods(ctx context.Context, config *types.Config) ([]string, error) {
+	if config.K8s == nil {
+		return nil, fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+	}
+
 	namespace := config.K8s.Namespace
 
 	// Step 1: Login AWS

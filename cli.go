@@ -132,8 +132,24 @@ func Run() {
 						Usage:    fmt.Sprintf("Component name (allowed: %s)", strings.Join(allowedComponentList(), ", ")),
 						Value:    "",
 					},
+					&cli.BoolFlag{
+						Name:     "troubleshoot",
+						Aliases:  []string{"t"},
+						Required: false,
+						Usage:    "Show logs of the running chain with troubleshoot mode",
+					},
 				},
 				Action: commands.ActionShowLogs(),
+			},
+			{
+				Name:   "update",
+				Usage:  "Update the config of the running chain",
+				Action: commands.ActionUpdateNetwork(),
+			},
+			{
+				Name:   "upgrade",
+				Usage:  "Upgrade the trh-sdk latest version",
+				Action: commands.ActionUpgrade(),
 			},
 			{
 				Name:   "verify-register-candidate",

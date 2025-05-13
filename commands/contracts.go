@@ -7,6 +7,7 @@ import (
 	"github.com/tokamak-network/trh-sdk/flags"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
+	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"github.com/urfave/cli/v3"
 )
 
@@ -16,11 +17,17 @@ func ActionDeployContracts() cli.ActionFunc {
 		network := cmd.String(flags.NetworkFlag.Name)
 		registerCandidate := !cmd.Bool(flags.NoCandidateFlag.Name)
 
+		config, err := utils.ReadConfigFromJSONFile()
+		if err != nil {
+			fmt.Println("Error reading settings.json")
+			return err
+		}
+
 		switch stack {
 		case constants.ThanosStack:
 			thanosStack := thanos.NewThanosStack(network, stack)
 			thanosStack.SetRegisterCandidate(registerCandidate)
-			return thanosStack.DeployContracts(ctx)
+			return thanosStack.DeployContracts(ctx, config)
 		default:
 			return fmt.Errorf("unsupported stack: %s", stack)
 		}

@@ -150,104 +150,45 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
 
     # Check if the current version is not v1.22.6
     if ! echo "$current_go_version" | grep 'go1.22.6' &>/dev/null ; then
-
-        # If Go is not installed, install Go 1.22.6 directly
-        if ! command -v go &> /dev/null; then
-            echo "Go not found, installing..."
-
-            if ! command -v curl &> /dev/null; then
-                echo "curl not found, installing..."
-                brew install curl
-            else
-                echo "curl is already installed."
-            fi
-
-            GO_FILE_NAME="go1.22.6.darwin-${ARCH}.tar.gz"
-            GO_DOWNLOAD_URL="https://go.dev/dl/${GO_FILE_NAME}"
-
-            sudo curl -L -o "${GO_FILE_NAME}" "${GO_DOWNLOAD_URL}"
-
-            sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf "${GO_FILE_NAME}"
-
-            # Check if the Go configuration is already in the CONFIG_FILE
-            if ! grep -Fxq 'export PATH="$PATH:/usr/local/go/bin"' "$CONFIG_FILE"; then
-                # If the configuration is not found, add Go to the current shell session
-                {
-                    echo ''
-                    echo 'export PATH="$PATH:/usr/local/go/bin"'
-                } >> "$CONFIG_FILE"
-            fi
-
-            # Check if the NVM configuration is already in the PROFILE_FILE
-            if ! grep -Fxq 'export PATH=$PATH:/usr/local/go/bin' "$PROFILE_FILE"; then
-                # If the configuration is not found, add Go to the current shell session
-                {
-                    echo ''
-                    echo 'export PATH="$PATH:/usr/local/go/bin"'
-                } >> "$PROFILE_FILE"
-            fi
-
-            export PATH="$PATH:/usr/local/go/bin"
-
-        # If Go is installed and the current version is Go 1.22.6, install GVM.
-        else
-            # 4-2. Install GVM
-            echo "Installing GVM..."
-            source ~/.gvm/scripts/gvm
-            if ! command -v gvm &> /dev/null; then
-                echo "GVM not found, installing..."
-
-                # Install bison for running GVM
-                if ! command -v bison &> /dev/null; then
-                    echo "bison not found, installing..."
-                    apt-get install bison -y
-                else
-                    echo "bison is already installed."
-                fi
-
-                bash < <(curl -s -S -L https://raw.githubusercontent.com/moovweb/gvm/master/binscripts/gvm-installer)
-
-                # Check if the GVM configuration is already in the CONFIG_FILE
-                if ! grep -Fxq 'source ~/.gvm/scripts/gvm' "$CONFIG_FILE"; then
-
-                    # If the configuration is not found, add GVM to the current shell session
-                    {
-                        echo ''
-                        echo 'source ~/.gvm/scripts/gvm'
-                    } >> "$CONFIG_FILE"
-                fi
-
-                # Check if the GVM configuration is already in the PROFILE_FILE
-                if ! grep -Fxq 'source ~/.gvm/scripts/gvm' "$PROFILE_FILE"; then
-
-                    # If the configuration is not found, add GVM to the current shell session
-                    {
-                        echo ''
-                        echo 'source ~/.gvm/scripts/gvm'
-                    } >> "$PROFILE_FILE"
-                fi
-
-                source ~/.gvm/scripts/gvm
-                gvm use system --default
-            else
-                echo "gvm is already installed."
-            fi
-
-            # 4-3. Install Go v1.22.6 using GVM
-            echo "Installing Go v1.22.6 using GVM..."
-            if ! gvm list | grep 'go1.22.6' &> /dev/null; then
-                echo "Go v1.22.6 not found, installing..."
-                gvm install go1.22.6
-            else
-                echo "Go v1.22.6 is already installed."
-            fi
-
-            # 4-4. Set Go v1.22.6 as the default version
-            echo "Setting Go v1.22.6 as the default version..."
-            echo "Switching to Go v1.22.6..."
-            gvm use --default go1.22.6
-            echo "Go v1.22.6 is now set as the default version."
+        # If Go is installed, remove it
+        if command -v go &> /dev/null; then
+            echo "Go is already installed. Removing the existing version..."
+            sudo rm -rf "$(which go)"
         fi
+
+        if ! command -v curl &> /dev/null; then
+            echo "curl not found, installing..."
+            brew install curl
+        else
+            echo "curl is already installed."
+        fi
+
+        GO_FILE_NAME="go1.22.6.darwin-${ARCH}.tar.gz"
+        GO_DOWNLOAD_URL="https://go.dev/dl/${GO_FILE_NAME}"
+
+        sudo curl -L -o "${GO_FILE_NAME}" "${GO_DOWNLOAD_URL}"
+
+        sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf "${GO_FILE_NAME}"
+
+        # Check if the Go configuration is already in the CONFIG_FILE
+        if ! grep -Fxq 'export PATH="$PATH:/usr/local/go/bin"' "$CONFIG_FILE"; then
+            # If the configuration is not found, add Go to the current shell session
+            {
+                echo ''
+                echo 'export PATH="$PATH:/usr/local/go/bin"'
+            } >> "$CONFIG_FILE"
+        fi
+
+        # Check if the NVM configuration is already in the PROFILE_FILE
+        if ! grep -Fxq 'export PATH=$PATH:/usr/local/go/bin' "$PROFILE_FILE"; then
+            # If the configuration is not found, add Go to the current shell session
+            {
+                echo ''
+                echo 'export PATH="$PATH:/usr/local/go/bin"'
+            } >> "$PROFILE_FILE"
+        fi
+
+        export PATH="$PATH:/usr/local/go/bin"
     else
         echo "Go 1.22.6 is already installed."
     fi
@@ -308,103 +249,46 @@ elif [[ "$OS_TYPE" == "linux" ]]; then
         # Check if the current version is not v1.22.6
         if ! echo "$current_go_version" | grep 'go1.22.6' &>/dev/null ; then
 
-            # If Go is not installed, install Go 1.22.6 directly
-            if ! command -v go &> /dev/null; then
-                echo "Go not found, installing..."
-
-                if ! command -v curl &> /dev/null; then
-                    echo "curl not found, installing..."
-                    sudo apt-get install -y curl
-                else
-                    echo "curl is already installed."
-                fi
-
-                GO_FILE_NAME="go1.22.6.linux-${ARCH}.tar.gz"
-                GO_DOWNLOAD_URL="https://go.dev/dl/${GO_FILE_NAME}"
-
-                sudo curl -L -o "${GO_FILE_NAME}" "${GO_DOWNLOAD_URL}"
-
-                sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf "${GO_FILE_NAME}"
-
-                # Check if the Go configuration is already in the CONFIG_FILE
-                if ! grep -Fxq 'export PATH="$PATH:/usr/local/go/bin"' "$CONFIG_FILE"; then
-                    # If the configuration is not found, add Go to the current shell session
-                    {
-                        echo ''
-                        echo 'export PATH="$PATH:/usr/local/go/bin"'
-                    } >> "$CONFIG_FILE"
-                fi
-
-                # Check if the NVM configuration is already in the PROFILE_FILE
-                if ! grep -Fxq 'export PATH=$PATH:/usr/local/go/bin' "$PROFILE_FILE"; then
-                    # If the configuration is not found, add Go to the current shell session
-                    {
-                        echo ''
-                        echo 'export PATH="$PATH:/usr/local/go/bin"'
-                    } >> "$PROFILE_FILE"
-                fi
-
-                export PATH="$PATH:/usr/local/go/bin"
-
-            # If Go is installed and the current version is Go 1.22.6, install GVM.
-            else
-                # 4-2. Install GVM
-                echo "Installing GVM..."
-                source ~/.gvm/scripts/gvm
-                if ! command -v gvm &> /dev/null; then
-                    echo "GVM not found, installing..."
-
-                    # Install bison for running GVM
-                    if ! command -v bison &> /dev/null; then
-                        echo "bison not found, installing..."
-                        apt-get install bison -y
-                    else
-                        echo "bison is already installed."
-                    fi
-
-                    bash < <(curl -s -S -L https://raw.githubusercontent.com/moovweb/gvm/master/binscripts/gvm-installer)
-
-                    # Check if the GVM configuration is already in the CONFIG_FILE
-                    if ! grep -Fxq 'source ~/.gvm/scripts/gvm' "$CONFIG_FILE"; then
-
-                        # If the configuration is not found, add GVM to the current shell session
-                        {
-                            echo ''
-                            echo 'source ~/.gvm/scripts/gvm'
-                        } >> "$CONFIG_FILE"
-                    fi
-
-                    # Check if the GVM configuration is already in the PROFILE_FILE
-                    if ! grep -Fxq 'source ~/.gvm/scripts/gvm' "$PROFILE_FILE"; then
-
-                        # If the configuration is not found, add GVM to the current shell session
-                        {
-                            echo ''
-                            echo 'source ~/.gvm/scripts/gvm'
-                        } >> "$PROFILE_FILE"
-                    fi
-
-                    source ~/.gvm/scripts/gvm
-                    gvm use system --default
-                else
-                    echo "gvm is already installed."
-                fi
-
-                # 4-3. Install Go v1.22.6 using GVM
-                echo "Installing Go v1.22.6 using GVM..."
-                if ! gvm list | grep 'go1.22.6' &> /dev/null; then
-                    echo "Go v1.22.6 not found, installing..."
-                    gvm install go1.22.6
-                else
-                    echo "Go v1.22.6 is already installed."
-                fi
-
-                # 4-4. Set Go v1.22.6 as the default version
-                echo "Setting Go v1.22.6 as the default version..."
-                echo "Switching to Go v1.22.6..."
-                gvm use --default go1.22.6
-                echo "Go v1.22.6 is now set as the default version."
+            echo "Installing go1.22.6..."
+            # If Go is installed, remove it
+            if command -v go &> /dev/null; then
+                echo "Go is already installed. Removing the existing version..."
+                sudo rm -rf "$(which go)"
             fi
+
+            if ! command -v curl &> /dev/null; then
+                echo "curl not found, installing..."
+                sudo apt-get install -y curl
+            else
+                echo "curl is already installed."
+            fi
+
+            GO_FILE_NAME="go1.22.6.linux-${ARCH}.tar.gz"
+            GO_DOWNLOAD_URL="https://go.dev/dl/${GO_FILE_NAME}"
+
+            sudo curl -L -o "${GO_FILE_NAME}" "${GO_DOWNLOAD_URL}"
+
+            sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf "${GO_FILE_NAME}"
+
+            # Check if the Go configuration is already in the CONFIG_FILE
+            if ! grep -Fxq 'export PATH="$PATH:/usr/local/go/bin"' "$CONFIG_FILE"; then
+                # If the configuration is not found, add Go to the current shell session
+                {
+                    echo ''
+                    echo 'export PATH="$PATH:/usr/local/go/bin"'
+                } >> "$CONFIG_FILE"
+            fi
+
+            # Check if the NVM configuration is already in the PROFILE_FILE
+            if ! grep -Fxq 'export PATH=$PATH:/usr/local/go/bin' "$PROFILE_FILE"; then
+                # If the configuration is not found, add Go to the current shell session
+                {
+                    echo ''
+                    echo 'export PATH="$PATH:/usr/local/go/bin"'
+                } >> "$PROFILE_FILE"
+            fi
+
+            export PATH="$PATH:/usr/local/go/bin"
         else
             echo "Go 1.22.6 is already installed."
         fi
@@ -444,7 +328,11 @@ if ! grep -q "export PATH=\"\$HOME/.cargo/env:\$PATH\"" "$CONFIG_FILE"; then
 fi
 
 # Source shell config and set PATH temporarily for this session
-source "$CONFIG_FILE"
+if [ "$SHELL_NAME" = "zsh" ]; then
+    zsh -c source "$CONFIG_FILE"
+else
+    bash -c source "$CONFIG_FILE"
+fi
 echo $CONFIG_FILE
 
 echo "✅ Go has been installed successfully!"
@@ -459,5 +347,8 @@ echo "Installing TRH SDK CLI..."
 go install github.com/tokamak-network/trh-sdk@latest
 
 echo "✅ TRH SDK has been installed successfully!"
+
+echo "Verifying TRH SDK installation..."
+trh-sdk version
 
 echo -e "\033[1;32msource $CONFIG_FILE\033[0m to apply changes to your current shell session."

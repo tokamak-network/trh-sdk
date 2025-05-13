@@ -16,7 +16,7 @@ func main() {
 		log.Fatalf("Failed to get Go version, err: %s", err.Error())
 	}
 	if currentVersion != expectedVersion {
-		log.Fatalf("Go version does not match expected version: %s, current version: %s", expectedVersion, currentVersion)
+		log.Fatalf("The Go version does not match the expected version: %s. Current version: %s. Please switch to the correct Go version using `gvm use %s`.", expectedVersion, currentVersion, expectedVersion)
 	}
 
 	Run()

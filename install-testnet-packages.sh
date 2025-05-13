@@ -3,19 +3,18 @@
 # Use SKIP_SHEBANG_CHECK variable to prevent infinite loop if already re-run
 # Get machine architecture
 ARCH=$(uname -m)
-
-if [[ "$ARCH" == "x86_64" ]]; then
-    ARCH="amd64"
-elif [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
-    ARCH="arm64"
-elif [[ "$ARCH" == "armv6l" ]]; then
-    ARCH="armv6l"
-elif [[ "$ARCH" == "i386" ]]; then
-    ARCH="386"
-else
-    echo "$ARCH is an unsupported architecture."
-    exit 1
-fi
+case "$ARCH" in
+    x86_64)
+        ARCH="x86_64"
+        ;;
+    aarch64|arm64)
+        ARCH="arm64"
+        ;;
+    *)
+        echo "Unsupported architecture: $ARCH"
+        exit 1
+        ;;
+esac
 
 OS_TYPE=$(uname)
 

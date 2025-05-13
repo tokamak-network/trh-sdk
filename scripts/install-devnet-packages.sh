@@ -1,11 +1,4 @@
 #!/usr/bin/env bash
-# Re-run with the correct interpreter depending on the OS
-# Use SKIP_SHEBANG_CHECK variable to prevent infinite loop if already re-run
-if [ "$(uname)" = "Darwin" ] && [ -z "$SKIP_SHEBANG_CHECK" ]; then
-  export SKIP_SHEBANG_CHECK=1
-  echo "macOS detected. Switching to zsh interpreter......"
-  exec /bin/zsh "$0" "$@"
-fi
 
 TOTAL_STEPS=10
 STEP=1
@@ -13,6 +6,18 @@ SUCCESS="false"
 
 # Detect Operating System
 OS_TYPE=$(uname)
+# Re-run with the correct interpreter depending on the OS
+# Use SKIP_SHEBANG_CHECK variable to prevent infinite loop if already re-run
+if [ "$OS_TYPE" = "Darwin" ] && [ -z "$SKIP_SHEBANG_CHECK" ]; then
+  if [ -x "/bin/zsh" ]; then
+    export SKIP_SHEBANG_CHECK=1
+    echo "macOS detected. Switching to zsh interpreter......"
+    exec /bin/zsh "$0" "$@"
+  else
+    echo "Error: /bin/zsh not found. Please ensure zsh is installed." >&2
+    exit 1
+  fi
+fi
 
 # Detect Architecture
 ARCH=$(uname -m)
@@ -148,128 +153,13 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
     STEP=$((STEP + 1))
     echo
 
-    # 3. Install Xcode Command Line Tools(Inclue make)
-    echo "[$STEP/$TOTAL_STEPS] ----- Installing Xcode Command Line Tools..."
+    # 3. Install or Upgrade Xcode Command Line Tools (Include make)
+    echo "[$STEP/$TOTAL_STEPS] ----- Installing or Upgrading Xcode Command Line Tools..."
     if ! xcode-select -p &> /dev/null; then
         echo "Xcode Command Line Tools not found, installing..."
         xcode-select --install
     else
-        echo "Xcode Command Line Tools are already installed."
-    fi
-
-    STEP=$((STEP + 1))
-    echo
-
-    # 4. Install Go (v1.22.6)
-    # 4-1. Install Go (v1.22.6)
-    echo "[$STEP/$TOTAL_STEPS] ----- Installing Go (v1.22.6)..."
-    export PATH="$PATH:/usr/local/go/bin"
-
-    # Save the current Go version
-    current_go_version=$(go version 2>/dev/null)
-
-    # Check if the current version is not v1.22.6
-    if ! echo "$current_go_version" | grep 'go1.22.6' &>/dev/null ; then
-
-        # If Go is not installed, install Go 1.22.6 directly
-        if ! command -v go &> /dev/null; then
-            echo "Go not found, installing..."
-
-            if ! command -v curl &> /dev/null; then
-                echo "curl not found, installing..."
-                brew install curl
-            else
-                echo "curl is already installed."
-            fi
-
-            GO_FILE_NAME="go1.22.6.darwin-${ARCH}.tar.gz"
-            GO_DOWNLOAD_URL="https://go.dev/dl/${GO_FILE_NAME}"
-
-            sudo curl -L -o "${GO_FILE_NAME}" "${GO_DOWNLOAD_URL}"
-
-            sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf "${GO_FILE_NAME}"
-
-            # Check if the Go configuration is already in the CONFIG_FILE
-            if ! grep -Fxq 'export PATH="$PATH:/usr/local/go/bin"' "$CONFIG_FILE"; then
-                # If the configuration is not found, add Go to the current shell session
-                {
-                    echo ''
-                    echo 'export PATH="$PATH:/usr/local/go/bin"'
-                } >> "$CONFIG_FILE"
-            fi
-
-            # Check if the NVM configuration is already in the PROFILE_FILE
-            if ! grep -Fxq 'export PATH=$PATH:/usr/local/go/bin' "$PROFILE_FILE"; then
-                # If the configuration is not found, add Go to the current shell session
-                {
-                    echo ''
-                    echo 'export PATH="$PATH:/usr/local/go/bin"'
-                } >> "$PROFILE_FILE"
-            fi
-
-            export PATH="$PATH:/usr/local/go/bin"
-
-        # If Go is installed and the current version is Go 1.22.6, install GVM.
-        else
-            # 4-2. Install GVM
-            echo "[$STEP/$TOTAL_STEPS] ----- Installing GVM..."
-            source ~/.gvm/scripts/gvm
-            if ! command -v gvm &> /dev/null; then
-                echo "GVM not found, installing..."
-
-                # Install bison for running GVM
-                if ! command -v bison &> /dev/null; then
-                    echo "bison not found, installing..."
-                    apt-get install bison -y
-                else
-                    echo "bison is already installed."
-                fi
-
-                bash < <(curl -s -S -L https://raw.githubusercontent.com/moovweb/gvm/master/binscripts/gvm-installer)
-
-                # Check if the GVM configuration is already in the CONFIG_FILE
-                if ! grep -Fxq 'source ~/.gvm/scripts/gvm' "$CONFIG_FILE"; then
-
-                    # If the configuration is not found, add GVM to the current shell session
-                    {
-                        echo ''
-                        echo 'source ~/.gvm/scripts/gvm'
-                    } >> "$CONFIG_FILE"
-                fi
-
-                # Check if the GVM configuration is already in the PROFILE_FILE
-                if ! grep -Fxq 'source ~/.gvm/scripts/gvm' "$PROFILE_FILE"; then
-
-                    # If the configuration is not found, add GVM to the current shell session
-                    {
-                        echo ''
-                        echo 'source ~/.gvm/scripts/gvm'
-                    } >> "$PROFILE_FILE"
-                fi
-
-                source ~/.gvm/scripts/gvm
-                gvm use system --default
-            else
-                echo "gvm is already installed."
-            fi
-
-            # 4-3. Install Go v1.22.6 using GVM
-            echo "[$STEP/$TOTAL_STEPS] ----- Installing Go v1.22.6 using GVM..."
-            if ! gvm list | grep 'go1.22.6' &> /dev/null; then
-                echo "Go v1.22.6 not found, installing..."
-                gvm install go1.22.6
-            else
-                echo "Go v1.22.6 is already installed."
-            fi
-
-            # 4-4. Set Go v1.22.6 as the default version
-            echo "[$STEP/$TOTAL_STEPS] ----- Setting Go v1.22.6 as the default version..."
-            echo "Switching to Go v1.22.6..."
-            gvm use --default go1.22.6
-            echo "Go v1.22.6 is now set as the default version."
-        fi
-    else
-        echo "Go 1.22.6 is already installed."
+        echo "Xcode Command Line Tools are already installed. Checking for updates..."
     fi
 
     STEP=$((STEP + 1))
@@ -498,121 +388,6 @@ elif [[ "$OS_TYPE" == "linux" ]]; then
             sudo apt-get install -y build-essential
         else
             echo "Build-essential is already installed."
-        fi
-
-        STEP=$((STEP + 1))
-        echo
-
-        # 4. Install Go (v1.22.6)
-        # 4-1. Install Go (v1.22.6)
-        echo "[$STEP/$TOTAL_STEPS] ----- Installing Go (v1.22.6)..."
-        export PATH="$PATH:/usr/local/go/bin"
-
-        # Save the current Go version
-        current_go_version=$(go version 2>/dev/null)
-
-        # Check if the current version is not v1.22.6
-        if ! echo "$current_go_version" | grep 'go1.22.6' &>/dev/null ; then
-
-            # If Go is not installed, install Go 1.22.6 directly
-            if ! command -v go &> /dev/null; then
-                echo "Go not found, installing..."
-
-                if ! command -v curl &> /dev/null; then
-                    echo "curl not found, installing..."
-                    sudo apt-get install -y curl
-                else
-                    echo "curl is already installed."
-                fi
-
-                GO_FILE_NAME="go1.22.6.linux-${ARCH}.tar.gz"
-                GO_DOWNLOAD_URL="https://go.dev/dl/${GO_FILE_NAME}"
-
-                sudo curl -L -o "${GO_FILE_NAME}" "${GO_DOWNLOAD_URL}"
-
-                sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf "${GO_FILE_NAME}"
-
-                # Check if the Go configuration is already in the CONFIG_FILE
-                if ! grep -Fxq 'export PATH="$PATH:/usr/local/go/bin"' "$CONFIG_FILE"; then
-                    # If the configuration is not found, add Go to the current shell session
-                    {
-                        echo ''
-                        echo 'export PATH="$PATH:/usr/local/go/bin"'
-                    } >> "$CONFIG_FILE"
-                fi
-
-                # Check if the NVM configuration is already in the PROFILE_FILE
-                if ! grep -Fxq 'export PATH=$PATH:/usr/local/go/bin' "$PROFILE_FILE"; then
-                    # If the configuration is not found, add Go to the current shell session
-                    {
-                        echo ''
-                        echo 'export PATH="$PATH:/usr/local/go/bin"'
-                    } >> "$PROFILE_FILE"
-                fi
-
-                export PATH="$PATH:/usr/local/go/bin"
-
-            # If Go is installed and the current version is Go 1.22.6, install GVM.
-            else
-                # 4-2. Install GVM
-                echo "[$STEP/$TOTAL_STEPS] ----- Installing GVM..."
-                source ~/.gvm/scripts/gvm
-                if ! command -v gvm &> /dev/null; then
-                    echo "GVM not found, installing..."
-
-                    # Install bison for running GVM
-                    if ! command -v bison &> /dev/null; then
-                        echo "bison not found, installing..."
-                        apt-get install bison -y
-                    else
-                        echo "bison is already installed."
-                    fi
-
-                    bash < <(curl -s -S -L https://raw.githubusercontent.com/moovweb/gvm/master/binscripts/gvm-installer)
-
-                    # Check if the GVM configuration is already in the CONFIG_FILE
-                    if ! grep -Fxq 'source ~/.gvm/scripts/gvm' "$CONFIG_FILE"; then
-
-                        # If the configuration is not found, add GVM to the current shell session
-                        {
-                            echo ''
-                            echo 'source ~/.gvm/scripts/gvm'
-                        } >> "$CONFIG_FILE"
-                    fi
-
-                    # Check if the GVM configuration is already in the PROFILE_FILE
-                    if ! grep -Fxq 'source ~/.gvm/scripts/gvm' "$PROFILE_FILE"; then
-
-                        # If the configuration is not found, add GVM to the current shell session
-                        {
-                            echo ''
-                            echo 'source ~/.gvm/scripts/gvm'
-                        } >> "$PROFILE_FILE"
-                    fi
-
-                    source ~/.gvm/scripts/gvm
-                    gvm use system --default
-                else
-                    echo "gvm is already installed."
-                fi
-
-                # 4-3. Install Go v1.22.6 using GVM
-                echo "[$STEP/$TOTAL_STEPS] ----- Installing Go v1.22.6 using GVM..."
-                if ! gvm list | grep 'go1.22.6' &> /dev/null; then
-                    echo "Go v1.22.6 not found, installing..."
-                    gvm install go1.22.6
-                else
-                    echo "Go v1.22.6 is already installed."
-                fi
-
-                # 4-4. Set Go v1.22.6 as the default version
-                echo "[$STEP/$TOTAL_STEPS] ----- Setting Go v1.22.6 as the default version..."
-                echo "Switching to Go v1.22.6..."
-                gvm use --default go1.22.6
-                echo "Go v1.22.6 is now set as the default version."
-            fi
-        else
-            echo "Go 1.22.6 is already installed."
         fi
 
         STEP=$((STEP + 1))
@@ -847,7 +622,14 @@ function check_command_version {
     VERSION_CMD=$3
 
     if command -v "$CMD" &> /dev/null; then
-        CURRENT_VERSION=$($VERSION_CMD 2>&1 | head -n 1)
+
+        # If zsh, enable word splitting option locally.
+        if [[ "$OS_TYPE" == "darwin" ]]; then
+            setopt localoptions sh_word_split
+        fi
+
+        CURRENT_VERSION=$(eval $VERSION_CMD 2>&1 | head -n 1)
+
         if [[ -z "$EXPECTED_VERSION" ]]; then
             if [[ "$CMD" == "forge" || "$CMD" == "cast" || "$CMD" == "anvil" ]]; then
                 echo "✅ foundry - $CMD is installed. Current version: $CURRENT_VERSION"
@@ -867,6 +649,13 @@ function check_command_version {
         fi
     fi
 }
+
+if [[ "$SUCCESS" == "true" ]]; then
+    echo "All required tools are installed and ready to use!"
+else
+    echo "Some tools failed to install. Please check the output above for details."
+    exit 1
+fi
 
 # Final step: Check installation and versions
 echo "Verifying installation and versions..."

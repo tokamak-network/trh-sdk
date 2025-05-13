@@ -10,6 +10,47 @@ type K8sConfig struct {
 	Namespace string `json:"namespace"`
 }
 
+type ChainConfiguration struct {
+	BatchSubmissionFrequency uint64 `json:"batch_submission_frequency"` // = l1BlockTime * maxChannelDuration
+	ChallengePeriod          uint64 `json:"challenge_period"`           // = finalizationPeriodSeconds
+	OutputRootFrequency      uint64 `json:"output_root_frequency"`      // = l2BlockTime * l2OutputOracleSubmissionInterval
+	L2BlockTime              uint64 `json:"l2_block_time"`
+	L1BlockTime              uint64 `json:"l1_block_time"`
+}
+
+func (c *ChainConfiguration) GetL2OutputOracleSubmissionInterval() uint64 {
+	if c.L2BlockTime == 0 {
+		panic("L2BlockTime is not set")
+	}
+	return c.OutputRootFrequency / c.L2BlockTime
+}
+
+func (c *ChainConfiguration) GetMaxChannelDuration() uint64 {
+	if c.L1BlockTime == 0 {
+		panic("L1BlockTime is not set")
+	}
+	return c.BatchSubmissionFrequency / c.L1BlockTime
+}
+
+func (c *ChainConfiguration) GetFinalizationPeriodSeconds() uint64 {
+	if c.ChallengePeriod == 0 {
+		panic("ChallengePeriod is not set")
+	}
+	return c.ChallengePeriod
+}
+
+type DeployContractStatus int
+
+const (
+	DeployContractStatusInProgress = iota + 1
+	DeployContractStatusCompleted
+)
+
+type DeployContractState struct {
+	Status DeployContractStatus `json:"status"`
+	Error  string               `json:"error,omitempty"`
+}
+
 type Config struct {
 	AdminPrivateKey      string `json:"admin_private_key"`
 	SequencerPrivateKey  string `json:"sequencer_private_key"`
@@ -38,6 +79,11 @@ type Config struct {
 	K8s *K8sConfig `json:"k8s"`
 
 	ChainName string `json:"chain_name"`
+
+	ChainConfiguration *ChainConfiguration `json:"chain_configuration"`
+
+	// Deployments
+	DeployContractState *DeployContractState `json:"deploy_contract_state"`
 }
 
 const ConfigFileName = "settings.json"

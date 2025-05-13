@@ -22,6 +22,9 @@ type K8sNamespaceStatus struct {
 }
 
 func (t *ThanosStack) tryToDeleteK8sNamespace(ctx context.Context, namespace string) error {
+	if namespace == "" {
+		return nil
+	}
 	output, err := utils.ExecuteCommand("kubectl", "get", "namespace", namespace, "-o", "json")
 	if err != nil {
 		fmt.Println("Error getting namespace status:", err)
