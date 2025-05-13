@@ -43,16 +43,10 @@ func CheckK8sReady(namespace string) (bool, error) {
 	maxRetries := 10
 	retryInterval := 20 * time.Second
 
-	var isPVCReady, isAPiReady bool
+	var isAPiReady bool
 	var err error
 
 	for i := 0; i < maxRetries; i++ {
-		isPVCReady, err = CheckPVCStatus(namespace)
-		if err != nil {
-			fmt.Printf("PVC status check failed (attempt %d/%d): %v\n", i+1, maxRetries, err)
-			time.Sleep(retryInterval)
-			continue
-		}
 
 		isAPiReady, err = CheckK8sApiHealth(namespace)
 		if err != nil {
@@ -61,7 +55,7 @@ func CheckK8sReady(namespace string) (bool, error) {
 			continue
 		}
 
-		if isPVCReady && isAPiReady {
+		if isAPiReady {
 			return true, nil
 		}
 
@@ -78,13 +72,4 @@ func CheckK8sApiHealth(namespace string) (bool, error) {
 		return false, err
 	}
 	return apiHealth == "ok", nil
-}
-
-func CheckPVCStatus(namespace string) (bool, error) {
-	pvcStatus, err := ExecuteCommand("bash", "-c", fmt.Sprintf("if kubectl get pvc -n %s -o jsonpath='{range .items[*]}{.status.phase}{\"\\n\"}{end}' | grep -qv Bound; then echo 'There are unbound PVCs'; else echo 'Bound'; fi", namespace))
-	fmt.Println("PVC status:", pvcStatus)
-	if err != nil {
-		return false, err
-	}
-	return pvcStatus == "Bound", nil
 }
