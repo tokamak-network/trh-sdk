@@ -295,7 +295,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployConfig *types.C
 	// If --no-candidate flag is NOT provided, register the candidate
 	if t.registerCandidate {
 		fmt.Println("🔍 Verifying and registering candidate...")
-		verifyRegisterError := t.verifyRegisterCandidates(ctx, cfg, registerCandidate)
+		verifyRegisterError := t.verifyRegisterCandidates(ctx, deployConfig, registerCandidate)
 		if verifyRegisterError != nil {
 			return fmt.Errorf("candidate registration failed: %v", verifyRegisterError)
 		}
