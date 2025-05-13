@@ -555,10 +555,10 @@ elif [[ "$OS_TYPE" == "Linux" ]]; then
         fi
 
         # Download AWS CLI v2 installer based on architecture
-        if [ "$ARCH" = "x86_64" ]; then
-            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-        elif [ "$ARCH" = "arm64" ]; then
+        if [ "$ARCH" = "arm64" ]; then
             curl "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o "awscliv2.zip"
+        elif [ "$ARCH" = "amd64" ]; then
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
         else
             echo "❌ Unsupported architecture: $ARCH"
             exit 1
