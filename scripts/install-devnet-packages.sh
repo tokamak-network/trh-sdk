@@ -165,7 +165,7 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
     STEP=$((STEP + 1))
     echo
 
-    # 5. Install Node.js (v20.16.0)
+    # 4. Install Node.js (v20.16.0)
     echo "[$STEP/$TOTAL_STEPS] ----- Installing Node.js (v20.16.0)..."
 
     # Save the current Node.js version
@@ -174,7 +174,7 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
     # Check if the current version is not v20.16.0
     if [[ "$current_node_version" != "v20.16.0" ]]; then
 
-        # 5-1. Install NVM
+        # 4-1. Install NVM
         echo "[$STEP/$TOTAL_STEPS] ----- Installing NVM..."
 
         # Create NVM directory if it doesn't exist
@@ -218,7 +218,7 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
             echo "NVM is already installed."
         fi
 
-        # 5-2. Install Node.js v20.16.0 using NVM
+        # 4-2. Install Node.js v20.16.0 using NVM
         echo "[$STEP/$TOTAL_STEPS] ----- Installing Node.js v20.16.0 using NVM..."
         if ! nvm ls | grep 'v20.16.0' | grep -v 'default' &> /dev/null; then
             echo "Node.js v20.16.0 not found, installing..."
@@ -227,7 +227,7 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
             echo "Node.js v20.16.0 is already installed."
         fi
 
-        # 5-3. Set Node.js v20.16.0 as the default version
+        # 4-3. Set Node.js v20.16.0 as the default version
         echo "[$STEP/$TOTAL_STEPS] ----- Setting Node.js v20.16.0 as the default version..."
         echo "Switching to Node.js v20.16.0..."
         nvm use v20.16.0
@@ -240,7 +240,7 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
     STEP=$((STEP + 1))
     echo
 
-    # 6. Install Pnpm
+    # 5. Install Pnpm
     echo "[$STEP/$TOTAL_STEPS] ----- Installing Pnpm..."
     if ! command -v pnpm &> /dev/null; then
         echo "pnpm not found, installing..."
@@ -252,7 +252,7 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
     STEP=$((STEP + 1))
     echo
 
-    # 8. Install and Run Docker
+    # 6. Install and Run Docker
     echo "[$STEP/$TOTAL_STEPS] ----- Installing Docker Engine..."
     if ! command -v docker &> /dev/null; then
         echo "Docker not found, installing..."
@@ -277,50 +277,14 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
     STEP=$((STEP + 1))
     echo
 
-    # 7. Install Cargo (v1.83.0)
-    echo "[$STEP/$TOTAL_STEPS] ----- Installing Cargo (v1.83.0)..."
-    source "$HOME/.cargo/env"
-    if ! cargo --version | grep -q "1.83.0" &> /dev/null; then
-        echo "Cargo 1.83.0 not found, installing..."
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-
-        # Check if the Cargo configuration is already in the CONFIG_FILE
-        if ! grep -Fq '. "$HOME/.cargo/env"' "$CONFIG_FILE"; then
-
-            # If the configuration is not found, add Cargo to the current shell session
-            {
-                echo ''
-                echo '. "$HOME/.cargo/env"'
-            } >> "$CONFIG_FILE"
-        fi
-
-        # Check if the Cargo configuration is already in the PROFILE_FILE
-        if ! grep -Fq '. "$HOME/.cargo/env"' "$PROFILE_FILE"; then
-            # If the configuration is not found, add Cargo to the current shell session
-            {
-                echo ''
-                echo '. "$HOME/.cargo/env"'
-            } >> "$PROFILE_FILE"
-        fi
-
-        source "$HOME/.cargo/env"
-        rustup install 1.83.0
-        rustup default 1.83.0
-    else
-        echo "Cargo 1.83.0 is already installed."
-    fi
-
-    STEP=$((STEP + 1))
-    echo
-
-    # 9. Install Foundry
+    # 7. Install Foundry
     echo "[$STEP/$TOTAL_STEPS] ----- Installing Foundry..."
     echo "Installing Foundry..."
 
     # Check if jq is installed
     if ! command -v jq &> /dev/null; then
         echo "jq not found, installing..."
-        sudo apt-get install -y jq
+        sudo brew install -y jq
     else
         echo "✅ jq is already installed"
     fi
@@ -333,9 +297,17 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
         echo "Installing/updating Foundry..."
         if ! command -v curl &> /dev/null; then
             echo "curl not found, installing..."
-            sudo apt-get install -y curl
+            sudo brew install -y curl
+            source $CONFIG_FILE
         fi
-        if curl -L https://foundry.paradigm.xyz | bash && curl -fsSL https://raw.githubusercontent.com/tokamak-network/trh-sdk/main/scripts/install-foundry.sh | bash; then \
+        # Install foundryup if not already installed
+        if ! command -v foundryup &> /dev/null; then
+            echo "Installing foundryup..."
+            curl -L https://foundry.paradigm.xyz | bash
+            source $CONFIG_FILE 
+        fi
+        # Install stable version of Foundry
+        if foundryup --install stable; then
             echo "✅ Foundry has been installed successfully!"
             forge --version
             cast --version 
@@ -502,43 +474,7 @@ elif [[ "$OS_TYPE" == "linux" ]]; then
         STEP=$((STEP + 1))
         echo
 
-        # 7. Install Cargo (v1.83.0)
-        echo "[$STEP/$TOTAL_STEPS] ----- Installing Cargo (v1.83.0)..."
-        source "$HOME/.cargo/env"
-        if ! cargo --version | grep -q "1.83.0" &> /dev/null; then
-            echo "Cargo 1.83.0 not found, installing..."
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-
-            # Check if the Cargo configuration is already in the CONFIG_FILE
-            if ! grep -Fq '. "$HOME/.cargo/env"' "$CONFIG_FILE"; then
-
-                # If the configuration is not found, add Cargo to the current shell session
-                {
-                    echo ''
-                    echo '. "$HOME/.cargo/env"'
-                } >> "$CONFIG_FILE"
-            fi
-
-            # Check if the Cargo configuration is already in the PROFILE_FILE
-            if ! grep -Fq '. "$HOME/.cargo/env"' "$PROFILE_FILE"; then
-                # If the configuration is not found, add Cargo to the current shell session
-                {
-                    echo ''
-                    echo '. "$HOME/.cargo/env"'
-                } >> "$PROFILE_FILE"
-            fi
-
-            source "$HOME/.cargo/env"
-            rustup install 1.83.0
-            rustup default 1.83.0
-        else
-            echo "Cargo 1.83.0 is already installed."
-        fi
-
-        STEP=$((STEP + 1))
-        echo
-
-        # 9. Install Foundry
+        # 7. Install Foundry
         echo "[$STEP/$TOTAL_STEPS] ----- Installing Foundry..."
         echo "Installing Foundry..."
 
@@ -560,7 +496,14 @@ elif [[ "$OS_TYPE" == "linux" ]]; then
                 echo "curl not found, installing..."
                 sudo apt-get install -y curl
             fi
-            if curl -L https://foundry.paradigm.xyz | bash && curl -fsSL https://raw.githubusercontent.com/tokamak-network/trh-sdk/main/scripts/install-foundry.sh | bash; then \
+            # Install foundryup if not already installed
+            if ! command -v foundryup &> /dev/null; then
+                echo "Installing foundryup..."
+                curl -L https://foundry.paradigm.xyz | bash
+                source $CONFIG_FILE 
+            fi
+            # Install stable version of Foundry
+            if foundryup --install stable; then
                 echo "✅ Foundry has been installed successfully!"
                 forge --version
                 cast --version 
@@ -688,9 +631,6 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
     # Check Pnpm
     check_command_version pnpm "" "pnpm --version"
 
-    # Check Cargo (Expect version 1.83.0)
-    check_command_version cargo "1.83.0" "cargo --version"
-
     # Check Docker
     check_command_version docker "" "docker --version"
 
@@ -720,9 +660,6 @@ elif [[ "$OS_TYPE" == "linux" ]]; then
 
     # Check Pnpm
     check_command_version pnpm "" "pnpm --version"
-
-    # Check Cargo (Expect version 1.83.0)
-    check_command_version cargo "1.83.0" "cargo --version"
 
     # Check Docker
     check_command_version docker "" "docker --version"

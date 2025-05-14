@@ -213,7 +213,7 @@ if [[ "$OS_TYPE" == "Darwin" ]]; then
     # Check if the current version is not v20.16.0
     if [[ "$current_node_version" != "v20.16.0" ]]; then
 
-        # 5-1. Install NVM
+        # 8-1. Install NVM
         echo "[$STEP/$TOTAL_MACOS_STEPS] ----- Installing NVM..."
 
         # Create NVM directory if it doesn't exist
@@ -257,7 +257,7 @@ if [[ "$OS_TYPE" == "Darwin" ]]; then
             echo "NVM is already installed."
         fi
 
-        # 5-2. Install Node.js v20.16.0 using NVM
+        # 8-2. Install Node.js v20.16.0 using NVM
         echo "[$STEP/$TOTAL_MACOS_STEPS] ----- Installing Node.js v20.16.0 using NVM..."
         if ! nvm ls | grep 'v20.16.0' | grep -v 'default' &> /dev/null; then
             echo "Node.js v20.16.0 not found, installing..."
@@ -266,129 +266,7 @@ if [[ "$OS_TYPE" == "Darwin" ]]; then
             echo "Node.js v20.16.0 is already installed."
         fi
 
-        # 5-3. Set Node.js v20.16.0 as the default version
-        echo "[$STEP/$TOTAL_MACOS_STEPS] ----- Setting Node.js v20.16.0 as the default version..."
-        echo "Switching to Node.js v20.16.0..."
-        nvm use v20.16.0
-        nvm alias default v20.16.0
-        echo "Node.js v20.16.0 is now set as the default version."
-    else
-        echo "Node.js is already v20.16.0."
-    fi
-
-    STEP=$((STEP + 1))
-    echo
-
-    # 6. Install Pnpm
-    echo "[$STEP/$TOTAL_MACOS_STEPS] ----- Installing Pnpm..."
-    if ! command -v pnpm &> /dev/null; then
-        echo "pnpm not found, installing..."
-        brew install pnpm
-    else
-        echo "pnpm is already installed."
-    fi
-
-    STEP=$((STEP + 1))
-    echo
-
-    # 7. Install Cargo (v1.83.0)
-    echo "[$STEP/$TOTAL_MACOS_STEPS] ----- Installing Cargo (v1.83.0)..."
-    source "$HOME/.cargo/env"
-    if ! cargo --version | grep "1.83.0" &> /dev/null; then
-        echo "Cargo 1.83.0 not found, installing..."
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-
-        # Check if the Cargo configuration is already in the CONFIG_FILE
-        if ! grep -Fq '. "$HOME/.cargo/env"' "$CONFIG_FILE"; then
-
-            # If the configuration is not found, add Cargo to the current shell session
-            {
-                echo ''
-                echo '. "$HOME/.cargo/env"'
-            } >> "$CONFIG_FILE"
-        fi
-
-        # Check if the Cargo configuration is already in the PROFILE_FILE
-        if ! grep -Fq '. "$HOME/.cargo/env"' "$PROFILE_FILE"; then
-            # If the configuration is not found, add Cargo to the current shell session
-            {
-                echo ''
-                echo '. "$HOME/.cargo/env"'
-            } >> "$PROFILE_FILE"
-        fi
-
-        source "$HOME/.cargo/env"
-        rustup install 1.83.0
-        rustup default 1.83.0
-    else
-        echo "Cargo 1.83.0 is already installed."
-    fi
-
-    STEP=$((STEP + 1))
-    echo
-
-    # 8. Install Node.js
-    echo "[$STEP/$TOTAL_MACOS_STEPS] ----- Installing Node.js (v20.16.0)..."
-    # Save the current Node.js version
-    current_node_version=$(node -v 2>/dev/null)
-
-    # Check if the current version is not v20.16.0
-    if [[ "$current_node_version" != "v20.16.0" ]]; then
-
-        # 5-1. Install NVM
-        echo "[$STEP/$TOTAL_MACOS_STEPS] ----- Installing NVM..."
-
-        # Create NVM directory if it doesn't exist
-        export NVM_DIR="$HOME/.nvm"
-        mkdir -p "$NVM_DIR"
-        HOMEBREW_PREFIX=$(brew --prefix)
-        [ -s "$HOMEBREW_PREFIX/opt/nvm/nvm.sh" ] && \. "$HOMEBREW_PREFIX/opt/nvm/nvm.sh"
-        [ -s "$HOMEBREW_PREFIX/opt/nvm/etc/bash_completion.d/nvm" ] && \. "$HOMEBREW_PREFIX/opt/nvm/etc/bash_completion.d/nvm"
-
-        if ! command -v nvm &> /dev/null; then
-            echo "NVM not found, installing..."
-            brew install nvm
-
-            # Check if the NVM configuration is already in the CONFIG_FILE
-            if ! grep -Fxq 'export NVM_DIR="$HOME/.nvm"' "$CONFIG_FILE"; then
-
-                # If the configuration is not found, add NVM to the current shell session
-                {
-                    echo ''
-                    echo 'export NVM_DIR="$HOME/.nvm"'
-                    echo "[ -s \"$HOMEBREW_PREFIX/opt/nvm/nvm.sh\" ] && \. \"$HOMEBREW_PREFIX/opt/nvm/nvm.sh\""
-                    echo "[ -s \"$HOMEBREW_PREFIX/opt/nvm/etc/bash_completion.d/nvm\" ] && \. \"$HOMEBREW_PREFIX/opt/nvm/etc/bash_completion.d/nvm\""
-                } >> "$CONFIG_FILE"
-            fi
-
-            # Check if the NVM configuration is already in the PROFILE_FILE
-            if ! grep -Fxq 'export NVM_DIR="$HOME/.nvm"' "$PROFILE_FILE"; then
-
-                # If the configuration is not found, add NVM to the current shell session
-                {
-                    echo ''
-                    echo 'export NVM_DIR="$HOME/.nvm"'
-                    echo "[ -s \"$HOMEBREW_PREFIX/opt/nvm/nvm.sh\" ] && \. \"$HOMEBREW_PREFIX/opt/nvm/nvm.sh\""
-                    echo "[ -s \"$HOMEBREW_PREFIX/opt/nvm/etc/bash_completion.d/nvm\" ] && \. \"$HOMEBREW_PREFIX/opt/nvm/etc/bash_completion.d/nvm\""
-                } >> "$PROFILE_FILE"
-            fi
-
-            [ -s "$HOMEBREW_PREFIX/opt/nvm/nvm.sh" ] && \. "$HOMEBREW_PREFIX/opt/nvm/nvm.sh"
-            [ -s "$HOMEBREW_PREFIX/opt/nvm/etc/bash_completion.d/nvm" ] && \. "$HOMEBREW_PREFIX/opt/nvm/etc/bash_completion.d/nvm"
-        else
-            echo "NVM is already installed."
-        fi
-
-        # 5-2. Install Node.js v20.16.0 using NVM
-        echo "[$STEP/$TOTAL_MACOS_STEPS] ----- Installing Node.js v20.16.0 using NVM..."
-        if ! nvm ls | grep 'v20.16.0' | grep -v 'default' &> /dev/null; then
-            echo "Node.js v20.16.0 not found, installing..."
-            nvm install v20.16.0
-        else
-            echo "Node.js v20.16.0 is already installed."
-        fi
-
-        # 5-3. Set Node.js v20.16.0 as the default version
+        # 8-3. Set Node.js v20.16.0 as the default version
         echo "[$STEP/$TOTAL_MACOS_STEPS] ----- Setting Node.js v20.16.0 as the default version..."
         echo "Switching to Node.js v20.16.0..."
         nvm use v20.16.0
@@ -413,51 +291,18 @@ if [[ "$OS_TYPE" == "Darwin" ]]; then
     STEP=$((STEP + 1))
     echo
 
-    # 10. Install Cargo (v1.83.0)
-    echo "[$STEP/$TOTAL_MACOS_STEPS] ----- Installing Cargo (v1.83.0)..."
-    source "$HOME/.cargo/env"
-    if ! cargo --version | grep "1.83.0" &> /dev/null; then
-        echo "Cargo 1.83.0 not found, installing..."
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-
-        # Check if the Cargo configuration is already in the CONFIG_FILE
-        if ! grep -Fq '. "$HOME/.cargo/env"' "$CONFIG_FILE"; then
-
-            # If the configuration is not found, add Cargo to the current shell session
-            {
-                echo ''
-                echo '. "$HOME/.cargo/env"'
-            } >> "$CONFIG_FILE"
-        fi
-
-        # Check if the Cargo configuration is already in the PROFILE_FILE
-        if ! grep -Fq '. "$HOME/.cargo/env"' "$PROFILE_FILE"; then
-            # If the configuration is not found, add Cargo to the current shell session
-            {
-                echo ''
-                echo '. "$HOME/.cargo/env"'
-            } >> "$PROFILE_FILE"
-        fi
-
-        source "$HOME/.cargo/env"
-        rustup install 1.83.0
-        rustup default 1.83.0
-    else
-        echo "Cargo 1.83.0 is already installed."
-    fi
-
-    STEP=$((STEP + 1))
-    echo
-    # 11. Install Foundry
-    echo "[$STEP/$TOTAL_MACOS_STEPS] ----- Installing Foundry..."
+    # 10. Install Foundry
+    echo "[$STEP/$TOTAL_STEPS] ----- Installing Foundry..."
     echo "Installing Foundry..."
+
+    # Check if jq is installed
     if ! command -v jq &> /dev/null; then
         echo "jq not found, installing..."
-        brew install jq
+        sudo brew install -y jq
     else
-        echo "jq is already installed."
+        echo "✅ jq is already installed"
     fi
-  
+
     # Check if Foundry is already installed with expected version
     if forge --version &> /dev/null && cast --version &> /dev/null; then
         echo "✅ Foundry is already installed"
@@ -466,9 +311,17 @@ if [[ "$OS_TYPE" == "Darwin" ]]; then
         echo "Installing/updating Foundry..."
         if ! command -v curl &> /dev/null; then
             echo "curl not found, installing..."
-            brew install curl
+            sudo brew install -y curl
+            source $CONFIG_FILE
         fi
-        if curl -L https://foundry.paradigm.xyz | bash && curl -fsSL https://raw.githubusercontent.com/tokamak-network/trh-sdk/main/scripts/install-foundry.sh | bash; then \
+        # Install foundryup if not already installed
+        if ! command -v foundryup &> /dev/null; then
+            echo "Installing foundryup..."
+            curl -L https://foundry.paradigm.xyz | bash
+            source $CONFIG_FILE 
+        fi
+        # Install stable version of Foundry
+        if foundryup --install stable; then
             echo "✅ Foundry has been installed successfully!"
             forge --version
             cast --version 
@@ -677,7 +530,7 @@ elif [[ "$OS_TYPE" == "Linux" ]]; then
     # Check if the current version is not v20.16.0
     if [[ "$current_node_version" != "v20.16.0" ]]; then
 
-        # 5-1. Install NVM
+        # 6-1. Install NVM
         echo "[$STEP/$TOTAL_LINUX_STEPS] ----- Installing NVM..."
 
         # Create NVM directory if it doesn't exist
@@ -720,7 +573,7 @@ elif [[ "$OS_TYPE" == "Linux" ]]; then
             echo "NVM is already installed."
         fi
 
-        # 5-2. Install Node.js v20.16.0 using NVM
+        # 6-2. Install Node.js v20.16.0 using NVM
         echo "[$STEP/$TOTAL_LINUX_STEPS] ----- Installing Node.js v20.16.0 using NVM..."
         if ! nvm ls | grep 'v20.16.0' | grep -v 'default' &> /dev/null; then
             echo "Node.js v20.16.0 not found, installing..."
@@ -729,7 +582,7 @@ elif [[ "$OS_TYPE" == "Linux" ]]; then
             echo "Node.js v20.16.0 is already installed."
         fi
 
-        # 5-3. Set Node.js v20.16.0 as the default version
+        # 6-3. Set Node.js v20.16.0 as the default version
         echo "[$STEP/$TOTAL_LINUX_STEPS] ----- Setting Node.js v20.16.0 as the default version..."
         echo "Switching to Node.js v20.16.0..."
         nvm use v20.16.0
@@ -777,44 +630,8 @@ elif [[ "$OS_TYPE" == "Linux" ]]; then
     STEP=$((STEP + 1))
     echo
 
-    # 7. Install Cargo (v1.83.0)
-    echo "[$STEP/$TOTAL_LINUX_STEPS] ----- Installing Cargo (v1.83.0)..."
-    source "$HOME/.cargo/env"
-    if ! cargo --version | grep -q "1.83.0" &> /dev/null; then
-        echo "Cargo 1.83.0 not found, installing..."
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-
-        # Check if the Cargo configuration is already in the CONFIG_FILE
-        if ! grep -Fq '. "$HOME/.cargo/env"' "$CONFIG_FILE"; then
-
-            # If the configuration is not found, add Cargo to the current shell session
-            {
-                echo ''
-                echo '. "$HOME/.cargo/env"'
-            } >> "$CONFIG_FILE"
-        fi
-
-        # Check if the Cargo configuration is already in the PROFILE_FILE
-        if ! grep -Fq '. "$HOME/.cargo/env"' "$PROFILE_FILE"; then
-            # If the configuration is not found, add Cargo to the current shell session
-            {
-                echo ''
-                echo '. "$HOME/.cargo/env"'
-            } >> "$PROFILE_FILE"
-        fi
-
-        source "$HOME/.cargo/env"
-        rustup install 1.83.0
-        rustup default 1.83.0
-    else
-        echo "Cargo 1.83.0 is already installed."
-    fi
-
-    STEP=$((STEP + 1))
-    echo
-
-    # 9. Install Foundry
-    echo "[$STEP/$TOTAL_LINUX_STEPS] ----- Installing Foundry..."
+    # 8. Install Foundry
+    echo "[$STEP/$TOTAL_STEPS] ----- Installing Foundry..."
     echo "Installing Foundry..."
 
     # Check if jq is installed
@@ -835,7 +652,14 @@ elif [[ "$OS_TYPE" == "Linux" ]]; then
             echo "curl not found, installing..."
             sudo apt-get install -y curl
         fi
-        if curl -L https://foundry.paradigm.xyz | bash && curl -fsSL https://raw.githubusercontent.com/tokamak-network/trh-sdk/main/scripts/install-foundry.sh | bash; then \
+        # Install foundryup if not already installed
+        if ! command -v foundryup &> /dev/null; then
+            echo "Installing foundryup..."
+            curl -L https://foundry.paradigm.xyz | bash
+            source $CONFIG_FILE 
+        fi
+        # Install stable version of Foundry
+        if foundryup --install stable; then
             echo "✅ Foundry has been installed successfully!"
             forge --version
             cast --version 
@@ -919,9 +743,6 @@ if [[ "$OS_TYPE" == "Darwin" ]]; then
     # Check Pnpm
     check_command_version pnpm "" "pnpm --version"
 
-    # Check Cargo (Expect version 1.83.0)
-    check_command_version cargo "1.83.0" "cargo --version"
-
     # Check Foundry
     check_command_version forge "" "forge --version"
     check_command_version cast "" "cast --version"
@@ -952,8 +773,6 @@ elif [[ "$OS_TYPE" == "Linux" ]]; then
 
     # Check Pnpm
     check_command_version pnpm "" "pnpm --version"
-
-    # Check Cargo (Expect version 1.83.0
 
     # Check Foundry
     check_command_version forge "" "forge --version"

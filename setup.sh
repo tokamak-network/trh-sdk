@@ -323,9 +323,6 @@ fi
 if ! grep -q "export PATH=\"\$HOME/.local/share/pnpm:\$PATH\"" "$CONFIG_FILE"; then
     echo "export PATH=\"\$HOME/.local/share/pnpm:\$PATH\"" >> "$CONFIG_FILE"
 fi
-if ! grep -q "export PATH=\"\$HOME/.cargo/env:\$PATH\"" "$CONFIG_FILE"; then
-    echo "export PATH=\"\$HOME/.cargo/env:\$PATH\"" >> "$CONFIG_FILE"
-fi
 
 # Source shell config and set PATH temporarily for this session
 if [ "$SHELL_NAME" = "zsh" ]; then
