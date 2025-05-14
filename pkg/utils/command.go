@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -86,14 +85,14 @@ func ExecuteCommandStream(command string, args ...string) error {
 
 // streamOutput reads and prints the command output line by line
 func streamOutput(r io.Reader) error {
-	reader := bufio.NewReader(r)
+	buf := make([]byte, 1024)
 	for {
-		line, err := reader.ReadString('\n') // or use a custom delimiter
-		if line != "" {
-			logging.Info(strings.TrimSuffix(line, "\n"))
+		n, err := r.Read(buf)
+		if n > 0 {
+			logging.Info(string(buf[:n]))
 		}
 		if err != nil {
-			if err == io.EOF || err.Error() == "EOF" {
+			if err == io.EOF {
 				return nil
 			}
 			return err
