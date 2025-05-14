@@ -24,15 +24,20 @@ TOTAL_LINUX_STEPS=9
 STEP=1
 SUCCESS="false"
 
+# Detect current shell
+CURRENT_SHELL=$(ps -p $$ -o comm=)
+
 if [ "$OS_TYPE" = "Darwin" ] && [ -z "$SKIP_SHEBANG_CHECK" ]; then
-  if [ -x "/bin/zsh" ]; then
-    export SKIP_SHEBANG_CHECK=1
-    echo "macOS detected. Switching to zsh interpreter......"
-    exec /bin/zsh "$0" "$@"
-  else
-    echo "Error: /bin/zsh not found. Please ensure zsh is installed." >&2
-    exit 1
-  fi
+    if [ "$CURRENT_SHELL" != "zsh" ]; then
+        if [ -x "/bin/zsh" ]; then
+            export SKIP_SHEBANG_CHECK=1
+            echo "macOS detected. Current shell: $CURRENT_SHELL. Switching to zsh interpreter......"
+            exec /bin/zsh "$0" "$@"
+        else
+            echo "Error: /bin/zsh not found. Please ensure zsh is installed." >&2
+            exit 1
+        fi
+    fi
 fi
 
 # Check Shell
