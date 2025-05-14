@@ -304,13 +304,13 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
         if ! command -v curl &> /dev/null; then
             echo "curl not found, installing..."
             sudo brew install -y curl
-            source $CONFIG_FILE
+            source ~/.zshrc
         fi
         # Install foundryup if not already installed
         if ! command -v foundryup &> /dev/null; then
             echo "Installing foundryup..."
             curl -L https://foundry.paradigm.xyz | bash
-            source $CONFIG_FILE 
+            source ~/.zshrc
         fi
         # Install stable version of Foundry
         if foundryup --install stable; then
@@ -506,7 +506,7 @@ elif [[ "$OS_TYPE" == "linux" ]]; then
             if ! command -v foundryup &> /dev/null; then
                 echo "Installing foundryup..."
                 curl -L https://foundry.paradigm.xyz | bash
-                source $CONFIG_FILE 
+                source ~/.bashrc
             fi
             # Install stable version of Foundry
             if foundryup --install stable; then
