@@ -202,7 +202,8 @@
         "name": "requiredThreshold",
         "type": "uint256",
         "internalType": "uint256"
-      }
+      },
+      { "name": "ownersCount", "type": "uint256", "internalType": "uint256" }
     ],
     "stateMutability": "view"
   },
@@ -249,7 +250,8 @@
         "name": "_proxyCodehash",
         "type": "bytes32",
         "internalType": "bytes32"
-      }
+      },
+      { "name": "_ownersCount", "type": "uint256", "internalType": "uint256" }
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
