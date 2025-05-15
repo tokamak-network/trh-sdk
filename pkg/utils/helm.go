@@ -73,3 +73,26 @@ func CheckK8sApiHealth(namespace string) (bool, error) {
 	}
 	return apiHealth == "ok", nil
 }
+
+func InstallHelmRelease(releaseName string, chartPath string, filePath string, namespace string) error {
+	_, err := ExecuteCommand("helm", []string{
+		"upgrade",
+		"--install",
+		releaseName,
+		chartPath,
+		"--values", filePath,
+		"--namespace", namespace,
+	}...)
+	if err != nil {
+		return fmt.Errorf("failed to install helm release: %v", err)
+	}
+	return nil
+}
+
+func UninstallHelmRelease(namespace string, releaseName string) error {
+	_, err := ExecuteCommand("helm", "uninstall", releaseName, "--namespace", namespace)
+	if err != nil {
+		return fmt.Errorf("failed to uninstall helm release: %v", err)
+	}
+	return nil
+}

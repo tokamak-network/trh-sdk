@@ -255,3 +255,46 @@ func GetServiceNames(namespace string, serviceName string) ([]string, error) {
 	}
 	return addresses, nil
 }
+
+func CheckPVCStatus(namespace string) (bool, error) {
+	cmd := []string{
+		"get", "pvc",
+		"-n", namespace,
+		"-o", "jsonpath={range .items[*]}{.status.phase}{\"\\n\"}{end}",
+	}
+	output, err := ExecuteCommand("kubectl", cmd...)
+	if err != nil {
+		return false, fmt.Errorf("failed to get PVC status: %w", err)
+	}
+	// Split output into lines and check each PVC status
+	pvcStatuses := strings.Split(strings.TrimSpace(output), "\n")
+	if len(pvcStatuses) == 0 {
+		return false, fmt.Errorf("no PVCs found in namespace %s", namespace)
+	}
+	fmt.Println("PVC statuses:", pvcStatuses)
+	for _, status := range pvcStatuses {
+		if status != "Bound" {
+			fmt.Printf("❌ Found PVC with status: %s\n", status)
+			return false, nil
+		}
+	}
+	fmt.Println("✅ All PVCs are bound")
+	return true, nil
+}
+
+func WaitPVCReady(namespace string) error {
+	maxRetries := 5
+	for i := 0; i < maxRetries; i++ {
+		isReady, err := CheckPVCStatus(namespace)
+		if err != nil {
+			fmt.Println("Error checking PVC status:", err)
+			return err
+		}
+		if isReady {
+			return nil
+		}
+		time.Sleep(10 * time.Second)
+	}
+
+	return fmt.Errorf("PVC not ready after %d attempts", maxRetries)
+}
