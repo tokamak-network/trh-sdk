@@ -716,15 +716,35 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 	}
 
 	helmReleaseName := fmt.Sprintf("%s-%d", namespace, time.Now().Unix())
-	_, err = utils.ExecuteCommand("helm", []string{
-		"install",
-		helmReleaseName,
-		fmt.Sprintf("%s/tokamak-thanos-stack/charts/thanos-stack", cwd),
-		"--values",
-		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", cwd),
-		"--namespace",
-		namespace,
-	}...)
+	chartFile := fmt.Sprintf("%s/tokamak-thanos-stack/charts/thanos-stack", cwd)
+	valueFile := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", cwd)
+
+	// Install the PVC first
+	err = utils.UpdateYAMLField(valueFile, "enable_vpc", true)
+	if err != nil {
+		fmt.Println("Error updating `enable_vpc` configuration:", err)
+		return err
+	}
+	err = utils.InstallHelmRelease(helmReleaseName, chartFile, valueFile, namespace)
+	if err != nil {
+		fmt.Println("Error installing Helm charts:", err)
+		return err
+	}
+
+	fmt.Println("Wait for the VPCs to be created...")
+	err = utils.WaitPVCReady(namespace)
+	if err != nil {
+		fmt.Println("Error waiting for PVC to be ready:", err)
+		return err
+	}
+
+	// Install the rest of the charts
+	err = utils.UpdateYAMLField(valueFile, "enable_deployment", true)
+	if err != nil {
+		fmt.Println("Error updating `enable_deployment` configuration:", err)
+	}
+
+	err = utils.InstallHelmRelease(helmReleaseName, chartFile, valueFile, namespace)
 	if err != nil {
 		fmt.Println("Error installing Helm charts:", err)
 		return err
