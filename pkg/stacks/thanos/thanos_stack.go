@@ -22,17 +22,31 @@ import (
 )
 
 type ThanosStack struct {
-	network string
-	stack   string
+	network           string
+	stack             string
+	registerCandidate bool
 
 	s3Client *s3.Client
 }
 
+type RegisterCandidateInput struct {
+	amount   float64
+	useTon   bool
+	memo     string
+	nameInfo string
+}
+
 func NewThanosStack(network string, stack string) *ThanosStack {
 	return &ThanosStack{
-		network: network,
-		stack:   stack,
+		network:           network,
+		stack:             stack,
+		registerCandidate: true,
 	}
+}
+
+func (t *ThanosStack) SetRegisterCandidate(value bool) *ThanosStack {
+	t.registerCandidate = value
+	return t
 }
 
 // ----------------------------------------- Deploy contracts command  ----------------------------- //
@@ -51,6 +65,8 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployConfig *types.C
 		err      error
 		isResume bool
 	)
+
+	var registerCandidate *RegisterCandidateInput
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -95,6 +111,13 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployConfig *types.C
 			return err
 		}
 
+		if t.registerCandidate {
+			registerCandidate, err = t.inputRegisterCandidate()
+			if err != nil {
+				return err
+			}
+		}
+
 		err = t.deployContracts(ctx, l1Client, deployConfig, true)
 		if err != nil {
 			fmt.Print("\r❌ Resume the contracts deployment failed!       \n")
@@ -106,6 +129,13 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployConfig *types.C
 		deployContractsConfig, err := t.inputDeployContracts(ctx)
 		if err != nil {
 			return err
+		}
+
+		if t.registerCandidate {
+			registerCandidate, err = t.inputRegisterCandidate()
+			if err != nil {
+				return err
+			}
 		}
 
 		l1Client, err := ethclient.DialContext(ctx, deployContractsConfig.l1RPCurl)
@@ -261,6 +291,19 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployConfig *types.C
 	fmt.Printf("\r Rollup file path: %s/tokamak-thanos/build/rollup.json\n", cwd)
 
 	fmt.Printf("✅ Configuration successfully saved to: %s/settings.json \n", cwd)
+
+	// If --no-candidate flag is NOT provided, register the candidate
+	if t.registerCandidate {
+		fmt.Println("🔍 Verifying and registering candidate...")
+		verifyRegisterError := t.verifyRegisterCandidates(ctx, deployConfig, registerCandidate)
+		if verifyRegisterError != nil {
+			return fmt.Errorf("candidate registration failed: %v", verifyRegisterError)
+		}
+		fmt.Println("✅ Candidate registration completed successfully!")
+	} else {
+		fmt.Println("ℹ️ Skipping candidate registration (--no-candidate flag provided)")
+	}
+
 	return nil
 }
 
