@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"path/filepath"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -17,6 +18,7 @@ import (
 	"github.com/tokamak-network/trh-sdk/abis"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
+	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
 // fromDeployContract flag would be true if the function would be called from the deploy contract function
@@ -243,9 +245,13 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, config *type
 	return nil
 }
 
-func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, config *types.Config) error {
+func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, config *types.Config, cwd string) error {
 	var err error
 	registerCandidate, err := t.inputRegisterCandidate()
+	if err != nil {
+		return err
+	}
+	err = t.setupSafeWallet(config, cwd)
 	if err != nil {
 		return err
 	}
@@ -254,5 +260,34 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, config *type
 		return err
 	}
 	fmt.Println("✅ Candidate registration completed successfully!")
+	return nil
+}
+
+func (t *ThanosStack) setupSafeWallet(config *types.Config, cwd string) error {
+	// 1. Set the safe wallet address
+	deployJSONPath := filepath.Join(cwd, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "deployments", fmt.Sprintf("%d-deploy.json", config.L1ChainID))
+	deployData, err := os.ReadFile(deployJSONPath)
+	if err != nil {
+		return fmt.Errorf("failed to read deployment file: %v", err)
+	}
+
+	var deployMap map[string]interface{}
+	if err := json.Unmarshal(deployData, &deployMap); err != nil {
+		return fmt.Errorf("failed to parse deployment file: %v", err)
+	}
+
+	safeWalletAddress, ok := deployMap["SystemOwnerSafe"].(string)
+	if !ok {
+		return fmt.Errorf("failed to get the value of 'SystemOwnerSafe' field in the deployment file")
+	}
+	fmt.Println("SafeWalletAddess: ", safeWalletAddress)
+	// 2. Run hardhat task
+	sdkPath := filepath.Join(cwd, "tokamak-thanos", "packages", "tokamak", "sdk")
+	cmdStr := fmt.Sprintf("cd %s && L1_URL=%s PRIVATE_KEY=%s SAFE_WALLET_ADDRESS=%s npx hardhat set-safe-wallet", sdkPath, config.L1RPCURL, config.AdminPrivateKey, safeWalletAddress)
+	if err := utils.ExecuteCommandStream("bash", "-c", cmdStr); err != nil {
+		fmt.Print("\r❌ failed to setup the Safe wallet!\n")
+		return err
+	}
+
 	return nil
 }
