@@ -320,8 +320,10 @@ if [[ "$OS_TYPE" == "Darwin" ]]; then
             brew install curl
         fi
         if curl -L https://foundry.paradigm.xyz | bash && curl -fsSL https://raw.githubusercontent.com/tokamak-network/trh-sdk/main/scripts/install-foundry.sh | bash; then
-            export PATH="$HOME/.foundry/bin:$PATH"
             echo "Foundry has been installed successfully!"
+            forge --version
+            cast --version 
+            anvil --version
         else
             echo "Foundry installation failed"
             exit 1
@@ -564,8 +566,10 @@ elif [[ "$OS_TYPE" == "Linux" ]]; then
             sudo apt-get install -y curl
         fi
         if curl -L https://foundry.paradigm.xyz | bash && curl -fsSL https://raw.githubusercontent.com/tokamak-network/trh-sdk/main/scripts/install-foundry.sh | bash; then
-            export PATH="$HOME/.foundry/bin:$PATH"
             echo "Foundry has been installed successfully!"
+            forge --version
+            cast --version 
+            anvil --version
         else
             echo "Foundry installation failed"
             exit 1
@@ -603,38 +607,6 @@ else
     exit 1
 fi
 
-# Function to check if a command exists and its version if necessary
-function check_command_version {
-    CMD=$1
-    EXPECTED_VERSION=$2
-    VERSION_CMD=$3
-
-    if command -v "$CMD" &> /dev/null; then
-        if [[ "$OS_TYPE" == "darwin" ]]; then
-            setopt localoptions sh_word_split
-        fi
-
-        CURRENT_VERSION=$(eval $VERSION_CMD 2>&1 | head -n 1)
-
-        if [[ -z "$EXPECTED_VERSION" ]]; then
-            if [[ "$CMD" == "forge" || "$CMD" == "cast" || "$CMD" == "anvil" ]]; then
-                echo "✅ foundry - $CMD is installed. Current version: $CURRENT_VERSION"
-            else
-                echo "✅ $CMD is installed. Current version: $CURRENT_VERSION"
-            fi
-        elif echo "$CURRENT_VERSION" | grep -q "$EXPECTED_VERSION"; then
-            echo "✅ $CMD is installed and matches version $EXPECTED_VERSION."
-        else
-            echo "❌ $CMD is installed but version does not match $EXPECTED_VERSION. Current version: $CURRENT_VERSION"
-        fi
-    else
-        if [[ "$CMD" == "forge" || "$CMD" == "cast" || "$CMD" == "anvil" ]]; then
-            echo "❌ foundry - $CMD is not installed."
-        else
-            echo "❌ $CMD is not installed."
-        fi
-    fi
-}
 
 if [[ "$SUCCESS" == "true" ]]; then
     echo "All required tools are installed and ready to use!"
@@ -642,40 +614,3 @@ else
     echo "Some tools failed to install. Please check the output above for details."
     exit 1
 fi
-
-
-# Check all installed tools
-if [[ "$OS_TYPE" == "Darwin" ]]; then
-    check_command_version brew "" "brew --version"
-    check_command_version git "" "git --version"
-    check_command_version make "" "make --version"
-    check_command_version xcode-select "" "xcode-select --version"
-    check_command_version node "v20.16.0" "node -v"
-    check_command_version pnpm "" "pnpm --version"
-    check_command_version cargo "1.83.0" "cargo --version"
-    check_command_version docker "" "docker --version"
-    check_command_version terraform "" "terraform --version"
-    check_command_version aws "" "aws --version"
-    check_command_version helm "" "helm version"
-    check_command_version kubectl "" "kubectl version --client"
-    check_command_version forge "" "forge --version"
-    check_command_version cast "" "cast --version"
-    check_command_version anvil "" "anvil --version"
-else
-    check_command_version git "" "git --version"
-    check_command_version make "" "make --version"
-    check_command_version gcc "" "gcc --version"
-    check_command_version node "v20.16.0" "node -v"
-    check_command_version pnpm "" "pnpm --version"
-    check_command_version cargo "1.83.0" "cargo --version"
-    check_command_version docker "" "docker --version"
-    check_command_version terraform "" "terraform --version"
-    check_command_version aws "" "aws --version"
-    check_command_version helm "" "helm version"
-    check_command_version kubectl "" "kubectl version --client"
-    check_command_version forge "" "forge --version"
-    check_command_version cast "" "cast --version"
-    check_command_version anvil "" "anvil --version"
-fi
-
-echo "🎉 All required tools are installed and ready to use!" 
