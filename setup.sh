@@ -355,6 +355,6 @@ go install github.com/tokamak-network/trh-sdk@latest
 echo "✅ TRH SDK has been installed successfully!"
 
 echo "Verifying TRH SDK installation..."
-trh-sdk version
+"$(go env GOPATH)/bin/trh-sdk" version
 
 echo -e "\033[1;32msource $CONFIG_FILE\033[0m to apply changes to your current shell session."
