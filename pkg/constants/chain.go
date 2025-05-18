@@ -1,5 +1,9 @@
 package constants
 
+const EthereumMainnetChainID uint64 = 1
+const EthereumSepoliaChainID uint64 = 11155111
+const EthereumHoleskyChainID uint64 = 17000
+
 var L1ChainConfigurations = map[uint64]struct {
 	BlockTimeInSeconds   uint64 `json:"block_time_in_seconds"`
 	L2NativeTokenAddress string `json:"native_token_address"`
@@ -17,7 +21,7 @@ var L1ChainConfigurations = map[uint64]struct {
 	ChainName     string `json:"chain_name"`
 	BlockExplorer string `json:"block_explorer"`
 }{
-	1: {
+	EthereumMainnetChainID: {
 		BlockTimeInSeconds:   12,
 		L2NativeTokenAddress: "0x2be5e8c109e2197D077D13A82dAead6a9b3433C5",
 		NativeTokenSymbol:    "ETH",
@@ -33,7 +37,7 @@ var L1ChainConfigurations = map[uint64]struct {
 		ChainName:     "Ethereum Mainnet",
 		BlockExplorer: "https://etherscan.io",
 	},
-	11155111: {
+	EthereumSepoliaChainID: {
 		BlockTimeInSeconds:   12,
 		L2NativeTokenAddress: "0xa30fe40285b8f5c0457dbc3b7c8a280373c40044",
 
@@ -50,7 +54,7 @@ var L1ChainConfigurations = map[uint64]struct {
 		ChainName:     "Ethereum Sepolia",
 		BlockExplorer: "https://sepolia.etherscan.io/",
 	},
-	17000: {
+	EthereumHoleskyChainID: {
 		BlockTimeInSeconds:   12,
 		L2NativeTokenAddress: "0xe11Ad6B761D175042340a784640d3A6e373E52A5",
 
