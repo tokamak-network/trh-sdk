@@ -83,8 +83,6 @@ elif [ "$SHELL_NAME" = "bash" ]; then
     PROFILE_FILE="$HOME/.profile"
 fi
 
-
-
 # Setup Go version
 # MacOS specific steps
 if [[ "$OS_TYPE" == "darwin" ]]; then
@@ -310,6 +308,35 @@ elif [[ "$OS_TYPE" == "linux" ]]; then
         echo "$OS_NAME is an unsupported operating system."
     fi
 fi
+
+
+# Add required PATH exports if not already present
+if ! grep -q "export PATH=\$PATH:/usr/local/go/bin" "$CONFIG_FILE"; then
+    echo "export PATH=\$PATH:/usr/local/go/bin" >> "$CONFIG_FILE"
+fi
+
+if ! grep -q "export PATH=\$HOME/go/bin:\$PATH" "$CONFIG_FILE"; then
+    echo "export PATH=\$HOME/go/bin:\$PATH" >> "$CONFIG_FILE"
+fi
+
+if ! grep -q "export PATH=\$PATH:\$HOME/.foundry/bin" "$CONFIG_FILE"; then
+    echo "export PATH=\$PATH:\$HOME/.foundry/bin" >> "$CONFIG_FILE"
+fi
+
+if ! grep -q "export PATH=\"\$HOME/.local/share/pnpm:\$PATH\"" "$CONFIG_FILE"; then
+    echo "export PATH=\"\$HOME/.local/share/pnpm:\$PATH\"" >> "$CONFIG_FILE"
+fi
+if ! grep -q "export PATH=\"\$HOME/.cargo/env:\$PATH\"" "$CONFIG_FILE"; then
+    echo "export PATH=\"\$HOME/.cargo/env:\$PATH\"" >> "$CONFIG_FILE"
+fi
+
+# Source shell config and set PATH temporarily for this session
+if [ "$SHELL_NAME" = "zsh" ]; then
+    zsh -c source "$CONFIG_FILE"
+else
+    bash -c source "$CONFIG_FILE"
+fi
+echo $CONFIG_FILE
 
 echo "✅ Go has been installed successfully!"
 # Verify Go installation
