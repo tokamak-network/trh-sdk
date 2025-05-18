@@ -1,5 +1,9 @@
 package constants
 
+const EthereumMainnetChainID uint64 = 1
+const EthereumSepoliaChainID uint64 = 11155111
+const EthereumHoleskyChainID uint64 = 17000
+
 var L1ChainConfigurations = map[uint64]struct {
 	BlockTimeInSeconds   uint64 `json:"block_time_in_seconds"`
 	L2NativeTokenAddress string `json:"native_token_address"`
@@ -22,7 +26,7 @@ var L1ChainConfigurations = map[uint64]struct {
 	MaxChannelDuration               uint64 `json:"max_channel_duration"`
 }{
 	//TODO: Updated the addresses for L1VerificationContractAddress, L2TonAddress, L2ManagerAddress and L1BridgeRegistry for different chains
-	1: {
+	EthereumMainnetChainID: {
 		BlockTimeInSeconds:   12,
 		L2NativeTokenAddress: "0x2be5e8c109e2197D077D13A82dAead6a9b3433C5",
 		NativeTokenSymbol:    "ETH",
@@ -42,7 +46,7 @@ var L1ChainConfigurations = map[uint64]struct {
 		TON:                              "0x0000000000000000000000000000000000000000",
 		MaxChannelDuration:               1500,
 	},
-	11155111: {
+	EthereumSepoliaChainID: {
 		BlockTimeInSeconds:   12,
 		L2NativeTokenAddress: "0xa30fe40285b8f5c0457dbc3b7c8a280373c40044",
 
@@ -63,7 +67,7 @@ var L1ChainConfigurations = map[uint64]struct {
 		TON:                              "0x33a66929dE3559315c928556FcFF449b3E708c62",
 		MaxChannelDuration:               120,
 	},
-	17000: {
+	EthereumHoleskyChainID: {
 		BlockTimeInSeconds:   12,
 		L2NativeTokenAddress: "0xe11Ad6B761D175042340a784640d3A6e373E52A5",
 

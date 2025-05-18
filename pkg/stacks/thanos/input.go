@@ -154,7 +154,8 @@ func (t *ThanosStack) inputDeployContracts(ctx context.Context) (*DeployContract
 
 			break
 		}
-		if l1ChainID != 1 {
+		// If we deploy the mainnet network, the challenge period must be 7 days.
+		if l1ChainID != constants.EthereumMainnetChainID {
 			for {
 				fmt.Printf("Challenge Period (Default: %d seconds): ", finalizationPeriodSeconds)
 				value, err := scanner.ScanInt()
