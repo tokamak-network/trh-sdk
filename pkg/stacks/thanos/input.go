@@ -154,24 +154,25 @@ func (t *ThanosStack) inputDeployContracts(ctx context.Context) (*DeployContract
 
 			break
 		}
+		if l1ChainID != 1 {
+			for {
+				fmt.Printf("Challenge Period (Default: %d seconds): ", finalizationPeriodSeconds)
+				value, err := scanner.ScanInt()
+				if err != nil {
+					fmt.Printf("Error while reading challenge period: %s", err)
+					continue
+				}
 
-		for {
-			fmt.Printf("Challenge Period (Default: %d seconds): ", finalizationPeriodSeconds)
-			value, err := scanner.ScanInt()
-			if err != nil {
-				fmt.Printf("Error while reading challenge period: %s", err)
-				continue
+				if value < 0 {
+					fmt.Println("Error: Challenge period must be greater than 0")
+					continue
+				} else if value > 0 {
+					challengePeriod = uint64(value)
+				} else {
+					challengePeriod = finalizationPeriodSeconds
+				}
+				break
 			}
-
-			if value < 0 {
-				fmt.Println("Error: Challenge period must be greater than 0")
-				continue
-			} else if value > 0 {
-				challengePeriod = uint64(value)
-			} else {
-				challengePeriod = finalizationPeriodSeconds
-			}
-			break
 		}
 
 	}
