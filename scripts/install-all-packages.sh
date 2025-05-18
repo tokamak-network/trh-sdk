@@ -341,15 +341,19 @@ if [[ "$OS_TYPE" == "Darwin" ]]; then
 
     # Run Docker Daemon
     echo "Starting Docker Daemon..."
-    open -a Docker
-    sudo chmod 666 /var/run/docker.sock
+    if ! docker info > /dev/null 2>&1; then
+        echo "🚫 Docker is not running. Starting Docker Desktop..."
+        open -a Docker
 
-    echo "Installing Docker Compose..."
-    if ! command -v docker-compose &> /dev/null; then
-        echo "Docker Compose not found, installing..."
-        brew install docker-compose
+        # Wait for Docker to initialize
+        while ! docker info > /dev/null 2>&1; do
+            echo "⏳ Waiting for Docker to start..."
+            sleep 2
+        done
+
+        echo "✅ Docker is now running!"
     else
-        echo "Docker Compose is already installed."
+        echo "✅ Docker is already running."
     fi
     STEP=$((STEP + 1))
     echo
@@ -592,8 +596,15 @@ elif [[ "$OS_TYPE" == "Linux" ]]; then
 
     # Run Docker Daemon
     echo "Starting Docker Daemon..."
-    sudo systemctl start docker
-    sudo chmod 666 /var/run/docker.sock
+    if ! docker info > /dev/null 2>&1; then
+        echo "Docker is not running. Starting Docker service..."
+        sudo systemctl start docker
+        # Wait for Docker to be fully started
+        sudo chmod 666 /var/run/docker.sock
+        sleep 5
+    else
+        echo "Docker is already running."
+    fi
     STEP=$((STEP + 1))
     echo
 
