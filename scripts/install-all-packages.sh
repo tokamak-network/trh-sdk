@@ -278,33 +278,6 @@ if [[ "$OS_TYPE" == "Darwin" ]]; then
     STEP=$((STEP + 1))
     echo
 
-    # 10. Install Cargo (v1.83.0)
-    echo "[$STEP/$TOTAL_MACOS_STEPS] Installing Cargo (v1.83.0)..."
-    source "$HOME/.cargo/env"
-    if ! cargo --version | grep "1.83.0" &> /dev/null; then
-        echo "Cargo 1.83.0 not found, installing..."
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-        if ! grep -Fq '. "$HOME/.cargo/env"' "$CONFIG_FILE"; then
-            {
-                echo ''
-                echo '. "$HOME/.cargo/env"'
-            } >> "$CONFIG_FILE"
-        fi
-        if ! grep -Fq '. "$HOME/.cargo/env"' "$PROFILE_FILE"; then
-            {
-                echo ''
-                echo '. "$HOME/.cargo/env"'
-            } >> "$PROFILE_FILE"
-        fi
-        source "$HOME/.cargo/env"
-        rustup install 1.83.0
-        rustup default 1.83.0
-    else
-        echo "Cargo 1.83.0 is already installed."
-    fi
-    STEP=$((STEP + 1))
-    echo
-
     # 11. Install Foundry
     echo "[$STEP/$TOTAL_MACOS_STEPS] Installing Foundry..."
     if ! command -v jq &> /dev/null; then
@@ -528,33 +501,6 @@ elif [[ "$OS_TYPE" == "Linux" ]]; then
     STEP=$((STEP + 1))
     echo
 
-    # 10. Install Cargo
-    echo "[$STEP/$TOTAL_LINUX_STEPS] Installing Cargo (v1.83.0)..."
-    source "$HOME/.cargo/env"
-    if ! cargo --version | grep -q "1.83.0" &> /dev/null; then
-        echo "Installing Cargo..."
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-        if ! grep -Fq '. "$HOME/.cargo/env"' "$CONFIG_FILE"; then
-            {
-                echo ''
-                echo '. "$HOME/.cargo/env"'
-            } >> "$CONFIG_FILE"
-        fi
-        if ! grep -Fq '. "$HOME/.cargo/env"' "$PROFILE_FILE"; then
-            {
-                echo ''
-                echo '. "$HOME/.cargo/env"'
-            } >> "$PROFILE_FILE"
-        fi
-        source "$HOME/.cargo/env"
-        rustup install 1.83.0
-        rustup default 1.83.0
-    else
-        echo "Cargo 1.83.0 is already installed."
-    fi
-    STEP=$((STEP + 1))
-    echo
-
     # 11. Install Foundry
     echo "[$STEP/$TOTAL_LINUX_STEPS] Installing Foundry..."
     if ! command -v jq &> /dev/null; then
@@ -663,7 +609,6 @@ if [[ "$OS_TYPE" == "Darwin" ]]; then
     check_command_version xcode-select "" "xcode-select --version"
     check_command_version node "v20.16.0" "node -v"
     check_command_version pnpm "" "pnpm --version"
-    check_command_version cargo "1.83.0" "cargo --version"
     check_command_version docker "" "docker --version"
     check_command_version terraform "" "terraform --version"
     check_command_version aws "" "aws --version"
@@ -678,7 +623,6 @@ else
     check_command_version gcc "" "gcc --version"
     check_command_version node "v20.16.0" "node -v"
     check_command_version pnpm "" "pnpm --version"
-    check_command_version cargo "1.83.0" "cargo --version"
     check_command_version docker "" "docker --version"
     check_command_version terraform "" "terraform --version"
     check_command_version aws "" "aws --version"
