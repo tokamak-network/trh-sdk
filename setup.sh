@@ -355,7 +355,7 @@ echo "Verifying TRH SDK installation..."
 "$(go env GOPATH)/bin/trh-sdk" version
 
 
-wget https://raw.githubusercontent.com/tokamak-network/trh-sdk/refs/heads/feat/install-dependencies-when-setup/scripts/install-all-packages.sh
+wget https://raw.githubusercontent.com/tokamak-network/trh-sdk/refs/heads/main/scripts/install-all-packages.sh
 chmod +x install-all-packages.sh
 ./install-all-packages.sh
 
