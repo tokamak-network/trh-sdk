@@ -331,12 +331,12 @@ if [[ "$OS_TYPE" == "Darwin" ]]; then
 
     # Run Docker Daemon
     echo "Starting Docker Daemon..."
-    if ! docker info > /dev/null 2>&1; then
+    if docker ps > /dev/null 2>&1; then
         echo "🚫 Docker is not running. Starting Docker Desktop..."
         open -a Docker
 
         # Wait for Docker to initialize
-        while ! docker info > /dev/null 2>&1; do
+        while ! docker ps > /dev/null 2>&1; do
             echo "⏳ Waiting for Docker to start..."
             sleep 2
         done
@@ -578,12 +578,17 @@ elif [[ "$OS_TYPE" == "Linux" ]]; then
 
     # Run Docker Daemon
     echo "Starting Docker Daemon..."
-    if ! docker info > /dev/null 2>&1; then
+    if ! docker ps > /dev/null 2>&1; then
         echo "Docker is not running. Starting Docker service..."
         sudo systemctl start docker
         # Wait for Docker to be fully started
         sudo chmod 666 /var/run/docker.sock
-        sleep 5
+        
+        # Wait for Docker to initialize
+        while ! docker ps > /dev/null 2>&1; do
+            echo "⏳ Waiting for Docker to start..."
+            sleep 2
+        done
     else
         echo "Docker is already running."
     fi
