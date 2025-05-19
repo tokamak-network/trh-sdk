@@ -319,14 +319,6 @@ if ! grep -q "export PATH=\$HOME/go/bin:\$PATH" "$CONFIG_FILE"; then
     echo "export PATH=\$HOME/go/bin:\$PATH" >> "$CONFIG_FILE"
 fi
 
-if ! grep -q "export PATH=\$PATH:\$HOME/.foundry/bin" "$CONFIG_FILE"; then
-    echo "export PATH=\$PATH:\$HOME/.foundry/bin" >> "$CONFIG_FILE"
-fi
-
-if ! grep -q "export PATH=\"\$HOME/.local/share/pnpm:\$PATH\"" "$CONFIG_FILE"; then
-    echo "export PATH=\"\$HOME/.local/share/pnpm:\$PATH\"" >> "$CONFIG_FILE"
-fi
-
 # Source shell config and set PATH temporarily for this session
 if [ "$SHELL_NAME" = "zsh" ]; then
     zsh -c source "$CONFIG_FILE"
