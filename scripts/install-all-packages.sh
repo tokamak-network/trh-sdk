@@ -20,8 +20,8 @@ fi
 
 OS_TYPE=$(uname)
 
-TOTAL_MACOS_STEPS=15
-TOTAL_LINUX_STEPS=12
+TOTAL_MACOS_STEPS=11
+TOTAL_LINUX_STEPS=11
 STEP=1
 SUCCESS="false"
 
@@ -278,32 +278,48 @@ if [[ "$OS_TYPE" == "Darwin" ]]; then
     STEP=$((STEP + 1))
     echo
 
-    # 11. Install Foundry
+    # 10. Install Foundry
     echo "[$STEP/$TOTAL_MACOS_STEPS] Installing Foundry..."
+    # Check if jq is installed
     if ! command -v jq &> /dev/null; then
         echo "jq not found, installing..."
-        brew install jq
+        sudo brew install -y jq
+    else
+        echo "✅ jq is already installed"
     fi
 
+    # Check if Foundry is already installed with expected version
     if forge --version &> /dev/null && cast --version &> /dev/null; then
-        echo "Foundry is already installed"
+        echo "✅ Foundry is already installed"
     else
+        # Install Foundry
         echo "Installing/updating Foundry..."
         if ! command -v curl &> /dev/null; then
-            brew install curl
+            echo "curl not found, installing..."
+            sudo brew install -y curl
+            source $CONFIG_FILE
         fi
-        if curl -L https://foundry.paradigm.xyz | bash && curl -fsSL https://raw.githubusercontent.com/tokamak-network/trh-sdk/main/scripts/install-foundry.sh | bash; then
-            export PATH="$HOME/.foundry/bin:$PATH"
-            echo "Foundry has been installed successfully!"
+        # Install foundryup if not already installed
+        if ! command -v foundryup &> /dev/null; then
+            echo "Installing foundryup..."
+            curl -L https://foundry.paradigm.xyz | bash
+            source $CONFIG_FILE
+        fi
+        # Install stable version of Foundry
+        if foundryup --install stable; then
+            echo "✅ Foundry has been installed successfully!"
+            forge --version
+            cast --version 
+            anvil --version
         else
-            echo "Foundry installation failed"
+            echo "❌ Foundry installation failed"
             exit 1
         fi
     fi
     STEP=$((STEP + 1))
     echo
 
-    # 12. Install Docker
+    # 11. Install Docker
     echo "[$STEP/$TOTAL_MACOS_STEPS] Installing Docker..."
     if ! command -v docker &> /dev/null; then
         echo "Docker not found, installing..."
@@ -501,30 +517,48 @@ elif [[ "$OS_TYPE" == "Linux" ]]; then
     STEP=$((STEP + 1))
     echo
 
-    # 11. Install Foundry
+    # 10. Install Foundry
     echo "[$STEP/$TOTAL_LINUX_STEPS] Installing Foundry..."
+    # Check if jq is installed
     if ! command -v jq &> /dev/null; then
+        echo "jq not found, installing..."
         sudo apt-get install -y jq
-    fi
-    if forge --version &> /dev/null && cast --version &> /dev/null; then
-        echo "Foundry is already installed"
     else
-        echo "Installing Foundry..."
+        echo "✅ jq is already installed"
+    fi
+
+    # Check if Foundry is already installed with expected version
+    if forge --version &> /dev/null && cast --version &> /dev/null; then
+        echo "✅ Foundry is already installed"
+    else
+        # Install Foundry
+        echo "Installing/updating Foundry..."
         if ! command -v curl &> /dev/null; then
+            echo "curl not found, installing..."
             sudo apt-get install -y curl
         fi
-        if curl -L https://foundry.paradigm.xyz | bash && curl -fsSL https://raw.githubusercontent.com/tokamak-network/trh-sdk/main/scripts/install-foundry.sh | bash; then
-            export PATH="$HOME/.foundry/bin:$PATH"
-            echo "Foundry has been installed successfully!"
+        # Install foundryup if not already installed
+        if ! command -v foundryup &> /dev/null; then
+            echo "Installing foundryup..."
+            curl -L https://foundry.paradigm.xyz | bash
+            source $CONFIG_FILE
+        fi
+        # Install stable version of Foundry
+        if foundryup --install stable; then
+            echo "✅ Foundry has been installed successfully!"
+            forge --version
+            cast --version 
+            anvil --version
         else
-            echo "Foundry installation failed"
+            echo "❌ Foundry installation failed"
             exit 1
         fi
     fi
+
     STEP=$((STEP + 1))
     echo
 
-    # 12. Install Docker
+    # 11. Install Docker
     echo "[$STEP/$TOTAL_LINUX_STEPS] Installing Docker..."
     if ! command -v docker &> /dev/null; then
         echo "Installing Docker..."
