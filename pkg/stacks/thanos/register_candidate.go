@@ -249,15 +249,15 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, config *type
 	var err error
 	registerCandidate, err := t.inputRegisterCandidate()
 	if err != nil {
-		return err
+		return fmt.Errorf("❌ failed to get register candidate input: %w", err)
 	}
 	err = t.setupSafeWallet(config, cwd)
 	if err != nil {
-		return err
+		return fmt.Errorf("❌ failed to set up Safe Wallet: %w", err)
 	}
 	err = t.verifyRegisterCandidates(ctx, config, registerCandidate)
 	if err != nil {
-		return err
+		return fmt.Errorf("❌ candidate verification failed: %w", err)
 	}
 	fmt.Println("✅ Candidate registration completed successfully!")
 	return nil
@@ -285,7 +285,7 @@ func (t *ThanosStack) setupSafeWallet(config *types.Config, cwd string) error {
 	sdkPath := filepath.Join(cwd, "tokamak-thanos", "packages", "tokamak", "sdk")
 	cmdStr := fmt.Sprintf("cd %s && L1_URL=%s PRIVATE_KEY=%s SAFE_WALLET_ADDRESS=%s npx hardhat set-safe-wallet", sdkPath, config.L1RPCURL, config.AdminPrivateKey, safeWalletAddress)
 	if err := utils.ExecuteCommandStream("bash", "-c", cmdStr); err != nil {
-		fmt.Print("\r❌ failed to setup the Safe wallet!\n")
+		fmt.Print("\rfailed to setup the Safe wallet!\n")
 		return err
 	}
 
