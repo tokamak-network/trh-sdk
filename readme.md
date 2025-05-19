@@ -20,14 +20,19 @@ The tokamak rollup hub SDK allows anyone to quickly deploy customized and autono
    ```
 
 3. Source the shell config
+    
+    First, get your current shell by:
+    ```bash
+    echo $SHELL
+    ```
 
-   - Mac
+   - if the output is `/bin/zsh`
 
    ```bash
    source ~/.zshrc
    ```
 
-   - Linux
+   - if the output is `/bin/bash`
 
    ```bash
    source ~/.bashrc

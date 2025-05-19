@@ -83,8 +83,6 @@ elif [ "$SHELL_NAME" = "bash" ]; then
     PROFILE_FILE="$HOME/.profile"
 fi
 
-
-
 # Setup Go version
 # MacOS specific steps
 if [[ "$OS_TYPE" == "darwin" ]]; then
@@ -312,7 +310,6 @@ elif [[ "$OS_TYPE" == "linux" ]]; then
 fi
 
 
-
 # Add required PATH exports if not already present
 if ! grep -q "export PATH=\$PATH:/usr/local/go/bin" "$CONFIG_FILE"; then
     echo "export PATH=\$PATH:/usr/local/go/bin" >> "$CONFIG_FILE"
@@ -355,6 +352,12 @@ go install github.com/tokamak-network/trh-sdk@latest
 echo "✅ TRH SDK has been installed successfully!"
 
 echo "Verifying TRH SDK installation..."
-trh-sdk version
+"$(go env GOPATH)/bin/trh-sdk" version
+
+
+wget https://raw.githubusercontent.com/tokamak-network/trh-sdk/refs/heads/feat/install-dependencies-when-setup/scripts/install-all-packages.sh
+chmod +x install-all-packages.sh
+./install-all-packages.sh
+
 
 echo -e "\033[1;32msource $CONFIG_FILE\033[0m to apply changes to your current shell session."
