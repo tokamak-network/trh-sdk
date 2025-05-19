@@ -577,21 +577,24 @@ elif [[ "$OS_TYPE" == "Linux" ]]; then
     fi
 
     # Run Docker Daemon
-    echo "Starting Docker Daemon..."
-    if ! docker ps > /dev/null 2>&1; then
-        echo "Docker is not running. Starting Docker service..."
-        sudo systemctl start docker
-        # Wait for Docker to be fully started
-        sudo chmod 666 /var/run/docker.sock
-        
-        # Wait for Docker to initialize
-        while ! docker ps > /dev/null 2>&1; do
-            echo "⏳ Waiting for Docker to start..."
-            sleep 2
-        done
-    else
-        echo "Docker is already running."
+
+    if [ -e /var/run/docker.sock ]; then
+        echo "Starting Docker Daemon..."
+        if ! docker ps > /dev/null 2>&1; then
+            echo "Docker is not running. Starting Docker service..."
+            sudo systemctl start docker
+            sudo chmod 666 /var/run/docker.sock
+
+            # Wait for Docker to initialize
+            while ! docker ps > /dev/null 2>&1; do
+                echo "⏳ Waiting for Docker to start..."
+                sleep 2
+            done
+        else
+            echo "Docker is already running."
+        fi
     fi
+    
     STEP=$((STEP + 1))
     echo
 
