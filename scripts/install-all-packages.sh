@@ -303,6 +303,7 @@ if [[ "$OS_TYPE" == "Darwin" ]]; then
         if ! command -v foundryup &> /dev/null; then
             echo "Installing foundryup..."
             curl -L https://foundry.paradigm.xyz | bash
+            export PATH="$HOME/.foundry/bin:$PATH"
             source $CONFIG_FILE
         fi
         # Install stable version of Foundry
@@ -541,6 +542,7 @@ elif [[ "$OS_TYPE" == "Linux" ]]; then
         if ! command -v foundryup &> /dev/null; then
             echo "Installing foundryup..."
             curl -L https://foundry.paradigm.xyz | bash
+            export PATH="$HOME/.foundry/bin:$PATH"
             source $CONFIG_FILE
         fi
         # Install stable version of Foundry
