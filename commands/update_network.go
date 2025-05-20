@@ -40,8 +40,8 @@ func UpdateNetwork(ctx context.Context, network, stack string, config *types.Con
 
 	switch stack {
 	case constants.ThanosStack:
-		thanosStack := thanos.NewThanosStack(network, stack)
-		return thanosStack.UpdateNetwork(ctx, config)
+		thanosStack := thanos.NewThanosStack(network, stack, config)
+		return thanosStack.UpdateNetwork(ctx)
 	}
 
 	return nil

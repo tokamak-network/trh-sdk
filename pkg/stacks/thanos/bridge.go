@@ -14,22 +14,22 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func (t *ThanosStack) installBridge(ctx context.Context, deployConfig *types.Config) error {
-	if deployConfig.K8s == nil {
+func (t *ThanosStack) installBridge(ctx context.Context) error {
+	if t.deployConfig.K8s == nil {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
-	_, _, err := t.loginAWS(ctx, deployConfig)
+	_, _, err := t.loginAWS(ctx)
 	if err != nil {
 		fmt.Println("Error to login in AWS:", err)
 		return err
 	}
 
 	var (
-		namespace = deployConfig.K8s.Namespace
-		chainName = deployConfig.ChainName
-		l1ChainID = deployConfig.L1ChainID
-		l1RPC     = deployConfig.L1RPCURL
+		namespace = t.deployConfig.K8s.Namespace
+		chainName = t.deployConfig.ChainName
+		l1ChainID = t.deployConfig.L1ChainID
+		l1RPC     = t.deployConfig.L1RPCURL
 	)
 
 	opBridgePods, err := utils.GetPodsByName(namespace, "op-bridge")
@@ -83,8 +83,8 @@ func (t *ThanosStack) installBridge(ctx context.Context, deployConfig *types.Con
 	opBridgeConfig.OpBridge.Env.L1USDCAddress = constants.L1ChainConfigurations[l1ChainID].USDCAddress
 
 	opBridgeConfig.OpBridge.Env.L2ChainName = chainName
-	opBridgeConfig.OpBridge.Env.L2ChainID = fmt.Sprintf("%d", deployConfig.L2ChainID)
-	opBridgeConfig.OpBridge.Env.L2RPC = deployConfig.L2RpcUrl
+	opBridgeConfig.OpBridge.Env.L2ChainID = fmt.Sprintf("%d", t.deployConfig.L2ChainID)
+	opBridgeConfig.OpBridge.Env.L2RPC = t.deployConfig.L2RpcUrl
 	opBridgeConfig.OpBridge.Env.L2NativeCurrencyName = "Tokamak Network Token"
 	opBridgeConfig.OpBridge.Env.L2NativeCurrencySymbol = "TON"
 	opBridgeConfig.OpBridge.Env.L2NativeCurrencyDecimals = 18
@@ -97,11 +97,11 @@ func (t *ThanosStack) installBridge(ctx context.Context, deployConfig *types.Con
 	opBridgeConfig.OpBridge.Env.L2OutputOracleAddress = contracts.L2OutputOracleProxy
 	opBridgeConfig.OpBridge.Env.L1USDCBridgeAddress = contracts.L1UsdcBridgeProxy
 	opBridgeConfig.OpBridge.Env.DisputeGameFactoryAddress = contracts.DisputeGameFactoryProxy
-	opBridgeConfig.OpBridge.Env.BatchSubmissionFrequency = deployConfig.ChainConfiguration.BatchSubmissionFrequency
-	opBridgeConfig.OpBridge.Env.L1BlockTime = deployConfig.ChainConfiguration.L1BlockTime
-	opBridgeConfig.OpBridge.Env.L2BlockTime = deployConfig.ChainConfiguration.L2BlockTime
-	opBridgeConfig.OpBridge.Env.OutputRootFrequency = deployConfig.ChainConfiguration.OutputRootFrequency
-	opBridgeConfig.OpBridge.Env.ChallengePeriod = deployConfig.ChainConfiguration.ChallengePeriod
+	opBridgeConfig.OpBridge.Env.BatchSubmissionFrequency = t.deployConfig.ChainConfiguration.BatchSubmissionFrequency
+	opBridgeConfig.OpBridge.Env.L1BlockTime = t.deployConfig.ChainConfiguration.L1BlockTime
+	opBridgeConfig.OpBridge.Env.L2BlockTime = t.deployConfig.ChainConfiguration.L2BlockTime
+	opBridgeConfig.OpBridge.Env.OutputRootFrequency = t.deployConfig.ChainConfiguration.OutputRootFrequency
+	opBridgeConfig.OpBridge.Env.ChallengePeriod = t.deployConfig.ChainConfiguration.ChallengePeriod
 
 	// input from users
 
@@ -179,22 +179,22 @@ func (t *ThanosStack) installBridge(ctx context.Context, deployConfig *types.Con
 	return nil
 }
 
-func (t *ThanosStack) uninstallBridge(ctx context.Context, deployConfig *types.Config) error {
-	if deployConfig.K8s == nil {
+func (t *ThanosStack) uninstallBridge(ctx context.Context) error {
+	if t.deployConfig.K8s == nil {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
 	var (
-		namespace = deployConfig.K8s.Namespace
+		namespace = t.deployConfig.K8s.Namespace
 	)
 
-	_, _, err := t.loginAWS(ctx, deployConfig)
+	_, _, err := t.loginAWS(ctx)
 	if err != nil {
 		fmt.Println("Error to login in AWS:", err)
 		return err
 	}
 
-	if deployConfig.AWS == nil {
+	if t.deployConfig.AWS == nil {
 		return fmt.Errorf("AWS configuration is not set. Please run the deploy command first")
 	}
 
