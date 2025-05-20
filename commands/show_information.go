@@ -36,8 +36,8 @@ func ShowInformation(ctx context.Context, network, stack string, config *types.C
 
 	switch stack {
 	case constants.ThanosStack:
-		thanosStack := thanos.NewThanosStack(network, stack)
-		return thanosStack.ShowInformation(ctx, config)
+		thanosStack := thanos.NewThanosStack(network, stack, config)
+		return thanosStack.ShowInformation(ctx)
 	}
 
 	return nil

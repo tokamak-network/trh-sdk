@@ -11,18 +11,18 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
-func (t *ThanosStack) installBlockExplorer(ctx context.Context, deployConfig *types.Config) error {
-	if deployConfig.K8s == nil {
+func (t *ThanosStack) installBlockExplorer(ctx context.Context) error {
+	if t.deployConfig.K8s == nil {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
-	_, _, err := t.loginAWS(ctx, deployConfig)
+	_, _, err := t.loginAWS(ctx)
 	if err != nil {
 		fmt.Println("Error to login in AWS:", err)
 		return err
 	}
 	var (
-		namespace = deployConfig.K8s.Namespace
-		vpcId     = deployConfig.AWS.VpcID
+		namespace = t.deployConfig.K8s.Namespace
+		vpcId     = t.deployConfig.AWS.VpcID
 	)
 
 	blockExplorerPods, err := utils.GetPodsByName(namespace, "block-explorer")
@@ -165,17 +165,17 @@ func (t *ThanosStack) installBlockExplorer(ctx context.Context, deployConfig *ty
 		export op_geth_svc=%s
 		export op_geth_public_url=%s
 		`,
-		deployConfig.DeploymentPath,
-		deployConfig.L1RPCURL,
-		deployConfig.L2ChainID,
+		t.deployConfig.DeploymentPath,
+		t.deployConfig.L1RPCURL,
+		t.deployConfig.L2ChainID,
 		coinmarketcapKey,
 		coinmarketcapTokenID,
 		releaseName,
-		deployConfig.ChainName,
+		t.deployConfig.ChainName,
 		walletConnectID,
 		fmt.Sprintf("%s/tokamak-thanos/build/rollup.json", cwd),
 		rdsConnectionUrl,
-		deployConfig.L1BeaconURL,
+		t.deployConfig.L1BeaconURL,
 		opGethSVC,
 		opGethPublicUrl,
 	)
@@ -291,17 +291,17 @@ func (t *ThanosStack) installBlockExplorer(ctx context.Context, deployConfig *ty
 	return nil
 }
 
-func (t *ThanosStack) uninstallBlockExplorer(ctx context.Context, deployConfig *types.Config) error {
-	if deployConfig.K8s == nil {
+func (t *ThanosStack) uninstallBlockExplorer(ctx context.Context) error {
+	if t.deployConfig.K8s == nil {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
-	if deployConfig.AWS == nil {
+	if t.deployConfig.AWS == nil {
 		return fmt.Errorf("AWS configuration is not set. Please run the deploy command first")
 	}
 
 	var (
-		namespace = deployConfig.K8s.Namespace
+		namespace = t.deployConfig.K8s.Namespace
 	)
 
 	// 1. Uninstall helm charts
