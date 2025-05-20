@@ -401,16 +401,7 @@ func (t *ThanosStack) deployLocalDevnet() error {
 		return err
 	}
 
-	// STEP 2. Source the config file
-	shellConfigFile := utils.GetShellConfigDefault()
-
-	// Source the shell configuration file
-	err = utils.ExecuteCommandStream("bash", "-c", fmt.Sprintf("source %s", shellConfigFile))
-	if err != nil {
-		return err
-	}
-
-	// STEP 3. Start the devnet
+	// Start the devnet
 	fmt.Println("Starting the devnet...")
 	fmt.Print("\r✅ Package installation completed successfully!       \n")
 
