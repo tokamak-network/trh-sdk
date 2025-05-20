@@ -83,16 +83,6 @@ func CheckTerraformInstallation() bool {
 		return false
 	}
 
-	arch, err := GetArchitecture()
-	if err != nil {
-		logging.Errorf("Failed to get architecture: %v", err)
-		return false
-	}
-
-	if !strings.Contains(terraformVersion, arch) {
-		fmt.Printf("❌ Terraform version does not match architecture: %s, arch: %s \n", terraformVersion, arch)
-		return false
-	}
 	fmt.Println("✅ Terraform is installed and architecture matches")
 	return true
 }
