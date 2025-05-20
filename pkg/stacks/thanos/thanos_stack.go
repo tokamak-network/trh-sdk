@@ -27,6 +27,8 @@ type ThanosStack struct {
 	registerCandidate bool
 
 	s3Client *s3.Client
+
+	deployConfig *types.Config
 }
 
 type RegisterCandidateInput struct {
@@ -36,10 +38,11 @@ type RegisterCandidateInput struct {
 	nameInfo string
 }
 
-func NewThanosStack(network string, stack string) *ThanosStack {
+func NewThanosStack(network string, stack string, config *types.Config) *ThanosStack {
 	return &ThanosStack{
 		network:           network,
 		stack:             stack,
+		deployConfig:      config,
 		registerCandidate: true,
 	}
 }
@@ -51,7 +54,7 @@ func (t *ThanosStack) SetRegisterCandidate(value bool) *ThanosStack {
 
 // ----------------------------------------- Deploy contracts command  ----------------------------- //
 
-func (t *ThanosStack) DeployContracts(ctx context.Context, deployConfig *types.Config) error {
+func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	fileName := fmt.Sprintf("logs/deploy_thanos_%s_%s_%d.log", t.stack, t.network, time.Now().Unix())
 	logging.InitLogger(fileName)
 	if t.network == constants.LocalDevnet {
@@ -74,15 +77,15 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployConfig *types.C
 		return err
 	}
 
-	if deployConfig == nil {
-		deployConfig = &types.Config{
+	if t.deployConfig == nil {
+		t.deployConfig = &types.Config{
 			Stack:   t.stack,
 			Network: t.network,
 		}
 	}
 
-	if deployConfig.DeployContractState != nil {
-		if deployConfig.DeployContractState.Status == types.DeployContractStatusCompleted {
+	if t.deployConfig.DeployContractState != nil {
+		if t.deployConfig.DeployContractState.Status == types.DeployContractStatusCompleted {
 			fmt.Println("The contracts have already been deployed successfully.")
 			fmt.Print("Do you want to deploy the contracts again? (y/N): ")
 			isDeployAgain, err := scanner.ScanBool(false)
@@ -93,7 +96,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployConfig *types.C
 			if !isDeployAgain {
 				return nil
 			}
-		} else if deployConfig.DeployContractState.Status == types.DeployContractStatusInProgress {
+		} else if t.deployConfig.DeployContractState.Status == types.DeployContractStatusInProgress {
 			fmt.Print("The contracts deployment is in progress. Do you want to resume? (Y/n): ")
 			isResume, err = scanner.ScanBool(true)
 			if err != nil {
@@ -104,7 +107,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployConfig *types.C
 	}
 
 	if isResume {
-		l1Rpc := deployConfig.L1RPCURL
+		l1Rpc := t.deployConfig.L1RPCURL
 		l1Client, err := ethclient.DialContext(ctx, l1Rpc)
 		if err != nil {
 			fmt.Printf("Failed to connect to L1 RPC: %s", err)
@@ -118,7 +121,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployConfig *types.C
 			}
 		}
 
-		err = t.deployContracts(ctx, l1Client, deployConfig, true)
+		err = t.deployContracts(ctx, l1Client, true)
 		if err != nil {
 			fmt.Print("\r❌ Resume the contracts deployment failed!       \n")
 			return err
@@ -183,23 +186,23 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployConfig *types.C
 			return nil
 		}
 
-		deployConfig.AdminPrivateKey = operators[0].PrivateKey
-		deployConfig.SequencerPrivateKey = operators[1].PrivateKey
-		deployConfig.BatcherPrivateKey = operators[2].PrivateKey
-		deployConfig.ProposerPrivateKey = operators[3].PrivateKey
+		t.deployConfig.AdminPrivateKey = operators[0].PrivateKey
+		t.deployConfig.SequencerPrivateKey = operators[1].PrivateKey
+		t.deployConfig.BatcherPrivateKey = operators[2].PrivateKey
+		t.deployConfig.ProposerPrivateKey = operators[3].PrivateKey
 		if deployContractsConfig.fraudProof {
 			if operators[4] == nil {
 				return fmt.Errorf("challenger operator is required for fault proof but was not found")
 			}
-			deployConfig.ChallengerPrivateKey = operators[4].PrivateKey
+			t.deployConfig.ChallengerPrivateKey = operators[4].PrivateKey
 		}
-		deployConfig.DeploymentPath = fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", cwd, deployContractsTemplate.L1ChainID)
-		deployConfig.L1RPCProvider = deployContractsConfig.l1Provider
-		deployConfig.L1ChainID = deployContractsTemplate.L1ChainID
-		deployConfig.L2ChainID = l2ChainID
-		deployConfig.L1RPCURL = deployContractsConfig.l1RPCurl
-		deployConfig.EnableFraudProof = deployContractsConfig.fraudProof
-		deployConfig.ChainConfiguration = deployContractsConfig.ChainConfiguration
+		t.deployConfig.DeploymentPath = fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", cwd, deployContractsTemplate.L1ChainID)
+		t.deployConfig.L1RPCProvider = deployContractsConfig.l1Provider
+		t.deployConfig.L1ChainID = deployContractsTemplate.L1ChainID
+		t.deployConfig.L2ChainID = l2ChainID
+		t.deployConfig.L1RPCURL = deployContractsConfig.l1RPCurl
+		t.deployConfig.EnableFraudProof = deployContractsConfig.fraudProof
+		t.deployConfig.ChainConfiguration = deployContractsConfig.ChainConfiguration
 
 		err = makeDeployContractConfigJsonFile(ctx, l1Client, operators, deployContractsTemplate)
 		if err != nil {
@@ -252,16 +255,16 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployConfig *types.C
 			fmt.Println("✅ The admin account has sufficient balance to proceed with deployment.")
 		}
 
-		deployConfig.DeployContractState = &types.DeployContractState{
+		t.deployConfig.DeployContractState = &types.DeployContractState{
 			Status: types.DeployContractStatusInProgress,
 		}
-		err = deployConfig.WriteToJSONFile()
+		err = t.deployConfig.WriteToJSONFile()
 		if err != nil {
 			fmt.Println("Failed to write settings file:", err)
 			return err
 		}
 
-		err = t.deployContracts(ctx, l1Client, deployConfig, false)
+		err = t.deployContracts(ctx, l1Client, false)
 		if err != nil {
 			fmt.Print("\r❌ Deploy the contracts failed!       \n")
 		}
@@ -300,12 +303,12 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployConfig *types.C
 }
 
 func (t *ThanosStack) deployContracts(ctx context.Context,
-	l1Client *ethclient.Client, deployConfig *types.Config,
+	l1Client *ethclient.Client,
 	isResume bool,
 ) error {
 	var (
-		adminPrivateKey = deployConfig.AdminPrivateKey
-		l1RPC           = deployConfig.L1RPCURL
+		adminPrivateKey = t.deployConfig.AdminPrivateKey
+		l1RPC           = t.deployConfig.L1RPCURL
 	)
 
 	fmt.Println("Deploying the contracts...")
@@ -355,8 +358,8 @@ func (t *ThanosStack) deployContracts(ctx context.Context,
 	}
 	fmt.Print("\r✅ Contract deployment completed successfully!       \n")
 
-	deployConfig.DeployContractState.Status = types.DeployContractStatusCompleted
-	err = deployConfig.WriteToJSONFile()
+	t.deployConfig.DeployContractState.Status = types.DeployContractStatusCompleted
+	err = t.deployConfig.WriteToJSONFile()
 	if err != nil {
 		fmt.Println("Failed to write settings file:", err)
 		return err
@@ -366,7 +369,7 @@ func (t *ThanosStack) deployContracts(ctx context.Context,
 
 // ----------------------------------------- Deploy command  ----------------------------- //
 
-func (t *ThanosStack) Deploy(ctx context.Context, deployConfig *types.Config) error {
+func (t *ThanosStack) Deploy(ctx context.Context) error {
 	fileName := fmt.Sprintf("logs/deploy_thanos_%s_%s_%d.log", t.stack, t.network, time.Now().Unix())
 	logging.InitLogger(fileName)
 	switch t.network {
@@ -378,7 +381,7 @@ func (t *ThanosStack) Deploy(ctx context.Context, deployConfig *types.Config) er
 		}
 	case constants.Testnet, constants.Mainnet:
 		// Check L1 RPC URL
-		if deployConfig.L1RPCURL == "" {
+		if t.deployConfig.L1RPCURL == "" {
 			return fmt.Errorf("L1 RPC URL is not set. Please run the deploy-contracts command first")
 		}
 
@@ -389,7 +392,7 @@ func (t *ThanosStack) Deploy(ctx context.Context, deployConfig *types.Config) er
 
 		ctxTimeout, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
-		client, err := ethclient.DialContext(ctxTimeout, deployConfig.L1RPCURL)
+		client, err := ethclient.DialContext(ctxTimeout, t.deployConfig.L1RPCURL)
 		if client != nil {
 			blockNo, err = client.BlockNumber(ctxTimeout)
 			if err != nil {
@@ -405,9 +408,9 @@ func (t *ThanosStack) Deploy(ctx context.Context, deployConfig *types.Config) er
 				fmt.Printf("Error while getting L1 RPC URL: %s", err)
 				return err
 			}
-			deployConfig.L1RPCURL = l1RPC
-			deployConfig.L1RPCProvider = l1RPCKind
-			err = deployConfig.WriteToJSONFile()
+			t.deployConfig.L1RPCURL = l1RPC
+			t.deployConfig.L1RPCProvider = l1RPCKind
+			err = t.deployConfig.WriteToJSONFile()
 			if err != nil {
 				fmt.Println("Failed to write settings file after getting L1 RPC", err)
 				return err
@@ -427,9 +430,9 @@ func (t *ThanosStack) Deploy(ctx context.Context, deployConfig *types.Config) er
 
 		switch infraOpt {
 		case constants.AWS:
-			err = t.deployNetworkToAWS(ctx, deployConfig)
+			err = t.deployNetworkToAWS(ctx)
 			if err != nil {
-				return t.destroyInfraOnAWS(ctx, deployConfig)
+				return t.destroyInfraOnAWS(ctx)
 			}
 			return nil
 		default:
@@ -463,7 +466,7 @@ func (t *ThanosStack) deployLocalDevnet() error {
 	return nil
 }
 
-func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *types.Config) error {
+func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 	shellConfigFile := utils.GetShellConfigDefault()
 
 	// Check dependencies
@@ -496,14 +499,14 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 	}
 
 	// STEP 2. AWS Authentication
-	awsProfile, awsLoginInputs, err := t.loginAWS(ctx, deployConfig)
+	awsProfile, awsLoginInputs, err := t.loginAWS(ctx)
 	if err != nil {
 		fmt.Println("Error authenticating with AWS:", err)
 		return err
 	}
 
-	deployConfig.AWS = awsLoginInputs
-	if err := deployConfig.WriteToJSONFile(); err != nil {
+	t.deployConfig.AWS = awsLoginInputs
+	if err := t.deployConfig.WriteToJSONFile(); err != nil {
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
@@ -523,7 +526,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 	}
 
 	var (
-		chainConfiguration = deployConfig.ChainConfiguration
+		chainConfiguration = t.deployConfig.ChainConfiguration
 	)
 
 	if chainConfiguration == nil {
@@ -534,18 +537,18 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 	err = makeTerraformEnvFile("tokamak-thanos-stack/terraform", types.TerraformEnvConfig{
 		ThanosStackName:     inputs.ChainName,
 		AwsRegion:           awsLoginInputs.Region,
-		SequencerKey:        deployConfig.SequencerPrivateKey,
-		BatcherKey:          deployConfig.BatcherPrivateKey,
-		ProposerKey:         deployConfig.ProposerPrivateKey,
-		ChallengerKey:       deployConfig.ChallengerPrivateKey,
+		SequencerKey:        t.deployConfig.SequencerPrivateKey,
+		BatcherKey:          t.deployConfig.BatcherPrivateKey,
+		ProposerKey:         t.deployConfig.ProposerPrivateKey,
+		ChallengerKey:       t.deployConfig.ChallengerPrivateKey,
 		EksClusterAdmins:    awsProfile.Arn,
-		DeploymentsPath:     deployConfig.DeploymentPath,
+		DeploymentsPath:     t.deployConfig.DeploymentPath,
 		L1BeaconUrl:         inputs.L1BeaconURL,
-		L1RpcUrl:            deployConfig.L1RPCURL,
-		L1RpcProvider:       deployConfig.L1RPCProvider,
+		L1RpcUrl:            t.deployConfig.L1RPCURL,
+		L1RpcProvider:       t.deployConfig.L1RPCProvider,
 		Azs:                 awsProfile.AvailabilityZones,
-		ThanosStackImageTag: constants.DockerImageTag[deployConfig.Network].ThanosStackImageTag,
-		OpGethImageTag:      constants.DockerImageTag[deployConfig.Network].OpGethImageTag,
+		ThanosStackImageTag: constants.DockerImageTag[t.deployConfig.Network].ThanosStackImageTag,
+		OpGethImageTag:      constants.DockerImageTag[t.deployConfig.Network].OpGethImageTag,
 		MaxChannelDuration:  chainConfiguration.GetMaxChannelDuration(),
 	})
 	if err != nil {
@@ -609,8 +612,8 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 		return fmt.Errorf("failed to get terraform output for %s: %w", "vpc_id", err)
 	}
 
-	deployConfig.AWS.VpcID = strings.Trim(vpcIdOutput, `"`)
-	if err := deployConfig.WriteToJSONFile(); err != nil {
+	t.deployConfig.AWS.VpcID = strings.Trim(vpcIdOutput, `"`)
+	if err := t.deployConfig.WriteToJSONFile(); err != nil {
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
@@ -620,8 +623,8 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 	}
 
 	namespace := utils.ConvertChainNameToNamespace(inputs.ChainName)
-	deployConfig.ChainName = inputs.ChainName
-	if err := deployConfig.WriteToJSONFile(); err != nil {
+	t.deployConfig.ChainName = inputs.ChainName
+	if err := t.deployConfig.WriteToJSONFile(); err != nil {
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
@@ -737,13 +740,13 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 	fmt.Printf("✅ Network deployment completed successfully!\n")
 	fmt.Printf("🌐 RPC endpoint: %s\n", l2RPCUrl)
 
-	deployConfig.K8s = &types.K8sConfig{
+	t.deployConfig.K8s = &types.K8sConfig{
 		Namespace: namespace,
 	}
-	deployConfig.L2RpcUrl = l2RPCUrl
-	deployConfig.L1BeaconURL = inputs.L1BeaconURL
+	t.deployConfig.L2RpcUrl = l2RPCUrl
+	t.deployConfig.L1BeaconURL = inputs.L1BeaconURL
 
-	err = deployConfig.WriteToJSONFile()
+	err = t.deployConfig.WriteToJSONFile()
 	if err != nil {
 		fmt.Println("Error saving configuration file:", err)
 		return err
@@ -751,7 +754,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 	fmt.Printf("Configuration saved successfully to: %s/settings.json \n", cwd)
 
 	// After installing the infra successfully, we install the bridge
-	err = t.installBridge(ctx, deployConfig)
+	err = t.installBridge(ctx)
 	if err != nil {
 		fmt.Println("Error installing bridge:", err)
 	}
@@ -764,14 +767,14 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, deployConfig *type
 
 // --------------------------------------------- Destroy command -------------------------------------//
 
-func (t *ThanosStack) Destroy(ctx context.Context, deployConfig *types.Config) error {
+func (t *ThanosStack) Destroy(ctx context.Context) error {
 	fileName := fmt.Sprintf("logs/destroy_thanos_%s_%s_%d.log", t.stack, t.network, time.Now().Unix())
 	logging.InitLogger(fileName)
 	switch t.network {
 	case constants.LocalDevnet:
 		return t.destroyDevnet()
 	case constants.Testnet, constants.Mainnet:
-		return t.destroyInfraOnAWS(ctx, deployConfig)
+		return t.destroyInfraOnAWS(ctx)
 	}
 	return nil
 }
@@ -788,20 +791,20 @@ func (t *ThanosStack) destroyDevnet() error {
 	return nil
 }
 
-func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context, deployConfig *types.Config) error {
+func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 	var (
 		err error
 	)
 
-	_, _, err = t.loginAWS(ctx, deployConfig)
+	_, _, err = t.loginAWS(ctx)
 	if err != nil {
 		fmt.Println("Error getting AWS profile:", err)
 		return err
 	}
 
 	var namespace string
-	if deployConfig.K8s != nil {
-		namespace = deployConfig.K8s.Namespace
+	if t.deployConfig.K8s != nil {
+		namespace = t.deployConfig.K8s.Namespace
 	}
 
 	helmReleases, err := utils.GetHelmReleases(namespace)
@@ -847,19 +850,19 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context, deployConfig *types
 
 // ------------------------------------------ Install plugins ---------------------------
 
-func (t *ThanosStack) InstallPlugins(ctx context.Context, pluginNames []string, deployConfig *types.Config) error {
+func (t *ThanosStack) InstallPlugins(ctx context.Context, pluginNames []string) error {
 	fileName := fmt.Sprintf("logs/install_plugins_%s_%s_%d.log", t.stack, t.network, time.Now().Unix())
 	logging.InitLogger(fileName)
 	if t.network == constants.LocalDevnet {
 		return fmt.Errorf("network %s does not support plugin installation", constants.LocalDevnet)
 	}
 
-	if deployConfig.K8s == nil {
+	if t.deployConfig.K8s == nil {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
 	var (
-		namespace = deployConfig.K8s.Namespace
+		namespace = t.deployConfig.K8s.Namespace
 	)
 
 	for _, pluginName := range pluginNames {
@@ -872,15 +875,15 @@ func (t *ThanosStack) InstallPlugins(ctx context.Context, pluginNames []string, 
 
 		switch pluginName {
 		case constants.PluginBlockExplorer:
-			err := t.installBlockExplorer(ctx, deployConfig)
+			err := t.installBlockExplorer(ctx)
 			if err != nil {
-				return t.uninstallBlockExplorer(ctx, deployConfig)
+				return t.uninstallBlockExplorer(ctx)
 			}
 			return nil
 		case constants.PluginBridge:
-			err := t.installBridge(ctx, deployConfig)
+			err := t.installBridge(ctx)
 			if err != nil {
-				return t.uninstallBridge(ctx, deployConfig)
+				return t.uninstallBridge(ctx)
 			}
 			return nil
 		}
@@ -890,19 +893,19 @@ func (t *ThanosStack) InstallPlugins(ctx context.Context, pluginNames []string, 
 
 // ------------------------------------------ Uninstall plugins ---------------------------
 
-func (t *ThanosStack) UninstallPlugins(ctx context.Context, pluginNames []string, deployConfig *types.Config) error {
+func (t *ThanosStack) UninstallPlugins(ctx context.Context, pluginNames []string) error {
 	fileName := fmt.Sprintf("logs/uninstall_plugins_%s_%s_%d.log", t.stack, t.network, time.Now().Unix())
 	logging.InitLogger(fileName)
 	if t.network == constants.LocalDevnet {
 		return fmt.Errorf("network %s does not support plugin installation", constants.LocalDevnet)
 	}
 
-	if deployConfig.K8s == nil {
+	if t.deployConfig.K8s == nil {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
 	var (
-		namespace = deployConfig.K8s.Namespace
+		namespace = t.deployConfig.K8s.Namespace
 	)
 
 	for _, pluginName := range pluginNames {
@@ -915,9 +918,9 @@ func (t *ThanosStack) UninstallPlugins(ctx context.Context, pluginNames []string
 
 		switch pluginName {
 		case constants.PluginBridge:
-			return t.uninstallBridge(ctx, deployConfig)
+			return t.uninstallBridge(ctx)
 		case constants.PluginBlockExplorer:
-			return t.uninstallBlockExplorer(ctx, deployConfig)
+			return t.uninstallBlockExplorer(ctx)
 		}
 	}
 	return nil

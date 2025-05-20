@@ -38,16 +38,16 @@ func ActionInstallationPlugins() cli.ActionFunc {
 		if cmd.Name == "install" {
 			switch stack {
 			case constants.ThanosStack:
-				thanosStack := thanos.NewThanosStack(network, stack)
-				return thanosStack.InstallPlugins(ctx, plugins, config)
+				thanosStack := thanos.NewThanosStack(network, stack, config)
+				return thanosStack.InstallPlugins(ctx, plugins)
 			default:
 				return nil
 			}
 		} else if cmd.Name == "uninstall" {
 			switch stack {
 			case constants.ThanosStack:
-				thanosStack := thanos.NewThanosStack(network, stack)
-				return thanosStack.UninstallPlugins(ctx, plugins, config)
+				thanosStack := thanos.NewThanosStack(network, stack, config)
+				return thanosStack.UninstallPlugins(ctx, plugins)
 			default:
 				return nil
 			}

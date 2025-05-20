@@ -13,20 +13,20 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
-func (t *ThanosStack) UpdateNetwork(ctx context.Context, deployConfig *types.Config) error {
-	if deployConfig == nil || deployConfig.K8s == nil {
+func (t *ThanosStack) UpdateNetwork(ctx context.Context) error {
+	if t.deployConfig == nil || t.deployConfig.K8s == nil {
 		return errors.New("your chain hasn't deployed yet. Please run 'trh-sdk deploy' first")
 	}
 
-	_, _, err := t.loginAWS(ctx, deployConfig)
+	_, _, err := t.loginAWS(ctx)
 	if err != nil {
 		fmt.Println("Error to login in AWS:", err)
 		return err
 	}
 
 	var (
-		namespace = deployConfig.K8s.Namespace
-		chainName = deployConfig.ChainName
+		namespace = t.deployConfig.K8s.Namespace
+		chainName = t.deployConfig.ChainName
 	)
 
 	// Step 1. Check the network status
@@ -51,8 +51,8 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, deployConfig *types.Con
 			return err
 		}
 
-		deployConfig.L1RPCURL = l1RPC
-		deployConfig.L1RPCProvider = l1Kind
+		t.deployConfig.L1RPCURL = l1RPC
+		t.deployConfig.L1RPCProvider = l1Kind
 	}
 
 	// Step 2.2. Get the Beacon RPC
@@ -67,7 +67,7 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, deployConfig *types.Con
 		if err != nil {
 			fmt.Println("Error scanning the L1 Beacon RPC URL", err)
 		}
-		deployConfig.L1BeaconURL = l1BeaconRPC
+		t.deployConfig.L1BeaconURL = l1BeaconRPC
 	}
 
 	fmt.Print("Do you want to update the network? (Y/n): ")
@@ -85,11 +85,11 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, deployConfig *types.Con
 	// Step 3. Update the network
 	// Step 3.1. Regenerate the values file
 	err = updateTerraformEnvFile("tokamak-thanos-stack/terraform", types.UpdateTerraformEnvConfig{
-		L1BeaconUrl:         deployConfig.L1BeaconURL,
-		L1RpcUrl:            deployConfig.L1RPCURL,
-		L1RpcProvider:       deployConfig.L1RPCProvider,
-		ThanosStackImageTag: constants.DockerImageTag[deployConfig.Network].ThanosStackImageTag,
-		OpGethImageTag:      constants.DockerImageTag[deployConfig.Network].OpGethImageTag,
+		L1BeaconUrl:         t.deployConfig.L1BeaconURL,
+		L1RpcUrl:            t.deployConfig.L1RPCURL,
+		L1RpcProvider:       t.deployConfig.L1RPCProvider,
+		ThanosStackImageTag: constants.DockerImageTag[t.deployConfig.Network].ThanosStackImageTag,
+		OpGethImageTag:      constants.DockerImageTag[t.deployConfig.Network].OpGethImageTag,
 	})
 	if err != nil {
 		fmt.Println("Error generating Terraform environment configuration:", err)
@@ -113,17 +113,17 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, deployConfig *types.Con
 
 	// Step 3.2. Update the thanos-stack-values.yaml file
 	if utils.CheckFileExists(thanosValuesFilePath) {
-		err = utils.UpdateYAMLField(thanosValuesFilePath, "l1_rpc.url", deployConfig.L1RPCURL)
+		err = utils.UpdateYAMLField(thanosValuesFilePath, "l1_rpc.url", t.deployConfig.L1RPCURL)
 		if err != nil {
 			fmt.Println("Error updating L1_RPC field:", err)
 			return err
 		}
-		err = utils.UpdateYAMLField(thanosValuesFilePath, "l1_rpc.kind", deployConfig.L1RPCProvider)
+		err = utils.UpdateYAMLField(thanosValuesFilePath, "l1_rpc.kind", t.deployConfig.L1RPCProvider)
 		if err != nil {
 			fmt.Println("Error updating L1_RPC_PROVIDER field:", err)
 			return err
 		}
-		err = utils.UpdateYAMLField(thanosValuesFilePath, "op_node.env.l1_beacon", deployConfig.L1BeaconURL)
+		err = utils.UpdateYAMLField(thanosValuesFilePath, "op_node.env.l1_beacon", t.deployConfig.L1BeaconURL)
 		if err != nil {
 			fmt.Println("Error updating L1_BEACON_RPC field:", err)
 			return err
@@ -132,7 +132,7 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, deployConfig *types.Con
 
 	// Update the L1 RPC URL in the op-bridge-values.yaml file
 	if utils.CheckFileExists(bridgeValuesFilePath) {
-		err = utils.UpdateYAMLField(bridgeValuesFilePath, "op_bridge.env.l1_rpc", deployConfig.L1RPCURL)
+		err = utils.UpdateYAMLField(bridgeValuesFilePath, "op_bridge.env.l1_rpc", t.deployConfig.L1RPCURL)
 		if err != nil {
 			fmt.Println("Error updating L1_RPC field:", err)
 			return err
@@ -154,13 +154,13 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, deployConfig *types.Con
 		}
 
 		// Update the L1 RPC URL in the block-explorer-values.yaml file
-		err = utils.UpdateYAMLField(blockExplorerValuesFilePath, "blockscout.env.INDEXER_OPTIMISM_L1_RPC", deployConfig.L1RPCURL)
+		err = utils.UpdateYAMLField(blockExplorerValuesFilePath, "blockscout.env.INDEXER_OPTIMISM_L1_RPC", t.deployConfig.L1RPCURL)
 		if err != nil {
 			fmt.Println("Error updating L1_RPC field:", err)
 			return err
 		}
 
-		err = utils.UpdateYAMLField(blockExplorerValuesFilePath, "blockscout.env.INDEXER_BEACON_RPC_URL", deployConfig.L1BeaconURL)
+		err = utils.UpdateYAMLField(blockExplorerValuesFilePath, "blockscout.env.INDEXER_BEACON_RPC_URL", t.deployConfig.L1BeaconURL)
 		if err != nil {
 			fmt.Println("Error updating L1_RPC field:", err)
 			return err
@@ -168,7 +168,7 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, deployConfig *types.Con
 	}
 
 	// Step 3.3. Update the network
-	helmReleases, err := utils.GetHelmReleases(deployConfig.K8s.Namespace)
+	helmReleases, err := utils.GetHelmReleases(t.deployConfig.K8s.Namespace)
 	if err != nil {
 		fmt.Println("Error getting helm releases:", err)
 		return err
@@ -212,7 +212,7 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, deployConfig *types.Con
 		}
 	}
 
-	if err = deployConfig.WriteToJSONFile(); err != nil {
+	if err = t.deployConfig.WriteToJSONFile(); err != nil {
 		fmt.Println("Error writing to settings.json", err)
 		return err
 	}

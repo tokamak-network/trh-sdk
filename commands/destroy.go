@@ -36,8 +36,8 @@ func Destroy(ctx context.Context, network, stack string, config *types.Config) e
 
 	switch stack {
 	case constants.ThanosStack:
-		thanosStack := thanos.NewThanosStack(network, stack)
-		return thanosStack.Destroy(ctx, config)
+		thanosStack := thanos.NewThanosStack(network, stack, config)
+		return thanosStack.Destroy(ctx)
 	}
 
 	return nil
