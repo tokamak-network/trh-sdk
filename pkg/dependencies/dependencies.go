@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
