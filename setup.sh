@@ -192,6 +192,8 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
             } >> "$PROFILE_FILE"
         fi
 
+        rm -rf "${GO_FILE_NAME}"
+
         export PATH="$PATH:/usr/local/go/bin"
     else
         echo "Go 1.22.6 is already installed."
@@ -292,6 +294,8 @@ elif [[ "$OS_TYPE" == "linux" ]]; then
                 } >> "$PROFILE_FILE"
             fi
 
+            rm -rf "${GO_FILE_NAME}"
+
             export PATH="$PATH:/usr/local/go/bin"
         else
             echo "Go 1.22.6 is already installed."
@@ -347,6 +351,9 @@ echo "Verifying TRH SDK installation..."
 wget https://raw.githubusercontent.com/tokamak-network/trh-sdk/refs/heads/main/scripts/install-all-packages.sh
 chmod +x install-all-packages.sh
 ./install-all-packages.sh
+
+
+rm -rf ./install-all-packages.sh
 
 
 echo -e "\033[1;32msource $CONFIG_FILE\033[0m to apply changes to your current shell session."
