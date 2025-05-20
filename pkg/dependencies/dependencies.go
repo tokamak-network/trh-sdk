@@ -83,7 +83,7 @@ func CheckTerraformInstallation() bool {
 		return false
 	}
 
-	fmt.Println("✅ Terraform is installed and architecture matches")
+	fmt.Printf("✅ Terraform is installed: %s \n", terraformVersion)
 	return true
 }
 
