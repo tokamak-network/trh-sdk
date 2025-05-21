@@ -15,7 +15,7 @@ func CloneRepo(url string, folderName string) error {
 		return fmt.Errorf("destination path '%s' already exists", clonePath)
 	}
 
-	return ExecuteCommandStream("git", "clone", url, clonePath)
+	return ExecuteCommandStream("git", "clone", "-b", "test/register-candidate-verify", url, clonePath)
 }
 
 func PullLatestCode(folderName string) error {

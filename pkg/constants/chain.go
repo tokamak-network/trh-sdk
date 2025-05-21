@@ -56,7 +56,7 @@ var L1ChainConfigurations = map[uint64]struct {
 		USDTAddress:                      "0xaa8e23fb1079ea71e0a56f48a2aa51851d8433d0",
 		ChainName:                        "Ethereum Sepolia",
 		BlockExplorer:                    "https://sepolia.etherscan.io/",
-		L1VerificationContractAddress:    "0x919DD1710EFbd45232a8d9aef90ed4284303f227",
+		L1VerificationContractAddress:    "0x0B5d7F18C353d18925de212a7D338e2923C11E02",
 		L2TonAddress:                     "0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000",
 		L2ManagerAddress:                 "0xb5e7b66D695485C96cb7Cf33ceE75383B8800D14",
 		L1BridgeRegistry:                 "0x472591A35A0c43Ad1942C6c47d1939BCcA7F6c13",
