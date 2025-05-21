@@ -10,14 +10,14 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 )
 
-func (t *ThanosStack) loginAWS(ctx context.Context, deployConfig *types.Config) (*aws.AccountProfile, *types.AWSConfig, error) {
+func (t *ThanosStack) loginAWS(ctx context.Context) (*aws.AccountProfile, *types.AWSConfig, error) {
 	var (
 		awsConfig *types.AWSConfig
 		err       error
 	)
 
-	if deployConfig != nil {
-		awsConfig = deployConfig.AWS
+	if t.deployConfig != nil {
+		awsConfig = t.deployConfig.AWS
 	}
 
 	// If AWS config is not provided, prompt the user for AWS credentials

@@ -22,7 +22,7 @@ var SupportedLogsComponents = map[string]bool{
 	"bridge":            true,
 }
 
-func (t *ThanosStack) ShowInformation(ctx context.Context, config *types.Config) error {
+func (t *ThanosStack) ShowInformation(ctx context.Context) error {
 	fileName := fmt.Sprintf("logs/show_information_%s_%s_%d.log", t.stack, t.network, time.Now().Unix())
 	logging.InitLogger(fileName)
 
@@ -42,14 +42,14 @@ func (t *ThanosStack) ShowInformation(ctx context.Context, config *types.Config)
 		return nil
 	}
 
-	if config.K8s == nil {
+	if t.deployConfig.K8s == nil {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
-	namespace := config.K8s.Namespace
+	namespace := t.deployConfig.K8s.Namespace
 
 	// Step 1: Get pods
-	runningPods, err := t.getRunningPods(ctx, config)
+	runningPods, err := t.getRunningPods(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get pods: %w", err)
 	}
@@ -111,7 +111,7 @@ func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, compon
 		return fmt.Errorf("unsupported component: %s", component)
 	}
 
-	runningPods, err := t.getRunningPods(ctx, config)
+	runningPods, err := t.getRunningPods(ctx)
 	if err != nil {
 		fmt.Printf("failed to get running pods: %s \n", err.Error())
 		return err
@@ -144,15 +144,15 @@ func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, compon
 	return nil
 }
 
-func (t *ThanosStack) getRunningPods(ctx context.Context, config *types.Config) ([]string, error) {
-	if config.K8s == nil {
+func (t *ThanosStack) getRunningPods(ctx context.Context) ([]string, error) {
+	if t.deployConfig.K8s == nil {
 		return nil, fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
-	namespace := config.K8s.Namespace
+	namespace := t.deployConfig.K8s.Namespace
 
 	// Step 1: Login AWS
-	if _, _, err := t.loginAWS(ctx, config); err != nil {
+	if _, _, err := t.loginAWS(ctx); err != nil {
 		return nil, fmt.Errorf("failed to login to AWS: %w", err)
 	}
 
