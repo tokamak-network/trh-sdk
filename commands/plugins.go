@@ -3,7 +3,9 @@ package commands
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 
@@ -34,6 +36,10 @@ func ActionInstallationPlugins() cli.ActionFunc {
 			fmt.Print("Please specify at least one plugin to install(e.g: bridge)")
 			return nil
 		}
+
+		// Initialize the logger
+		fileName := fmt.Sprintf("logs/%s_plugins_%s_%s_%d.log", cmd.Name, stack, network, time.Now().Unix())
+		logging.InitLogger(fileName)
 
 		if cmd.Name == "install" {
 			switch stack {

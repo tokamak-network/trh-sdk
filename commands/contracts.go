@@ -3,9 +3,11 @@ package commands
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/tokamak-network/trh-sdk/flags"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
+	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"github.com/urfave/cli/v3"
@@ -21,6 +23,10 @@ func ActionDeployContracts() cli.ActionFunc {
 			fmt.Println("Error reading settings.json")
 			return err
 		}
+
+		// Initialize the logger
+		fileName := fmt.Sprintf("logs/deploy_contracts_%s_%s_%d.log", stack, network, time.Now().Unix())
+		logging.InitLogger(fileName)
 
 		switch stack {
 		case constants.ThanosStack:

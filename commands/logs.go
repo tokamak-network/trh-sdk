@@ -3,8 +3,10 @@ package commands
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
+	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -36,6 +38,9 @@ func ActionShowLogs() cli.ActionFunc {
 }
 
 func ShowLogs(ctx context.Context, network, stack string, component string, isTroubleshoot bool, config *types.Config) error {
+	// Initialize the logger
+	fileName := fmt.Sprintf("logs/show_logs_%s_%s_%d.log", stack, network, time.Now().Unix())
+	logging.InitLogger(fileName)
 
 	switch stack {
 	case constants.ThanosStack:

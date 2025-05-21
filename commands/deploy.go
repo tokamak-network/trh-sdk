@@ -3,9 +3,11 @@ package commands
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
@@ -26,6 +28,10 @@ func Execute(ctx context.Context, network, stack string, config *types.Config) e
 	if !constants.SupportedNetworks[network] {
 		return fmt.Errorf("unsupported network: %s", network)
 	}
+
+	// Initialize the logger
+	fileName := fmt.Sprintf("logs/deploy_%s_%s_%d.log", stack, network, time.Now().Unix())
+	logging.InitLogger(fileName)
 
 	switch stack {
 	case constants.ThanosStack:
@@ -56,6 +62,7 @@ func ActionDeploy() cli.ActionFunc {
 			network = config.Network
 			stack = config.Stack
 		}
+
 		return Execute(ctx, network, stack, config)
 	}
 }
