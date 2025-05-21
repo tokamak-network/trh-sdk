@@ -406,9 +406,8 @@ func (t *ThanosStack) deployLocalDevnet() error {
 
 	// Start the devnet
 	fmt.Println("Starting the devnet...")
-	fmt.Print("\r✅ Package installation completed successfully!       \n")
 
-	err = utils.ExecuteCommandStream("bash", "-l", "-c", "cd tokamak-thanos && export DEVNET_L2OO=true && make devnet-up")
+	err = utils.ExecuteCommandStream("bash", "-c", "cd tokamak-thanos && export DEVNET_L2OO=true && make devnet-up")
 	if err != nil {
 		fmt.Print("\r❌ Failed to start devnet!       \n")
 		return err
