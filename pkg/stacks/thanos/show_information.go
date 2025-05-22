@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
-	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
@@ -23,9 +21,6 @@ var SupportedLogsComponents = map[string]bool{
 }
 
 func (t *ThanosStack) ShowInformation(ctx context.Context) error {
-	fileName := fmt.Sprintf("logs/show_information_%s_%s_%d.log", t.stack, t.network, time.Now().Unix())
-	logging.InitLogger(fileName)
-
 	if t.network == constants.LocalDevnet {
 		// Check the devnet network running
 		runningContainers, err := utils.GetDockerContainers(ctx)
@@ -96,9 +91,6 @@ func (t *ThanosStack) ShowInformation(ctx context.Context) error {
 }
 
 func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, component string, isTroubleshoot bool) error {
-	fileName := fmt.Sprintf("logs/show_logs_%s_%s_%s_%d.log", t.stack, t.network, component, time.Now().Unix())
-	logging.InitLogger(fileName)
-
 	if config.K8s == nil {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
@@ -128,13 +120,13 @@ func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, compon
 	}
 
 	if isTroubleshoot {
-		err = utils.ExecuteCommandStream("bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f | grep -iE 'error|fail|panic|critical'", namespace, runningPodName))
+		err = utils.ExecuteCommandStream(t.l, "bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f | grep -iE 'error|fail|panic|critical'", namespace, runningPodName))
 		if err != nil {
 			fmt.Printf("failed to show logs: %s \n", err.Error())
 			return err
 		}
 	} else {
-		err = utils.ExecuteCommandStream("bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f", namespace, runningPodName))
+		err = utils.ExecuteCommandStream(t.l, "bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f", namespace, runningPodName))
 		if err != nil {
 			fmt.Printf("failed to show logs: %s \n", err.Error())
 			return err

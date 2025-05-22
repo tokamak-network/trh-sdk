@@ -38,7 +38,7 @@ func ActionDestroyInfra() cli.ActionFunc {
 func Destroy(ctx context.Context, network, stack string, config *types.Config) error {
 	// Initialize the logger
 	fileName := fmt.Sprintf("logs/destroy_%s_%s_%d.log", stack, network, time.Now().Unix())
-	logging.InitLogger(fileName)
+	l := logging.InitLogger(fileName)
 
 	switch stack {
 	case constants.ThanosStack:
@@ -53,7 +53,7 @@ func Destroy(ctx context.Context, network, stack string, config *types.Config) e
 			}
 		}
 
-		thanosStack := thanos.NewThanosStack(network, stack, config, awsProfile, true)
+		thanosStack := thanos.NewThanosStack(l, network, stack, config, awsProfile, true)
 		return thanosStack.Destroy(ctx)
 	}
 

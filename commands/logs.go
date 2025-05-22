@@ -41,7 +41,7 @@ func ActionShowLogs() cli.ActionFunc {
 func ShowLogs(ctx context.Context, network, stack string, component string, isTroubleshoot bool, config *types.Config) error {
 	// Initialize the logger
 	fileName := fmt.Sprintf("logs/show_logs_%s_%s_%d.log", stack, network, time.Now().Unix())
-	logging.InitLogger(fileName)
+	l := logging.InitLogger(fileName)
 
 	switch stack {
 	case constants.ThanosStack:
@@ -55,7 +55,7 @@ func ShowLogs(ctx context.Context, network, stack string, component string, isTr
 			}
 		}
 
-		thanosStack := thanos.NewThanosStack(network, stack, config, awsProfile, true)
+		thanosStack := thanos.NewThanosStack(l, network, stack, config, awsProfile, true)
 		return thanosStack.ShowLogs(ctx, config, component, isTroubleshoot)
 	}
 

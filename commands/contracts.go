@@ -26,11 +26,11 @@ func ActionDeployContracts() cli.ActionFunc {
 
 		// Initialize the logger
 		fileName := fmt.Sprintf("logs/deploy_contracts_%s_%s_%d.log", stack, network, time.Now().Unix())
-		logging.InitLogger(fileName)
+		l := logging.InitLogger(fileName)
 
 		switch stack {
 		case constants.ThanosStack:
-			thanosStack := thanos.NewThanosStack(network, stack, config, nil, true)
+			thanosStack := thanos.NewThanosStack(l, network, stack, config, nil, true)
 			// STEP 1. Input the parameters
 			fmt.Println("You are about to deploy the L1 contracts.")
 			deployContractsConfig, err := thanosStack.InputDeployContracts(ctx)

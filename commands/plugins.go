@@ -41,7 +41,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 
 		// Initialize the logger
 		fileName := fmt.Sprintf("logs/%s_plugins_%s_%s_%d.log", cmd.Name, stack, network, time.Now().Unix())
-		logging.InitLogger(fileName)
+		l := logging.InitLogger(fileName)
 
 		switch stack {
 		case constants.ThanosStack:
@@ -55,7 +55,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 				}
 			}
 
-			thanosStack := thanos.NewThanosStack(network, stack, config, awsProfile, true)
+			thanosStack := thanos.NewThanosStack(l, network, stack, config, awsProfile, true)
 
 			if cmd.Name == "install" {
 				switch stack {

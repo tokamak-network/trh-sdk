@@ -79,7 +79,7 @@ func (t *ThanosStack) installBlockExplorer(ctx context.Context, inputs *InstallB
 
 	releaseName := chainReleaseName[0]
 
-	err = utils.ExecuteCommandStream("bash", []string{
+	err = utils.ExecuteCommandStream(t.l, "bash", []string{
 		"-c",
 		`cd tokamak-thanos-stack/terraform &&
 		source .envrc &&

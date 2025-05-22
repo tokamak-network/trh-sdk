@@ -43,7 +43,7 @@ func UpdateNetwork(ctx context.Context, network, stack string, config *types.Con
 
 	// Initialize the logger
 	fileName := fmt.Sprintf("logs/update_network_%s_%s_%d.log", stack, network, time.Now().Unix())
-	logging.InitLogger(fileName)
+	l := logging.InitLogger(fileName)
 
 	switch stack {
 	case constants.ThanosStack:
@@ -57,7 +57,7 @@ func UpdateNetwork(ctx context.Context, network, stack string, config *types.Con
 			}
 		}
 
-		thanosStack := thanos.NewThanosStack(network, stack, config, awsProfile, true)
+		thanosStack := thanos.NewThanosStack(l, network, stack, config, awsProfile, true)
 		err = thanosStack.GetUpdateNetworkParams(ctx)
 		if err != nil {
 			fmt.Println("Error getting update network parameters")

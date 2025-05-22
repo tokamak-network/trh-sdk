@@ -3,9 +3,11 @@ package commands
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
+	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -34,7 +36,8 @@ func ActionShowInformation() cli.ActionFunc {
 }
 
 func ShowInformation(ctx context.Context, network, stack string, config *types.Config) error {
-
+	fileName := fmt.Sprintf("logs/show_info_%s_%s_%d.log", stack, network, time.Now().Unix())
+	l := logging.InitLogger(fileName)
 	switch stack {
 	case constants.ThanosStack:
 		var awsProfile *types.AWSProfile
@@ -47,7 +50,7 @@ func ShowInformation(ctx context.Context, network, stack string, config *types.C
 			}
 		}
 
-		thanosStack := thanos.NewThanosStack(network, stack, config, awsProfile, true)
+		thanosStack := thanos.NewThanosStack(l, network, stack, config, awsProfile, true)
 		return thanosStack.ShowInformation(ctx)
 	}
 

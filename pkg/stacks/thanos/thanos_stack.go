@@ -2,6 +2,7 @@ package thanos
 
 import (
 	"github.com/tokamak-network/trh-sdk/pkg/types"
+	"go.uber.org/zap"
 )
 
 type ThanosStack struct {
@@ -10,9 +11,11 @@ type ThanosStack struct {
 	deployConfig      *types.Config
 	enableConfimation bool
 	awsConfig         *types.AWSProfile
+	l                 *zap.SugaredLogger
 }
 
 func NewThanosStack(
+	l *zap.SugaredLogger,
 	network string,
 	stack string,
 	config *types.Config,
@@ -25,5 +28,6 @@ func NewThanosStack(
 		deployConfig:      config,
 		enableConfimation: enableConfirmation,
 		awsConfig:         awsConfig,
+		l:                 l,
 	}
 }
