@@ -85,4 +85,5 @@ type DeployConfigTemplate struct {
 	PairInitCodeHash                         string   `json:"pairInitCodeHash"`
 	PoolInitCodeHash                         string   `json:"poolInitCodeHash"`
 	UniversalRouterRewardsDistributor        string   `json:"universalRouterRewardsDistributor"`
+	ReuseDeployment                          bool     `json:"reuseDeployment"`
 }
