@@ -3,11 +3,14 @@ package commands
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/logging"
+	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
@@ -35,8 +38,41 @@ func Execute(ctx context.Context, network, stack string, config *types.Config) e
 
 	switch stack {
 	case constants.ThanosStack:
-		thanosStack := thanos.NewThanosStack(network, stack, config)
-		err := thanosStack.Deploy(ctx)
+		var err error
+		var awsProfile *types.AWSProfile
+		var infraOpt string
+
+		if network == constants.LocalDevnet {
+			infraOpt = "localhost"
+		} else {
+			fmt.Print("Please select your infrastructure provider [AWS] (default: AWS): ")
+			input, err := scanner.ScanString()
+			if err != nil {
+				fmt.Printf("Error reading infrastructure selection: %s", err)
+				return err
+			}
+			infraOpt = strings.ToLower(input)
+			if infraOpt == "" {
+				infraOpt = constants.AWS
+			}
+
+			switch infraOpt {
+			case constants.AWS:
+				fmt.Println("You selected AWS as your infrastructure provider.")
+
+				awsProfile, err = aws.LoginAWS(ctx, config)
+				if err != nil {
+					fmt.Println("Error logging into AWS")
+					return err
+				}
+
+			default:
+				fmt.Printf("Unsupported infrastructure provider: %s\n", infraOpt)
+			}
+		}
+
+		thanosStack := thanos.NewThanosStack(network, stack, config, awsProfile, true)
+		err = thanosStack.Deploy(ctx, infraOpt)
 		if err != nil {
 			fmt.Println("Error deploying Thanos Stack")
 			return err

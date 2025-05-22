@@ -39,15 +39,14 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 		err error
 	)
 
-	_, _, err = t.loginAWS(ctx)
-	if err != nil {
-		fmt.Println("Error getting AWS profile:", err)
-		return err
-	}
-
 	var namespace string
 	if t.deployConfig.K8s != nil {
 		namespace = t.deployConfig.K8s.Namespace
+	}
+
+	if t.awsConfig == nil {
+		fmt.Println("AWS profile is not set")
+		return fmt.Errorf("AWS profile is not set")
 	}
 
 	helmReleases, err := utils.GetHelmReleases(namespace)

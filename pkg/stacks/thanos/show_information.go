@@ -151,11 +151,6 @@ func (t *ThanosStack) getRunningPods(ctx context.Context) ([]string, error) {
 
 	namespace := t.deployConfig.K8s.Namespace
 
-	// Step 1: Login AWS
-	if _, _, err := t.loginAWS(ctx); err != nil {
-		return nil, fmt.Errorf("failed to login to AWS: %w", err)
-	}
-
 	// Step 2: Get pods
 	runningPods, err := utils.GetK8sPods(namespace)
 	if err != nil {

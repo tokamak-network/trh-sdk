@@ -30,8 +30,14 @@ func ActionDeployContracts() cli.ActionFunc {
 
 		switch stack {
 		case constants.ThanosStack:
-			thanosStack := thanos.NewThanosStack(network, stack, config)
-			return thanosStack.DeployContracts(ctx)
+			thanosStack := thanos.NewThanosStack(network, stack, config, nil, true)
+			// STEP 1. Input the parameters
+			fmt.Println("You are about to deploy the L1 contracts.")
+			deployContractsConfig, err := thanosStack.InputDeployContracts(ctx)
+			if err != nil {
+				return err
+			}
+			return thanosStack.DeployContracts(ctx, deployContractsConfig)
 		default:
 			return fmt.Errorf("unsupported stack: %s", stack)
 		}

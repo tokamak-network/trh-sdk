@@ -30,7 +30,7 @@ func (t *ThanosStack) clearTerraformState(ctx context.Context) error {
 
 		fmt.Println("Checking bucket existence", state.Backend.Config.Bucket)
 
-		bucketExist := utils.BucketExists(ctx, t.s3Client, state.Backend.Config.Bucket)
+		bucketExist := utils.BucketExists(ctx, t.awsConfig.S3Client, state.Backend.Config.Bucket)
 		if bucketExist {
 			fmt.Println("Destroying thanos-stack terraform resources")
 			err = t.destroyTerraform("tokamak-thanos-stack/terraform/thanos-stack")

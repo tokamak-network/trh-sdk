@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
@@ -41,7 +42,18 @@ func Destroy(ctx context.Context, network, stack string, config *types.Config) e
 
 	switch stack {
 	case constants.ThanosStack:
-		thanosStack := thanos.NewThanosStack(network, stack, config)
+		var err error
+		var awsProfile *types.AWSProfile
+
+		if network == constants.Testnet || network == constants.Mainnet {
+			awsProfile, err = aws.LoginAWS(ctx, config)
+			if err != nil {
+				fmt.Println("Error logging into AWS")
+				return err
+			}
+		}
+
+		thanosStack := thanos.NewThanosStack(network, stack, config, awsProfile, true)
 		return thanosStack.Destroy(ctx)
 	}
 

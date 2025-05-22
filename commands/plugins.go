@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
+	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
@@ -41,23 +43,38 @@ func ActionInstallationPlugins() cli.ActionFunc {
 		fileName := fmt.Sprintf("logs/%s_plugins_%s_%s_%d.log", cmd.Name, stack, network, time.Now().Unix())
 		logging.InitLogger(fileName)
 
-		if cmd.Name == "install" {
-			switch stack {
-			case constants.ThanosStack:
-				thanosStack := thanos.NewThanosStack(network, stack, config)
-				return thanosStack.InstallPlugins(ctx, plugins)
-			default:
-				return nil
+		switch stack {
+		case constants.ThanosStack:
+			var awsProfile *types.AWSProfile
+			var err error
+			if network == constants.Testnet || network == constants.Mainnet {
+				awsProfile, err = aws.LoginAWS(ctx, config)
+				if err != nil {
+					fmt.Println("Error logging into AWS")
+					return err
+				}
 			}
-		} else if cmd.Name == "uninstall" {
-			switch stack {
-			case constants.ThanosStack:
-				thanosStack := thanos.NewThanosStack(network, stack, config)
-				return thanosStack.UninstallPlugins(ctx, plugins)
-			default:
-				return nil
+
+			thanosStack := thanos.NewThanosStack(network, stack, config, awsProfile, true)
+
+			if cmd.Name == "install" {
+				switch stack {
+				case constants.ThanosStack:
+					return thanosStack.InstallPlugins(ctx, plugins)
+				default:
+					return nil
+				}
+			} else if cmd.Name == "uninstall" {
+				switch stack {
+				case constants.ThanosStack:
+					return thanosStack.UninstallPlugins(ctx, plugins)
+				default:
+					return nil
+				}
 			}
+			return nil
+		default:
+			return fmt.Errorf("unsupported stack: %s", stack)
 		}
-		return nil
 	}
 }

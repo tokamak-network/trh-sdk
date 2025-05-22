@@ -17,7 +17,7 @@ import (
 
 // ----------------------------------------- Deploy contracts command  ----------------------------- //
 
-func (t *ThanosStack) DeployContracts(ctx context.Context) error {
+func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig *DeployContractsInput) error {
 	if t.network == constants.LocalDevnet {
 		return fmt.Errorf("network %s does not require contract deployment, please run `trh-sdk deploy` instead", constants.LocalDevnet)
 	}
@@ -46,21 +46,26 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	if t.deployConfig.DeployContractState != nil {
 		if t.deployConfig.DeployContractState.Status == types.DeployContractStatusCompleted {
 			fmt.Println("The contracts have already been deployed successfully.")
-			fmt.Print("Do you want to deploy the contracts again? (y/N): ")
-			isDeployAgain, err := scanner.ScanBool(false)
-			if err != nil {
-				fmt.Println("Error reading the deploy again input:", err)
-				return err
-			}
-			if !isDeployAgain {
-				return nil
+			if t.enableConfimation {
+				fmt.Print("Do you want to deploy the contracts again? (y/N): ")
+				isDeployAgain, err := scanner.ScanBool(false)
+				if err != nil {
+					fmt.Println("Error reading the deploy again input:", err)
+					return err
+				}
+
+				if !isDeployAgain {
+					return nil
+				}
 			}
 		} else if t.deployConfig.DeployContractState.Status == types.DeployContractStatusInProgress {
-			fmt.Print("The contracts deployment is in progress. Do you want to resume? (Y/n): ")
-			isResume, err = scanner.ScanBool(true)
-			if err != nil {
-				fmt.Println("Error reading the resume input:", err)
-				return err
+			if t.enableConfimation {
+				fmt.Print("The contracts deployment is in progress. Do you want to resume? (Y/n): ")
+				isResume, err = scanner.ScanBool(true)
+				if err != nil {
+					fmt.Println("Error reading the resume input:", err)
+					return err
+				}
 			}
 		}
 	}
@@ -79,13 +84,6 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 			return err
 		}
 	} else {
-		// STEP 1. Input the parameters
-		fmt.Println("You are about to deploy the L1 contracts.")
-		deployContractsConfig, err := t.inputDeployContracts(ctx)
-		if err != nil {
-			return err
-		}
-
 		l1Client, err := ethclient.DialContext(ctx, deployContractsConfig.l1RPCurl)
 		if err != nil {
 			return err
@@ -97,25 +95,29 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 			return err
 		}
 
-		deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig, l2ChainID)
-
-		// Select operators Accounts
-		operators, err := selectAccounts(ctx, l1Client, deployContractsConfig.fraudProof, deployContractsConfig.seed)
+		l1ChainID, err := l1Client.ChainID(ctx)
 		if err != nil {
+			fmt.Printf("Failed to get L1 chain ID: %s", err)
 			return err
 		}
 
-		if len(operators) == 0 {
-			return fmt.Errorf("no operators were found")
+		deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig, l1ChainID.Uint64(), l2ChainID)
+
+		operators := deployContractsConfig.Operators
+
+		if len(operators) == 0 || len(operators) < 4 {
+			return fmt.Errorf("at least 5 operators are required for deploying contracts")
 		}
 
-		fmt.Print("🔎 The SDK is ready to deploy the contracts to the L1 network. Do you want to proceed(Y/n)? ")
-		confirmation, err := scanner.ScanBool(true)
-		if err != nil {
-			return err
-		}
-		if !confirmation {
-			return nil
+		if t.enableConfimation {
+			fmt.Print("🔎 The SDK is ready to deploy the contracts to the L1 network. Do you want to proceed(Y/n)? ")
+			confirmation, err := scanner.ScanBool(true)
+			if err != nil {
+				return err
+			}
+			if !confirmation {
+				return nil
+			}
 		}
 
 		shellConfigFile := utils.GetShellConfigDefault()
@@ -142,7 +144,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 			t.deployConfig.ChallengerPrivateKey = operators[4].PrivateKey
 		}
 		t.deployConfig.DeploymentPath = fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", cwd, deployContractsTemplate.L1ChainID)
-		t.deployConfig.L1RPCProvider = deployContractsConfig.l1Provider
+		t.deployConfig.L1RPCProvider = utils.DetectRPCKind(deployContractsConfig.l1RPCurl)
 		t.deployConfig.L1ChainID = deployContractsTemplate.L1ChainID
 		t.deployConfig.L2ChainID = l2ChainID
 		t.deployConfig.L1RPCURL = deployContractsConfig.l1RPCurl

@@ -10,14 +10,13 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/dependencies"
-	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
 // ----------------------------------------- Deploy command  ----------------------------- //
 
-func (t *ThanosStack) Deploy(ctx context.Context) error {
+func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string) error {
 	switch t.network {
 	case constants.LocalDevnet:
 		err := t.deployLocalDevnet()
@@ -49,29 +48,21 @@ func (t *ThanosStack) Deploy(ctx context.Context) error {
 		}
 		if err != nil {
 			fmt.Printf("❌ Can't connect to L1 RPC. Please try again: %s \n", err)
-			l1RPC, l1RPCKind, _, err := t.inputL1RPC(ctx)
+			l1RPC, l1RPCKind, l1ChainId, err := t.inputL1RPC(ctx)
 			if err != nil {
 				fmt.Printf("Error while getting L1 RPC URL: %s", err)
 				return err
 			}
+
 			t.deployConfig.L1RPCURL = l1RPC
 			t.deployConfig.L1RPCProvider = l1RPCKind
+			t.deployConfig.L1ChainID = l1ChainId
+
 			err = t.deployConfig.WriteToJSONFile()
 			if err != nil {
 				fmt.Println("Failed to write settings file after getting L1 RPC", err)
 				return err
 			}
-		}
-
-		fmt.Print("Please select your infrastructure provider [AWS] (default: AWS): ")
-		input, err := scanner.ScanString()
-		if err != nil {
-			fmt.Printf("Error reading infrastructure selection: %s", err)
-			return err
-		}
-		infraOpt := strings.ToLower(input)
-		if infraOpt == "" {
-			infraOpt = constants.AWS
 		}
 
 		switch infraOpt {
@@ -144,11 +135,11 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 	}
 
 	// STEP 2. AWS Authentication
-	awsProfile, awsLoginInputs, err := t.loginAWS(ctx)
-	if err != nil {
-		fmt.Println("Error authenticating with AWS:", err)
-		return err
+	if t.awsConfig == nil {
+		return fmt.Errorf("AWS configuration is not set")
 	}
+	awsAccountProfile := t.awsConfig.AccountProfile
+	awsLoginInputs := t.awsConfig.AwsConfig
 
 	t.deployConfig.AWS = awsLoginInputs
 	if err := t.deployConfig.WriteToJSONFile(); err != nil {
@@ -186,12 +177,12 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 		BatcherKey:          t.deployConfig.BatcherPrivateKey,
 		ProposerKey:         t.deployConfig.ProposerPrivateKey,
 		ChallengerKey:       t.deployConfig.ChallengerPrivateKey,
-		EksClusterAdmins:    awsProfile.Arn,
+		EksClusterAdmins:    awsAccountProfile.Arn,
 		DeploymentsPath:     t.deployConfig.DeploymentPath,
 		L1BeaconUrl:         inputs.L1BeaconURL,
 		L1RpcUrl:            t.deployConfig.L1RPCURL,
 		L1RpcProvider:       t.deployConfig.L1RPCProvider,
-		Azs:                 awsProfile.AvailabilityZones,
+		Azs:                 awsAccountProfile.AvailabilityZones,
 		ThanosStackImageTag: constants.DockerImageTag[t.deployConfig.Network].ThanosStackImageTag,
 		OpGethImageTag:      constants.DockerImageTag[t.deployConfig.Network].OpGethImageTag,
 		MaxChannelDuration:  chainConfiguration.GetMaxChannelDuration(),

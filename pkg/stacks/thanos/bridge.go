@@ -19,12 +19,6 @@ func (t *ThanosStack) installBridge(ctx context.Context) error {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
-	_, _, err := t.loginAWS(ctx)
-	if err != nil {
-		fmt.Println("Error to login in AWS:", err)
-		return err
-	}
-
 	var (
 		namespace = t.deployConfig.K8s.Namespace
 		chainName = t.deployConfig.ChainName
@@ -187,12 +181,6 @@ func (t *ThanosStack) uninstallBridge(ctx context.Context) error {
 	var (
 		namespace = t.deployConfig.K8s.Namespace
 	)
-
-	_, _, err := t.loginAWS(ctx)
-	if err != nil {
-		fmt.Println("Error to login in AWS:", err)
-		return err
-	}
 
 	if t.deployConfig.AWS == nil {
 		return fmt.Errorf("AWS configuration is not set. Please run the deploy command first")

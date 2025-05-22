@@ -8,20 +8,18 @@ import (
 	"strings"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
-	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
+type UpdateNetworkParams struct {
+	L1RPCURL    string
+	L1BeaconURL string
+}
+
 func (t *ThanosStack) UpdateNetwork(ctx context.Context) error {
 	if t.deployConfig == nil || t.deployConfig.K8s == nil {
 		return errors.New("your chain hasn't deployed yet. Please run 'trh-sdk deploy' first")
-	}
-
-	_, _, err := t.loginAWS(ctx)
-	if err != nil {
-		fmt.Println("Error to login in AWS:", err)
-		return err
 	}
 
 	var (
@@ -33,52 +31,6 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context) error {
 	chainPods, err := utils.GetPodsByName(namespace, namespace)
 	if len(chainPods) == 0 || err != nil {
 		fmt.Printf("No pods found for chain %s in namespace %s\n", chainName, namespace)
-		return nil
-	}
-
-	// Step 2. Get the input from users
-	// Step 2.1. Get L1 RPC
-	fmt.Print("Do you want to update the L1 RPC? (Y/n): ")
-	wantUpdateL1RPC, err := scanner.ScanBool(true)
-	if err != nil {
-		fmt.Println("Error scanning the L1 RPC option", err)
-		return err
-	}
-	if wantUpdateL1RPC {
-		l1RPC, l1Kind, _, err := t.inputL1RPC(ctx)
-		if err != nil {
-			fmt.Println("Error scanning the L1 RPC URL", err)
-			return err
-		}
-
-		t.deployConfig.L1RPCURL = l1RPC
-		t.deployConfig.L1RPCProvider = l1Kind
-	}
-
-	// Step 2.2. Get the Beacon RPC
-	fmt.Print("Do you want to update the L1 Beacon RPC? (Y/n): ")
-	wantUpdateL1BeaconRPC, err := scanner.ScanBool(true)
-	if err != nil {
-		fmt.Println("Error scanning the L1 Beacon RPC option", err)
-		return err
-	}
-	if wantUpdateL1BeaconRPC {
-		l1BeaconRPC, err := t.inputL1BeaconURL()
-		if err != nil {
-			fmt.Println("Error scanning the L1 Beacon RPC URL", err)
-		}
-		t.deployConfig.L1BeaconURL = l1BeaconRPC
-	}
-
-	fmt.Print("Do you want to update the network? (Y/n): ")
-	wantUpdate, err := scanner.ScanBool(true)
-	if err != nil {
-		fmt.Println("Error scanning input:", err)
-		return err
-	}
-
-	if !wantUpdate {
-		fmt.Println("Skip to update the network")
 		return nil
 	}
 

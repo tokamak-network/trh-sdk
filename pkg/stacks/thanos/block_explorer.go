@@ -11,15 +11,15 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
-func (t *ThanosStack) installBlockExplorer(ctx context.Context) error {
+func (t *ThanosStack) installBlockExplorer(ctx context.Context, inputs *InstallBlockExplorerInput) error {
 	if t.deployConfig.K8s == nil {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
-	_, _, err := t.loginAWS(ctx)
-	if err != nil {
-		fmt.Println("Error to login in AWS:", err)
-		return err
+
+	if inputs == nil {
+		return fmt.Errorf("inputs are not set. Please provide the inputs")
 	}
+
 	var (
 		namespace = t.deployConfig.K8s.Namespace
 		vpcId     = t.deployConfig.AWS.VpcID
@@ -44,17 +44,13 @@ func (t *ThanosStack) installBlockExplorer(ctx context.Context) error {
 	fmt.Println("Installing a block explorer component...")
 
 	// Make .envrc file
-	installBlockExplorerInput, err := t.inputInstallBlockExplorer()
-	if err != nil || installBlockExplorerInput == nil {
-		fmt.Println("Error installing block explorer:", err)
-		return err
-	}
+
 	var (
-		databasePassword     = installBlockExplorerInput.DatabasePassword
-		databaseUserName     = installBlockExplorerInput.DatabaseUsername
-		coinmarketcapKey     = installBlockExplorerInput.CoinmarketcapKey
-		coinmarketcapTokenID = installBlockExplorerInput.CoinmarketcapTokenID
-		walletConnectID      = installBlockExplorerInput.WalletConnectProjectID
+		databasePassword     = inputs.DatabasePassword
+		databaseUserName     = inputs.DatabaseUsername
+		coinmarketcapKey     = inputs.CoinmarketcapKey
+		coinmarketcapTokenID = inputs.CoinmarketcapTokenID
+		walletConnectID      = inputs.WalletConnectProjectID
 	)
 	err = makeBlockExplorerEnvs(
 		"tokamak-thanos-stack/terraform",

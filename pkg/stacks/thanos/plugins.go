@@ -32,7 +32,13 @@ func (t *ThanosStack) InstallPlugins(ctx context.Context, pluginNames []string) 
 
 		switch pluginName {
 		case constants.PluginBlockExplorer:
-			err := t.installBlockExplorer(ctx)
+			installBlockExplorerInput, err := t.inputInstallBlockExplorer()
+			if err != nil || installBlockExplorerInput == nil {
+				fmt.Println("Error installing block explorer:", err)
+				return err
+			}
+
+			err = t.installBlockExplorer(ctx, installBlockExplorerInput)
 			if err != nil {
 				return t.uninstallBlockExplorer(ctx)
 			}
