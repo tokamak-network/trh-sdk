@@ -27,6 +27,13 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context) error {
 		chainName = t.deployConfig.ChainName
 	)
 
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Println("Error getting current working directory:", err)
+		return err
+	}
+	deploymentPath := fmt.Sprintf("%s/%s", cwd, t.deploymentPath)
+
 	// Step 1. Check the network status
 	chainPods, err := utils.GetPodsByName(namespace, namespace)
 	if len(chainPods) == 0 || err != nil {
@@ -36,7 +43,7 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context) error {
 
 	// Step 3. Update the network
 	// Step 3.1. Regenerate the values file
-	err = updateTerraformEnvFile("tokamak-thanos-stack/terraform", types.UpdateTerraformEnvConfig{
+	err = updateTerraformEnvFile(fmt.Sprintf("%s/tokamak-thanos-stack/terraform", deploymentPath), types.UpdateTerraformEnvConfig{
 		L1BeaconUrl:         t.deployConfig.L1BeaconURL,
 		L1RpcUrl:            t.deployConfig.L1RPCURL,
 		L1RpcProvider:       t.deployConfig.L1RPCProvider,
@@ -49,12 +56,12 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context) error {
 	}
 
 	var (
-		thanosValuesFilePath        = "tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml"
-		bridgeValuesFilePath        = "tokamak-thanos-stack/terraform/thanos-stack/op-bridge-values.yaml"
-		blockExplorerValuesFilePath = "tokamak-thanos-stack/charts/blockscout-stack/block-explorer-value.yaml"
-		thanosChartPath             = "tokamak-thanos-stack/charts/thanos-stack"
-		bridgeChartPath             = "tokamak-thanos-stack/charts/op-bridge"
-		blockExplorerChartPath      = "tokamak-thanos-stack/charts/blockscout-stack"
+		thanosValuesFilePath        = fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", deploymentPath)
+		bridgeValuesFilePath        = fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/op-bridge-values.yaml", deploymentPath)
+		blockExplorerValuesFilePath = fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack/block-explorer-value.yaml", deploymentPath)
+		thanosChartPath             = fmt.Sprintf("%s/tokamak-thanos-stack/charts/thanos-stack", deploymentPath)
+		bridgeChartPath             = fmt.Sprintf("%s/tokamak-thanos-stack/charts/op-bridge", deploymentPath)
+		blockExplorerChartPath      = fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack", deploymentPath)
 	)
 
 	// Generate the values file
@@ -124,10 +131,6 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context) error {
 	if err != nil {
 		fmt.Println("Error getting helm releases:", err)
 		return err
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Println("Error getting current working directory:", err)
 	}
 
 	for _, release := range helmReleases {

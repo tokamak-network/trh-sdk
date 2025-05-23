@@ -3,6 +3,7 @@ package thanos
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -23,7 +24,15 @@ func (t *ThanosStack) Destroy(ctx context.Context) error {
 }
 
 func (t *ThanosStack) destroyDevnet() error {
-	output, err := utils.ExecuteCommand("bash", "-c", "cd tokamak-thanos && make nuke")
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Println("Error getting current working directory:", err)
+		return err
+	}
+
+	deploymentPath := fmt.Sprintf("%s/%s", cwd, t.deploymentPath)
+
+	output, err := utils.ExecuteCommand("bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos && make nuke", deploymentPath))
 	if err != nil {
 		fmt.Printf("\r❌ Devnet cleanup failed!       \n Details: %s", output)
 		return err

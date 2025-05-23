@@ -88,10 +88,17 @@ func (t *ThanosStack) deployLocalDevnet() error {
 		return err
 	}
 
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Println("Error getting current working directory:", err)
+		return err
+	}
+	deploymentPath := fmt.Sprintf("%s/%s", cwd, t.deploymentPath)
+
 	// Start the devnet
 	fmt.Println("Starting the devnet...")
 
-	err = utils.ExecuteCommandStream(t.l, "bash", "-c", "cd tokamak-thanos && export DEVNET_L2OO=true && make devnet-up")
+	err = utils.ExecuteCommandStream(t.l, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos && export DEVNET_L2OO=true && make devnet-up", deploymentPath))
 	if err != nil {
 		fmt.Print("\r❌ Failed to start devnet!       \n")
 		return err
@@ -169,8 +176,15 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 		return fmt.Errorf("chain configuration is not set")
 	}
 
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Println("Error getting current working directory:", err)
+		return err
+	}
+	deploymentPath := fmt.Sprintf("%s/%s", cwd, t.deploymentPath)
+
 	// STEP 3. Create .envrc file
-	err = makeTerraformEnvFile("tokamak-thanos-stack/terraform", types.TerraformEnvConfig{
+	err = makeTerraformEnvFile(fmt.Sprintf("%s/tokamak-thanos-stack/terraform", deploymentPath), types.TerraformEnvConfig{
 		ThanosStackName:     inputs.ChainName,
 		AwsRegion:           awsLoginInputs.Region,
 		SequencerKey:        t.deployConfig.SequencerPrivateKey,
@@ -195,13 +209,13 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 	// STEP 4. Initialize Terraform backend
 	err = utils.ExecuteCommandStream(t.l, "bash", []string{
 		"-c",
-		`cd tokamak-thanos-stack/terraform &&
+		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
 		source .envrc &&
 		cd backend &&
 		terraform init &&
 		terraform plan &&
 		terraform apply -auto-approve
-		`,
+		`, deploymentPath),
 	}...)
 	if err != nil {
 		fmt.Println("Error initializing Terraform backend:", err)
@@ -209,12 +223,19 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 	}
 
 	// STEP 5. Copy configuration files
-	err = utils.CopyFile("tokamak-thanos/build/rollup.json", "tokamak-thanos-stack/terraform/thanos-stack/config-files/rollup.json")
+	err = utils.CopyFile(
+		fmt.Sprintf("%s/tokamak-thanos/build/rollup.json", deploymentPath),
+		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/config-files/rollup.json", deploymentPath),
+	)
 	if err != nil {
 		fmt.Println("Error copying rollup configuration:", err)
 		return err
 	}
-	err = utils.CopyFile("tokamak-thanos/build/genesis.json", "tokamak-thanos-stack/terraform/thanos-stack/config-files/genesis.json")
+
+	err = utils.CopyFile(
+		fmt.Sprintf("%s/tokamak-thanos/build/genesis.json", deploymentPath),
+		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/config-files/genesis.json", deploymentPath),
+	)
 	if err != nil {
 		fmt.Println("Error copying genesis configuration:", err)
 		return err
@@ -224,12 +245,12 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 	// STEP 6. Deploy Thanos stack infrastructure
 	err = utils.ExecuteCommandStream(t.l, "bash", []string{
 		"-c",
-		`cd tokamak-thanos-stack/terraform &&
+		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
 		source .envrc &&
 		cd thanos-stack &&
 		terraform init &&
 		terraform plan &&
-		terraform apply -auto-approve`,
+		terraform apply -auto-approve`, deploymentPath),
 	}...)
 	if err != nil {
 		fmt.Println("Error deploying Thanos stack infrastructure:", err)
@@ -239,10 +260,10 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 	// Get VPC ID
 	vpcIdOutput, err := utils.ExecuteCommand("bash", []string{
 		"-c",
-		`cd tokamak-thanos-stack/terraform &&
+		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
 		source .envrc &&
 		cd thanos-stack &&
-		terraform output -json vpc_id`,
+		terraform output -json vpc_id`, deploymentPath),
 	}...)
 	if err != nil {
 		return fmt.Errorf("failed to get terraform output for %s: %w", "vpc_id", err)
@@ -253,7 +274,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
-	thanosStackValueFileExist := utils.CheckFileExists("tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml")
+	thanosStackValueFileExist := utils.CheckFileExists(fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", deploymentPath))
 	if !thanosStackValueFileExist {
 		return fmt.Errorf("configuration file thanos-stack-values.yaml not found")
 	}
@@ -316,11 +337,6 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 	fmt.Println("Helm repository added successfully: \n", helmSearchOutput)
 
 	// Step 8.2. Install Helm charts
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-
 	helmReleaseName := fmt.Sprintf("%s-%d", namespace, time.Now().Unix())
 	chartFile := fmt.Sprintf("%s/tokamak-thanos-stack/charts/thanos-stack", cwd)
 	valueFile := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", cwd)

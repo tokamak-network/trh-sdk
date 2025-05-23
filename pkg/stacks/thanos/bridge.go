@@ -14,7 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func (t *ThanosStack) installBridge(ctx context.Context) error {
+func (t *ThanosStack) installBridge(_ context.Context) error {
 	if t.deployConfig.K8s == nil {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
@@ -44,7 +44,9 @@ func (t *ThanosStack) installBridge(ctx context.Context) error {
 		return err
 	}
 
-	file, err := os.Open(fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%s", cwd, fmt.Sprintf("%d-deploy.json", l1ChainID)))
+	deploymentPath := fmt.Sprintf("%s/%s", cwd, t.deploymentPath)
+
+	file, err := os.Open(fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%s", deploymentPath, fmt.Sprintf("%d-deploy.json", l1ChainID)))
 	if err != nil {
 		fmt.Println("Error opening deployment file:", err)
 		return err
@@ -123,7 +125,7 @@ func (t *ThanosStack) installBridge(ctx context.Context) error {
 		return err
 	}
 
-	configFileDir := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", cwd)
+	configFileDir := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", deploymentPath)
 	if err := os.MkdirAll(configFileDir, os.ModePerm); err != nil {
 		fmt.Println("Error creating directory:", err)
 		return err
@@ -141,7 +143,7 @@ func (t *ThanosStack) installBridge(ctx context.Context) error {
 	_, err = utils.ExecuteCommand("helm", []string{
 		"install",
 		helmReleaseName,
-		fmt.Sprintf("%s/tokamak-thanos-stack/charts/op-bridge", cwd),
+		fmt.Sprintf("%s/tokamak-thanos-stack/charts/op-bridge", deploymentPath),
 		"--values",
 		filePath,
 		"--namespace",
@@ -173,7 +175,7 @@ func (t *ThanosStack) installBridge(ctx context.Context) error {
 	return nil
 }
 
-func (t *ThanosStack) uninstallBridge(ctx context.Context) error {
+func (t *ThanosStack) uninstallBridge(_ context.Context) error {
 	if t.deployConfig.K8s == nil {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}

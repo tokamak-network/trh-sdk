@@ -12,6 +12,7 @@ type ThanosStack struct {
 	enableConfimation bool
 	awsConfig         *types.AWSProfile
 	l                 *zap.SugaredLogger
+	deploymentPath    string
 }
 
 func NewThanosStack(
@@ -21,6 +22,7 @@ func NewThanosStack(
 	config *types.Config,
 	awsConfig *types.AWSProfile,
 	enableConfirmation bool,
+	deploymentPath string,
 ) *ThanosStack {
 	return &ThanosStack{
 		network:           network,
@@ -29,5 +31,6 @@ func NewThanosStack(
 		enableConfimation: enableConfirmation,
 		awsConfig:         awsConfig,
 		l:                 l,
+		deploymentPath:    deploymentPath,
 	}
 }

@@ -43,6 +43,14 @@ func ShowLogs(ctx context.Context, network, stack string, component string, isTr
 	fileName := fmt.Sprintf("logs/show_logs_%s_%s_%d.log", stack, network, time.Now().Unix())
 	l := logging.InitLogger(fileName)
 
+	var selectedDeployment *types.Deployment
+	var err error
+	selectedDeployment, err = utils.SelectDeployment()
+	if err != nil {
+		fmt.Println("Error selecting deployment:", err)
+		return err
+	}
+
 	switch stack {
 	case constants.ThanosStack:
 		var awsProfile *types.AWSProfile
@@ -55,7 +63,14 @@ func ShowLogs(ctx context.Context, network, stack string, component string, isTr
 			}
 		}
 
-		thanosStack := thanos.NewThanosStack(l, network, stack, config, awsProfile, true)
+		var deploymentPath string
+		if selectedDeployment != nil {
+			deploymentPath = fmt.Sprintf("deployments/%s", selectedDeployment.DeploymentPath)
+		} else {
+			deploymentPath = fmt.Sprintf("deployments/%s-%s-%d", stack, network, time.Now().Unix())
+		}
+
+		thanosStack := thanos.NewThanosStack(l, network, stack, config, awsProfile, true, deploymentPath)
 		return thanosStack.ShowLogs(ctx, config, component, isTroubleshoot)
 	}
 

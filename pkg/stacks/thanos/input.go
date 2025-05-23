@@ -906,20 +906,20 @@ func makeBlockExplorerEnvs(dirPath string, filename string, config types.BlockEx
 }
 
 func (t *ThanosStack) cloneSourcecode(repositoryName, url string) error {
-	existingSourcecode, err := utils.CheckExistingSourceCode(repositoryName)
+	existingSourcecode, err := utils.CheckExistingSourceCode(t.deploymentPath, repositoryName)
 	if err != nil {
 		fmt.Println("Error while checking existing source code")
 		return err
 	}
 
 	if !existingSourcecode {
-		err := utils.CloneRepo(t.l, url, repositoryName)
+		err := utils.CloneRepo(t.l, t.deploymentPath, url, repositoryName)
 		if err != nil {
 			fmt.Println("Error while cloning the repository")
 			return err
 		}
 	} else {
-		err := utils.PullLatestCode(t.l, repositoryName)
+		err := utils.PullLatestCode(t.l, t.deploymentPath, repositoryName)
 		if err != nil {
 			fmt.Printf("Error while pulling the latest code for repository %s: %v\n", repositoryName, err)
 			return err

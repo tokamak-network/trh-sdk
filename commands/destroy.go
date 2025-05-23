@@ -40,6 +40,14 @@ func Destroy(ctx context.Context, network, stack string, config *types.Config) e
 	fileName := fmt.Sprintf("logs/destroy_%s_%s_%d.log", stack, network, time.Now().Unix())
 	l := logging.InitLogger(fileName)
 
+	var selectedDeployment *types.Deployment
+	var err error
+	selectedDeployment, err = utils.SelectDeployment()
+	if err != nil {
+		fmt.Println("Error selecting deployment:", err)
+		return err
+	}
+
 	switch stack {
 	case constants.ThanosStack:
 		var err error
@@ -52,8 +60,13 @@ func Destroy(ctx context.Context, network, stack string, config *types.Config) e
 				return err
 			}
 		}
-
-		thanosStack := thanos.NewThanosStack(l, network, stack, config, awsProfile, true)
+		var deploymentPath string
+		if selectedDeployment != nil {
+			deploymentPath = fmt.Sprintf("deployments/%s", selectedDeployment.DeploymentPath)
+		} else {
+			deploymentPath = fmt.Sprintf("deployments/%s-%s-%d", stack, network, time.Now().Unix())
+		}
+		thanosStack := thanos.NewThanosStack(l, network, stack, config, awsProfile, true, deploymentPath)
 		return thanosStack.Destroy(ctx)
 	}
 
