@@ -16,9 +16,22 @@ import (
 
 func ActionUpdateNetwork() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
-		var err error
 		var network, stack string
-		config, err := utils.ReadConfigFromJSONFile()
+		var err error
+		var selectedDeployment *types.Deployment
+
+		selectedDeployment, err = utils.SelectDeployment()
+		if err != nil {
+			fmt.Println("Error selecting deployment:", err)
+			return err
+		}
+
+		if selectedDeployment == nil {
+			fmt.Println("No deployment selected.")
+			return nil
+		}
+
+		config, err := utils.ReadConfigFromJSONFile(selectedDeployment.DeploymentPath)
 		if err != nil {
 			fmt.Println("Error reading settings.json")
 			return err
@@ -31,29 +44,25 @@ func ActionUpdateNetwork() cli.ActionFunc {
 			network = config.Network
 			stack = config.Stack
 		}
-		return UpdateNetwork(ctx, network, stack, config)
+
+		if network == constants.LocalDevnet {
+			fmt.Println("You are in local devnet mode. Please specify the network and stack.")
+			return nil
+		}
+
+		return UpdateNetwork(ctx, network, stack, config, selectedDeployment.DeploymentPath)
 	}
 }
 
-func UpdateNetwork(ctx context.Context, network, stack string, config *types.Config) error {
+func UpdateNetwork(ctx context.Context, network, stack string, config *types.Config, deploymentPath string) error {
 	if network == constants.LocalDevnet {
 		fmt.Println("You are using the local devnet. No need to update the network.")
 		return nil
 	}
 
 	// Initialize the logger
-	fileName := fmt.Sprintf("logs/update_network_%s_%s_%d.log", stack, network, time.Now().Unix())
+	fileName := fmt.Sprintf("%s/logs/update_network_%s_%s_%d.log", deploymentPath, stack, network, time.Now().Unix())
 	l := logging.InitLogger(fileName)
-
-	var selectedDeployment *types.Deployment
-	var err error
-	if network != constants.LocalDevnet {
-		selectedDeployment, err = utils.SelectDeployment()
-		if err != nil {
-			fmt.Println("Error selecting deployment:", err)
-			return err
-		}
-	}
 
 	switch stack {
 	case constants.ThanosStack:
@@ -66,12 +75,7 @@ func UpdateNetwork(ctx context.Context, network, stack string, config *types.Con
 				return err
 			}
 		}
-		var deploymentPath string
-		if selectedDeployment != nil {
-			deploymentPath = fmt.Sprintf("deployments/%s", selectedDeployment.DeploymentPath)
-		} else {
-			deploymentPath = fmt.Sprintf("deployments/%s-%s-%d", stack, network, time.Now().Unix())
-		}
+
 		thanosStack := thanos.NewThanosStack(l, network, stack, config, awsProfile, true, deploymentPath)
 		err = thanosStack.GetUpdateNetworkParams(ctx)
 		if err != nil {

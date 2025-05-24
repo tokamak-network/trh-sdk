@@ -9,7 +9,6 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
-	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"github.com/urfave/cli/v3"
 )
 
@@ -18,20 +17,16 @@ func ActionDeployContracts() cli.ActionFunc {
 		stack := cmd.String(flags.StackFlag.Name)
 		network := cmd.String(flags.NetworkFlag.Name)
 
-		config, err := utils.ReadConfigFromJSONFile()
-		if err != nil {
-			fmt.Println("Error reading settings.json")
-			return err
-		}
+		now := time.Now().Unix()
+		deploymentPath := fmt.Sprintf("deployments/%s-%s-%d", stack, network, now)
 
 		// Initialize the logger
-		fileName := fmt.Sprintf("logs/deploy_contracts_%s_%s_%d.log", stack, network, time.Now().Unix())
+		fileName := fmt.Sprintf("%s/logs/deploy_contracts_%s_%s_%d.log", deploymentPath, stack, network, now)
 		l := logging.InitLogger(fileName)
 
 		switch stack {
 		case constants.ThanosStack:
-			deploymentPath := fmt.Sprintf("deployments/%s-%s-%d", stack, network, time.Now().Unix())
-			thanosStack := thanos.NewThanosStack(l, network, stack, config, nil, true, deploymentPath)
+			thanosStack := thanos.NewThanosStack(l, network, stack, nil, nil, true, deploymentPath)
 			// STEP 1. Input the parameters
 			fmt.Println("You are about to deploy the L1 contracts.")
 			deployContractsConfig, err := thanosStack.InputDeployContracts(ctx)

@@ -17,9 +17,22 @@ import (
 
 func ActionInstallationPlugins() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
-		var err error
 		var network, stack string
-		config, err := utils.ReadConfigFromJSONFile()
+		var err error
+		var selectedDeployment *types.Deployment
+
+		selectedDeployment, err = utils.SelectDeployment()
+		if err != nil {
+			fmt.Println("Error selecting deployment:", err)
+			return err
+		}
+
+		if selectedDeployment == nil {
+			fmt.Println("No deployment selected.")
+			return nil
+		}
+
+		config, err := utils.ReadConfigFromJSONFile(selectedDeployment.DeploymentPath)
 		if err != nil {
 			fmt.Println("Error reading settings.json")
 			return err
@@ -33,6 +46,18 @@ func ActionInstallationPlugins() cli.ActionFunc {
 			stack = config.Stack
 		}
 
+		if !constants.SupportedStacks[stack] {
+			return fmt.Errorf("unsupported stack: %s", stack)
+		}
+		if !constants.SupportedNetworks[network] {
+			return fmt.Errorf("unsupported network: %s", network)
+		}
+
+		if network == constants.LocalDevnet {
+			fmt.Println("You are in local devnet mode. Please specify the network and stack.")
+			return nil
+		}
+
 		plugins := cmd.Args().Slice()
 		if len(plugins) == 0 {
 			fmt.Print("Please specify at least one plugin to install(e.g: bridge)")
@@ -40,17 +65,8 @@ func ActionInstallationPlugins() cli.ActionFunc {
 		}
 
 		// Initialize the logger
-		fileName := fmt.Sprintf("logs/%s_plugins_%s_%s_%d.log", cmd.Name, stack, network, time.Now().Unix())
+		fileName := fmt.Sprintf("%s/logs/%s_plugins_%s_%s_%d.log", selectedDeployment.DeploymentPath, cmd.Name, stack, network, time.Now().Unix())
 		l := logging.InitLogger(fileName)
-
-		var selectedDeployment *types.Deployment
-		if network != constants.LocalDevnet {
-			selectedDeployment, err = utils.SelectDeployment()
-			if err != nil {
-				fmt.Println("Error selecting deployment:", err)
-				return err
-			}
-		}
 
 		switch stack {
 		case constants.ThanosStack:
@@ -64,14 +80,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 				}
 			}
 
-			var deploymentPath string
-			if selectedDeployment != nil {
-				deploymentPath = fmt.Sprintf("deployments/%s", selectedDeployment.DeploymentPath)
-			} else {
-				deploymentPath = fmt.Sprintf("deployments/%s-%s-%d", stack, network, time.Now().Unix())
-			}
-
-			thanosStack := thanos.NewThanosStack(l, network, stack, config, awsProfile, true, deploymentPath)
+			thanosStack := thanos.NewThanosStack(l, network, stack, config, awsProfile, true, selectedDeployment.DeploymentPath)
 
 			if cmd.Name == "install" {
 				switch stack {

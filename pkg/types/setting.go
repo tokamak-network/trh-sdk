@@ -88,15 +88,16 @@ type Config struct {
 
 const ConfigFileName = "settings.json"
 
-func (c *Config) WriteToJSONFile() error {
+func (c *Config) WriteToJSONFile(deploymentPath string) error {
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		fmt.Println("Error marshalling JSON:", err)
 		return err
 	}
 
+	fileName := fmt.Sprintf("%s/%s", deploymentPath, ConfigFileName)
 	// Write JSON to a file
-	err = os.WriteFile(ConfigFileName, data, 0644)
+	err = os.WriteFile(fileName, data, 0644)
 	if err != nil {
 		fmt.Println("Error writing JSON file:", err)
 		return err

@@ -583,7 +583,13 @@ func SelectAccounts(ctx context.Context, client *ethclient.Client, enableFraudPr
 	return operators, nil
 }
 
-func makeDeployContractConfigJsonFile(ctx context.Context, l1Provider *ethclient.Client, operators types.OperatorMap, deployContractTemplate *types.DeployConfigTemplate) error {
+func makeDeployContractConfigJsonFile(
+	ctx context.Context,
+	l1Provider *ethclient.Client,
+	operators types.OperatorMap,
+	deployContractTemplate *types.DeployConfigTemplate,
+	filePath string,
+) error {
 	for role, account := range operators {
 		switch role {
 		case types.Admin:
@@ -620,7 +626,7 @@ func makeDeployContractConfigJsonFile(ctx context.Context, l1Provider *ethclient
 	deployContractTemplate.L1StartingBlockTag = latest.Hash().Hex()
 	deployContractTemplate.L2OutputOracleStartingTimestamp = latest.Time()
 
-	file, err := os.Create("deploy-config.json")
+	file, err := os.Create(filePath)
 	if err != nil {
 		fmt.Printf("Failed to create configuration file: %s", err)
 		return err

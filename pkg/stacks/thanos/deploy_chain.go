@@ -58,7 +58,7 @@ func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string) error {
 			t.deployConfig.L1RPCProvider = l1RPCKind
 			t.deployConfig.L1ChainID = l1ChainId
 
-			err = t.deployConfig.WriteToJSONFile()
+			err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
 			if err != nil {
 				fmt.Println("Failed to write settings file after getting L1 RPC", err)
 				return err
@@ -149,7 +149,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 	awsLoginInputs := t.awsConfig.AwsConfig
 
 	t.deployConfig.AWS = awsLoginInputs
-	if err := t.deployConfig.WriteToJSONFile(); err != nil {
+	if err := t.deployConfig.WriteToJSONFile(t.deploymentPath); err != nil {
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
@@ -270,7 +270,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 	}
 
 	t.deployConfig.AWS.VpcID = strings.Trim(vpcIdOutput, `"`)
-	if err := t.deployConfig.WriteToJSONFile(); err != nil {
+	if err := t.deployConfig.WriteToJSONFile(t.deploymentPath); err != nil {
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
@@ -281,7 +281,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 
 	namespace := utils.ConvertChainNameToNamespace(inputs.ChainName)
 	t.deployConfig.ChainName = inputs.ChainName
-	if err := t.deployConfig.WriteToJSONFile(); err != nil {
+	if err := t.deployConfig.WriteToJSONFile(t.deploymentPath); err != nil {
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
@@ -338,8 +338,8 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 
 	// Step 8.2. Install Helm charts
 	helmReleaseName := fmt.Sprintf("%s-%d", namespace, time.Now().Unix())
-	chartFile := fmt.Sprintf("%s/tokamak-thanos-stack/charts/thanos-stack", cwd)
-	valueFile := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", cwd)
+	chartFile := fmt.Sprintf("%s/tokamak-thanos-stack/charts/thanos-stack", deploymentPath)
+	valueFile := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", deploymentPath)
 
 	// Install the PVC first
 	err = utils.UpdateYAMLField(valueFile, "enable_vpc", true)
@@ -398,12 +398,12 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 	t.deployConfig.L2RpcUrl = l2RPCUrl
 	t.deployConfig.L1BeaconURL = inputs.L1BeaconURL
 
-	err = t.deployConfig.WriteToJSONFile()
+	err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
 	if err != nil {
 		fmt.Println("Error saving configuration file:", err)
 		return err
 	}
-	fmt.Printf("Configuration saved successfully to: %s/settings.json \n", cwd)
+	fmt.Printf("Configuration saved successfully to: %s/settings.json \n", deploymentPath)
 
 	// After installing the infra successfully, we install the bridge
 	err = t.installBridge(ctx)

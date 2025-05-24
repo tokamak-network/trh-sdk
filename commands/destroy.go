@@ -18,7 +18,19 @@ func ActionDestroyInfra() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
 		var err error
 		var network, stack string
-		config, err := utils.ReadConfigFromJSONFile()
+		var selectedDeployment *types.Deployment
+		selectedDeployment, err = utils.SelectDeployment()
+		if err != nil {
+			fmt.Println("Error selecting deployment:", err)
+			return err
+		}
+
+		if selectedDeployment == nil {
+			fmt.Println("No deployment selected.")
+			return nil
+		}
+
+		config, err := utils.ReadConfigFromJSONFile(selectedDeployment.DeploymentPath)
 		if err != nil {
 			fmt.Println("Error reading settings.json")
 			return err
@@ -31,22 +43,14 @@ func ActionDestroyInfra() cli.ActionFunc {
 			network = config.Network
 			stack = config.Stack
 		}
-		return Destroy(ctx, network, stack, config)
+		return Destroy(ctx, network, stack, config, selectedDeployment.DeploymentPath)
 	}
 }
 
-func Destroy(ctx context.Context, network, stack string, config *types.Config) error {
+func Destroy(ctx context.Context, network, stack string, config *types.Config, deploymentPath string) error {
 	// Initialize the logger
-	fileName := fmt.Sprintf("logs/destroy_%s_%s_%d.log", stack, network, time.Now().Unix())
+	fileName := fmt.Sprintf("%s/logs/destroy_%s_%s_%d.log", deploymentPath, stack, network, time.Now().Unix())
 	l := logging.InitLogger(fileName)
-
-	var selectedDeployment *types.Deployment
-	var err error
-	selectedDeployment, err = utils.SelectDeployment()
-	if err != nil {
-		fmt.Println("Error selecting deployment:", err)
-		return err
-	}
 
 	switch stack {
 	case constants.ThanosStack:
@@ -59,12 +63,6 @@ func Destroy(ctx context.Context, network, stack string, config *types.Config) e
 				fmt.Println("Error logging into AWS")
 				return err
 			}
-		}
-		var deploymentPath string
-		if selectedDeployment != nil {
-			deploymentPath = fmt.Sprintf("deployments/%s", selectedDeployment.DeploymentPath)
-		} else {
-			deploymentPath = fmt.Sprintf("deployments/%s-%s-%d", stack, network, time.Now().Unix())
 		}
 		thanosStack := thanos.NewThanosStack(l, network, stack, config, awsProfile, true, deploymentPath)
 		return thanosStack.Destroy(ctx)

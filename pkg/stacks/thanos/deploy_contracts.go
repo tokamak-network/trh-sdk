@@ -135,6 +135,12 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			return nil
 		}
 
+		// STEP 2. Clone the repository
+		err = t.cloneSourcecode("tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
+		if err != nil {
+			return err
+		}
+
 		t.deployConfig.AdminPrivateKey = operators[0].PrivateKey
 		t.deployConfig.SequencerPrivateKey = operators[1].PrivateKey
 		t.deployConfig.BatcherPrivateKey = operators[2].PrivateKey
@@ -153,13 +159,9 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		t.deployConfig.EnableFraudProof = deployContractsConfig.fraudProof
 		t.deployConfig.ChainConfiguration = deployContractsConfig.ChainConfiguration
 
-		err = makeDeployContractConfigJsonFile(ctx, l1Client, operators, deployContractsTemplate)
-		if err != nil {
-			return err
-		}
+		deployConfigFilePath := fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts/deploy-config.json", deploymentPath)
 
-		// STEP 2. Clone the repository
-		err = t.cloneSourcecode("tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
+		err = makeDeployContractConfigJsonFile(ctx, l1Client, operators, deployContractsTemplate, deployConfigFilePath)
 		if err != nil {
 			return err
 		}
@@ -207,7 +209,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		t.deployConfig.DeployContractState = &types.DeployContractState{
 			Status: types.DeployContractStatusInProgress,
 		}
-		err = t.deployConfig.WriteToJSONFile()
+		err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
 		if err != nil {
 			fmt.Println("Failed to write settings file:", err)
 			return err
@@ -274,13 +276,6 @@ func (t *ThanosStack) deployContracts(ctx context.Context,
 		return err
 	}
 
-	// STEP 4.2. Copy the config file into the scripts folder
-	err = utils.ExecuteCommandStream(t.l, "bash", "-c", fmt.Sprintf("cp ./deploy-config.json %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts", deploymentPath))
-	if err != nil {
-		fmt.Print("\r❌ Copy the config file successfully!       \n")
-		return err
-	}
-
 	// STEP 4.3. Deploy contracts
 	if isResume {
 		err = utils.ExecuteCommandStream(t.l, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh redeploy -e .env -c deploy-config.json", deploymentPath))
@@ -298,7 +293,7 @@ func (t *ThanosStack) deployContracts(ctx context.Context,
 	fmt.Print("\r✅ Contract deployment completed successfully!       \n")
 
 	t.deployConfig.DeployContractState.Status = types.DeployContractStatusCompleted
-	err = t.deployConfig.WriteToJSONFile()
+	err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
 	if err != nil {
 		fmt.Println("Failed to write settings file:", err)
 		return err

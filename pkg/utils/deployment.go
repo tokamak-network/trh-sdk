@@ -31,7 +31,7 @@ func GetDepployments() ([]*types.Deployment, error) {
 		stack := parts[0]
 		network := parts[1]
 		deployments = append(deployments, &types.Deployment{
-			DeploymentPath: deploymentPath,
+			DeploymentPath: "deployments/" + deploymentPath,
 			Network:        network,
 			Stack:          stack,
 		})
