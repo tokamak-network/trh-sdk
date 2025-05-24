@@ -63,18 +63,20 @@ func CheckDirExists(path string) bool {
 	return info.IsDir()
 }
 
-func ReadConfigFromJSONFile() (*types.Config, error) {
+func ReadConfigFromJSONFile(deploymentPath string) (*types.Config, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
 
-	fileExist := CheckFileExists(fmt.Sprintf("%s/%s", cwd, types.ConfigFileName))
+	filePath := fmt.Sprintf("%s/%s/%s", cwd, deploymentPath, types.ConfigFileName)
+
+	fileExist := CheckFileExists(filePath)
 	if !fileExist {
 		return nil, nil
 	}
 
-	data, err := os.ReadFile(types.ConfigFileName)
+	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
 	}

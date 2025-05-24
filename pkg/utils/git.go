@@ -4,23 +4,25 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"go.uber.org/zap"
 )
 
-func CloneRepo(url string, folderName string) error {
+func CloneRepo(l *zap.SugaredLogger, deploymentPath string, url string, folderName string) error {
 	// Get the full path where the repo will be cloned
-	clonePath := filepath.Join(".", folderName)
+	clonePath := filepath.Join(".", deploymentPath, folderName)
 
 	// Check if the target directory already exists
 	if _, err := os.Stat(clonePath); !os.IsNotExist(err) {
 		return fmt.Errorf("destination path '%s' already exists", clonePath)
 	}
 
-	return ExecuteCommandStream("git", "clone", url, clonePath)
+	return ExecuteCommandStream(l, "git", "clone", url, clonePath)
 }
 
-func PullLatestCode(folderName string) error {
+func PullLatestCode(l *zap.SugaredLogger, deploymentPath string, folderName string) error {
 	// Get the full path of the target directory
-	clonePath := filepath.Join(".", folderName)
+	clonePath := filepath.Join(".", deploymentPath, folderName)
 
 	// Check if the target directory exists
 	if _, err := os.Stat(clonePath); os.IsNotExist(err) {
@@ -39,5 +41,5 @@ func PullLatestCode(folderName string) error {
 	}
 
 	// Execute the git pull command
-	return ExecuteCommandStream("git", "pull")
+	return ExecuteCommandStream(l, "git", "pull")
 }

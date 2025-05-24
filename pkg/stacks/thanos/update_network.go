@@ -8,26 +8,31 @@ import (
 	"strings"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
-	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
+
+type UpdateNetworkParams struct {
+	L1RPCURL    string
+	L1BeaconURL string
+}
 
 func (t *ThanosStack) UpdateNetwork(ctx context.Context) error {
 	if t.deployConfig == nil || t.deployConfig.K8s == nil {
 		return errors.New("your chain hasn't deployed yet. Please run 'trh-sdk deploy' first")
 	}
 
-	_, _, err := t.loginAWS(ctx)
-	if err != nil {
-		fmt.Println("Error to login in AWS:", err)
-		return err
-	}
-
 	var (
 		namespace = t.deployConfig.K8s.Namespace
 		chainName = t.deployConfig.ChainName
 	)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Println("Error getting current working directory:", err)
+		return err
+	}
+	deploymentPath := fmt.Sprintf("%s/%s", cwd, t.deploymentPath)
 
 	// Step 1. Check the network status
 	chainPods, err := utils.GetPodsByName(namespace, namespace)
@@ -36,55 +41,9 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context) error {
 		return nil
 	}
 
-	// Step 2. Get the input from users
-	// Step 2.1. Get L1 RPC
-	fmt.Print("Do you want to update the L1 RPC? (Y/n): ")
-	wantUpdateL1RPC, err := scanner.ScanBool(true)
-	if err != nil {
-		fmt.Println("Error scanning the L1 RPC option", err)
-		return err
-	}
-	if wantUpdateL1RPC {
-		l1RPC, l1Kind, _, err := t.inputL1RPC(ctx)
-		if err != nil {
-			fmt.Println("Error scanning the L1 RPC URL", err)
-			return err
-		}
-
-		t.deployConfig.L1RPCURL = l1RPC
-		t.deployConfig.L1RPCProvider = l1Kind
-	}
-
-	// Step 2.2. Get the Beacon RPC
-	fmt.Print("Do you want to update the L1 Beacon RPC? (Y/n): ")
-	wantUpdateL1BeaconRPC, err := scanner.ScanBool(true)
-	if err != nil {
-		fmt.Println("Error scanning the L1 Beacon RPC option", err)
-		return err
-	}
-	if wantUpdateL1BeaconRPC {
-		l1BeaconRPC, err := t.inputL1BeaconURL()
-		if err != nil {
-			fmt.Println("Error scanning the L1 Beacon RPC URL", err)
-		}
-		t.deployConfig.L1BeaconURL = l1BeaconRPC
-	}
-
-	fmt.Print("Do you want to update the network? (Y/n): ")
-	wantUpdate, err := scanner.ScanBool(true)
-	if err != nil {
-		fmt.Println("Error scanning input:", err)
-		return err
-	}
-
-	if !wantUpdate {
-		fmt.Println("Skip to update the network")
-		return nil
-	}
-
 	// Step 3. Update the network
 	// Step 3.1. Regenerate the values file
-	err = updateTerraformEnvFile("tokamak-thanos-stack/terraform", types.UpdateTerraformEnvConfig{
+	err = updateTerraformEnvFile(fmt.Sprintf("%s/tokamak-thanos-stack/terraform", deploymentPath), types.UpdateTerraformEnvConfig{
 		L1BeaconUrl:         t.deployConfig.L1BeaconURL,
 		L1RpcUrl:            t.deployConfig.L1RPCURL,
 		L1RpcProvider:       t.deployConfig.L1RPCProvider,
@@ -97,12 +56,12 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context) error {
 	}
 
 	var (
-		thanosValuesFilePath        = "tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml"
-		bridgeValuesFilePath        = "tokamak-thanos-stack/terraform/thanos-stack/op-bridge-values.yaml"
-		blockExplorerValuesFilePath = "tokamak-thanos-stack/charts/blockscout-stack/block-explorer-value.yaml"
-		thanosChartPath             = "tokamak-thanos-stack/charts/thanos-stack"
-		bridgeChartPath             = "tokamak-thanos-stack/charts/op-bridge"
-		blockExplorerChartPath      = "tokamak-thanos-stack/charts/blockscout-stack"
+		thanosValuesFilePath        = fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", deploymentPath)
+		bridgeValuesFilePath        = fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/op-bridge-values.yaml", deploymentPath)
+		blockExplorerValuesFilePath = fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack/block-explorer-value.yaml", deploymentPath)
+		thanosChartPath             = fmt.Sprintf("%s/tokamak-thanos-stack/charts/thanos-stack", deploymentPath)
+		bridgeChartPath             = fmt.Sprintf("%s/tokamak-thanos-stack/charts/op-bridge", deploymentPath)
+		blockExplorerChartPath      = fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack", deploymentPath)
 	)
 
 	// Generate the values file
@@ -173,10 +132,6 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context) error {
 		fmt.Println("Error getting helm releases:", err)
 		return err
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Println("Error getting current working directory:", err)
-	}
 
 	for _, release := range helmReleases {
 		var (
@@ -212,7 +167,7 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context) error {
 		}
 	}
 
-	if err = t.deployConfig.WriteToJSONFile(); err != nil {
+	if err = t.deployConfig.WriteToJSONFile(t.deploymentPath); err != nil {
 		fmt.Println("Error writing to settings.json", err)
 		return err
 	}

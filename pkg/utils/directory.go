@@ -2,7 +2,7 @@ package utils
 
 import "os"
 
-func CheckExistingSourceCode(folderName string) (bool, error) {
+func CheckExistingSourceCode(deploymentPath string, folderName string) (bool, error) {
 	currentDir, err := os.Getwd()
 	if err != nil {
 		return false, err
