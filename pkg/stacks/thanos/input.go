@@ -228,18 +228,15 @@ func inputL1RPC(ctx context.Context) (l1RPCUrl string, l1RRCKind string, l1Chain
 			return "", "", 0, err
 		}
 
+		isValidL1Rpc := utils.IsValidL1RPC(l1RPCUrl)
+		if !isValidL1Rpc {
+			fmt.Println("Invalid L1 RPC, please try again")
+			continue
+		}
+
 		client, err := ethclient.Dial(l1RPCUrl)
 		if err != nil {
-			fmt.Printf("Invalid L1 RPC URL: %s. Please try again", l1RPCUrl)
-			continue
-		}
-		blockNo, err := client.BlockNumber(ctx)
-		if err != nil {
-			fmt.Printf("Failed to retrieve block number: %s", err)
-			continue
-		}
-		if blockNo == 0 {
-			fmt.Printf("The L1 RPC URL is not returning any blocks. Please try again")
+			fmt.Println("Failed to connect l1 RPC", "err", err)
 			continue
 		}
 
