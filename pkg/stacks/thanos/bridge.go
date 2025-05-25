@@ -38,15 +38,7 @@ func (t *ThanosStack) installBridge(_ context.Context) error {
 
 	fmt.Println("Installing a bridge component...")
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Println("Error determining current directory:", err)
-		return err
-	}
-
-	deploymentPath := fmt.Sprintf("%s/%s", cwd, t.deploymentPath)
-
-	file, err := os.Open(fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%s", deploymentPath, fmt.Sprintf("%d-deploy.json", l1ChainID)))
+	file, err := os.Open(fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%s", t.deploymentPath, fmt.Sprintf("%d-deploy.json", l1ChainID)))
 	if err != nil {
 		fmt.Println("Error opening deployment file:", err)
 		return err
@@ -125,7 +117,7 @@ func (t *ThanosStack) installBridge(_ context.Context) error {
 		return err
 	}
 
-	configFileDir := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", deploymentPath)
+	configFileDir := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", t.deploymentPath)
 	if err := os.MkdirAll(configFileDir, os.ModePerm); err != nil {
 		fmt.Println("Error creating directory:", err)
 		return err
@@ -143,7 +135,7 @@ func (t *ThanosStack) installBridge(_ context.Context) error {
 	_, err = utils.ExecuteCommand("helm", []string{
 		"install",
 		helmReleaseName,
-		fmt.Sprintf("%s/tokamak-thanos-stack/charts/op-bridge", deploymentPath),
+		fmt.Sprintf("%s/tokamak-thanos-stack/charts/op-bridge", t.deploymentPath),
 		"--values",
 		filePath,
 		"--namespace",

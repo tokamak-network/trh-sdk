@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 )
 
 type K8sConfig struct {
@@ -58,12 +60,12 @@ type Config struct {
 	ProposerPrivateKey   string `json:"proposer_private_key"`
 	ChallengerPrivateKey string `json:"challenger_private_key,omitempty"`
 
-	DeploymentPath string `json:"deployment_path"`
-	L1RPCURL       string `json:"l1_rpc_url"`
-	L1BeaconURL    string `json:"l1_beacon_url"`
-	L1RPCProvider  string `json:"l1_rpc_provider"`
-	L1ChainID      uint64 `json:"l1_chain_id"`
-	L2ChainID      uint64 `json:"l2_chain_id"`
+	DeploymentFilePath string `json:"deployment_file_path"`
+	L1RPCURL           string `json:"l1_rpc_url"`
+	L1BeaconURL        string `json:"l1_beacon_url"`
+	L1RPCProvider      string `json:"l1_rpc_provider"`
+	L1ChainID          uint64 `json:"l1_chain_id"`
+	L2ChainID          uint64 `json:"l2_chain_id"`
 
 	Stack            string `json:"stack"`
 	Network          string `json:"network"`
@@ -104,4 +106,8 @@ func (c *Config) WriteToJSONFile(deploymentPath string) error {
 	}
 
 	return nil
+}
+
+func (c *Config) SupportAWS() bool {
+	return c != nil && (c.Network == constants.Testnet || c.Network == constants.Mainnet)
 }

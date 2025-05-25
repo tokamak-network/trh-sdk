@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -21,6 +22,11 @@ func CopyFile(src, dst string) error {
 	}
 	defer sourceFile.Close()
 
+	// Ensure destination directory exists
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return fmt.Errorf("failed to create destination directory: %v", err)
+	}
+
 	// Create the destination file
 	destinationFile, err := os.Create(dst)
 	if err != nil {
@@ -28,10 +34,18 @@ func CopyFile(src, dst string) error {
 	}
 	defer destinationFile.Close()
 
-	// Copy the content from source to destination
-	_, err = io.Copy(destinationFile, sourceFile)
-	if err != nil {
+	// Copy content
+	if _, err := io.Copy(destinationFile, sourceFile); err != nil {
 		return fmt.Errorf("failed to copy content: %v", err)
+	}
+
+	// Preserve file permissions
+	info, err := os.Stat(src)
+	if err != nil {
+		return fmt.Errorf("failed to stat source file: %v", err)
+	}
+	if err := os.Chmod(dst, info.Mode()); err != nil {
+		return fmt.Errorf("failed to set destination file permissions: %v", err)
 	}
 
 	return nil
@@ -64,12 +78,10 @@ func CheckDirExists(path string) bool {
 }
 
 func ReadConfigFromJSONFile(deploymentPath string) (*types.Config, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
 
-	filePath := fmt.Sprintf("%s/%s/%s", cwd, deploymentPath, types.ConfigFileName)
+	filePath := fmt.Sprintf("%s/%s", deploymentPath, types.ConfigFileName)
+
+	fmt.Println("Reading config from:", filePath)
 
 	fileExist := CheckFileExists(filePath)
 	if !fileExist {

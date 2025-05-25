@@ -1,16 +1,21 @@
 package thanos
 
 import (
+	"context"
+	"fmt"
+
+	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
+	"github.com/tokamak-network/trh-sdk/pkg/utils"
+
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"go.uber.org/zap"
 )
 
 type ThanosStack struct {
 	network           string
-	stack             string
 	deployConfig      *types.Config
-	enableConfimation bool
-	awsConfig         *types.AWSProfile
+	ignorePromptInput bool
+	awsProfile        *types.AWSProfile
 	l                 *zap.SugaredLogger
 	deploymentPath    string
 }
@@ -18,19 +23,36 @@ type ThanosStack struct {
 func NewThanosStack(
 	l *zap.SugaredLogger,
 	network string,
-	stack string,
-	config *types.Config,
-	awsConfig *types.AWSProfile,
-	enableConfirmation bool,
+	ignorePromptInput bool,
 	deploymentPath string,
-) *ThanosStack {
+	awsConfig *types.AWSConfig,
+) (*ThanosStack, error) {
+	fmt.Println("Deployment Path:", deploymentPath)
+	fmt.Println("Network:", network)
+
+	// get the config file
+	config, err := utils.ReadConfigFromJSONFile(deploymentPath)
+	if err != nil {
+		fmt.Println("Error reading settings.json")
+		return nil, err
+	}
+
+	// Login AWS
+
+	var awsProfile *types.AWSProfile
+	if awsConfig != nil {
+		awsProfile, err = aws.LoginAWS(context.Background(), awsConfig)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return &ThanosStack{
 		network:           network,
-		stack:             stack,
-		deployConfig:      config,
-		enableConfimation: enableConfirmation,
-		awsConfig:         awsConfig,
+		ignorePromptInput: ignorePromptInput,
+		awsProfile:        awsProfile,
 		l:                 l,
 		deploymentPath:    deploymentPath,
-	}
+		deployConfig:      config,
+	}, nil
 }

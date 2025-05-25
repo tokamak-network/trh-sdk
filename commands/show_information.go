@@ -3,9 +3,9 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
-	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
@@ -17,21 +17,16 @@ import (
 func ActionShowInformation() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
 		var network, stack string
-		var err error
-		var selectedDeployment *types.Deployment
 
-		selectedDeployment, err = utils.SelectDeployment()
+		var config *types.Config
+
+		var awsConfig *types.AWSConfig
+
+		deploymentPath, err := os.Getwd()
 		if err != nil {
-			fmt.Println("Error selecting deployment:", err)
 			return err
 		}
-
-		if selectedDeployment == nil {
-			fmt.Println("No deployment selected.")
-			return nil
-		}
-
-		config, err := utils.ReadConfigFromJSONFile(selectedDeployment.DeploymentPath)
+		config, err = utils.ReadConfigFromJSONFile(deploymentPath)
 		if err != nil {
 			fmt.Println("Error reading settings.json")
 			return err
@@ -43,31 +38,30 @@ func ActionShowInformation() cli.ActionFunc {
 		} else {
 			network = config.Network
 			stack = config.Stack
+			awsConfig = config.AWS
 		}
 
-		return ShowInformation(ctx, network, stack, config, selectedDeployment.DeploymentPath)
-	}
-}
-
-func ShowInformation(ctx context.Context, network, stack string, config *types.Config, deploymentPath string) error {
-	fileName := fmt.Sprintf("%s/logs/show_info_%s_%s_%d.log", deploymentPath, stack, network, time.Now().Unix())
-	l := logging.InitLogger(fileName)
-
-	switch stack {
-	case constants.ThanosStack:
-		var awsProfile *types.AWSProfile
-		var err error
-		if network == constants.Testnet || network == constants.Mainnet {
-			awsProfile, err = aws.LoginAWS(ctx, config)
+		if awsConfig == nil {
+			awsConfig, err = thanos.InputAWSLogin()
 			if err != nil {
-				fmt.Println("Error logging into AWS")
+				fmt.Printf("Failed to login AWS: %s \n", err)
 				return err
 			}
 		}
 
-		thanosStack := thanos.NewThanosStack(l, network, stack, config, awsProfile, true, deploymentPath)
-		return thanosStack.ShowInformation(ctx)
-	}
+		fileName := fmt.Sprintf("%s/logs/show_info_%s_%s_%d.log", deploymentPath, stack, network, time.Now().Unix())
+		l := logging.InitLogger(fileName)
 
-	return nil
+		switch stack {
+		case constants.ThanosStack:
+			thanosStack, err := thanos.NewThanosStack(l, network, false, deploymentPath, awsConfig)
+			if err != nil {
+				fmt.Println("Failed to initialize thanos stack", "err", err)
+				return err
+			}
+			return thanosStack.ShowInformation(ctx)
+		}
+
+		return nil
+	}
 }

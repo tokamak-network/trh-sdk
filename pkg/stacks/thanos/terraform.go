@@ -3,23 +3,14 @@ package thanos
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
 func (t *ThanosStack) clearTerraformState(ctx context.Context) error {
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Println("Error getting current working directory:", err)
-		return err
-	}
-
-	deploymentPath := fmt.Sprintf("%s/%s", cwd, t.deploymentPath)
-
 	// STEP 1: Destroy tokamak-thanos-stack/terraform/block-explorer resources
-	err = t.destroyTerraform(fmt.Sprintf("%s/tokamak-thanos-stack/terraform/block-explorer", deploymentPath))
+	err := t.destroyTerraform(fmt.Sprintf("%s/tokamak-thanos-stack/terraform/block-explorer", t.deploymentPath))
 	fmt.Println("Destroying block-explorer terraform resources")
 	if err != nil {
 		fmt.Println("Error running block-explorer terraform destroy", err)
@@ -29,7 +20,7 @@ func (t *ThanosStack) clearTerraformState(ctx context.Context) error {
 	// STEP 2: Destroy tokamak-thanos-stack/terraform/thanos-stack resources
 	// Check the bucket name in the state file exists
 	// If it doesn't exist, we need to delete the state file to prevent conflicts when reinstalling the stack
-	thanosStackTerraformPath := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/.terraform/terraform.tfstate", deploymentPath)
+	thanosStackTerraformPath := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/.terraform/terraform.tfstate", t.deploymentPath)
 	if utils.CheckFileExists(thanosStackTerraformPath) {
 		state, err := utils.ReadThanosStackTerraformState(thanosStackTerraformPath)
 		if err != nil {
@@ -39,10 +30,10 @@ func (t *ThanosStack) clearTerraformState(ctx context.Context) error {
 
 		fmt.Println("Checking bucket existence", state.Backend.Config.Bucket)
 
-		bucketExist := utils.BucketExists(ctx, t.awsConfig.S3Client, state.Backend.Config.Bucket)
+		bucketExist := utils.BucketExists(ctx, t.awsProfile.S3Client, state.Backend.Config.Bucket)
 		if bucketExist {
 			fmt.Println("Destroying thanos-stack terraform resources")
-			err = t.destroyTerraform(fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", deploymentPath))
+			err = t.destroyTerraform(fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", t.deploymentPath))
 			if err != nil {
 				fmt.Println("Error running thanos-stack terraform destroy:", err)
 				return err
@@ -52,7 +43,7 @@ func (t *ThanosStack) clearTerraformState(ctx context.Context) error {
 
 	// STEP 3: Destroy tokamak-thanos-stack/terraform/backend resources
 	fmt.Println("Destroying backend terraform resources")
-	err = t.destroyTerraform(fmt.Sprintf("%s/tokamak-thanos-stack/terraform/backend", deploymentPath))
+	err = t.destroyTerraform(fmt.Sprintf("%s/tokamak-thanos-stack/terraform/backend", t.deploymentPath))
 	if err != nil {
 		fmt.Println("Error running backend terraform destroy", err)
 		return err
@@ -62,7 +53,7 @@ func (t *ThanosStack) clearTerraformState(ctx context.Context) error {
 	// This is a workaround for the issue where the bucket name is deleted but the state file remains containing the old bucket name.
 	err = utils.ExecuteCommandStream(t.l, "bash", []string{
 		"-c",
-		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform/thanos-stack && rm -rf terraform.tfstate terraform.tfstate.backup .terraform.lock.hcl .terraform/`, deploymentPath),
+		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform/thanos-stack && rm -rf terraform.tfstate terraform.tfstate.backup .terraform.lock.hcl .terraform/`, t.deploymentPath),
 	}...)
 	if err != nil {
 		fmt.Println("Error deleting thanos-stack terraform state", err)

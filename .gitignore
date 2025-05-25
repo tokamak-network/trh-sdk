@@ -32,4 +32,7 @@ trh-sdk
 
 logs/
 *.log
-deployments/
+
+settings.json
+tokamak-thanos
+tokamak-thanos-stack

@@ -9,33 +9,18 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
-func LoginAWS(ctx context.Context, deployConfig *types.Config) (*types.AWSProfile, error) {
+func LoginAWS(ctx context.Context, awsConfig *types.AWSConfig) (*types.AWSProfile, error) {
 	var (
-		awsConfig *types.AWSConfig
-		err       error
+		err error
 	)
 
-	if deployConfig != nil && deployConfig.AWS != nil {
-		awsConfig = deployConfig.AWS
-	}
-
-	// If AWS config is not provided, prompt the user for AWS credentials
 	if awsConfig == nil {
 		fmt.Println("You aren't logged into your AWS account.")
-		awsConfig, err = inputAWSLogin()
-		if err != nil {
-			fmt.Println("Error collecting AWS credentials:", err)
-			return nil, err
-		}
-
-		if awsConfig == nil {
-			return nil, fmt.Errorf("AWS config is nil")
-		}
+		return nil, fmt.Errorf("You aren't logged into your AWS account.")
 	}
 
 	// Login to AWS account
@@ -60,73 +45,6 @@ func LoginAWS(ctx context.Context, deployConfig *types.Config) (*types.AWSProfil
 		S3Client:       s3Client,
 		AccountProfile: profileAccount,
 		AwsConfig:      awsConfig,
-	}, nil
-}
-
-func inputAWSLogin() (*types.AWSConfig, error) {
-	var (
-		awsAccessKeyID, awsSecretKey, awsRegion string
-		err                                     error
-	)
-	for {
-		fmt.Print("Please enter your AWS access key: ")
-		awsAccessKeyID, err = scanner.ScanString()
-		if err != nil {
-			fmt.Println("Error while reading AWS access key")
-			return nil, err
-		}
-		if awsAccessKeyID == "" {
-			fmt.Println("Error: AWS access key ID cannot be empty")
-			continue
-		}
-		if !utils.IsValidAWSAccessKey(awsAccessKeyID) {
-			fmt.Println("Error: The AWS access key ID format is invalid")
-			continue
-		}
-		break
-	}
-
-	for {
-		fmt.Print("Please enter your AWS secret key: ")
-		awsSecretKey, err = scanner.ScanString()
-		if err != nil {
-			fmt.Println("Error while reading AWS secret key")
-			return nil, err
-		}
-		if awsSecretKey == "" {
-			fmt.Println("Error: AWS secret key cannot be empty")
-			continue
-		}
-		if !utils.IsValidAWSSecretKey(awsSecretKey) {
-			fmt.Println("Error: The AWS secret key format is invalid")
-			continue
-		}
-		break
-	}
-
-	for {
-		fmt.Print("Please enter your AWS region (default: ap-northeast-2): ")
-		awsRegion, err = scanner.ScanString()
-		if err != nil {
-			fmt.Println("Error while reading AWS region")
-			return nil, err
-		}
-		if awsRegion == "" {
-			awsRegion = "ap-northeast-2"
-		}
-		fmt.Println("Verifying region availability...")
-		if !IsAvailableRegion(awsAccessKeyID, awsSecretKey, awsRegion) {
-			fmt.Println("Error: The AWS region is not available. Please try again.")
-			continue
-		}
-		break
-	}
-
-	return &types.AWSConfig{
-		SecretKey:     awsSecretKey,
-		Region:        awsRegion,
-		AccessKey:     awsAccessKeyID,
-		DefaultFormat: "json",
 	}, nil
 }
 

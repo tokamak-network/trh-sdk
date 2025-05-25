@@ -10,14 +10,10 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 )
 
-func GetDepployments() ([]*types.Deployment, error) {
+func GetDeployments() ([]*types.Deployment, error) {
 	var deployments []*types.Deployment
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, fmt.Errorf("error getting current working directory: %w", err)
-	}
 
-	files, err := os.ReadDir(cwd + "/deployments")
+	files, err := os.ReadDir("deployments")
 	if err != nil {
 		return nil, fmt.Errorf("error reading directory: %w", err)
 	}
@@ -31,7 +27,7 @@ func GetDepployments() ([]*types.Deployment, error) {
 		stack := parts[0]
 		network := parts[1]
 		deployments = append(deployments, &types.Deployment{
-			DeploymentPath: "deployments/" + deploymentPath,
+			DeploymentPath: "/home/tiennam/work/tokamak/trh-sdk/deployments/thanos-testnet-1748081302/tokamak-thanos-stack",
 			Network:        network,
 			Stack:          stack,
 		})
@@ -41,7 +37,7 @@ func GetDepployments() ([]*types.Deployment, error) {
 }
 
 func SelectDeployment() (*types.Deployment, error) {
-	deployments, err := GetDepployments()
+	deployments, err := GetDeployments()
 	if err != nil {
 		return nil, fmt.Errorf("error getting deployments: %w", err)
 	}

@@ -3,11 +3,9 @@ package thanos
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/dependencies"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
@@ -16,7 +14,7 @@ import (
 
 // ----------------------------------------- Deploy command  ----------------------------- //
 
-func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string) error {
+func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string, inputs *DeployInfraInput) error {
 	switch t.network {
 	case constants.LocalDevnet:
 		err := t.deployLocalDevnet()
@@ -25,49 +23,9 @@ func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string) error {
 			return t.destroyDevnet()
 		}
 	case constants.Testnet, constants.Mainnet:
-		// Check L1 RPC URL
-		if t.deployConfig.L1RPCURL == "" {
-			return fmt.Errorf("L1 RPC URL is not set. Please run the deploy-contracts command first")
-		}
-
-		var (
-			blockNo uint64
-			err     error
-		)
-
-		ctxTimeout, cancel := context.WithTimeout(ctx, 20*time.Second)
-		defer cancel()
-		client, err := ethclient.DialContext(ctxTimeout, t.deployConfig.L1RPCURL)
-		if client != nil {
-			blockNo, err = client.BlockNumber(ctxTimeout)
-			if err != nil {
-				fmt.Printf("❌ Failed to retrieve block number: %s \n", err)
-			} else {
-				fmt.Printf("✅ Successfully connected to L1 RPC, current block number: %d \n", blockNo)
-			}
-		}
-		if err != nil {
-			fmt.Printf("❌ Can't connect to L1 RPC. Please try again: %s \n", err)
-			l1RPC, l1RPCKind, l1ChainId, err := t.inputL1RPC(ctx)
-			if err != nil {
-				fmt.Printf("Error while getting L1 RPC URL: %s", err)
-				return err
-			}
-
-			t.deployConfig.L1RPCURL = l1RPC
-			t.deployConfig.L1RPCProvider = l1RPCKind
-			t.deployConfig.L1ChainID = l1ChainId
-
-			err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
-			if err != nil {
-				fmt.Println("Failed to write settings file after getting L1 RPC", err)
-				return err
-			}
-		}
-
 		switch infraOpt {
 		case constants.AWS:
-			err = t.deployNetworkToAWS(ctx)
+			err := t.deployNetworkToAWS(ctx, inputs)
 			if err != nil {
 				return t.destroyInfraOnAWS(ctx)
 			}
@@ -88,17 +46,10 @@ func (t *ThanosStack) deployLocalDevnet() error {
 		return err
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Println("Error getting current working directory:", err)
-		return err
-	}
-	deploymentPath := fmt.Sprintf("%s/%s", cwd, t.deploymentPath)
-
 	// Start the devnet
 	fmt.Println("Starting the devnet...")
 
-	err = utils.ExecuteCommandStream(t.l, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos && export DEVNET_L2OO=true && make devnet-up", deploymentPath))
+	err = utils.ExecuteCommandStream(t.l, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos && export DEVNET_L2OO=true && make devnet-up", t.deploymentPath))
 	if err != nil {
 		fmt.Print("\r❌ Failed to start devnet!       \n")
 		return err
@@ -109,7 +60,7 @@ func (t *ThanosStack) deployLocalDevnet() error {
 	return nil
 }
 
-func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
+func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfraInput) error {
 	shellConfigFile := utils.GetShellConfigDefault()
 
 	// Check dependencies
@@ -142,11 +93,11 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 	}
 
 	// STEP 2. AWS Authentication
-	if t.awsConfig == nil {
+	if t.awsProfile == nil {
 		return fmt.Errorf("AWS configuration is not set")
 	}
-	awsAccountProfile := t.awsConfig.AccountProfile
-	awsLoginInputs := t.awsConfig.AwsConfig
+	awsAccountProfile := t.awsProfile.AccountProfile
+	awsLoginInputs := t.awsProfile.AwsConfig
 
 	t.deployConfig.AWS = awsLoginInputs
 	if err := t.deployConfig.WriteToJSONFile(t.deploymentPath); err != nil {
@@ -162,12 +113,6 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 
 	fmt.Println("✅ Removed the previous deployment state...")
 
-	inputs, err := t.inputDeployInfra()
-	if err != nil {
-		fmt.Println("Error collecting infrastructure deployment parameters:", err)
-		return err
-	}
-
 	var (
 		chainConfiguration = t.deployConfig.ChainConfiguration
 	)
@@ -176,15 +121,8 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 		return fmt.Errorf("chain configuration is not set")
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Println("Error getting current working directory:", err)
-		return err
-	}
-	deploymentPath := fmt.Sprintf("%s/%s", cwd, t.deploymentPath)
-
 	// STEP 3. Create .envrc file
-	err = makeTerraformEnvFile(fmt.Sprintf("%s/tokamak-thanos-stack/terraform", deploymentPath), types.TerraformEnvConfig{
+	err = makeTerraformEnvFile(fmt.Sprintf("%s/tokamak-thanos-stack/terraform", t.deploymentPath), types.TerraformEnvConfig{
 		ThanosStackName:     inputs.ChainName,
 		AwsRegion:           awsLoginInputs.Region,
 		SequencerKey:        t.deployConfig.SequencerPrivateKey,
@@ -192,7 +130,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 		ProposerKey:         t.deployConfig.ProposerPrivateKey,
 		ChallengerKey:       t.deployConfig.ChallengerPrivateKey,
 		EksClusterAdmins:    awsAccountProfile.Arn,
-		DeploymentsPath:     t.deployConfig.DeploymentPath,
+		DeploymentFilePath:  t.deployConfig.DeploymentFilePath,
 		L1BeaconUrl:         inputs.L1BeaconURL,
 		L1RpcUrl:            t.deployConfig.L1RPCURL,
 		L1RpcProvider:       t.deployConfig.L1RPCProvider,
@@ -206,7 +144,26 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 		return err
 	}
 
-	// STEP 4. Initialize Terraform backend
+	// STEP 4. Copy configuration files
+	err = utils.CopyFile(
+		fmt.Sprintf("%s/tokamak-thanos/build/rollup.json", t.deploymentPath),
+		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/config-files/rollup.json", t.deploymentPath),
+	)
+	if err != nil {
+		fmt.Println("Error copying rollup configuration:", err)
+		return err
+	}
+
+	err = utils.CopyFile(
+		fmt.Sprintf("%s/tokamak-thanos/build/genesis.json", t.deploymentPath),
+		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/config-files/genesis.json", t.deploymentPath),
+	)
+	if err != nil {
+		fmt.Println("Error copying genesis configuration:", err)
+		return err
+	}
+
+	// STEP 5. Initialize Terraform backend
 	err = utils.ExecuteCommandStream(t.l, "bash", []string{
 		"-c",
 		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
@@ -215,29 +172,10 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 		terraform init &&
 		terraform plan &&
 		terraform apply -auto-approve
-		`, deploymentPath),
+		`, t.deploymentPath),
 	}...)
 	if err != nil {
 		fmt.Println("Error initializing Terraform backend:", err)
-		return err
-	}
-
-	// STEP 5. Copy configuration files
-	err = utils.CopyFile(
-		fmt.Sprintf("%s/tokamak-thanos/build/rollup.json", deploymentPath),
-		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/config-files/rollup.json", deploymentPath),
-	)
-	if err != nil {
-		fmt.Println("Error copying rollup configuration:", err)
-		return err
-	}
-
-	err = utils.CopyFile(
-		fmt.Sprintf("%s/tokamak-thanos/build/genesis.json", deploymentPath),
-		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/config-files/genesis.json", deploymentPath),
-	)
-	if err != nil {
-		fmt.Println("Error copying genesis configuration:", err)
 		return err
 	}
 
@@ -250,7 +188,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 		cd thanos-stack &&
 		terraform init &&
 		terraform plan &&
-		terraform apply -auto-approve`, deploymentPath),
+		terraform apply -auto-approve`, t.deploymentPath),
 	}...)
 	if err != nil {
 		fmt.Println("Error deploying Thanos stack infrastructure:", err)
@@ -263,7 +201,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
 		source .envrc &&
 		cd thanos-stack &&
-		terraform output -json vpc_id`, deploymentPath),
+		terraform output -json vpc_id`, t.deploymentPath),
 	}...)
 	if err != nil {
 		return fmt.Errorf("failed to get terraform output for %s: %w", "vpc_id", err)
@@ -274,7 +212,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
-	thanosStackValueFileExist := utils.CheckFileExists(fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", deploymentPath))
+	thanosStackValueFileExist := utils.CheckFileExists(fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", t.deploymentPath))
 	if !thanosStackValueFileExist {
 		return fmt.Errorf("configuration file thanos-stack-values.yaml not found")
 	}
@@ -338,8 +276,8 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 
 	// Step 8.2. Install Helm charts
 	helmReleaseName := fmt.Sprintf("%s-%d", namespace, time.Now().Unix())
-	chartFile := fmt.Sprintf("%s/tokamak-thanos-stack/charts/thanos-stack", deploymentPath)
-	valueFile := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", deploymentPath)
+	chartFile := fmt.Sprintf("%s/tokamak-thanos-stack/charts/thanos-stack", t.deploymentPath)
+	valueFile := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", t.deploymentPath)
 
 	// Install the PVC first
 	err = utils.UpdateYAMLField(valueFile, "enable_vpc", true)
@@ -403,7 +341,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 		fmt.Println("Error saving configuration file:", err)
 		return err
 	}
-	fmt.Printf("Configuration saved successfully to: %s/settings.json \n", deploymentPath)
+	fmt.Printf("Configuration saved successfully to: %s/settings.json \n", t.deploymentPath)
 
 	// After installing the infra successfully, we install the bridge
 	err = t.installBridge(ctx)

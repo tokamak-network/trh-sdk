@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"os"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -30,17 +29,9 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		isResume bool
 	)
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Println("Error obtaining current working directory:", err)
-		return err
-	}
-
-	deploymentPath := fmt.Sprintf("%s/%s", cwd, t.deploymentPath)
-
 	if t.deployConfig == nil {
 		t.deployConfig = &types.Config{
-			Stack:   t.stack,
+			Stack:   constants.ThanosStack,
 			Network: t.network,
 		}
 	}
@@ -48,7 +39,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 	if t.deployConfig.DeployContractState != nil {
 		if t.deployConfig.DeployContractState.Status == types.DeployContractStatusCompleted {
 			fmt.Println("The contracts have already been deployed successfully.")
-			if t.enableConfimation {
+			if !t.ignorePromptInput {
 				fmt.Print("Do you want to deploy the contracts again? (y/N): ")
 				isDeployAgain, err := scanner.ScanBool(false)
 				if err != nil {
@@ -61,7 +52,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 				}
 			}
 		} else if t.deployConfig.DeployContractState.Status == types.DeployContractStatusInProgress {
-			if t.enableConfimation {
+			if !t.ignorePromptInput {
 				fmt.Print("The contracts deployment is in progress. Do you want to resume? (Y/n): ")
 				isResume, err = scanner.ScanBool(true)
 				if err != nil {
@@ -111,7 +102,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			return fmt.Errorf("at least 5 operators are required for deploying contracts")
 		}
 
-		if t.enableConfimation {
+		if !t.ignorePromptInput {
 			fmt.Print("🔎 The SDK is ready to deploy the contracts to the L1 network. Do you want to proceed(Y/n)? ")
 			confirmation, err := scanner.ScanBool(true)
 			if err != nil {
@@ -151,7 +142,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			}
 			t.deployConfig.ChallengerPrivateKey = operators[4].PrivateKey
 		}
-		t.deployConfig.DeploymentPath = fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", deploymentPath, deployContractsTemplate.L1ChainID)
+		t.deployConfig.DeploymentFilePath = fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", t.deploymentPath, deployContractsTemplate.L1ChainID)
 		t.deployConfig.L1RPCProvider = utils.DetectRPCKind(deployContractsConfig.l1RPCurl)
 		t.deployConfig.L1ChainID = deployContractsTemplate.L1ChainID
 		t.deployConfig.L2ChainID = l2ChainID
@@ -159,7 +150,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		t.deployConfig.EnableFraudProof = deployContractsConfig.fraudProof
 		t.deployConfig.ChainConfiguration = deployContractsConfig.ChainConfiguration
 
-		deployConfigFilePath := fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts/deploy-config.json", deploymentPath)
+		deployConfigFilePath := fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts/deploy-config.json", t.deploymentPath)
 
 		err = makeDeployContractConfigJsonFile(ctx, l1Client, operators, deployContractsTemplate, deployConfigFilePath)
 		if err != nil {
@@ -168,7 +159,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 
 		// STEP 3. Build the contracts
 		fmt.Println("Building smart contracts...")
-		err = utils.ExecuteCommandStream(t.l, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh build", deploymentPath))
+		err = utils.ExecuteCommandStream(t.l, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh build", t.deploymentPath))
 		if err != nil {
 			fmt.Print("\r❌ Build the contracts failed!       \n")
 			return err
@@ -222,17 +213,17 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 	}
 
 	// STEP 5: Generate the genesis and rollup files
-	err = utils.ExecuteCommandStream(t.l, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh generate -e .env -c deploy-config.json", deploymentPath))
+	err = utils.ExecuteCommandStream(t.l, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh generate -e .env -c deploy-config.json", t.deploymentPath))
 	fmt.Println("Generating the rollup and genesis files...")
 	if err != nil {
 		fmt.Print("\r❌ Failed to generate rollup and genesis files!       \n")
 		return err
 	}
 	fmt.Print("\r✅ Successfully generated rollup and genesis files!       \n")
-	fmt.Printf("\r Genesis file path: %s/tokamak-thanos/build/genesis.json\n", deploymentPath)
-	fmt.Printf("\r Rollup file path: %s/tokamak-thanos/build/rollup.json\n", deploymentPath)
+	fmt.Printf("\r Genesis file path: %s/tokamak-thanos/build/genesis.json\n", t.deploymentPath)
+	fmt.Printf("\r Rollup file path: %s/tokamak-thanos/build/rollup.json\n", t.deploymentPath)
 
-	fmt.Printf("✅ Configuration successfully saved to: %s/settings.json \n", deploymentPath)
+	fmt.Printf("✅ Configuration successfully saved to: %s/settings.json \n", t.deploymentPath)
 	return nil
 }
 
@@ -252,13 +243,6 @@ func (t *ThanosStack) deployContracts(ctx context.Context,
 		fmt.Printf("Failed to get gas price: %v\n", err)
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Println("Error getting current working directory:", err)
-		return err
-	}
-	deploymentPath := fmt.Sprintf("%s/%s", cwd, t.deploymentPath)
-
 	envValues := fmt.Sprintf("export GS_ADMIN_PRIVATE_KEY=%s\nexport L1_RPC_URL=%s\n", adminPrivateKey, l1RPC)
 	if gasPriceWei != nil && gasPriceWei.Uint64() > 0 {
 		// double gas price
@@ -269,7 +253,7 @@ func (t *ThanosStack) deployContracts(ctx context.Context,
 	_, err = utils.ExecuteCommand(
 		"bash",
 		"-c",
-		fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && echo '%s' > .env", deploymentPath, envValues),
+		fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && echo '%s' > .env", t.deploymentPath, envValues),
 	)
 	if err != nil {
 		fmt.Print("\r❌ Make .env file failed!       \n")
@@ -278,13 +262,13 @@ func (t *ThanosStack) deployContracts(ctx context.Context,
 
 	// STEP 4.3. Deploy contracts
 	if isResume {
-		err = utils.ExecuteCommandStream(t.l, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh redeploy -e .env -c deploy-config.json", deploymentPath))
+		err = utils.ExecuteCommandStream(t.l, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh redeploy -e .env -c deploy-config.json", t.deploymentPath))
 		if err != nil {
 			fmt.Print("\r❌ Contract deployment failed!       \n")
 			return err
 		}
 	} else {
-		err = utils.ExecuteCommandStream(t.l, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh deploy -e .env -c deploy-config.json", deploymentPath))
+		err = utils.ExecuteCommandStream(t.l, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh deploy -e .env -c deploy-config.json", t.deploymentPath))
 		if err != nil {
 			fmt.Print("\r❌ Contract deployment failed!       \n")
 			return err

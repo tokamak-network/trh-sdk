@@ -3,9 +3,9 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
-	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
@@ -18,21 +18,16 @@ import (
 func ActionInstallationPlugins() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
 		var network, stack string
-		var err error
-		var selectedDeployment *types.Deployment
 
-		selectedDeployment, err = utils.SelectDeployment()
+		var config *types.Config
+
+		var awsConfig *types.AWSConfig
+
+		deploymentPath, err := os.Getwd()
 		if err != nil {
-			fmt.Println("Error selecting deployment:", err)
 			return err
 		}
-
-		if selectedDeployment == nil {
-			fmt.Println("No deployment selected.")
-			return nil
-		}
-
-		config, err := utils.ReadConfigFromJSONFile(selectedDeployment.DeploymentPath)
+		config, err = utils.ReadConfigFromJSONFile(deploymentPath)
 		if err != nil {
 			fmt.Println("Error reading settings.json")
 			return err
@@ -44,6 +39,15 @@ func ActionInstallationPlugins() cli.ActionFunc {
 		} else {
 			network = config.Network
 			stack = config.Stack
+			awsConfig = config.AWS
+		}
+
+		if awsConfig == nil {
+			awsConfig, err = thanos.InputAWSLogin()
+			if err != nil {
+				fmt.Printf("Failed to login AWS: %s \n", err)
+				return err
+			}
 		}
 
 		if !constants.SupportedStacks[stack] {
@@ -65,22 +69,16 @@ func ActionInstallationPlugins() cli.ActionFunc {
 		}
 
 		// Initialize the logger
-		fileName := fmt.Sprintf("%s/logs/%s_plugins_%s_%s_%d.log", selectedDeployment.DeploymentPath, cmd.Name, stack, network, time.Now().Unix())
+		fileName := fmt.Sprintf("%s/logs/%s_plugins_%s_%s_%d.log", deploymentPath, cmd.Name, stack, network, time.Now().Unix())
 		l := logging.InitLogger(fileName)
 
 		switch stack {
 		case constants.ThanosStack:
-			var awsProfile *types.AWSProfile
-			var err error
-			if network == constants.Testnet || network == constants.Mainnet {
-				awsProfile, err = aws.LoginAWS(ctx, config)
-				if err != nil {
-					fmt.Println("Error logging into AWS")
-					return err
-				}
+			thanosStack, err := thanos.NewThanosStack(l, network, false, deploymentPath, awsConfig)
+			if err != nil {
+				fmt.Println("Failed to initialize thanos stack", "err", err)
+				return err
 			}
-
-			thanosStack := thanos.NewThanosStack(l, network, stack, config, awsProfile, true, selectedDeployment.DeploymentPath)
 
 			if cmd.Name == "install" {
 				switch stack {

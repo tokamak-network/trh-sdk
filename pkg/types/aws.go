@@ -16,7 +16,7 @@ type AWSConfig struct {
 	AccessKey     string `json:"access_key"`
 	Region        string `json:"region"`
 	DefaultFormat string `json:"default_format" default:"json"`
-	VpcID         string `json:"vpc_id"`
+	VpcID         string `json:"vpc_id,omitempty"`
 }
 
 type AvailabilityZone struct {

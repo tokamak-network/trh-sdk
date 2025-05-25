@@ -1,15 +1,17 @@
 package utils
 
-import "os"
+import (
+	"os"
+	"path/filepath"
+)
 
 func CheckExistingSourceCode(deploymentPath string, folderName string) (bool, error) {
-	currentDir, err := os.Getwd()
-	if err != nil {
-		return false, err
+	var fullPath string
+	if filepath.IsAbs(deploymentPath) {
+		fullPath = filepath.Join(deploymentPath, folderName)
+	} else {
+		fullPath = filepath.Join(".", deploymentPath, folderName)
 	}
-
-	// Construct full path
-	fullPath := currentDir + "/" + folderName
 
 	// Check if the folder exists
 	info, err := os.Stat(fullPath)

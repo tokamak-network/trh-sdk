@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
+
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
@@ -45,8 +47,8 @@ type InstallBlockExplorerInput struct {
 	WalletConnectProjectID string
 }
 
-func (t *ThanosStack) InputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
-	l1RPCUrl, _, l1ChainID, err := t.inputL1RPC(ctx)
+func InputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
+	l1RPCUrl, _, l1ChainID, err := inputL1RPC(ctx)
 	if err != nil {
 		fmt.Printf("Error while reading L1 RPC URL: %s", err)
 		return nil, err
@@ -212,7 +214,7 @@ func (t *ThanosStack) InputDeployContracts(ctx context.Context) (*DeployContract
 	}, nil
 }
 
-func (t *ThanosStack) inputL1RPC(ctx context.Context) (l1RPCUrl string, l1RRCKind string, l1ChainID uint64, err error) {
+func inputL1RPC(ctx context.Context) (l1RPCUrl string, l1RRCKind string, l1ChainID uint64, err error) {
 	for {
 		fmt.Print("Please enter your L1 RPC URL: ")
 		l1RPCUrl, err = scanner.ScanString()
@@ -252,7 +254,7 @@ func (t *ThanosStack) inputL1RPC(ctx context.Context) (l1RPCUrl string, l1RRCKin
 	return l1RPCUrl, l1RRCKind, l1ChainID, nil
 }
 
-func (t *ThanosStack) inputDeployInfra() (*DeployInfraInput, error) {
+func InputDeployInfra() (*DeployInfraInput, error) {
 	var (
 		chainName   string
 		l1BeaconURL string
@@ -281,7 +283,7 @@ func (t *ThanosStack) inputDeployInfra() (*DeployInfraInput, error) {
 		break
 	}
 
-	l1BeaconURL, err = t.inputL1BeaconURL()
+	l1BeaconURL, err = inputL1BeaconURL()
 	if err != nil {
 		fmt.Printf("Error while reading L1 beacon URL: %s", err)
 		return nil, err
@@ -293,7 +295,7 @@ func (t *ThanosStack) inputDeployInfra() (*DeployInfraInput, error) {
 	}, nil
 }
 
-func (t *ThanosStack) inputL1BeaconURL() (string, error) {
+func inputL1BeaconURL() (string, error) {
 	var (
 		l1BeaconURL string
 		err         error
@@ -437,7 +439,7 @@ func (t *ThanosStack) GetUpdateNetworkParams(ctx context.Context) error {
 		return err
 	}
 	if wantUpdateL1RPC {
-		l1RPC, l1Kind, _, err := t.inputL1RPC(ctx)
+		l1RPC, l1Kind, _, err := inputL1RPC(ctx)
 		if err != nil {
 			fmt.Println("Error scanning the L1 RPC URL", err)
 			return err
@@ -455,7 +457,7 @@ func (t *ThanosStack) GetUpdateNetworkParams(ctx context.Context) error {
 		return err
 	}
 	if wantUpdateL1BeaconRPC {
-		l1BeaconRPC, err := t.inputL1BeaconURL()
+		l1BeaconRPC, err := inputL1BeaconURL()
 		if err != nil {
 			fmt.Println("Error scanning the L1 Beacon RPC URL", err)
 		}
@@ -475,6 +477,73 @@ func (t *ThanosStack) GetUpdateNetworkParams(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func InputAWSLogin() (*types.AWSConfig, error) {
+	var (
+		awsAccessKeyID, awsSecretKey, awsRegion string
+		err                                     error
+	)
+	for {
+		fmt.Print("Please enter your AWS access key: ")
+		awsAccessKeyID, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error while reading AWS access key")
+			return nil, err
+		}
+		if awsAccessKeyID == "" {
+			fmt.Println("Error: AWS access key ID cannot be empty")
+			continue
+		}
+		if !utils.IsValidAWSAccessKey(awsAccessKeyID) {
+			fmt.Println("Error: The AWS access key ID format is invalid")
+			continue
+		}
+		break
+	}
+
+	for {
+		fmt.Print("Please enter your AWS secret key: ")
+		awsSecretKey, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error while reading AWS secret key")
+			return nil, err
+		}
+		if awsSecretKey == "" {
+			fmt.Println("Error: AWS secret key cannot be empty")
+			continue
+		}
+		if !utils.IsValidAWSSecretKey(awsSecretKey) {
+			fmt.Println("Error: The AWS secret key format is invalid")
+			continue
+		}
+		break
+	}
+
+	for {
+		fmt.Print("Please enter your AWS region (default: ap-northeast-2): ")
+		awsRegion, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error while reading AWS region")
+			return nil, err
+		}
+		if awsRegion == "" {
+			awsRegion = "ap-northeast-2"
+		}
+		fmt.Println("Verifying region availability...")
+		if !aws.IsAvailableRegion(awsAccessKeyID, awsSecretKey, awsRegion) {
+			fmt.Println("Error: The AWS region is not available. Please try again.")
+			continue
+		}
+		break
+	}
+
+	return &types.AWSConfig{
+		SecretKey:     awsSecretKey,
+		Region:        awsRegion,
+		AccessKey:     awsAccessKeyID,
+		DefaultFormat: "json",
+	}, nil
 }
 
 func SelectAccounts(ctx context.Context, client *ethclient.Client, enableFraudProof bool, seed string) (types.OperatorMap, error) {
@@ -775,7 +844,7 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	writer.WriteString(fmt.Sprintf("export TF_VAR_prestate_file_path=\"%s\"\n", "config-files/prestate.json"))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_prestate_hash=\"%s\"\n", "0x03ab262ce124af0d5d328e09bf886a2b272fe960138115ad8b94fdc3034e3155"))
 
-	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_deployments_path=\"%s\"\n", config.DeploymentsPath))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_deployments_path=\"%s\"\n", config.DeploymentFilePath))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_l1_rpc_url=\"%s\"\n", config.L1RpcUrl))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_l1_rpc_provider=\"%s\"\n", config.L1RpcProvider))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_l1_beacon_url=\"%s\"\n", config.L1BeaconUrl))

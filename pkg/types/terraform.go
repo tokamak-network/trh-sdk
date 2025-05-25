@@ -24,7 +24,7 @@ type TerraformEnvConfig struct {
 	RollupFilePath      string
 	PrestateFilePath    string
 	PrestateHash        string
-	DeploymentsPath     string
+	DeploymentFilePath  string
 	L1RpcUrl            string
 	L1RpcProvider       string
 	L1BeaconUrl         string
