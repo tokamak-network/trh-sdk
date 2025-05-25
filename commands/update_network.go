@@ -65,12 +65,17 @@ func ActionUpdateNetwork() cli.ActionFunc {
 				fmt.Println("Failed to initialize thanos stack", "err", err)
 				return err
 			}
-			err = thanosStack.GetUpdateNetworkParams(ctx)
+			inputs, err := thanos.GetUpdateNetworkInputs(ctx)
 			if err != nil {
-				fmt.Println("Error getting update network parameters")
+				fmt.Println("Error getting update network inputs")
 				return err
 			}
-			return thanosStack.UpdateNetwork(ctx)
+
+			if inputs == nil {
+				return nil
+			}
+
+			return thanosStack.UpdateNetwork(ctx, inputs)
 		}
 
 		return nil

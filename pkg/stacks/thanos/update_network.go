@@ -16,9 +16,22 @@ type UpdateNetworkParams struct {
 	L1BeaconURL string
 }
 
-func (t *ThanosStack) UpdateNetwork(ctx context.Context) error {
+func (t *ThanosStack) UpdateNetwork(ctx context.Context, inputs *UpdateNetworkInput) error {
 	if t.deployConfig == nil || t.deployConfig.K8s == nil {
 		return errors.New("your chain hasn't deployed yet. Please run 'trh-sdk deploy' first")
+	}
+
+	if inputs == nil {
+		return fmt.Errorf("inputs can not be empty")
+	}
+
+	if inputs.L1RPC != "" {
+		t.deployConfig.L1RPCURL = inputs.L1RPC
+		t.deployConfig.L1RPCProvider = utils.DetectRPCKind(inputs.L1RPC)
+	}
+
+	if inputs.L1BeaconURL != "" {
+		t.deployConfig.L1BeaconURL = inputs.L1BeaconURL
 	}
 
 	var (

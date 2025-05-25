@@ -47,6 +47,11 @@ type InstallBlockExplorerInput struct {
 	WalletConnectProjectID string
 }
 
+type UpdateNetworkInput struct {
+	L1RPC       string
+	L1BeaconURL string
+}
+
 func InputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
 	l1RPCUrl, _, l1ChainID, err := inputL1RPC(ctx)
 	if err != nil {
@@ -429,24 +434,26 @@ func InputInstallBlockExplorer() (*InstallBlockExplorerInput, error) {
 	}, nil
 }
 
-func (t *ThanosStack) GetUpdateNetworkParams(ctx context.Context) error {
+func GetUpdateNetworkInputs(ctx context.Context) (*UpdateNetworkInput, error) {
 	// Step 2. Get the input from users
 	// Step 2.1. Get L1 RPC
+
+	var updateNetworkInput UpdateNetworkInput
+
 	fmt.Print("Do you want to update the L1 RPC? (Y/n): ")
 	wantUpdateL1RPC, err := scanner.ScanBool(true)
 	if err != nil {
 		fmt.Println("Error scanning the L1 RPC option", err)
-		return err
+		return nil, err
 	}
 	if wantUpdateL1RPC {
-		l1RPC, l1Kind, _, err := inputL1RPC(ctx)
+		l1RPC, _, _, err := inputL1RPC(ctx)
 		if err != nil {
 			fmt.Println("Error scanning the L1 RPC URL", err)
-			return err
+			return nil, err
 		}
 
-		t.deployConfig.L1RPCURL = l1RPC
-		t.deployConfig.L1RPCProvider = l1Kind
+		updateNetworkInput.L1RPC = l1RPC
 	}
 
 	// Step 2.2. Get the Beacon RPC
@@ -454,29 +461,29 @@ func (t *ThanosStack) GetUpdateNetworkParams(ctx context.Context) error {
 	wantUpdateL1BeaconRPC, err := scanner.ScanBool(true)
 	if err != nil {
 		fmt.Println("Error scanning the L1 Beacon RPC option", err)
-		return err
+		return nil, err
 	}
 	if wantUpdateL1BeaconRPC {
 		l1BeaconRPC, err := inputL1BeaconURL()
 		if err != nil {
 			fmt.Println("Error scanning the L1 Beacon RPC URL", err)
 		}
-		t.deployConfig.L1BeaconURL = l1BeaconRPC
+		updateNetworkInput.L1BeaconURL = l1BeaconRPC
 	}
 
 	fmt.Print("Do you want to update the network? (Y/n): ")
 	wantUpdate, err := scanner.ScanBool(true)
 	if err != nil {
 		fmt.Println("Error scanning input:", err)
-		return err
+		return nil, err
 	}
 
 	if !wantUpdate {
 		fmt.Println("Skip to update the network")
-		return nil
+		return nil, nil
 	}
 
-	return nil
+	return &updateNetworkInput, nil
 }
 
 func InputAWSLogin() (*types.AWSConfig, error) {
