@@ -14,7 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func (t *ThanosStack) installBridge(_ context.Context) error {
+func (t *ThanosStack) InstallBridge(_ context.Context) error {
 	if t.deployConfig.K8s == nil {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
@@ -167,7 +167,7 @@ func (t *ThanosStack) installBridge(_ context.Context) error {
 	return nil
 }
 
-func (t *ThanosStack) uninstallBridge(_ context.Context) error {
+func (t *ThanosStack) UninstallBridge(_ context.Context) error {
 	if t.deployConfig.K8s == nil {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}

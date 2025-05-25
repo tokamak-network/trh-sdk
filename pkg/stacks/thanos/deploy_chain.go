@@ -344,7 +344,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	fmt.Printf("Configuration saved successfully to: %s/settings.json \n", t.deploymentPath)
 
 	// After installing the infra successfully, we install the bridge
-	err = t.installBridge(ctx)
+	err = t.InstallBridge(ctx)
 	if err != nil {
 		fmt.Println("Error installing bridge:", err)
 	}

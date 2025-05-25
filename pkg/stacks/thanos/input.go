@@ -319,7 +319,7 @@ func inputL1BeaconURL() (string, error) {
 	return l1BeaconURL, nil
 }
 
-func (t *ThanosStack) inputInstallBlockExplorer() (*InstallBlockExplorerInput, error) {
+func InputInstallBlockExplorer() (*InstallBlockExplorerInput, error) {
 	var (
 		databaseUserName,
 		databasePassword,

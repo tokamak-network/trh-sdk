@@ -80,17 +80,61 @@ func ActionInstallationPlugins() cli.ActionFunc {
 				return err
 			}
 
+			if network == constants.LocalDevnet {
+				return fmt.Errorf("network %s does not support plugin installation", constants.LocalDevnet)
+			}
+
 			if cmd.Name == "install" {
 				switch stack {
 				case constants.ThanosStack:
-					return thanosStack.InstallPlugins(ctx, plugins)
+					for _, pluginName := range plugins {
+						if !constants.SupportedPlugins[pluginName] {
+							fmt.Printf("Plugin %s is not supported for this stack.\n", pluginName)
+							continue
+						}
+
+						switch pluginName {
+						case constants.PluginBlockExplorer:
+							installBlockExplorerInput, err := thanos.InputInstallBlockExplorer()
+							if err != nil || installBlockExplorerInput == nil {
+								fmt.Println("Error installing block explorer:", err)
+								return err
+							}
+
+							err = thanosStack.InstallBlockExplorer(ctx, installBlockExplorerInput)
+							if err != nil {
+								return thanosStack.UninstallBlockExplorer(ctx)
+							}
+							return nil
+						case constants.PluginBridge:
+							err := thanosStack.InstallBridge(ctx)
+							if err != nil {
+								return thanosStack.UninstallBridge(ctx)
+							}
+							return nil
+						default:
+							return nil
+						}
+					}
 				default:
 					return nil
 				}
 			} else if cmd.Name == "uninstall" {
 				switch stack {
 				case constants.ThanosStack:
-					return thanosStack.UninstallPlugins(ctx, plugins)
+					for _, pluginName := range plugins {
+						if !constants.SupportedPlugins[pluginName] {
+							fmt.Printf("Plugin %s is not supported for this stack.\n", pluginName)
+							continue
+						}
+
+						switch pluginName {
+						case constants.PluginBridge:
+							return thanosStack.UninstallBridge(ctx)
+						case constants.PluginBlockExplorer:
+							return thanosStack.UninstallBlockExplorer(ctx)
+						}
+					}
 				default:
 					return nil
 				}
