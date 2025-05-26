@@ -107,7 +107,11 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 
 		operators := deployContractsConfig.Operators
 
-		if len(operators) == 0 || len(operators) < 4 {
+		if operators == nil ||
+			operators.AdminPrivateKey == "" ||
+			operators.SequencerPrivateKey == "" ||
+			operators.BatcherPrivateKey == "" ||
+			operators.ProposerPrivateKey == "" {
 			return fmt.Errorf("at least 5 operators are required for deploying contracts")
 		}
 
@@ -141,15 +145,15 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			return err
 		}
 
-		t.deployConfig.AdminPrivateKey = operators[0].PrivateKey
-		t.deployConfig.SequencerPrivateKey = operators[1].PrivateKey
-		t.deployConfig.BatcherPrivateKey = operators[2].PrivateKey
-		t.deployConfig.ProposerPrivateKey = operators[3].PrivateKey
+		t.deployConfig.AdminPrivateKey = operators.AdminPrivateKey
+		t.deployConfig.SequencerPrivateKey = operators.SequencerPrivateKey
+		t.deployConfig.BatcherPrivateKey = operators.BatcherPrivateKey
+		t.deployConfig.ProposerPrivateKey = operators.ProposerPrivateKey
 		if deployContractsConfig.fraudProof {
-			if operators[4] == nil {
+			if operators.ChallengerPrivateKey == "" {
 				return fmt.Errorf("challenger operator is required for fault proof but was not found")
 			}
-			t.deployConfig.ChallengerPrivateKey = operators[4].PrivateKey
+			t.deployConfig.ChallengerPrivateKey = operators.ChallengerPrivateKey
 		}
 		t.deployConfig.DeploymentFilePath = fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", t.deploymentPath, deployContractsTemplate.L1ChainID)
 		t.deployConfig.L1RPCProvider = utils.DetectRPCKind(deployContractsConfig.l1RPCurl)
@@ -177,7 +181,11 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 
 		// STEP 4. Deploy the contracts
 		// Check admin balance and estimated deployment cost
-		adminAddress := operators[0].Address
+		adminAddress, err := utils.GetAddressFromPrivateKey(operators.AdminPrivateKey)
+		if err != nil {
+			fmt.Printf("❌ Failed to get admin address from private key: %v\n", err)
+			return err
+		}
 		balance, err := l1Client.BalanceAt(ctx, common.HexToAddress(adminAddress), nil)
 		if err != nil {
 			fmt.Printf("❌ Failed to retrieve admin account balance: %v\n", err)

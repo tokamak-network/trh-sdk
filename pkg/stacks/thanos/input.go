@@ -31,7 +31,7 @@ type DeployContractsInput struct {
 	l1RPCurl           string
 	fraudProof         bool
 	ChainConfiguration *types.ChainConfiguration
-	Operators          types.OperatorMap
+	Operators          *types.Operators
 }
 
 func (c *DeployContractsInput) Validate(ctx context.Context) error {
@@ -53,7 +53,7 @@ func (c *DeployContractsInput) Validate(ctx context.Context) error {
 		return errors.New("ChainConfiguration is required")
 	}
 
-	if len(c.Operators) == 0 {
+	if c.Operators == nil {
 		return errors.New("operators is required")
 	}
 
@@ -191,7 +191,7 @@ func InputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
 		return nil, err
 	}
 
-	if len(operators) == 0 {
+	if operators == nil {
 		return nil, fmt.Errorf("no operators were found")
 	}
 
@@ -650,9 +650,9 @@ func InputAWSLogin() (*types.AWSConfig, error) {
 	}, nil
 }
 
-func SelectAccounts(ctx context.Context, client *ethclient.Client, enableFraudProof bool, seed string) (types.OperatorMap, error) {
+func SelectAccounts(ctx context.Context, client *ethclient.Client, enableFraudProof bool, seed string) (*types.Operators, error) {
 	fmt.Println("Retrieving accounts...")
-	accounts, err := types.GetAccountMap(ctx, client, seed)
+	accounts, err := utils.GetAccountMap(ctx, client, seed)
 	if err != nil {
 		return nil, err
 	}
@@ -679,10 +679,10 @@ func SelectAccounts(ctx context.Context, client *ethclient.Client, enableFraudPr
 		prompts = append(prompts, "Select a challenger account from the following list (recommended 0.3 ETH)")
 	}
 
-	operators := make(types.OperatorMap)
+	operatorsMap := make(types.OperatorMap)
 
 	displayAccounts(accounts)
-	for i := 0; i < len(prompts); i++ {
+	for i := range prompts {
 		operator := types.Operator(i)
 	startLoop:
 		for {
@@ -736,8 +736,7 @@ func SelectAccounts(ctx context.Context, client *ethclient.Client, enableFraudPr
 			}
 
 			selectedAccountsIndex[i] = selectingIndex
-			operators[operator] = &types.IndexAccount{
-				Index:      selectingIndex,
+			operatorsMap[operator] = &types.IndexAccount{
 				Address:    selectedAccount.Address,
 				PrivateKey: selectedAccount.PrivateKey,
 			}
@@ -745,48 +744,104 @@ func SelectAccounts(ctx context.Context, client *ethclient.Client, enableFraudPr
 		}
 	}
 
-	sortedOperators := make([]*types.IndexAccount, len(operators))
-	for i, operator := range operators {
+	sortedOperators := make([]*types.IndexAccount, len(operatorsMap))
+	for i, operator := range operatorsMap {
 		sortedOperators[i] = operator
 	}
+
+	var operators types.Operators
 	for i, operator := range sortedOperators {
 		fmt.Printf("%s account address: %s\n", mapAccountIndexes[i], operator.Address)
+
+		switch types.Operator(i) {
+		case types.Admin:
+			operators.AdminPrivateKey = operator.PrivateKey
+		case types.Sequencer:
+			operators.SequencerPrivateKey = operator.PrivateKey
+		case types.Batcher:
+			operators.BatcherPrivateKey = operator.PrivateKey
+		case types.Proposer:
+			operators.ProposerPrivateKey = operator.PrivateKey
+		case types.Challenger:
+			operators.ChallengerPrivateKey = operator.PrivateKey
+		default:
+			return nil, errors.New("unknown operator type")
+		}
 	}
 
-	return operators, nil
+	return &operators, nil
 }
 
 func makeDeployContractConfigJsonFile(
 	ctx context.Context,
 	l1Provider *ethclient.Client,
-	operators types.OperatorMap,
+	operators *types.Operators,
 	deployContractTemplate *types.DeployConfigTemplate,
 	filePath string,
 ) error {
-	for role, account := range operators {
-		switch role {
-		case types.Admin:
-			deployContractTemplate.FinalSystemOwner = account.Address
-			deployContractTemplate.SuperchainConfigGuardian = account.Address
-			deployContractTemplate.ProxyAdminOwner = account.Address
-			deployContractTemplate.BaseFeeVaultRecipient = account.Address
-			deployContractTemplate.L1FeeVaultRecipient = account.Address
-			deployContractTemplate.SequencerFeeVaultRecipient = account.Address
-			deployContractTemplate.NewPauser = account.Address
-			deployContractTemplate.NewBlacklister = account.Address
-			deployContractTemplate.MasterMinterOwner = account.Address
-			deployContractTemplate.FiatTokenOwner = account.Address
-			deployContractTemplate.UniswapV3FactoryOwner = account.Address
-			deployContractTemplate.UniversalRouterRewardsDistributor = account.Address
-		case types.Sequencer:
-			deployContractTemplate.P2pSequencerAddress = account.Address
-		case types.Batcher:
-			deployContractTemplate.BatchSenderAddress = account.Address
-		case types.Proposer:
-			deployContractTemplate.L2OutputOracleProposer = account.Address
-		case types.Challenger:
-			deployContractTemplate.L2OutputOracleChallenger = account.Address
+	if operators == nil {
+		return fmt.Errorf("operators cannot be nil")
+	}
+
+	if l1Provider == nil {
+		return fmt.Errorf("l1Provider cannot be nil")
+	}
+
+	if deployContractTemplate == nil {
+		return fmt.Errorf("deployContractTemplate cannot be nil")
+	}
+
+	if account := operators.AdminPrivateKey; account != "" {
+		address, err := utils.GetAddressFromPrivateKey(account)
+		if err != nil {
+			fmt.Printf("Error getting address from private key: %s", err)
+			return err
 		}
+
+		deployContractTemplate.FinalSystemOwner = address
+		deployContractTemplate.SuperchainConfigGuardian = address
+		deployContractTemplate.ProxyAdminOwner = address
+		deployContractTemplate.BaseFeeVaultRecipient = address
+		deployContractTemplate.L1FeeVaultRecipient = address
+		deployContractTemplate.SequencerFeeVaultRecipient = address
+		deployContractTemplate.NewPauser = address
+		deployContractTemplate.NewBlacklister = address
+		deployContractTemplate.MasterMinterOwner = address
+		deployContractTemplate.FiatTokenOwner = address
+		deployContractTemplate.UniswapV3FactoryOwner = address
+		deployContractTemplate.UniversalRouterRewardsDistributor = address
+	}
+	if account := operators.SequencerPrivateKey; account != "" {
+		address, err := utils.GetAddressFromPrivateKey(account)
+		if err != nil {
+			fmt.Printf("Error getting address from private key: %s", err)
+			return err
+		}
+		deployContractTemplate.P2pSequencerAddress = address
+	}
+	if account := operators.BatcherPrivateKey; account != "" {
+		address, err := utils.GetAddressFromPrivateKey(account)
+		if err != nil {
+			fmt.Printf("Error getting address from private key: %s", err)
+			return err
+		}
+		deployContractTemplate.BatchSenderAddress = address
+	}
+	if account := operators.ProposerPrivateKey; account != "" {
+		address, err := utils.GetAddressFromPrivateKey(account)
+		if err != nil {
+			fmt.Printf("Error getting address from private key: %s", err)
+			return err
+		}
+		deployContractTemplate.L2OutputOracleProposer = address
+	}
+	if account := operators.ChallengerPrivateKey; account != "" {
+		address, err := utils.GetAddressFromPrivateKey(account)
+		if err != nil {
+			fmt.Printf("Error getting address from private key: %s", err)
+			return err
+		}
+		deployContractTemplate.L2OutputOracleChallenger = address
 	}
 
 	// Fetch the latest block
