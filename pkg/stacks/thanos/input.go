@@ -28,6 +28,7 @@ var (
 
 type DeployContractsInput struct {
 	l1RPCurl           string
+	l1ChainId          uint64
 	seed               string
 	fraudProof         bool
 	ChainConfiguration *types.ChainConfiguration
@@ -206,6 +207,7 @@ func InputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
 
 	return &DeployContractsInput{
 		l1RPCurl:   l1RPCUrl,
+		l1ChainId:  l1ChainID,
 		seed:       seed,
 		fraudProof: fraudProof,
 		ChainConfiguration: &types.ChainConfiguration{

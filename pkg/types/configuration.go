@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
@@ -39,6 +40,45 @@ func (c *ChainConfiguration) GetFinalizationPeriodSeconds() uint64 {
 		panic("ChallengePeriod is not set")
 	}
 	return c.ChallengePeriod
+}
+
+func (c *ChainConfiguration) Validate(l1ChainId uint64) error {
+	if c.BatchSubmissionFrequency <= 0 {
+		return errors.New("BatchSubmissionFrequency is not set")
+	}
+
+	if c.ChallengePeriod <= 0 {
+		return errors.New("ChallengePeriod is not set")
+	}
+
+	if c.OutputRootFrequency <= 0 {
+		return errors.New("OutputRootFrequency is not set")
+	}
+
+	if c.L1BlockTime <= 0 {
+		return errors.New("L1BlockTime is not set")
+	}
+
+	if c.L2BlockTime <= 0 {
+		return errors.New("L2BlockTime is not set")
+	}
+
+	if c.OutputRootFrequency%c.L2BlockTime != 0 {
+		return fmt.Errorf("OutputRootFrequency must be a multiple of %d", c.L2BlockTime)
+	}
+
+	if c.BatchSubmissionFrequency%c.L1BlockTime != 0 {
+		return fmt.Errorf("BatchSubmissionFrequency must be a multiple of %d", c.L1BlockTime)
+	}
+
+	if l1ChainId == constants.EthereumMainnetChainID {
+		mainnetChallengePeriod := constants.L1ChainConfigurations[l1ChainId].FinalizationPeriodSeconds
+		if c.ChallengePeriod != mainnetChallengePeriod {
+			return fmt.Errorf("challengePeriod must be equal by %d", mainnetChallengePeriod)
+		}
+	}
+
+	return nil
 }
 
 type DeployContractStatus int
