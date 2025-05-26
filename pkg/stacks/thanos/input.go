@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -28,11 +29,39 @@ var (
 
 type DeployContractsInput struct {
 	l1RPCurl           string
-	l1ChainId          uint64
-	seed               string
 	fraudProof         bool
 	ChainConfiguration *types.ChainConfiguration
 	Operators          types.OperatorMap
+}
+
+func (c *DeployContractsInput) Validate(ctx context.Context) error {
+	if c.l1RPCurl == "" {
+		return errors.New("l1RPCurl is required")
+	}
+
+	l1Client, err := ethclient.Dial(c.l1RPCurl)
+	if err != nil {
+		return fmt.Errorf("failed to connect l1 client: %w", err)
+	}
+
+	l1ChainId, err := l1Client.ChainID(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get l1 chain id: %w", err)
+	}
+
+	if c.ChainConfiguration == nil {
+		return errors.New("ChainConfiguration is required")
+	}
+
+	if len(c.Operators) == 0 {
+		return errors.New("operators is required")
+	}
+
+	if err := c.ChainConfiguration.Validate(l1ChainId.Uint64()); err != nil {
+		return fmt.Errorf("chain configuration is invalid: %w", err)
+	}
+
+	return nil
 }
 
 type DeployInfraInput struct {
@@ -207,8 +236,6 @@ func InputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
 
 	return &DeployContractsInput{
 		l1RPCurl:   l1RPCUrl,
-		l1ChainId:  l1ChainID,
-		seed:       seed,
 		fraudProof: fraudProof,
 		ChainConfiguration: &types.ChainConfiguration{
 			L2BlockTime:              l2BlockTime,
