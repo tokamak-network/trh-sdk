@@ -24,6 +24,20 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		return fmt.Errorf("network %s does not support", t.network)
 	}
 
+	if deployContractsConfig == nil {
+		return fmt.Errorf("deployContractsConfig is required")
+	}
+
+	if deployContractsConfig.ChainConfiguration == nil {
+		return fmt.Errorf("chainConfiguration is required")
+	}
+
+	l1ChainID := deployContractsConfig.l1ChainId
+
+	if err := deployContractsConfig.ChainConfiguration.Validate(l1ChainID); err != nil {
+		return err
+	}
+
 	var (
 		err      error
 		isResume bool
@@ -88,13 +102,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			return err
 		}
 
-		l1ChainID, err := l1Client.ChainID(ctx)
-		if err != nil {
-			fmt.Printf("Failed to get L1 chain ID: %s", err)
-			return err
-		}
-
-		deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig, l1ChainID.Uint64(), l2ChainID)
+		deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig, l1ChainID, l2ChainID)
 
 		operators := deployContractsConfig.Operators
 
