@@ -93,9 +93,64 @@ type InstallBlockExplorerInput struct {
 	WalletConnectProjectID string
 }
 
+func (c *InstallBlockExplorerInput) Validate(ctx context.Context) error {
+	if c.DatabaseUsername == "" {
+		return errors.New("database username is required")
+	}
+	if c.DatabasePassword == "" {
+		return errors.New("database password is required")
+	}
+
+	if c.CoinmarketcapKey == "" {
+		return errors.New("coinmarketcap key is required")
+	}
+
+	if c.WalletConnectProjectID == "" {
+		return errors.New("wallet connect project id is required")
+	}
+
+	if c.CoinmarketcapTokenID == "" {
+		return errors.New("coinmarketcap token id is required")
+	}
+
+	if err := utils.ValidatePostgresUsername(c.DatabaseUsername); err != nil {
+		return errors.New("database username is invalid")
+	}
+
+	if !utils.IsValidRDSUsername(c.DatabaseUsername) {
+		return errors.New("database username is invalid")
+	}
+
+	if !utils.IsValidRDSPassword(c.DatabasePassword) {
+		return errors.New("database password is invalid")
+	}
+
+	return nil
+}
+
 type UpdateNetworkInput struct {
 	L1RPC       string
 	L1BeaconURL string
+}
+
+func (c *UpdateNetworkInput) Validate(ctx context.Context) error {
+	if c.L1RPC == "" {
+		return errors.New("l1RPC is required")
+	}
+
+	if c.L1BeaconURL == "" {
+		return errors.New("l1BeaconURL is required")
+	}
+
+	if !utils.IsValidL1RPC(c.L1RPC) {
+		return fmt.Errorf("l1RPC is invalid")
+	}
+
+	if !utils.IsValidBeaconURL(c.L1BeaconURL) {
+		return fmt.Errorf("l1BeaconURL is invalid")
+	}
+
+	return nil
 }
 
 func InputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {

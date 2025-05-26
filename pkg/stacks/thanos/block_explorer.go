@@ -10,13 +10,17 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
-func (t *ThanosStack) InstallBlockExplorer(_ context.Context, inputs *InstallBlockExplorerInput) error {
+func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallBlockExplorerInput) error {
 	if t.deployConfig.K8s == nil {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
 	if inputs == nil {
 		return fmt.Errorf("inputs are not set. Please provide the inputs")
+	}
+
+	if err := inputs.Validate(ctx); err != nil {
+		return err
 	}
 
 	var (

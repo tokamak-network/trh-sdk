@@ -25,6 +25,10 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, inputs *UpdateNetworkIn
 		return fmt.Errorf("inputs can not be empty")
 	}
 
+	if err := inputs.Validate(ctx); err != nil {
+		return err
+	}
+
 	if inputs.L1RPC != "" {
 		t.deployConfig.L1RPCURL = inputs.L1RPC
 		t.deployConfig.L1RPCProvider = utils.DetectRPCKind(inputs.L1RPC)
