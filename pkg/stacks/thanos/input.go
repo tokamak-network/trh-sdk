@@ -28,18 +28,18 @@ var (
 )
 
 type DeployContractsInput struct {
-	l1RPCurl           string
-	fraudProof         bool
+	L1RPCurl           string
+	FraudProof         bool
 	ChainConfiguration *types.ChainConfiguration
 	Operators          *types.Operators
 }
 
 func (c *DeployContractsInput) Validate(ctx context.Context) error {
-	if c.l1RPCurl == "" {
+	if c.L1RPCurl == "" {
 		return errors.New("l1RPCurl is required")
 	}
 
-	l1Client, err := ethclient.Dial(c.l1RPCurl)
+	l1Client, err := ethclient.Dial(c.L1RPCurl)
 	if err != nil {
 		return fmt.Errorf("failed to connect l1 client: %w", err)
 	}
@@ -306,8 +306,8 @@ func InputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
 	}
 
 	return &DeployContractsInput{
-		l1RPCurl:   l1RPCUrl,
-		fraudProof: fraudProof,
+		L1RPCurl:   l1RPCUrl,
+		FraudProof: fraudProof,
 		ChainConfiguration: &types.ChainConfiguration{
 			L2BlockTime:              l2BlockTime,
 			L1BlockTime:              l1BlockTime,
@@ -885,7 +885,7 @@ func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainI
 		l1ChainId                        = l1ChainID
 		l2OutputOracleSubmissionInterval = chainConfiguration.GetL2OutputOracleSubmissionInterval()
 		finalizationPeriods              = chainConfiguration.GetFinalizationPeriodSeconds()
-		enableFraudProof                 = deployConfigInputs.fraudProof
+		enableFraudProof                 = deployConfigInputs.FraudProof
 	)
 
 	defaultTemplate := &types.DeployConfigTemplate{
