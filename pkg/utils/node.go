@@ -69,3 +69,15 @@ func IsValidL1RPC(l1RPCUrl string) bool {
 
 	return true
 }
+
+func GetChainIDFromL1RPC(l1RPCUrl string) (uint64, error) {
+	client, err := ethclient.Dial(l1RPCUrl)
+	if err != nil {
+		return 0, err
+	}
+	chainID, err := client.ChainID(context.Background())
+	if err != nil {
+		return 0, err
+	}
+	return chainID.Uint64(), nil
+}

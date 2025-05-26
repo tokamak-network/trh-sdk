@@ -36,3 +36,5 @@ logs/
 settings.json
 tokamak-thanos
 tokamak-thanos-stack
+
+deploy-config.json
