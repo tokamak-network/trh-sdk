@@ -69,6 +69,22 @@ type DeployInfraInput struct {
 	L1BeaconURL string
 }
 
+func (c *DeployInfraInput) Validate(ctx context.Context) error {
+	if c.L1BeaconURL == "" {
+		return errors.New("L1BeaconURL is required")
+	}
+
+	if !utils.IsValidBeaconURL(c.L1BeaconURL) {
+		return errors.New("invalid L1BeaconURL")
+	}
+
+	if !chainNameRegex.MatchString(c.ChainName) {
+		return errors.New("invalid chain name, chain name must contain only letters (a-z, A-Z), numbers (0-9), spaces. Special characters are not allowed")
+	}
+
+	return nil
+}
+
 type InstallBlockExplorerInput struct {
 	DatabaseUsername       string
 	DatabasePassword       string

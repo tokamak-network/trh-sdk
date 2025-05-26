@@ -85,6 +85,15 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		return nil
 	}
 
+	if inputs == nil {
+		return fmt.Errorf("inputs is required")
+	}
+
+	if err := inputs.Validate(ctx); err != nil {
+		fmt.Println("Error validating inputs, err:", err)
+		return err
+	}
+
 	// STEP 1. Clone the charts repository
 	err := t.cloneSourcecode("tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git")
 	if err != nil {
