@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/ethereum/go-ethereum/common"
+	ethCommon "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"os"
@@ -121,6 +121,19 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 			}
 		}
 
+		if t.registerCandidate {
+			adminAddress, err := utils.GetAddressFromPrivateKey(t.deployConfig.AdminPrivateKey)
+			if err != nil {
+				return err
+			}
+			err = t.checkAdminBalance(ctx, adminAddress, registerCandidate.amount, l1Client)
+			if err != nil {
+				return err
+			}
+		}
+
+		fmt.Println("Resuming the contracts deployment...", t.deployConfig.AdminPrivateKey)
+
 		err = t.deployContracts(ctx, l1Client, true)
 		if err != nil {
 			fmt.Print("\r❌ Resume the contracts deployment failed!       \n")
@@ -162,6 +175,13 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 
 		if len(operators) == 0 {
 			return fmt.Errorf("no operators were found")
+		}
+
+		if t.registerCandidate {
+			err = t.checkAdminBalance(ctx, ethCommon.HexToAddress(operators[0].Address), registerCandidate.amount, l1Client)
+			if err != nil {
+				return err
+			}
 		}
 
 		fmt.Print("🔎 The SDK is ready to deploy the contracts to the L1 network. Do you want to proceed(Y/n)? ")
@@ -227,7 +247,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		// STEP 4. Deploy the contracts
 		// Check admin balance and estimated deployment cost
 		adminAddress := operators[0].Address
-		balance, err := l1Client.BalanceAt(ctx, common.HexToAddress(adminAddress), nil)
+		balance, err := l1Client.BalanceAt(ctx, ethCommon.HexToAddress(adminAddress), nil)
 		if err != nil {
 			fmt.Printf("❌ Failed to retrieve admin account balance: %v\n", err)
 			return err
