@@ -39,7 +39,7 @@ func ShowLogs(ctx context.Context, network, stack string, component string, isTr
 
 	switch stack {
 	case constants.ThanosStack:
-		thanosStack := thanos.NewThanosStack(network, stack)
+		thanosStack := thanos.NewThanosStack(network, stack, config)
 		return thanosStack.ShowLogs(ctx, config, component, isTroubleshoot)
 	}
 

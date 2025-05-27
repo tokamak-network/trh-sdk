@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/urfave/cli/v3"
+
+	"github.com/tokamak-network/trh-sdk/pkg/types"
+
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
-	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
-	"github.com/urfave/cli/v3"
 )
 
 type Deploy struct {
@@ -27,8 +29,8 @@ func Execute(ctx context.Context, network, stack string, config *types.Config) e
 
 	switch stack {
 	case constants.ThanosStack:
-		thanosStack := thanos.NewThanosStack(network, stack)
-		err := thanosStack.Deploy(ctx, config)
+		thanosStack := thanos.NewThanosStack(network, stack, config)
+		err := thanosStack.Deploy(ctx)
 		if err != nil {
 			fmt.Println("Error deploying Thanos Stack")
 			return err

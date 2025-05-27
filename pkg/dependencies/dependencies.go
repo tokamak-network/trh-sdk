@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
@@ -60,7 +59,7 @@ func GetArchitecture() (string, error) {
 	}
 
 	// Check if the architecture is supported
-	if strings.Contains(arch, "x86_64") {
+	if strings.Contains(arch, "x86_64") || strings.Contains(arch, "amd64") {
 		arch = "amd64"
 	} else if strings.Contains(arch, "aarch64") || strings.Contains(arch, "arm64") {
 		arch = "arm64"
@@ -83,17 +82,7 @@ func CheckTerraformInstallation() bool {
 		return false
 	}
 
-	arch, err := GetArchitecture()
-	if err != nil {
-		logging.Errorf("Failed to get architecture: %v", err)
-		return false
-	}
-
-	if !strings.Contains(terraformVersion, arch) {
-		fmt.Printf("❌ Terraform version does not match architecture: %s\n", terraformVersion)
-		return false
-	}
-	fmt.Println("✅ Terraform is installed and architecture matches")
+	fmt.Printf("✅ Terraform is installed: %s \n", terraformVersion)
 	return true
 }
 

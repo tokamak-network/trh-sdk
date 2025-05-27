@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
+
+# Detect current shell
+CURRENT_SHELL=$(ps -p $$ -o comm=)
+
 # Re-run with the correct interpreter depending on the OS
 # Use SKIP_SHEBANG_CHECK variable to prevent infinite loop if already re-run
 if [ "$(uname)" = "Darwin" ] && [ -z "$SKIP_SHEBANG_CHECK" ]; then
-  export SKIP_SHEBANG_CHECK=1
-  echo "macOS detected. Switching to zsh interpreter......"
-  exec /bin/zsh "$0" "$@"
+    if [ " $CURRENT_SHELL" != "zsh" ]; then
+        export SKIP_SHEBANG_CHECK=1
+        echo "macOS detected. Current shell: $CURRENT_SHELL.Switching to zsh interpreter......"
+        exec /bin/zsh "$0" "$@"
+    fi
 fi
 
 # Detect OS
@@ -76,8 +82,6 @@ elif [ "$SHELL_NAME" = "bash" ]; then
     CONFIG_FILE="$HOME/.bashrc"
     PROFILE_FILE="$HOME/.profile"
 fi
-
-
 
 # Setup Go version
 # MacOS specific steps
@@ -188,6 +192,8 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
             } >> "$PROFILE_FILE"
         fi
 
+        rm -rf "${GO_FILE_NAME}"
+
         export PATH="$PATH:/usr/local/go/bin"
     else
         echo "Go 1.22.6 is already installed."
@@ -288,6 +294,8 @@ elif [[ "$OS_TYPE" == "linux" ]]; then
                 } >> "$PROFILE_FILE"
             fi
 
+            rm -rf "${GO_FILE_NAME}"
+
             export PATH="$PATH:/usr/local/go/bin"
         else
             echo "Go 1.22.6 is already installed."
@@ -306,7 +314,6 @@ elif [[ "$OS_TYPE" == "linux" ]]; then
 fi
 
 
-
 # Add required PATH exports if not already present
 if ! grep -q "export PATH=\$PATH:/usr/local/go/bin" "$CONFIG_FILE"; then
     echo "export PATH=\$PATH:/usr/local/go/bin" >> "$CONFIG_FILE"
@@ -314,17 +321,6 @@ fi
 
 if ! grep -q "export PATH=\$HOME/go/bin:\$PATH" "$CONFIG_FILE"; then
     echo "export PATH=\$HOME/go/bin:\$PATH" >> "$CONFIG_FILE"
-fi
-
-if ! grep -q "export PATH=\$PATH:\$HOME/.foundry/bin" "$CONFIG_FILE"; then
-    echo "export PATH=\$PATH:\$HOME/.foundry/bin" >> "$CONFIG_FILE"
-fi
-
-if ! grep -q "export PATH=\"\$HOME/.local/share/pnpm:\$PATH\"" "$CONFIG_FILE"; then
-    echo "export PATH=\"\$HOME/.local/share/pnpm:\$PATH\"" >> "$CONFIG_FILE"
-fi
-if ! grep -q "export PATH=\"\$HOME/.cargo/env:\$PATH\"" "$CONFIG_FILE"; then
-    echo "export PATH=\"\$HOME/.cargo/env:\$PATH\"" >> "$CONFIG_FILE"
 fi
 
 # Source shell config and set PATH temporarily for this session
@@ -349,6 +345,15 @@ go install github.com/tokamak-network/trh-sdk@latest
 echo "✅ TRH SDK has been installed successfully!"
 
 echo "Verifying TRH SDK installation..."
-trh-sdk version
+"$(go env GOPATH)/bin/trh-sdk" version
+
+
+wget https://raw.githubusercontent.com/tokamak-network/trh-sdk/refs/heads/main/scripts/install-all-packages.sh
+chmod +x install-all-packages.sh
+./install-all-packages.sh
+
+
+rm -rf ./install-all-packages.sh
+
 
 echo -e "\033[1;32msource $CONFIG_FILE\033[0m to apply changes to your current shell session."
