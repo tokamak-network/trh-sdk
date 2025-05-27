@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
-	"github.com/ethereum/go-ethereum/common"
+	ethCommon "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
@@ -20,6 +20,38 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
+
+func (t *ThanosStack) checkAdminBalance(ctx context.Context, adminAddress ethCommon.Address, amount float64, l1Client *ethclient.Client) error {
+	fmt.Printf("Checking admin's TON token balance... \n")
+
+	chainIDFromClient, errChainID := l1Client.ChainID(ctx)
+	if errChainID != nil {
+		return fmt.Errorf("failed to get L1 chain ID: %w", errChainID)
+	}
+
+	chainConfig := constants.L1ChainConfigurations[chainIDFromClient.Uint64()]
+
+	tonAddress := ethCommon.HexToAddress(chainConfig.TON)
+	tokenInstance, errToken := abis.NewTON(tonAddress, l1Client)
+	if errToken != nil {
+		return fmt.Errorf("failed to instantiate TON token contract at %s: %w", tonAddress.Hex(), errToken)
+	}
+
+	adminBalance, errBalance := tokenInstance.BalanceOf(&bind.CallOpts{Context: ctx}, adminAddress)
+	if errBalance != nil {
+		return fmt.Errorf("failed to get TON balance for admin %s from contract %s: %w", adminAddress, tonAddress.Hex(), errBalance)
+	}
+	amountInWei := new(big.Float).Mul(big.NewFloat(amount), big.NewFloat(1e18))
+	requiredAmountBigInt, _ := amountInWei.Int(nil)
+
+	if adminBalance.Cmp(requiredAmountBigInt) < 0 {
+		return fmt.Errorf("insufficient TON token balance for admin %s. Have: %s, Required: %s. Please top up the admin account",
+			adminAddress,
+			adminBalance.String(),
+			requiredAmountBigInt.String())
+	}
+	return nil
+}
 
 // fromDeployContract flag would be true if the function would be called from the deploy contract function
 func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, config *types.Config, registerCandidate *RegisterCandidateInput) error {
@@ -32,6 +64,8 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, config *type
 		fmt.Printf("Failed to get chain id: %s", err)
 		return err
 	}
+
+	chainConfig := constants.L1ChainConfigurations[chainID.Uint64()]
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -72,11 +106,11 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, config *type
 	}
 
 	// Get contract address from environment
-	contractAddrStr := constants.L1ChainConfigurations[chainID.Uint64()].L1VerificationContractAddress
+	contractAddrStr := chainConfig.L1VerificationContractAddress
 	if contractAddrStr == "" {
 		return fmt.Errorf("L1_VERIFICATION_CONTRACT_ADDRESS not set in constant")
 	}
-	contractAddr := common.HexToAddress(contractAddrStr)
+	contractAddr := ethCommon.HexToAddress(contractAddrStr)
 
 	// Create contract instance
 	contract, err := abis.NewL1ContractVerification(contractAddr, l1Client)
@@ -94,7 +128,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, config *type
 		return fmt.Errorf("ProxyAdmin is not set")
 	}
 
-	l2TonAddress := constants.L1ChainConfigurations[chainID.Uint64()].L2TonAddress
+	l2TonAddress := chainConfig.L2TonAddress
 	if l2TonAddress == "" {
 		return fmt.Errorf("L2TonAddress variable is not set")
 	}
@@ -108,16 +142,37 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, config *type
 	if err != nil {
 		return fmt.Errorf("failed to check if verification is possible: %v", err)
 	}
+
+	contractAddrStrBridgeRegistry := chainConfig.L1BridgeRegistry
+	if contractAddrStrBridgeRegistry == "" {
+		return fmt.Errorf("L1BridgeRegistry variable not set in constant")
+	}
+	contractAddressBridgeRegistry := ethCommon.HexToAddress(contractAddrStrBridgeRegistry)
+	// Create contract instance
+	bridgeRegistryContract, err := abis.NewL1BridgeRegistry(contractAddressBridgeRegistry, l1Client)
+	if err != nil {
+		return fmt.Errorf("failed to create contract instance: %v", err)
+	}
+
+	rollupType, err := bridgeRegistryContract.RollupType(callOpts, ethCommon.HexToAddress(systemConfigProxy))
+	if err != nil {
+		return fmt.Errorf("failed to get rollup type: %v", err)
+	}
+
+	if rollupType != 0 {
+		fmt.Printf("Config already registered \n")
+	}
+
 	// Verify and register config
-	if isVerificationPossible {
+	if isVerificationPossible && rollupType == 0 {
 		txVerifyAndRegisterConfig, err := contract.VerifyAndRegisterRollupConfig(
 			auth,
-			common.HexToAddress(systemConfigProxy),
-			common.HexToAddress(proxyAdmin),
+			ethCommon.HexToAddress(systemConfigProxy),
+			ethCommon.HexToAddress(proxyAdmin),
 			2, //TODO: Need to check and update this using TON
-			common.HexToAddress(l2TonAddress),
+			ethCommon.HexToAddress(l2TonAddress),
 			registerCandidate.nameInfo,
-			common.HexToAddress(safeWalletAddress),
+			ethCommon.HexToAddress(safeWalletAddress),
 		)
 		if err != nil {
 			return fmt.Errorf("failed to register candidate: %v", err)
@@ -136,20 +191,8 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, config *type
 		}
 
 		fmt.Printf("Transaction confirmed in block %d\n", receiptVerifyRegisterConfig.BlockNumber.Uint64())
-	} else {
-		contractAddrStrBridgeRegistry := constants.L1ChainConfigurations[chainID.Uint64()].L1BridgeRegistry
-		if contractAddrStrBridgeRegistry == "" {
-			return fmt.Errorf("L1BridgeRegistry variable not set in constant")
-		}
-		contractAddressBridgeRegistry := common.HexToAddress(contractAddrStrBridgeRegistry)
-
-		// Create contract instance
-		bridgeRegistryContract, err := abis.NewL1BridgeRegistry(contractAddressBridgeRegistry, l1Client)
-		if err != nil {
-			return fmt.Errorf("failed to create contract instance: %v", err)
-		}
-
-		txRegisterConfig, err := bridgeRegistryContract.RegisterRollupConfig(auth, common.HexToAddress(systemConfigProxy), 2, common.HexToAddress(l2TonAddress),
+	} else if rollupType == 0 {
+		txRegisterConfig, err := bridgeRegistryContract.RegisterRollupConfig(auth, ethCommon.HexToAddress(systemConfigProxy), 2, ethCommon.HexToAddress(l2TonAddress),
 			registerCandidate.nameInfo)
 
 		if err != nil {
@@ -176,17 +219,17 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, config *type
 	amountBigInt, _ := amountInWei.Int(nil)
 
 	// Get contract address from environment
-	l2ManagerAddressStr := constants.L1ChainConfigurations[chainID.Uint64()].L2ManagerAddress
+	l2ManagerAddressStr := chainConfig.L2ManagerAddress
 	if l2ManagerAddressStr == "" {
 		return fmt.Errorf("L2_MANAGER_ADDRESS variable is not set")
 	}
-	l2ManagerAddress := common.HexToAddress(l2ManagerAddressStr)
+	l2ManagerAddress := ethCommon.HexToAddress(l2ManagerAddressStr)
 
-	tonAddressStr := constants.L1ChainConfigurations[chainID.Uint64()].TON
+	tonAddressStr := chainConfig.TON
 	if tonAddressStr == "" {
 		return fmt.Errorf("TON variable is not set")
 	}
-	tonAddress := common.HexToAddress(tonAddressStr)
+	tonAddress := ethCommon.HexToAddress(tonAddressStr)
 
 	// Create TON contract instance
 	tonContract, err := abis.NewTON(tonAddress, l1Client)
@@ -219,7 +262,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, config *type
 	// Call registerCandidateAddOn
 	txRegisterCandidate, err := l2ManagerContract.RegisterCandidateAddOn(
 		auth,
-		common.HexToAddress(systemConfigProxy),
+		ethCommon.HexToAddress(systemConfigProxy),
 		amountBigInt,
 		registerCandidate.useTon,
 		registerCandidate.memo,
@@ -250,6 +293,18 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, cwd string) 
 	registerCandidate, err := t.inputRegisterCandidate()
 	if err != nil {
 		return fmt.Errorf("❌ failed to get register candidate input: %w", err)
+	}
+	l1Client, err := ethclient.DialContext(ctx, t.deployConfig.L1RPCURL)
+	if err != nil {
+		return err
+	}
+	adminAddress, err := utils.GetAddressFromPrivateKey(t.deployConfig.AdminPrivateKey)
+	if err != nil {
+		return err
+	}
+	err = t.checkAdminBalance(ctx, adminAddress, registerCandidate.amount, l1Client)
+	if err != nil {
+		return err
 	}
 	err = t.setupSafeWallet(t.deployConfig, cwd)
 	if err != nil {
