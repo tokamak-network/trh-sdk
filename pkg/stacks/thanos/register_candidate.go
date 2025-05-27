@@ -245,17 +245,17 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, config *type
 	return nil
 }
 
-func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, config *types.Config, cwd string) error {
+func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, cwd string) error {
 	var err error
 	registerCandidate, err := t.inputRegisterCandidate()
 	if err != nil {
 		return fmt.Errorf("❌ failed to get register candidate input: %w", err)
 	}
-	err = t.setupSafeWallet(config, cwd)
+	err = t.setupSafeWallet(t.deployConfig, cwd)
 	if err != nil {
 		return fmt.Errorf("❌ failed to set up Safe Wallet: %w", err)
 	}
-	err = t.verifyRegisterCandidates(ctx, config, registerCandidate)
+	err = t.verifyRegisterCandidates(ctx, t.deployConfig, registerCandidate)
 	if err != nil {
 		return fmt.Errorf("❌ candidate verification failed: %w", err)
 	}

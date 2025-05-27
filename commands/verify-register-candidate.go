@@ -26,8 +26,8 @@ func ActionVerifyRegisterCandidates() cli.ActionFunc {
 
 		switch config.Stack {
 		case constants.ThanosStack:
-			thanosStack := thanos.NewThanosStack(config.Network, config.Stack)
-			err = thanosStack.VerifyRegisterCandidates(ctx, config, cwd)
+			thanosStack := thanos.NewThanosStack(config.Network, config.Stack, config)
+			err = thanosStack.VerifyRegisterCandidates(ctx, cwd)
 			return err
 		default:
 			return fmt.Errorf("unsupported stack: %s", config.Stack)
