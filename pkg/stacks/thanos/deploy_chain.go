@@ -20,14 +20,14 @@ func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string, inputs *Deplo
 		err := t.deployLocalDevnet()
 		if err != nil {
 			fmt.Printf("Error deploying local devnet: %s", err)
-			return t.destroyDevnet()
+			return err
 		}
 	case constants.Testnet, constants.Mainnet:
 		switch infraOpt {
 		case constants.AWS:
 			err := t.deployNetworkToAWS(ctx, inputs)
 			if err != nil {
-				return t.destroyInfraOnAWS(ctx)
+				return err
 			}
 			return nil
 		default:
