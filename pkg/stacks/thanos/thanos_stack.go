@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 
 	"github.com/tokamak-network/trh-sdk/pkg/types"
@@ -39,6 +40,15 @@ func NewThanosStack(
 	// Login AWS
 
 	var awsProfile *types.AWSProfile
+
+	if awsConfig != nil {
+		awsProfile, err = aws.LoginAWS(context.Background(), awsConfig)
+		if err != nil {
+			fmt.Println("Failed to login aws", "err", err)
+			return nil, err
+		}
+	}
+
 	if awsConfig != nil && config.K8s != nil && config.K8s.Namespace != "" {
 		// Switch to this context
 		err = utils.SwitchKubernetesContext(context.Background(), config.K8s.Namespace, awsConfig.Region)
