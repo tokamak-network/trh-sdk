@@ -105,9 +105,8 @@ func ActionDeploy() cli.ActionFunc {
 
 			err = thanosStack.Deploy(ctx, infraOpt, inputs)
 			if err != nil {
-				fmt.Println("Error deploying Thanos Stack")
-
-				return thanosStack.Destroy(ctx)
+				fmt.Println("Error deploying Thanos Stack", "err", err)
+				return err
 			}
 		}
 		return nil

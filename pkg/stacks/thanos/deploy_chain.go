@@ -19,14 +19,25 @@ func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string, inputs *Deplo
 	case constants.LocalDevnet:
 		err := t.deployLocalDevnet()
 		if err != nil {
-			fmt.Printf("Error deploying local devnet: %s", err)
+			fmt.Printf("Failed to deploy the devnet: %s", err)
+
+			if destroyErr := t.destroyDevnet(); destroyErr != nil {
+				fmt.Println("Failed to destroy the devnet chain after deploying the chain failed", "err", destroyErr)
+			}
 			return err
 		}
+		return nil
 	case constants.Testnet, constants.Mainnet:
 		switch infraOpt {
 		case constants.AWS:
 			err := t.deployNetworkToAWS(ctx, inputs)
 			if err != nil {
+				fmt.Println("Failed to deploy the testnet chain", "err", err)
+
+				if destroyErr := t.destroyInfraOnAWS(ctx); destroyErr != nil {
+					fmt.Println("Failed to destroy the testnet chain after deploying the chain failed", "err", destroyErr)
+				}
+
 				return err
 			}
 			return nil
@@ -37,7 +48,6 @@ func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string, inputs *Deplo
 		return fmt.Errorf("network %s is not supported", t.network)
 	}
 
-	return nil
 }
 
 func (t *ThanosStack) deployLocalDevnet() error {
