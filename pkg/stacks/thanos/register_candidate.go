@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
-	"github.com/ethereum/go-ethereum/common"
 	ethCommon "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -22,6 +21,11 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
+
+type DesignatedOwners struct {
+	TokamakDAO ethCommon.Address
+	Foundation ethCommon.Address
+}
 
 func (t *ThanosStack) checkAdminBalance(ctx context.Context, adminAddress ethCommon.Address, amount float64, l1Client *ethclient.Client) error {
 	fmt.Printf("Checking admin's TON token balance... \n")
@@ -337,7 +341,6 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, config *types.Config,
 	if !ok {
 		return fmt.Errorf("failed to get the value of 'SystemOwnerSafe' field in the deployment file")
 	}
-	fmt.Println("SafeWalletAddess: ", safeWalletAddress)
 
 	fmt.Println("Checking if safe wallet is set up properly...")
 
@@ -383,13 +386,15 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, config *types.Config,
 		return fmt.Errorf("failed to call getOwners: %v", err)
 	}
 
-	// Define the required owners
-	// TODO: create function to get designated owners: tokamakDAO, foundation
-	// Example: Sepolia
-	requiredOwners := []common.Address{
+	ownersInfo, err := GetDesignatedOwnersByChainID(config.L1ChainID)
+	if err != nil {
+		return fmt.Errorf("failed to get designated owners: %v", err)
+	}
+
+	requiredOwners := []ethCommon.Address{
 		address, // admin address
-		common.HexToAddress("0x0Fd5632f3b52458C31A2C3eE1F4b447001872Be9"), // TokamakDAO address
-		common.HexToAddress("0x61dc95E5f27266b94805ED23D95B4C9553A3D049"), // Foundation address
+		ownersInfo.TokamakDAO,
+		ownersInfo.Foundation,
 	}
 
 	// Check if the owners match the required ones
@@ -437,4 +442,21 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, config *types.Config,
 	}
 
 	return nil
+}
+
+func GetDesignatedOwnersByChainID(chainID uint64) (DesignatedOwners, error) {
+	switch chainID {
+	case 11155111: // Sepolia
+		return DesignatedOwners{
+			TokamakDAO: ethCommon.HexToAddress("0x0Fd5632f3b52458C31A2C3eE1F4b447001872Be9"),
+			Foundation: ethCommon.HexToAddress("0x61dc95E5f27266b94805ED23D95B4C9553A3D049"),
+		}, nil
+	case 1: // Ethereum (TODO: need to update)
+		return DesignatedOwners{
+			TokamakDAO: ethCommon.HexToAddress("0xYourMainnetTokamakDAOAddress"),
+			Foundation: ethCommon.HexToAddress("0xYourMainnetFoundationAddress"),
+		}, nil
+	default:
+		return DesignatedOwners{}, fmt.Errorf("unsupported chain ID: %d", chainID)
+	}
 }
