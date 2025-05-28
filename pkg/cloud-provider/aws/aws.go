@@ -49,6 +49,22 @@ func LoginAWS(ctx context.Context, awsConfig *types.AWSConfig) (*types.AWSProfil
 }
 
 func loginAWS(accessKey, secretKey, region, formatFile string) (*types.AccountProfile, error) {
+	if accessKey == "" {
+		return nil, fmt.Errorf("accessKey can't be empty")
+	}
+
+	if secretKey == "" {
+		return nil, fmt.Errorf("secretKey can't be empty")
+	}
+
+	if region == "" {
+		return nil, fmt.Errorf("region can't be empty")
+	}
+
+	if formatFile == "" {
+		formatFile = "json"
+	}
+
 	configureAWS("aws", "configure", "set", "aws_access_key_id", accessKey)
 	configureAWS("aws", "configure", "set", "aws_secret_access_key", secretKey)
 	configureAWS("aws", "configure", "set", "region", region)
