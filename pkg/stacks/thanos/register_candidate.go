@@ -259,6 +259,8 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 		return fmt.Errorf("failed to create contract instance: %v", err)
 	}
 
+	fmt.Println("Initiating transaction to register DAO candidate...")
+
 	// Call registerCandidateAddOn
 	txRegisterCandidate, err := l2ManagerContract.RegisterCandidateAddOn(
 		auth,
