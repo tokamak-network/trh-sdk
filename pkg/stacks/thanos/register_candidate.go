@@ -295,6 +295,8 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, config *type
 
 func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, cwd string) error {
 	var err error
+	fmt.Println("Starting candidate registration process...")
+	fmt.Println("💲 Admin account will be used to register the candidate. Please ensure it has sufficient TON token balance.")
 	registerCandidate, err := t.inputRegisterCandidate()
 	if err != nil {
 		return fmt.Errorf("❌ failed to get register candidate input: %w", err)

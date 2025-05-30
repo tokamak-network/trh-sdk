@@ -498,14 +498,22 @@ func (t *ThanosStack) inputRegisterCandidate() (*RegisterCandidateInput, error) 
 		break
 	}
 
-	fmt.Print("Please enter a memo for the registration (optional): ")
-	memo, err = scanner.ScanString()
-	if err != nil {
-		fmt.Printf("Error while reading memo: %s", err)
-		return nil, err
+	for {
+		fmt.Print("Please enter a memo for the registration: ")
+		memo, err = scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error while reading memo: %s", err)
+			return nil, err
+		}
+
+		if memo == "" {
+			fmt.Println("Memo cannot be empty")
+			continue
+		}
+		break
 	}
 
-	fmt.Print("Please enter a name for the registration (optional): ")
+	fmt.Print("Please enter a name for the registration (default: \"\"): ")
 	nameInfo, err = scanner.ScanString()
 	if err != nil {
 		fmt.Printf("Error while reading name: %s", err)
