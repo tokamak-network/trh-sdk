@@ -168,7 +168,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig, l2ChainID)
 
 		// Select operators Accounts
-		operators, err := selectAccounts(ctx, l1Client, deployContractsConfig.fraudProof, deployContractsConfig.seed)
+		operators, err := selectAccounts(ctx, l1Client, deployContractsConfig.fraudProof, deployContractsConfig.seed, t.registerCandidate)
 		if err != nil {
 			return err
 		}
