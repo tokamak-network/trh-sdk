@@ -2,7 +2,6 @@ package thanos
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -351,19 +350,10 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, config *types.Config,
 	}
 
 	// Create the signer from the private key
-	privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(config.AdminPrivateKey, "0x"))
+	adminAddress, err := utils.GetAddressFromPrivateKey(t.deployConfig.AdminPrivateKey)
 	if err != nil {
-		return fmt.Errorf("failed to load private key: %v", err)
+		return fmt.Errorf("failed to get admin address: %v", err)
 	}
-	// Generate the address from the private key
-	publicKey := privateKey.Public()
-	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
-	if !ok {
-		return fmt.Errorf("failed to assert public key type")
-	}
-
-	// Derive the address from the public key
-	address := crypto.PubkeyToAddress(*publicKeyECDSA)
 
 	// Retrieve the owners and threshold
 	callOpts := &bind.CallOpts{
@@ -392,7 +382,7 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, config *types.Config,
 	}
 
 	requiredOwners := []ethCommon.Address{
-		address, // admin address
+		adminAddress, // admin address
 		ownersInfo.TokamakDAO,
 		ownersInfo.Foundation,
 	}
