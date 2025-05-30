@@ -168,7 +168,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig, l2ChainID)
 
 		// Select operators Accounts
-		operators, err := selectAccounts(ctx, l1Client, deployContractsConfig.fraudProof, deployContractsConfig.seed)
+		operators, err := selectAccounts(ctx, l1Client, deployContractsConfig.fraudProof, deployContractsConfig.seed, t.registerCandidate)
 		if err != nil {
 			return err
 		}
@@ -306,7 +306,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	// If --no-candidate flag is NOT provided, register the candidate
 	if t.registerCandidate {
 		fmt.Println("Setting up the safe wallet...")
-		if err := t.setupSafeWallet(cwd); err != nil {
+		if err := t.setupSafeWallet(ctx, cwd); err != nil {
 			return err
 		}
 		fmt.Println("🔍 Verifying and registering candidate...")
