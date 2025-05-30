@@ -42,7 +42,7 @@ func displayAccounts(accounts map[int]types.Account) {
 	}
 }
 
-func selectAccounts(ctx context.Context, client *ethclient.Client, enableFraudProof bool, seed string) (types.OperatorMap, error) {
+func selectAccounts(ctx context.Context, client *ethclient.Client, enableFraudProof bool, seed string, isRegisteringCandidate bool) (types.OperatorMap, error) {
 	fmt.Println("Retrieving accounts...")
 	accounts, err := types.GetAccountMap(ctx, client, seed)
 	if err != nil {
@@ -74,6 +74,9 @@ func selectAccounts(ctx context.Context, client *ethclient.Client, enableFraudPr
 	operators := make(types.OperatorMap)
 
 	displayAccounts(accounts)
+	if isRegisteringCandidate {
+		fmt.Println("💲 Admin account will be used to register the candidate. Please ensure it has sufficient TON token balance.")
+	}
 	for i := 0; i < len(prompts); i++ {
 		operator := types.Operator(i)
 	startLoop:
