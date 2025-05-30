@@ -21,6 +21,11 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
+type DesignatedOwners struct {
+	TokamakDAO ethCommon.Address
+	Foundation ethCommon.Address
+}
+
 func (t *ThanosStack) checkAdminBalance(ctx context.Context, adminAddress ethCommon.Address, amount float64, l1Client *ethclient.Client) error {
 	fmt.Printf("Checking admin's TON token balance... \n")
 
@@ -306,7 +311,7 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, cwd string) 
 	if err != nil {
 		return err
 	}
-	err = t.setupSafeWallet(t.deployConfig, cwd)
+	err = t.setupSafeWallet(ctx, t.deployConfig, cwd)
 	if err != nil {
 		return fmt.Errorf("❌ failed to set up Safe Wallet: %w", err)
 	}
@@ -318,8 +323,8 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, cwd string) 
 	return nil
 }
 
-func (t *ThanosStack) setupSafeWallet(config *types.Config, cwd string) error {
-	// 1. Set the safe wallet address
+func (t *ThanosStack) setupSafeWallet(ctx context.Context, config *types.Config, cwd string) error {
+	// Set the safe wallet address
 	deployJSONPath := filepath.Join(cwd, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "deployments", fmt.Sprintf("%d-deploy.json", config.L1ChainID))
 	deployData, err := os.ReadFile(deployJSONPath)
 	if err != nil {
@@ -335,8 +340,90 @@ func (t *ThanosStack) setupSafeWallet(config *types.Config, cwd string) error {
 	if !ok {
 		return fmt.Errorf("failed to get the value of 'SystemOwnerSafe' field in the deployment file")
 	}
-	fmt.Println("SafeWalletAddess: ", safeWalletAddress)
-	// 2. Run hardhat task
+
+	fmt.Println("Checking if safe wallet is set up properly...")
+
+	// Connect to the L1
+	l1Client, err := ethclient.Dial(config.L1RPCURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Ethereum client: %v", err)
+	}
+
+	// Create the signer from the private key
+	adminAddress, err := utils.GetAddressFromPrivateKey(t.deployConfig.AdminPrivateKey)
+	if err != nil {
+		return fmt.Errorf("failed to get admin address: %v", err)
+	}
+
+	// Retrieve the owners and threshold
+	callOpts := &bind.CallOpts{
+		Context: ctx,
+	}
+
+	contract, err := abis.NewSafeExtender(ethCommon.HexToAddress(safeWalletAddress), l1Client)
+	if err != nil {
+		return fmt.Errorf("failed to create contract instance: %v", err)
+	}
+
+	// Call getThreshold() function
+	threshold, err := contract.GetThreshold(callOpts)
+	if err != nil {
+		return fmt.Errorf("failed to call getThreshold: %v", err)
+	}
+
+	owners, err := contract.GetOwners(callOpts)
+	if err != nil {
+		return fmt.Errorf("failed to call getOwners: %v", err)
+	}
+
+	ownersInfo, err := GetDesignatedOwnersByChainID(config.L1ChainID)
+	if err != nil {
+		return fmt.Errorf("failed to get designated owners: %v", err)
+	}
+
+	requiredOwners := []ethCommon.Address{
+		adminAddress, // admin address
+		ownersInfo.TokamakDAO,
+		ownersInfo.Foundation,
+	}
+
+	// Check if the owners match the required ones
+	ownersMatch := true
+	for _, requiredOwner := range requiredOwners {
+		ownerFound := false
+		for _, owner := range owners {
+			if owner == requiredOwner {
+				ownerFound = true
+				break
+			}
+		}
+		if !ownerFound {
+			ownersMatch = false
+			break
+		}
+	}
+	if ownersMatch {
+		fmt.Println("✅ All required owners are present in the Safe wallet.")
+	} else {
+		fmt.Println("❌ Required owners do not match the Safe wallet.")
+	}
+
+	// Check if the threshold is 3
+	thresholdMatch := threshold.Cmp(big.NewInt(3)) == 0
+
+	if thresholdMatch {
+		fmt.Println("✅ All required threshold are present in the Safe wallet.")
+	} else {
+		fmt.Println("❌ Required threshold do not match the Safe wallet.")
+	}
+
+	// Skip execution if owners and threshold match
+	if ownersMatch && thresholdMatch {
+		fmt.Println("Owners and threshold are already correct. Skipping hardhat task.")
+		return nil
+	}
+
+	// Run hardhat task
 	sdkPath := filepath.Join(cwd, "tokamak-thanos", "packages", "tokamak", "sdk")
 	cmdStr := fmt.Sprintf("cd %s && L1_URL=%s PRIVATE_KEY=%s SAFE_WALLET_ADDRESS=%s npx hardhat set-safe-wallet", sdkPath, config.L1RPCURL, config.AdminPrivateKey, safeWalletAddress)
 	if err := utils.ExecuteCommandStream("bash", "-c", cmdStr); err != nil {
@@ -345,4 +432,21 @@ func (t *ThanosStack) setupSafeWallet(config *types.Config, cwd string) error {
 	}
 
 	return nil
+}
+
+func GetDesignatedOwnersByChainID(chainID uint64) (DesignatedOwners, error) {
+	switch chainID {
+	case 11155111: // Sepolia
+		return DesignatedOwners{
+			TokamakDAO: ethCommon.HexToAddress("0x0Fd5632f3b52458C31A2C3eE1F4b447001872Be9"),
+			Foundation: ethCommon.HexToAddress("0x61dc95E5f27266b94805ED23D95B4C9553A3D049"),
+		}, nil
+	case 1: // Ethereum (TODO: need to update)
+		return DesignatedOwners{
+			TokamakDAO: ethCommon.HexToAddress("0xYourMainnetTokamakDAOAddress"),
+			Foundation: ethCommon.HexToAddress("0xYourMainnetFoundationAddress"),
+		}, nil
+	default:
+		return DesignatedOwners{}, fmt.Errorf("unsupported chain ID: %d", chainID)
+	}
 }
