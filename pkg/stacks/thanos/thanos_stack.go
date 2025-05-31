@@ -12,18 +12,18 @@ import (
 )
 
 type ThanosStack struct {
-	network           string
-	deployConfig      *types.Config
-	ignorePromptInput bool
-	awsProfile        *types.AWSProfile
-	l                 *zap.SugaredLogger
-	deploymentPath    string
+	network        string
+	deployConfig   *types.Config
+	usePromptInput bool
+	awsProfile     *types.AWSProfile
+	l              *zap.SugaredLogger
+	deploymentPath string
 }
 
 func NewThanosStack(
 	l *zap.SugaredLogger,
 	network string,
-	ignorePromptInput bool,
+	usePromptInput bool,
 	deploymentPath string,
 	awsConfig *types.AWSConfig,
 ) (*ThanosStack, error) {
@@ -49,21 +49,23 @@ func NewThanosStack(
 		}
 	}
 
-	if awsConfig != nil && config.K8s != nil && config.K8s.Namespace != "" {
-		// Switch to this context
-		err = utils.SwitchKubernetesContext(context.Background(), config.K8s.Namespace, awsConfig.Region)
-		if err != nil {
-			fmt.Println("Failed to switch k8s context", "err", err)
-			return nil, err
+	if awsConfig != nil {
+		if config != nil && config.K8s != nil && config.K8s.Namespace != "" {
+			// Switch to this context
+			err = utils.SwitchKubernetesContext(context.Background(), config.K8s.Namespace, awsConfig.Region)
+			if err != nil {
+				fmt.Println("Failed to switch k8s context", "err", err)
+				return nil, err
+			}
 		}
 	}
 
 	return &ThanosStack{
-		network:           network,
-		ignorePromptInput: ignorePromptInput,
-		awsProfile:        awsProfile,
-		l:                 l,
-		deploymentPath:    deploymentPath,
-		deployConfig:      config,
+		network:        network,
+		usePromptInput: usePromptInput,
+		awsProfile:     awsProfile,
+		l:              l,
+		deploymentPath: deploymentPath,
+		deployConfig:   config,
 	}, nil
 }

@@ -28,6 +28,33 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		return fmt.Errorf("deployContractsConfig is required")
 	}
 
+	if deployContractsConfig.ChainConfiguration == nil {
+		l1Client, err := ethclient.DialContext(ctx, deployContractsConfig.L1RPCurl)
+		if err != nil {
+			return err
+		}
+
+		l1ChainID, err := l1Client.ChainID(ctx)
+		if err != nil {
+			fmt.Println("Failed to get the L1 ChainID", "err", err)
+			return err
+		}
+
+		finalzationPeriodSeconds := constants.L1ChainConfigurations[l1ChainID.Uint64()].FinalizationPeriodSeconds
+		l2OutputSubmissionInterval := constants.L1ChainConfigurations[l1ChainID.Uint64()].L2OutputOracleSubmissionInterval
+		maxChannelDuration := constants.L1ChainConfigurations[l1ChainID.Uint64()].MaxChannelDuration
+		l2BlockTime := constants.DefaultL2BlockTimeInSeconds
+		l1BlockTime := constants.L1ChainConfigurations[l1ChainID.Uint64()].BlockTimeInSeconds
+
+		deployContractsConfig.ChainConfiguration = &types.ChainConfiguration{
+			BatchSubmissionFrequency: maxChannelDuration * l1BlockTime,
+			ChallengePeriod:          finalzationPeriodSeconds,
+			OutputRootFrequency:      l2BlockTime * l2OutputSubmissionInterval,
+			L2BlockTime:              l2BlockTime,
+			L1BlockTime:              l1BlockTime,
+		}
+	}
+
 	err := deployContractsConfig.Validate(ctx)
 	if err != nil {
 		fmt.Println("Error validating deployContractsConfig, err:", err)
@@ -48,7 +75,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 	if t.deployConfig.DeployContractState != nil {
 		if t.deployConfig.DeployContractState.Status == types.DeployContractStatusCompleted {
 			fmt.Println("The contracts have already been deployed successfully.")
-			if !t.ignorePromptInput {
+			if !t.usePromptInput {
 				fmt.Print("Do you want to deploy the contracts again? (y/N): ")
 				isDeployAgain, err := scanner.ScanBool(false)
 				if err != nil {
@@ -61,7 +88,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 				}
 			}
 		} else if t.deployConfig.DeployContractState.Status == types.DeployContractStatusInProgress {
-			if !t.ignorePromptInput {
+			if !t.usePromptInput {
 				fmt.Print("The contracts deployment is in progress. Do you want to resume? (Y/n): ")
 				isResume, err = scanner.ScanBool(true)
 				if err != nil {
@@ -115,7 +142,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			return fmt.Errorf("at least 5 operators are required for deploying contracts")
 		}
 
-		if !t.ignorePromptInput {
+		if !t.usePromptInput {
 			fmt.Print("🔎 The SDK is ready to deploy the contracts to the L1 network. Do you want to proceed(Y/n)? ")
 			confirmation, err := scanner.ScanBool(true)
 			if err != nil {
