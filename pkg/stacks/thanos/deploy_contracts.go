@@ -176,18 +176,18 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		t.deployConfig.SequencerPrivateKey = operators.SequencerPrivateKey
 		t.deployConfig.BatcherPrivateKey = operators.BatcherPrivateKey
 		t.deployConfig.ProposerPrivateKey = operators.ProposerPrivateKey
-		if deployContractsConfig.FraudProof {
-			if operators.ChallengerPrivateKey == "" {
-				return fmt.Errorf("challenger operator is required for fault proof but was not found")
-			}
-			t.deployConfig.ChallengerPrivateKey = operators.ChallengerPrivateKey
-		}
+		// if deployContractsConfig.FraudProof {
+		// 	if operators.ChallengerPrivateKey == "" {
+		// 		return fmt.Errorf("challenger operator is required for fault proof but was not found")
+		// 	}
+		// 	t.deployConfig.ChallengerPrivateKey = operators.ChallengerPrivateKey
+		// }
 		t.deployConfig.DeploymentFilePath = fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", t.deploymentPath, deployContractsTemplate.L1ChainID)
 		t.deployConfig.L1RPCProvider = utils.DetectRPCKind(deployContractsConfig.L1RPCurl)
 		t.deployConfig.L1ChainID = deployContractsTemplate.L1ChainID
 		t.deployConfig.L2ChainID = l2ChainID
 		t.deployConfig.L1RPCURL = deployContractsConfig.L1RPCurl
-		t.deployConfig.EnableFraudProof = deployContractsConfig.FraudProof
+		t.deployConfig.EnableFraudProof = false
 		t.deployConfig.ChainConfiguration = deployContractsConfig.ChainConfiguration
 
 		deployConfigFilePath := fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts/deploy-config.json", t.deploymentPath)

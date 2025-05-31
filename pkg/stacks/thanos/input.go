@@ -29,7 +29,6 @@ var (
 
 type DeployContractsInput struct {
 	L1RPCurl           string
-	FraudProof         bool
 	ChainConfiguration *types.ChainConfiguration
 	Operators          *types.Operators
 }
@@ -306,8 +305,7 @@ func InputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
 	}
 
 	return &DeployContractsInput{
-		L1RPCurl:   l1RPCUrl,
-		FraudProof: fraudProof,
+		L1RPCurl: l1RPCUrl,
 		ChainConfiguration: &types.ChainConfiguration{
 			L2BlockTime:              l2BlockTime,
 			L1BlockTime:              l1BlockTime,
@@ -885,7 +883,7 @@ func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainI
 		l1ChainId                        = l1ChainID
 		l2OutputOracleSubmissionInterval = chainConfiguration.GetL2OutputOracleSubmissionInterval()
 		finalizationPeriods              = chainConfiguration.GetFinalizationPeriodSeconds()
-		enableFraudProof                 = deployConfigInputs.FraudProof
+		enableFraudProof                 = false
 	)
 
 	defaultTemplate := &types.DeployConfigTemplate{
