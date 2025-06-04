@@ -99,7 +99,7 @@ func GetAccountMap(ctx context.Context, client *ethclient.Client, seedPhrase str
 
 	accountCount := 10
 
-	for i := range accountCount {
+	for i := 0; i < accountCount; i++ {
 		childKey, err := changeKey.NewChildKey(uint32(i))
 		if err != nil {
 			log.Printf("Error deriving key for index %d: %v", i, err)
