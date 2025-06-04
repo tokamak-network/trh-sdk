@@ -64,8 +64,9 @@ func (c *DeployContractsInput) Validate(ctx context.Context) error {
 }
 
 type DeployInfraInput struct {
-	ChainName   string
-	L1BeaconURL string
+	ChainName           string
+	L1BeaconURL         string
+	IgnoreInstallBridge bool
 }
 
 func (c *DeployInfraInput) Validate(ctx context.Context) error {
