@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"runtime"
 	"strings"
 	"time"
 
@@ -722,6 +723,14 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 func (t *ThanosStack) Destroy(ctx context.Context) error {
 	fileName := fmt.Sprintf("logs/destroy_thanos_%s_%s_%d.log", t.stack, t.network, time.Now().Unix())
 	logging.InitLogger(fileName)
+
+	// To ensure docker execution and socket permissions
+	if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
+		if err := utils.EnsureDockerReady(); err != nil {
+			return fmt.Errorf("docker setup failed: %w", err)
+		}
+	}
+
 	switch t.network {
 	case constants.LocalDevnet:
 		return t.destroyDevnet()
