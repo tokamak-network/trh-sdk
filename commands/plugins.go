@@ -74,7 +74,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 
 		switch stack {
 		case constants.ThanosStack:
-			thanosStack, err := thanos.NewThanosStack(l, network, false, deploymentPath, awsConfig)
+			thanosStack, err := thanos.NewThanosStack(l, network, true, deploymentPath, awsConfig)
 			if err != nil {
 				fmt.Println("Failed to initialize thanos stack", "err", err)
 				return err
