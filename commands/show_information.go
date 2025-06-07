@@ -59,7 +59,8 @@ func ActionShowInformation() cli.ActionFunc {
 				fmt.Println("Failed to initialize thanos stack", "err", err)
 				return err
 			}
-			return thanosStack.ShowInformation(ctx)
+			_, err = thanosStack.ShowInformation(ctx)
+			return err
 		}
 
 		return nil

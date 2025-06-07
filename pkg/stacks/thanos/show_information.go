@@ -20,25 +20,27 @@ var SupportedLogsComponents = map[string]bool{
 	"bridge":            true,
 }
 
-func (t *ThanosStack) ShowInformation(ctx context.Context) error {
+func (t *ThanosStack) ShowInformation(ctx context.Context) (*types.ChainInformation, error) {
 	if t.network == constants.LocalDevnet {
 		// Check the devnet network running
 		runningContainers, err := utils.GetDockerContainers(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to get docker containers: %w", err)
+			return nil, fmt.Errorf("failed to get docker containers: %w", err)
 		}
 		if len(runningContainers) == 0 {
 			fmt.Println("No running containers found. Please run the deploy command first")
-			return nil
+			return nil, nil
 		}
 		fmt.Println("✅ L1 and L2 networks are running on local devnet")
 		fmt.Println("L1 network is running on http://localhost:8545")
 		fmt.Println("L2 network is running on http://localhost:9545")
-		return nil
+		return &types.ChainInformation{
+			L2RpcUrl: "http://localhost:9545",
+		}, nil
 	}
 
 	if t.deployConfig.K8s == nil {
-		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+		return nil, fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
 	namespace := t.deployConfig.K8s.Namespace
@@ -46,7 +48,7 @@ func (t *ThanosStack) ShowInformation(ctx context.Context) error {
 	// Step 1: Get pods
 	runningPods, err := t.getRunningPods(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get pods: %w", err)
+		return nil, fmt.Errorf("failed to get pods: %w", err)
 	}
 
 	status := map[string]bool{
@@ -54,6 +56,10 @@ func (t *ThanosStack) ShowInformation(ctx context.Context) error {
 		"bridge":            false,
 		"block-explorer-fe": false,
 	}
+
+	var (
+		l2RpcUrl, bridgeUrl, blockExplorerUrl string
+	)
 
 	for _, pod := range runningPods {
 		if strings.Contains(pod, namespace) {
@@ -69,7 +75,7 @@ func (t *ThanosStack) ShowInformation(ctx context.Context) error {
 
 	ingresses, err := utils.GetIngresses(namespace)
 	if err != nil {
-		return fmt.Errorf("failed to get ingresses: %w", err)
+		return nil, fmt.Errorf("failed to get ingresses: %w", err)
 	}
 
 	for ingressName, addresses := range ingresses {
@@ -79,15 +85,22 @@ func (t *ThanosStack) ShowInformation(ctx context.Context) error {
 		ingress := addresses[0]
 		switch {
 		case strings.Contains(ingressName, namespace) && status["chain"]:
-			fmt.Printf("✅ L2 network is running on http://%s\n", ingress)
+			l2RpcUrl = fmt.Sprintf("http://%s", ingress)
+			fmt.Printf("✅ L2 network is running on %s\n", l2RpcUrl)
 		case strings.Contains(ingressName, "bridge") && status["bridge"]:
-			fmt.Printf("✅ Bridge is running on http://%s\n", ingress)
+			bridgeUrl = fmt.Sprintf("http://%s", ingress)
+			fmt.Printf("✅ Bridge is running on %s\n", bridgeUrl)
 		case strings.Contains(ingressName, "block-explorer-fe") && status["block-explorer-fe"]:
-			fmt.Printf("✅ Block Explorer is running on http://%s\n", ingress)
+			blockExplorerUrl = fmt.Sprintf("http://%s", ingress)
+			fmt.Printf("✅ Block Explorer is running on %s\n", blockExplorerUrl)
 		}
 	}
 
-	return nil
+	return &types.ChainInformation{
+		L2RpcUrl:      l2RpcUrl,
+		BridgeUrl:     bridgeUrl,
+		BlockExplorer: blockExplorerUrl,
+	}, nil
 }
 
 func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, component string, isTroubleshoot bool) error {
