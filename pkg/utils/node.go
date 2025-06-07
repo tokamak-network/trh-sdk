@@ -1,10 +1,13 @@
 package utils
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 type BeaconGenesisResponse struct {
@@ -46,4 +49,35 @@ func IsValidBeaconURL(baseURL string) bool {
 	}
 
 	return true
+}
+
+func IsValidL1RPC(l1RPCUrl string) bool {
+	client, err := ethclient.Dial(l1RPCUrl)
+	if err != nil {
+		fmt.Printf("Invalid L1 RPC URL: %s. Please try again", l1RPCUrl)
+		return false
+	}
+	blockNo, err := client.BlockNumber(context.Background())
+	if err != nil {
+		fmt.Printf("Failed to retrieve block number: %s", err)
+		return false
+	}
+	if blockNo == 0 {
+		fmt.Printf("The L1 RPC URL is not returning any blocks. Please try again")
+		return false
+	}
+
+	return true
+}
+
+func GetChainIDFromL1RPC(l1RPCUrl string) (uint64, error) {
+	client, err := ethclient.Dial(l1RPCUrl)
+	if err != nil {
+		return 0, err
+	}
+	chainID, err := client.ChainID(context.Background())
+	if err != nil {
+		return 0, err
+	}
+	return chainID.Uint64(), nil
 }

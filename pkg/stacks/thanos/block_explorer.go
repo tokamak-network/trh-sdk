@@ -3,7 +3,6 @@ package thanos
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -11,15 +10,19 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
-func (t *ThanosStack) installBlockExplorer(ctx context.Context) error {
+func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallBlockExplorerInput) error {
 	if t.deployConfig.K8s == nil {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
-	_, _, err := t.loginAWS(ctx)
-	if err != nil {
-		fmt.Println("Error to login in AWS:", err)
+
+	if inputs == nil {
+		return fmt.Errorf("inputs are not set. Please provide the inputs")
+	}
+
+	if err := inputs.Validate(ctx); err != nil {
 		return err
 	}
+
 	var (
 		namespace = t.deployConfig.K8s.Namespace
 		vpcId     = t.deployConfig.AWS.VpcID
@@ -44,20 +47,16 @@ func (t *ThanosStack) installBlockExplorer(ctx context.Context) error {
 	fmt.Println("Installing a block explorer component...")
 
 	// Make .envrc file
-	installBlockExplorerInput, err := t.inputInstallBlockExplorer()
-	if err != nil || installBlockExplorerInput == nil {
-		fmt.Println("Error installing block explorer:", err)
-		return err
-	}
+
 	var (
-		databasePassword     = installBlockExplorerInput.DatabasePassword
-		databaseUserName     = installBlockExplorerInput.DatabaseUsername
-		coinmarketcapKey     = installBlockExplorerInput.CoinmarketcapKey
-		coinmarketcapTokenID = installBlockExplorerInput.CoinmarketcapTokenID
-		walletConnectID      = installBlockExplorerInput.WalletConnectProjectID
+		databasePassword     = inputs.DatabasePassword
+		databaseUserName     = inputs.DatabaseUsername
+		coinmarketcapKey     = inputs.CoinmarketcapKey
+		coinmarketcapTokenID = inputs.CoinmarketcapTokenID
+		walletConnectID      = inputs.WalletConnectProjectID
 	)
 	err = makeBlockExplorerEnvs(
-		"tokamak-thanos-stack/terraform",
+		fmt.Sprintf("%s/tokamak-thanos-stack/terraform", t.deploymentPath),
 		".envrc",
 		types.BlockExplorerEnvs{
 			BlockExplorerDatabasePassword: databasePassword,
@@ -83,33 +82,27 @@ func (t *ThanosStack) installBlockExplorer(ctx context.Context) error {
 
 	releaseName := chainReleaseName[0]
 
-	err = utils.ExecuteCommandStream("bash", []string{
+	err = utils.ExecuteCommandStream(t.l, "bash", []string{
 		"-c",
-		`cd tokamak-thanos-stack/terraform &&
+		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
 		source .envrc &&
 		cd block-explorer &&
 		terraform init &&
 		terraform plan &&
 		terraform apply -auto-approve
-		`,
+		`, t.deploymentPath),
 	}...)
 	if err != nil {
 		fmt.Println("Error initializing Terraform backend:", err)
 		return err
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Println("Error getting current working directory:", err)
-		return err
-	}
-
 	rdsConnectionUrl, err := utils.ExecuteCommand("bash", []string{
 		"-c",
-		`cd tokamak-thanos-stack/terraform &&
+		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
 		source .envrc &&
 		cd block-explorer &&	
-		terraform output -json rds_connection_url`,
+		terraform output -json rds_connection_url`, t.deploymentPath),
 	}...)
 	if err != nil {
 		return fmt.Errorf("failed to get terraform output for %s: %w", "vpc_id", err)
@@ -165,7 +158,7 @@ func (t *ThanosStack) installBlockExplorer(ctx context.Context) error {
 		export op_geth_svc=%s
 		export op_geth_public_url=%s
 		`,
-		t.deployConfig.DeploymentPath,
+		t.deployConfig.DeploymentFilePath,
 		t.deployConfig.L1RPCURL,
 		t.deployConfig.L2ChainID,
 		coinmarketcapKey,
@@ -173,7 +166,7 @@ func (t *ThanosStack) installBlockExplorer(ctx context.Context) error {
 		releaseName,
 		t.deployConfig.ChainName,
 		walletConnectID,
-		fmt.Sprintf("%s/tokamak-thanos/build/rollup.json", cwd),
+		fmt.Sprintf("%s/tokamak-thanos/build/rollup.json", t.deploymentPath),
 		rdsConnectionUrl,
 		t.deployConfig.L1BeaconURL,
 		opGethSVC,
@@ -182,7 +175,7 @@ func (t *ThanosStack) installBlockExplorer(ctx context.Context) error {
 	_, err = utils.ExecuteCommand(
 		"bash",
 		"-c",
-		fmt.Sprintf("cd tokamak-thanos-stack/charts/blockscout-stack && echo '%s' > .env", envValues),
+		fmt.Sprintf("cd %s/tokamak-thanos-stack/charts/blockscout-stack && echo '%s' > .env", t.deploymentPath, envValues),
 	)
 	if err != nil {
 		fmt.Print("\r❌ Make .env file failed!\n")
@@ -192,25 +185,20 @@ func (t *ThanosStack) installBlockExplorer(ctx context.Context) error {
 	_, err = utils.ExecuteCommand(
 		"bash",
 		"-c",
-		"cd tokamak-thanos-stack/charts/blockscout-stack && source .env && bash ./scripts/generate-blockscout.sh",
+		fmt.Sprintf("cd %s/tokamak-thanos-stack/charts/blockscout-stack && source .env && bash ./scripts/generate-blockscout.sh", t.deploymentPath),
 	)
 	if err != nil {
 		fmt.Print("\r❌ Make helm values failed!\n")
 		return err
 	}
-	cwd, err = os.Getwd()
-	if err != nil {
-		fmt.Println("Error getting current working directory:", err)
-		return err
-	}
 
 	// Install backend first
 	blockExplorerBackendReleaseName := fmt.Sprintf("%s-%d", "block-explorer-be", time.Now().Unix())
-	fileValue := fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack/block-explorer-value.yaml", cwd)
+	fileValue := fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack/block-explorer-value.yaml", t.deploymentPath)
 	_, err = utils.ExecuteCommand("helm", []string{
 		"install",
 		blockExplorerBackendReleaseName,
-		fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack", cwd),
+		fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack", t.deploymentPath),
 		"--values",
 		fileValue,
 		"--namespace",
@@ -275,7 +263,7 @@ func (t *ThanosStack) installBlockExplorer(ctx context.Context) error {
 	_, err = utils.ExecuteCommand("helm", []string{
 		"install",
 		blockExplorerFrontendReleaseName,
-		fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack", cwd),
+		fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack", t.deploymentPath),
 		"--values",
 		fileValue,
 		"--namespace",
@@ -291,7 +279,7 @@ func (t *ThanosStack) installBlockExplorer(ctx context.Context) error {
 	return nil
 }
 
-func (t *ThanosStack) uninstallBlockExplorer(ctx context.Context) error {
+func (t *ThanosStack) UninstallBlockExplorer(_ context.Context) error {
 	if t.deployConfig.K8s == nil {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
@@ -323,8 +311,9 @@ func (t *ThanosStack) uninstallBlockExplorer(ctx context.Context) error {
 			return err
 		}
 	}
+
 	// 2. Destroy terraform resources
-	err = t.destroyTerraform("tokamak-thanos-stack/terraform/block-explorer")
+	err = t.destroyTerraform(fmt.Sprintf("%s/tokamak-thanos-stack/terraform/block-explorer", t.deploymentPath))
 	if err != nil {
 		fmt.Println("Error running block-explorer terraform destroy", err)
 		return err
