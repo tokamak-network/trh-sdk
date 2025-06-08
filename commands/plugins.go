@@ -101,13 +101,13 @@ func ActionInstallationPlugins() cli.ActionFunc {
 								return err
 							}
 
-							err = thanosStack.InstallBlockExplorer(ctx, installBlockExplorerInput)
+							_, err = thanosStack.InstallBlockExplorer(ctx, installBlockExplorerInput)
 							if err != nil {
 								return thanosStack.UninstallBlockExplorer(ctx)
 							}
 							return nil
 						case constants.PluginBridge:
-							err := thanosStack.InstallBridge(ctx)
+							_, err := thanosStack.InstallBridge(ctx)
 							if err != nil {
 								return thanosStack.UninstallBridge(ctx)
 							}

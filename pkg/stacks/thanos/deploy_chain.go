@@ -364,7 +364,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 
 	// After installing the infra successfully, we install the bridge
 	if !inputs.IgnoreInstallBridge {
-		err = t.InstallBridge(ctx)
+		_, err = t.InstallBridge(ctx)
 		if err != nil {
 			fmt.Println("Error installing bridge:", err)
 		}

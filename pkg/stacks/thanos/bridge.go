@@ -14,9 +14,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func (t *ThanosStack) InstallBridge(_ context.Context) error {
+func (t *ThanosStack) InstallBridge(_ context.Context) (string, error) {
 	if t.deployConfig.K8s == nil {
-		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+		return "", fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
 	var (
@@ -29,11 +29,11 @@ func (t *ThanosStack) InstallBridge(_ context.Context) error {
 	opBridgePods, err := utils.GetPodsByName(namespace, "op-bridge")
 	if err != nil {
 		fmt.Println("Error to get op bridge pods:", err)
-		return err
+		return "", err
 	}
 	if len(opBridgePods) > 0 {
 		fmt.Printf("OP Bridge is running: \n")
-		return nil
+		return "", nil
 	}
 
 	fmt.Println("Installing a bridge component...")
@@ -41,7 +41,7 @@ func (t *ThanosStack) InstallBridge(_ context.Context) error {
 	file, err := os.Open(fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%s", t.deploymentPath, fmt.Sprintf("%d-deploy.json", l1ChainID)))
 	if err != nil {
 		fmt.Println("Error opening deployment file:", err)
-		return err
+		return "", err
 	}
 	defer file.Close()
 
@@ -50,7 +50,7 @@ func (t *ThanosStack) InstallBridge(_ context.Context) error {
 	decoder := json.NewDecoder(file)
 	if err := decoder.Decode(&contracts); err != nil {
 		fmt.Println("Error decoding deployment JSON file:", err)
-		return err
+		return "", err
 	}
 
 	// make yaml file at {cwd}/tokamak-thanos-stack/terraform/thanos-stack/op-bridge-values.yaml
@@ -114,13 +114,13 @@ func (t *ThanosStack) InstallBridge(_ context.Context) error {
 	data, err := yaml.Marshal(&opBridgeConfig)
 	if err != nil {
 		fmt.Println("Error marshalling op-bridge values YAML file:", err)
-		return err
+		return "", err
 	}
 
 	configFileDir := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", t.deploymentPath)
 	if err := os.MkdirAll(configFileDir, os.ModePerm); err != nil {
 		fmt.Println("Error creating directory:", err)
-		return err
+		return "", err
 	}
 
 	// Write to file
@@ -128,7 +128,7 @@ func (t *ThanosStack) InstallBridge(_ context.Context) error {
 	err = os.WriteFile(filePath, data, 0644)
 	if err != nil {
 		fmt.Println("Error writing file:", err)
-		return nil
+		return "", nil
 	}
 
 	helmReleaseName := fmt.Sprintf("op-bridge-%d", time.Now().Unix())
@@ -143,7 +143,7 @@ func (t *ThanosStack) InstallBridge(_ context.Context) error {
 	}...)
 	if err != nil {
 		fmt.Println("Error installing Helm charts:", err)
-		return err
+		return "", err
 	}
 
 	fmt.Println("✅ Bridge component installed successfully and is being initialized. Please wait for the ingress address to become available...")
@@ -152,7 +152,7 @@ func (t *ThanosStack) InstallBridge(_ context.Context) error {
 		k8sIngresses, err := utils.GetAddressByIngress(namespace, helmReleaseName)
 		if err != nil {
 			fmt.Println("Error retrieving ingress addresses:", err, "details:", k8sIngresses)
-			return err
+			return "", err
 		}
 
 		if len(k8sIngresses) > 0 {
@@ -164,7 +164,7 @@ func (t *ThanosStack) InstallBridge(_ context.Context) error {
 	}
 	fmt.Printf("✅ Bridge component is up and running. You can access it at: %s\n", bridgeUrl)
 
-	return nil
+	return bridgeUrl, nil
 }
 
 func (t *ThanosStack) UninstallBridge(_ context.Context) error {

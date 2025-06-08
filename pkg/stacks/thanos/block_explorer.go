@@ -10,17 +10,17 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
-func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallBlockExplorerInput) error {
+func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallBlockExplorerInput) (string, error) {
 	if t.deployConfig.K8s == nil {
-		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+		return "", fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
 	if inputs == nil {
-		return fmt.Errorf("inputs are not set. Please provide the inputs")
+		return "", fmt.Errorf("inputs are not set. Please provide the inputs")
 	}
 
 	if err := inputs.Validate(ctx); err != nil {
-		return err
+		return "", err
 	}
 
 	var (
@@ -31,17 +31,17 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	blockExplorerPods, err := utils.GetPodsByName(namespace, "block-explorer")
 	if err != nil {
 		fmt.Println("Error to get block explorer pods:", err)
-		return err
+		return "", err
 	}
 	if len(blockExplorerPods) > 0 {
 		fmt.Printf("Block Explorer is running: \n")
-		return nil
+		return "", nil
 	}
 
 	err = t.cloneSourcecode("tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git")
 	if err != nil {
 		fmt.Println("Error cloning repository:", err)
-		return err
+		return "", err
 	}
 
 	fmt.Println("Installing a block explorer component...")
@@ -67,17 +67,17 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	)
 	if err != nil {
 		fmt.Println("Error creating block explorer environments file:", err)
-		return err
+		return "", err
 	}
 
 	chainReleaseName, err := utils.FilterHelmReleases(namespace, namespace)
 	if err != nil {
 		fmt.Println("Error filtering helm releases:", err)
-		return err
+		return "", err
 	}
 	if len(chainReleaseName) == 0 {
 		fmt.Println("No helm releases found")
-		return nil
+		return "", nil
 	}
 
 	releaseName := chainReleaseName[0]
@@ -94,7 +94,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	}...)
 	if err != nil {
 		fmt.Println("Error initializing Terraform backend:", err)
-		return err
+		return "", err
 	}
 
 	rdsConnectionUrl, err := utils.ExecuteCommand("bash", []string{
@@ -105,7 +105,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		terraform output -json rds_connection_url`, t.deploymentPath),
 	}...)
 	if err != nil {
-		return fmt.Errorf("failed to get terraform output for %s: %w", "vpc_id", err)
+		return "", fmt.Errorf("failed to get terraform output for %s: %w", "vpc_id", err)
 	}
 
 	rdsConnectionUrl = strings.Trim(rdsConnectionUrl, `"`)
@@ -115,7 +115,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		k8sSvc, err := utils.GetServiceNames(namespace, "op-geth")
 		if err != nil {
 			fmt.Println("Error retrieving svc:", err, "details:", k8sSvc)
-			return err
+			return "", err
 		}
 
 		if len(k8sSvc) > 0 {
@@ -131,7 +131,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		k8sIngresses, err := utils.GetAddressByIngress(namespace, "op-geth")
 		if err != nil {
 			fmt.Println("Error retrieving ingress addresses:", err, "details:", k8sIngresses)
-			return err
+			return "", err
 		}
 
 		if len(k8sIngresses) > 0 {
@@ -179,7 +179,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	)
 	if err != nil {
 		fmt.Print("\r❌ Make .env file failed!\n")
-		return err
+		return "", err
 	}
 
 	_, err = utils.ExecuteCommand(
@@ -189,7 +189,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	)
 	if err != nil {
 		fmt.Print("\r❌ Make helm values failed!\n")
-		return err
+		return "", err
 	}
 
 	// Install backend first
@@ -206,7 +206,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	}...)
 	if err != nil {
 		fmt.Println("Error installing block explorer backend component:", err)
-		return err
+		return "", err
 	}
 	fmt.Println("✅ Install block explorer backend component successfully")
 
@@ -217,7 +217,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		k8sIngresses, err := utils.GetAddressByIngress(namespace, blockExplorerBackendReleaseName)
 		if err != nil {
 			fmt.Println("Error retrieving ingress addresses:", err, "details:", k8sIngresses)
-			return err
+			return "", err
 		}
 
 		if len(k8sIngresses) > 0 {
@@ -232,31 +232,31 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	err = utils.UpdateYAMLField(fileValue, "blockscout.enabled", false)
 	if err != nil {
 		fmt.Println("Error updating blockscout.enabled field:", err)
-		return err
+		return "", err
 	}
 
 	err = utils.UpdateYAMLField(fileValue, "frontend.enabled", true)
 	if err != nil {
 		fmt.Println("Error updating frontend.enabled field:", err)
-		return err
+		return "", err
 	}
 
 	err = utils.UpdateYAMLField(fileValue, "frontend.env.NEXT_PUBLIC_API_HOST", blockExplorerUrl)
 	if err != nil {
 		fmt.Println("Error updating NEXT_PUBLIC_API_HOST field:", err)
-		return err
+		return "", err
 	}
 
 	err = utils.UpdateYAMLField(fileValue, "frontend.env.NEXT_PUBLIC_APP_HOST", blockExplorerUrl)
 	if err != nil {
 		fmt.Println("Error updating NEXT_PUBLIC_APP_HOST field:", err)
-		return err
+		return "", err
 	}
 
 	err = utils.UpdateYAMLField(fileValue, "frontend.ingress.hostname", blockExplorerUrl)
 	if err != nil {
 		fmt.Println("Error updating frontend.ingress.hostname field:", err)
-		return err
+		return "", err
 	}
 
 	blockExplorerFrontendReleaseName := fmt.Sprintf("%s-%d", "block-explorer-fe", time.Now().Unix())
@@ -271,12 +271,12 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	}...)
 	if err != nil {
 		fmt.Println("Error installing block explorer front-end component:", err)
-		return err
+		return "", err
 	}
 
 	fmt.Printf("✅ Block Explorer frontend component installed successfully. Accessible at: %s\n", fmt.Sprintf("http://%s", blockExplorerUrl))
 
-	return nil
+	return "http://" + blockExplorerUrl, nil
 }
 
 func (t *ThanosStack) UninstallBlockExplorer(_ context.Context) error {
