@@ -35,7 +35,22 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	}
 	if len(blockExplorerPods) > 0 {
 		fmt.Printf("Block Explorer is running: \n")
-		return "", nil
+		var blockExplorerURL string
+		for {
+			k8sIngresses, err := utils.GetAddressByIngress(namespace, "block-explorer")
+			if err != nil {
+				fmt.Println("Error retrieving ingress addresses:", err, "details:", k8sIngresses)
+				return "", err
+			}
+
+			if len(k8sIngresses) > 0 {
+				blockExplorerURL = "http://" + k8sIngresses[0]
+				break
+			}
+
+			time.Sleep(15 * time.Second)
+		}
+		return blockExplorerURL, nil
 	}
 
 	err = t.cloneSourcecode("tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git")

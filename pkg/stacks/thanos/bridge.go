@@ -33,7 +33,22 @@ func (t *ThanosStack) InstallBridge(_ context.Context) (string, error) {
 	}
 	if len(opBridgePods) > 0 {
 		fmt.Printf("OP Bridge is running: \n")
-		return "", nil
+		var bridgeUrl string
+		for {
+			k8sIngresses, err := utils.GetAddressByIngress(namespace, "op-bridge")
+			if err != nil {
+				fmt.Println("Error retrieving ingress addresses:", err, "details:", k8sIngresses)
+				return "", err
+			}
+
+			if len(k8sIngresses) > 0 {
+				bridgeUrl = "http://" + k8sIngresses[0]
+				break
+			}
+
+			time.Sleep(15 * time.Second)
+		}
+		return bridgeUrl, nil
 	}
 
 	fmt.Println("Installing a bridge component...")
