@@ -15,15 +15,15 @@ import (
 func (t *ThanosStack) Destroy(ctx context.Context) error {
 	switch t.network {
 	case constants.LocalDevnet:
-		return t.destroyDevnet()
+		return t.destroyDevnet(ctx)
 	case constants.Testnet, constants.Mainnet:
 		return t.destroyInfraOnAWS(ctx)
 	}
 	return nil
 }
 
-func (t *ThanosStack) destroyDevnet() error {
-	output, err := utils.ExecuteCommand("bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos && make nuke", t.deploymentPath))
+func (t *ThanosStack) destroyDevnet(ctx context.Context) error {
+	output, err := utils.ExecuteCommand(ctx, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos && make nuke", t.deploymentPath))
 	if err != nil {
 		fmt.Printf("\r❌ Devnet cleanup failed!       \n Details: %s", output)
 		return err
@@ -49,7 +49,7 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 		return fmt.Errorf("AWS profile is not set")
 	}
 
-	helmReleases, err := utils.GetHelmReleases(namespace)
+	helmReleases, err := utils.GetHelmReleases(ctx, namespace)
 	if err != nil {
 		fmt.Println("Error retrieving Helm releases:", err)
 	}
@@ -58,7 +58,7 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 		for _, release := range helmReleases {
 			if strings.Contains(release, namespace) || strings.Contains(release, "op-bridge") || strings.Contains(release, "block-explorer") {
 				fmt.Printf("Uninstalling Helm release: %s in namespace: %s...\n", release, namespace)
-				_, err := utils.ExecuteCommand("helm", "uninstall", release, "--namespace", namespace)
+				_, err := utils.ExecuteCommand(ctx, "helm", "uninstall", release, "--namespace", namespace)
 				if err != nil {
 					fmt.Println("Error removing Helm release:", err)
 					return err

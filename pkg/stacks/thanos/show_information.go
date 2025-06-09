@@ -73,7 +73,7 @@ func (t *ThanosStack) ShowInformation(ctx context.Context) (*types.ChainInformat
 		}
 	}
 
-	ingresses, err := utils.GetIngresses(namespace)
+	ingresses, err := utils.GetIngresses(ctx, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ingresses: %w", err)
 	}
@@ -133,13 +133,13 @@ func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, compon
 	}
 
 	if isTroubleshoot {
-		err = utils.ExecuteCommandStream(t.l, "bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f | grep -iE 'error|fail|panic|critical'", namespace, runningPodName))
+		err = utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f | grep -iE 'error|fail|panic|critical'", namespace, runningPodName))
 		if err != nil {
 			fmt.Printf("failed to show logs: %s \n", err.Error())
 			return err
 		}
 	} else {
-		err = utils.ExecuteCommandStream(t.l, "bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f", namespace, runningPodName))
+		err = utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f", namespace, runningPodName))
 		if err != nil {
 			fmt.Printf("failed to show logs: %s \n", err.Error())
 			return err
@@ -157,7 +157,7 @@ func (t *ThanosStack) getRunningPods(ctx context.Context) ([]string, error) {
 	namespace := t.deployConfig.K8s.Namespace
 
 	// Step 2: Get pods
-	runningPods, err := utils.GetK8sPods(namespace)
+	runningPods, err := utils.GetK8sPods(ctx, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pods: %w", err)
 	}

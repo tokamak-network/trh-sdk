@@ -55,7 +55,7 @@ func IsAvailableRegion(region string, availableRegions []string) bool {
 }
 
 func SwitchKubernetesContext(ctx context.Context, namespace string, region string) error {
-	eksSetup, err := ExecuteCommand("aws", []string{
+	eksSetup, err := ExecuteCommand(ctx, "aws", []string{
 		"eks",
 		"update-kubeconfig",
 		"--region", region,

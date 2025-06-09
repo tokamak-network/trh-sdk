@@ -14,7 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func (t *ThanosStack) InstallBridge(_ context.Context) (string, error) {
+func (t *ThanosStack) InstallBridge(ctx context.Context) (string, error) {
 	if t.deployConfig.K8s == nil {
 		return "", fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
@@ -26,7 +26,7 @@ func (t *ThanosStack) InstallBridge(_ context.Context) (string, error) {
 		l1RPC     = t.deployConfig.L1RPCURL
 	)
 
-	opBridgePods, err := utils.GetPodsByName(namespace, "op-bridge")
+	opBridgePods, err := utils.GetPodsByName(ctx, namespace, "op-bridge")
 	if err != nil {
 		fmt.Println("Error to get op bridge pods:", err)
 		return "", err
@@ -35,7 +35,7 @@ func (t *ThanosStack) InstallBridge(_ context.Context) (string, error) {
 		fmt.Printf("OP Bridge is running: \n")
 		var bridgeUrl string
 		for {
-			k8sIngresses, err := utils.GetAddressByIngress(namespace, "op-bridge")
+			k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, "op-bridge")
 			if err != nil {
 				fmt.Println("Error retrieving ingress addresses:", err, "details:", k8sIngresses)
 				return "", err
@@ -147,7 +147,7 @@ func (t *ThanosStack) InstallBridge(_ context.Context) (string, error) {
 	}
 
 	helmReleaseName := fmt.Sprintf("op-bridge-%d", time.Now().Unix())
-	_, err = utils.ExecuteCommand("helm", []string{
+	_, err = utils.ExecuteCommand(ctx, "helm", []string{
 		"install",
 		helmReleaseName,
 		fmt.Sprintf("%s/tokamak-thanos-stack/charts/op-bridge", t.deploymentPath),
@@ -164,7 +164,7 @@ func (t *ThanosStack) InstallBridge(_ context.Context) (string, error) {
 	fmt.Println("✅ Bridge component installed successfully and is being initialized. Please wait for the ingress address to become available...")
 	var bridgeUrl string
 	for {
-		k8sIngresses, err := utils.GetAddressByIngress(namespace, helmReleaseName)
+		k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, helmReleaseName)
 		if err != nil {
 			fmt.Println("Error retrieving ingress addresses:", err, "details:", k8sIngresses)
 			return "", err
@@ -182,7 +182,7 @@ func (t *ThanosStack) InstallBridge(_ context.Context) (string, error) {
 	return bridgeUrl, nil
 }
 
-func (t *ThanosStack) UninstallBridge(_ context.Context) error {
+func (t *ThanosStack) UninstallBridge(ctx context.Context) error {
 	if t.deployConfig.K8s == nil {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
@@ -195,14 +195,14 @@ func (t *ThanosStack) UninstallBridge(_ context.Context) error {
 		return fmt.Errorf("AWS configuration is not set. Please run the deploy command first")
 	}
 
-	releases, err := utils.FilterHelmReleases(namespace, "op-bridge")
+	releases, err := utils.FilterHelmReleases(ctx, namespace, "op-bridge")
 	if err != nil {
 		fmt.Println("Error to filter helm releases:", err)
 		return err
 	}
 
 	for _, release := range releases {
-		_, err = utils.ExecuteCommand("helm", []string{
+		_, err = utils.ExecuteCommand(ctx, "helm", []string{
 			"uninstall",
 			release,
 			"--namespace",

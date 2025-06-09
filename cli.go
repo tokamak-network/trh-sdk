@@ -53,7 +53,7 @@ func Run() {
 								fmt.Println("Installing dependencies...")
 								// Add installation logic here
 								dependenciesCmd := commands.Dependencies{}
-								return dependenciesCmd.Install(cmd.Args().Slice())
+								return dependenciesCmd.Install(ctx, cmd.Args().Slice())
 
 							} else {
 								fmt.Println("Installation skipped.")
@@ -66,7 +66,7 @@ func Run() {
 						Usage: "Check the dependencies",
 						Action: func(ctx context.Context, cmd *cli.Command) error {
 							dependenciesCmd := commands.Dependencies{}
-							dependenciesCmd.Check(cmd.Args().Slice())
+							dependenciesCmd.Check(ctx, cmd.Args().Slice())
 							return nil
 						},
 					},

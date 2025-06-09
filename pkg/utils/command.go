@@ -2,6 +2,7 @@ package utils
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -17,29 +18,36 @@ var (
 	ErrorPseudoTerminalExist = "read /dev/ptmx: input/output error"
 )
 
-func ExecuteCommand(command string, args ...string) (string, error) {
-	cmd := exec.Command(command, args...)
+func ExecuteCommand(ctx context.Context, command string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, command, args...)
 	output, err := cmd.CombinedOutput()
 
 	trimmedOutput := strings.TrimSpace(string(output))
 
+	// Handle cancellation
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
 	return trimmedOutput, err
 }
 
-func ExecuteCommandStream(l *zap.SugaredLogger, command string, args ...string) error {
-	cmd := exec.Command(command, args...)
+func ExecuteCommandStream(ctx context.Context, l *zap.SugaredLogger, command string, args ...string) error {
+	cmd := exec.CommandContext(ctx, command, args...)
 
 	var (
-		ptmx *os.File
-		err  error
-		wg   sync.WaitGroup
-		r    io.Reader
+		ptmx    *os.File
+		err     error
+		wg      sync.WaitGroup
+		r       io.Reader
+		started bool
 	)
 
 	// Try to start with PTY
 	ptmx, err = pty.Start(cmd)
 	if err == nil {
 		r = ptmx
+		started = true // command is already started by pty.Start
 		defer func() {
 			wg.Wait()
 			_ = ptmx.Close()
@@ -65,16 +73,26 @@ func ExecuteCommandStream(l *zap.SugaredLogger, command string, args ...string) 
 		}
 	}()
 
-	// Wait for command to complete
+	if !started {
+		// Only start if not already started by pty.Start
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+	}
+
 	err = cmd.Wait()
+	wg.Wait()
+
+	if ctx.Err() != nil {
+		l.Info("Command was cancelled via context")
+		return ctx.Err()
+	}
+
 	if err != nil {
 		l.Errorf("Command execution failed: %v", err)
 		return err
 	}
 
-	wg.Wait()
-
-	// Check exit code
 	if cmd.ProcessState.ExitCode() != 0 {
 		l.Errorf("Command exited with non-zero status: %d", cmd.ProcessState.ExitCode())
 		return fmt.Errorf("command exited with status: %d", cmd.ProcessState.ExitCode())

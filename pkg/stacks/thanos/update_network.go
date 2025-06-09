@@ -44,7 +44,7 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, inputs *UpdateNetworkIn
 	)
 
 	// Step 1. Check the network status
-	chainPods, err := utils.GetPodsByName(namespace, namespace)
+	chainPods, err := utils.GetPodsByName(ctx, namespace, namespace)
 	if len(chainPods) == 0 || err != nil {
 		fmt.Printf("No pods found for chain %s in namespace %s\n", chainName, namespace)
 		return nil
@@ -136,7 +136,7 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, inputs *UpdateNetworkIn
 	}
 
 	// Step 3.3. Update the network
-	helmReleases, err := utils.GetHelmReleases(t.deployConfig.K8s.Namespace)
+	helmReleases, err := utils.GetHelmReleases(ctx, t.deployConfig.K8s.Namespace)
 	if err != nil {
 		fmt.Println("Error getting helm releases:", err)
 		return err
@@ -161,7 +161,7 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, inputs *UpdateNetworkIn
 			continue
 		}
 		// Update the helm release
-		_, err = utils.ExecuteCommand("helm", []string{
+		_, err = utils.ExecuteCommand(ctx, "helm", []string{
 			"upgrade",
 			release,
 			fmt.Sprintf("%s/%s", t.deploymentPath, chartPath),

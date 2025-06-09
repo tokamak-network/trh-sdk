@@ -1,15 +1,16 @@
 package dependencies
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
-func CheckK8sInstallation() bool {
+func CheckK8sInstallation(ctx context.Context) bool {
 	// Check if kubectl is installed
-	_, err := utils.ExecuteCommand("kubectl", "version", "--client")
+	_, err := utils.ExecuteCommand(ctx, "kubectl", "version", "--client")
 	if err != nil {
 		fmt.Println("❌ kubectl is not installed or not found in PATH")
 		return false
@@ -19,8 +20,8 @@ func CheckK8sInstallation() bool {
 	return true
 }
 
-func CheckHelmInstallation() bool {
-	_, err := utils.ExecuteCommand("helm", "version")
+func CheckHelmInstallation(ctx context.Context) bool {
+	_, err := utils.ExecuteCommand(ctx, "helm", "version")
 	if err != nil {
 		fmt.Println("❌ Helm is not installed or not found in PATH")
 		return false
@@ -29,9 +30,9 @@ func CheckHelmInstallation() bool {
 	return true
 }
 
-func CheckDockerInstallation() bool {
+func CheckDockerInstallation(ctx context.Context) bool {
 	// Check if Docker is installed
-	_, err := utils.ExecuteCommand("docker", "--version")
+	_, err := utils.ExecuteCommand(ctx, "docker", "--version")
 	if err != nil {
 		fmt.Println("❌ Docker is not installed or not found in PATH")
 		return false
@@ -39,7 +40,7 @@ func CheckDockerInstallation() bool {
 	fmt.Println("✅ Docker is installed")
 
 	// Check if Docker daemon is running
-	_, err = utils.ExecuteCommand("docker", "info")
+	_, err = utils.ExecuteCommand(ctx, "docker", "info")
 	if err != nil {
 		fmt.Println("❌ Docker is installed but the daemon is not running")
 		return true
@@ -50,9 +51,9 @@ func CheckDockerInstallation() bool {
 	return true
 }
 
-func GetArchitecture() (string, error) {
+func GetArchitecture(ctx context.Context) (string, error) {
 	// Get machine architecture
-	arch, err := utils.ExecuteCommand("uname", "-m")
+	arch, err := utils.ExecuteCommand(ctx, "uname", "-m")
 	if err != nil {
 		fmt.Println("❌ Failed to get machine architecture")
 		return "", err
@@ -75,8 +76,8 @@ func GetArchitecture() (string, error) {
 	return arch, nil
 }
 
-func CheckTerraformInstallation() bool {
-	terraformVersion, err := utils.ExecuteCommand("terraform", "--version")
+func CheckTerraformInstallation(ctx context.Context) bool {
+	terraformVersion, err := utils.ExecuteCommand(ctx, "terraform", "--version")
 	if err != nil {
 		fmt.Println("❌ Terraform is not installed or not found in PATH")
 		return false
@@ -86,8 +87,8 @@ func CheckTerraformInstallation() bool {
 	return true
 }
 
-func CheckAwsCLIInstallation() bool {
-	_, err := utils.ExecuteCommand("aws", "--version")
+func CheckAwsCLIInstallation(ctx context.Context) bool {
+	_, err := utils.ExecuteCommand(ctx, "aws", "--version")
 	if err != nil {
 		fmt.Println("❌ AWS CLI is not installed or not found in PATH")
 		return false
@@ -96,8 +97,8 @@ func CheckAwsCLIInstallation() bool {
 	return true
 }
 
-func CheckDirenvInstallation() bool {
-	_, err := utils.ExecuteCommand("direnv", "--version")
+func CheckDirenvInstallation(ctx context.Context) bool {
+	_, err := utils.ExecuteCommand(ctx, "direnv", "--version")
 	if err != nil {
 		fmt.Println("❌ direnv is not installed or not found in PATH")
 		return false
@@ -107,8 +108,8 @@ func CheckDirenvInstallation() bool {
 	return true
 }
 
-func CheckPnpmInstallation() bool {
-	_, err := utils.ExecuteCommand("pnpm", "--version")
+func CheckPnpmInstallation(ctx context.Context) bool {
+	_, err := utils.ExecuteCommand(ctx, "pnpm", "--version")
 	if err != nil {
 		fmt.Println("❌ pnpm is not installed or not found in PATH")
 		return false
@@ -117,20 +118,20 @@ func CheckPnpmInstallation() bool {
 	return true
 }
 
-func CheckFoundryInstallation() bool {
-	_, err := utils.ExecuteCommand("forge", "--version")
+func CheckFoundryInstallation(ctx context.Context) bool {
+	_, err := utils.ExecuteCommand(ctx, "forge", "--version")
 	if err != nil {
 		fmt.Println("❌ forge is not installed or not found in PATH")
 		return false
 	}
 
-	_, err = utils.ExecuteCommand("anvil", "--version")
+	_, err = utils.ExecuteCommand(ctx, "anvil", "--version")
 	if err != nil {
 		fmt.Println("❌ anvil is not installed or not found in PATH")
 		return false
 	}
 
-	_, err = utils.ExecuteCommand("cast", "--version")
+	_, err = utils.ExecuteCommand(ctx, "cast", "--version")
 	if err != nil {
 		fmt.Println("❌ cast is not installed or not found in PATH")
 		return false

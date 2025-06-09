@@ -1,17 +1,18 @@
 package utils
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
 )
 
 // GetHelmReleases fetches the list of Helm releases in the given namespace
-func GetHelmReleases(namespace string) ([]string, error) {
+func GetHelmReleases(ctx context.Context, namespace string) ([]string, error) {
 	if namespace == "" {
 		return nil, nil
 	}
-	output, err := ExecuteCommand("helm", "list", "--namespace", namespace, "-q")
+	output, err := ExecuteCommand(ctx, "helm", "list", "--namespace", namespace, "-q")
 	if err != nil {
 		return nil, err
 	}
@@ -23,8 +24,8 @@ func GetHelmReleases(namespace string) ([]string, error) {
 	return strings.Split(output, "\n"), nil
 }
 
-func FilterHelmReleases(namespace string, releaseName string) ([]string, error) {
-	releases, err := GetHelmReleases(namespace)
+func FilterHelmReleases(ctx context.Context, namespace string, releaseName string) ([]string, error) {
+	releases, err := GetHelmReleases(ctx, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +39,7 @@ func FilterHelmReleases(namespace string, releaseName string) ([]string, error) 
 	return helmReleases, nil
 }
 
-func CheckK8sReady(namespace string) (bool, error) {
+func CheckK8sReady(ctx context.Context, namespace string) (bool, error) {
 	// TODO: these values can be adjusted if it is not enough
 	maxRetries := 10
 	retryInterval := 20 * time.Second
@@ -48,7 +49,7 @@ func CheckK8sReady(namespace string) (bool, error) {
 
 	for i := 0; i < maxRetries; i++ {
 
-		isAPiReady, err = CheckK8sApiHealth(namespace)
+		isAPiReady, err = CheckK8sApiHealth(ctx, namespace)
 		if err != nil {
 			fmt.Printf("K8s API health check failed (attempt %d/%d): %v\n", i+1, maxRetries, err)
 			time.Sleep(retryInterval)
@@ -66,16 +67,16 @@ func CheckK8sReady(namespace string) (bool, error) {
 	return false, fmt.Errorf("K8s not ready after %d attempts", maxRetries)
 }
 
-func CheckK8sApiHealth(namespace string) (bool, error) {
-	apiHealth, err := ExecuteCommand("kubectl", "get", "--raw=/readyz")
+func CheckK8sApiHealth(ctx context.Context, namespace string) (bool, error) {
+	apiHealth, err := ExecuteCommand(ctx, "kubectl", "get", "--raw=/readyz")
 	if err != nil {
 		return false, err
 	}
 	return apiHealth == "ok", nil
 }
 
-func InstallHelmRelease(releaseName string, chartPath string, filePath string, namespace string) error {
-	_, err := ExecuteCommand("helm", []string{
+func InstallHelmRelease(ctx context.Context, releaseName string, chartPath string, filePath string, namespace string) error {
+	_, err := ExecuteCommand(ctx, "helm", []string{
 		"upgrade",
 		"--install",
 		releaseName,
@@ -89,8 +90,8 @@ func InstallHelmRelease(releaseName string, chartPath string, filePath string, n
 	return nil
 }
 
-func UninstallHelmRelease(namespace string, releaseName string) error {
-	_, err := ExecuteCommand("helm", "uninstall", releaseName, "--namespace", namespace)
+func UninstallHelmRelease(ctx context.Context, namespace string, releaseName string) error {
+	_, err := ExecuteCommand(ctx, "helm", "uninstall", releaseName, "--namespace", namespace)
 	if err != nil {
 		return fmt.Errorf("failed to uninstall helm release: %v", err)
 	}
