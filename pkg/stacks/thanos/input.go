@@ -109,10 +109,6 @@ func (c *InstallBlockExplorerInput) Validate(ctx context.Context) error {
 		return errors.New("wallet connect project id is required")
 	}
 
-	if c.CoinmarketcapTokenID == "" {
-		return errors.New("coinmarketcap token id is required")
-	}
-
 	if err := utils.ValidatePostgresUsername(c.DatabaseUsername); err != nil {
 		return errors.New("database username is invalid")
 	}
@@ -123,6 +119,11 @@ func (c *InstallBlockExplorerInput) Validate(ctx context.Context) error {
 
 	if !utils.IsValidRDSPassword(c.DatabasePassword) {
 		return errors.New("database password is invalid")
+	}
+
+	// fill out missing fields by default values
+	if c.CoinmarketcapTokenID == "" {
+		c.CoinmarketcapTokenID = constants.TonCoinMarketCapTokenID
 	}
 
 	return nil
