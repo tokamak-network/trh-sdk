@@ -25,7 +25,7 @@ type DockerContainer struct {
 }
 
 func GetDockerContainers(ctx context.Context) ([]string, error) {
-	containersOutput, err := ExecuteCommand("docker", "ps", "--format", "json")
+	containersOutput, err := ExecuteCommand(ctx, "docker", "ps", "--format", "json")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get docker containers: %w", err)
 	}

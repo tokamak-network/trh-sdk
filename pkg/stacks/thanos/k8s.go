@@ -25,7 +25,7 @@ func (t *ThanosStack) tryToDeleteK8sNamespace(ctx context.Context, namespace str
 	if namespace == "" {
 		return nil
 	}
-	output, err := utils.ExecuteCommand("kubectl", "get", "namespace", namespace, "-o", "json")
+	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "namespace", namespace, "-o", "json")
 	if err != nil {
 		fmt.Println("Error getting namespace status:", err)
 	}
@@ -56,7 +56,7 @@ func (t *ThanosStack) tryToDeleteK8sNamespace(ctx context.Context, namespace str
 		}
 
 		// apply the changes
-		_, err = utils.ExecuteCommand("kubectl", "replace", "--raw", fmt.Sprintf("/api/v1/namespaces/%s/finalize", namespace), "-f", "/tmp/namespace.json")
+		_, err = utils.ExecuteCommand(ctx, "kubectl", "replace", "--raw", fmt.Sprintf("/api/v1/namespaces/%s/finalize", namespace), "-f", "/tmp/namespace.json")
 		if err != nil {
 			fmt.Println("Error applying changes to namespace:", err)
 			return err
@@ -74,7 +74,7 @@ func (t *ThanosStack) tryToDeleteK8sNamespace(ctx context.Context, namespace str
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := utils.ExecuteCommand("kubectl", "delete", "namespace", namespace)
+		_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "namespace", namespace)
 		if err != nil {
 			fmt.Println("Error deleting namespace:", err)
 			done <- err

@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"context"
+
 	"github.com/tokamak-network/trh-sdk/pkg/dependencies"
 )
 
@@ -10,16 +12,16 @@ type Dependencies struct {
 	Helm   bool
 }
 
-func (c *Dependencies) Check(args []string) {
-	c.Docker = dependencies.CheckDockerInstallation()
+func (c *Dependencies) Check(ctx context.Context, args []string) {
+	c.Docker = dependencies.CheckDockerInstallation(ctx)
 
-	c.K8s = dependencies.CheckK8sInstallation()
+	c.K8s = dependencies.CheckK8sInstallation(ctx)
 
-	c.Helm = dependencies.CheckHelmInstallation()
+	c.Helm = dependencies.CheckHelmInstallation(ctx)
 }
 
-func (c *Dependencies) Install(args []string) error {
-	c.Check(args)
+func (c *Dependencies) Install(ctx context.Context, args []string) error {
+	c.Check(ctx, args)
 
 	return nil
 }
