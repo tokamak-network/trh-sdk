@@ -53,6 +53,9 @@ func ExecuteCommandStream(ctx context.Context, l *zap.SugaredLogger, command str
 			_ = ptmx.Close()
 		}()
 	} else {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		// Fallback to StdoutPipe
 		var rd io.ReadCloser
 		rd, err = cmd.StdoutPipe()

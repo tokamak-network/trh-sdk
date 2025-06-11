@@ -2,6 +2,7 @@ package thanos
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -19,6 +20,10 @@ func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string, inputs *Deplo
 	case constants.LocalDevnet:
 		err := t.deployLocalDevnet(ctx)
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				fmt.Println("Deployment canceled")
+				return nil
+			}
 			fmt.Printf("Failed to deploy the devnet: %s", err)
 
 			if destroyErr := t.destroyDevnet(ctx); destroyErr != nil {
@@ -32,6 +37,10 @@ func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string, inputs *Deplo
 		case constants.AWS:
 			err := t.deployNetworkToAWS(ctx, inputs)
 			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					fmt.Println("Deployment canceled")
+					return nil
+				}
 				fmt.Println("Failed to deploy the testnet chain", "err", err)
 
 				if destroyErr := t.destroyInfraOnAWS(ctx); destroyErr != nil {
