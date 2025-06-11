@@ -87,6 +87,8 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 				if !isDeployAgain {
 					return nil
 				}
+			} else {
+				return nil
 			}
 		} else if t.deployConfig.DeployContractState.Status == types.DeployContractStatusInProgress {
 			if t.usePromptInput {
