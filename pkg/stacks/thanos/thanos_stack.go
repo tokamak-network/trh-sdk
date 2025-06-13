@@ -847,6 +847,12 @@ func (t *ThanosStack) InstallPlugins(ctx context.Context, pluginNames []string) 
 				return t.uninstallBridge(ctx)
 			}
 			return nil
+		case constants.PluginMonitoring:
+			err := t.installMonitoring(ctx)
+			if err != nil {
+				return t.uninstallMonitoring(ctx)
+			}
+			return nil
 		}
 	}
 	return nil
@@ -882,6 +888,8 @@ func (t *ThanosStack) UninstallPlugins(ctx context.Context, pluginNames []string
 			return t.uninstallBridge(ctx)
 		case constants.PluginBlockExplorer:
 			return t.uninstallBlockExplorer(ctx)
+		case constants.PluginMonitoring:
+			return t.uninstallMonitoring(ctx)
 		}
 	}
 	return nil
