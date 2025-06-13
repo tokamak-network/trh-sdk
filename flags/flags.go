@@ -30,10 +30,18 @@ var (
 		Value:   "localhost",
 		Sources: cli.EnvVars(PrefixEnvVars(envPrefix, "NETWORK")...),
 	}
+
+	NoCandidateFlag = &cli.BoolFlag{
+		Name:    "no-candidate",
+		Usage:   "Skip candidate registration after contract deployment",
+		Value:   false,
+		Sources: cli.EnvVars(PrefixEnvVars(envPrefix, "NO_CANDIDATE")...),
+	}
 )
 
 var DeployContractsFlag = []cli.Flag{
 	StackFlag,
 	NetworkFlag,
 	SaveConfigFlag,
+	NoCandidateFlag,
 }

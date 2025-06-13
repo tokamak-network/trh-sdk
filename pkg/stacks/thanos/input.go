@@ -475,3 +475,66 @@ func (t *ThanosStack) inputInstallBlockExplorer() (*InstallBlockExplorerInput, e
 		WalletConnectProjectID: walletConnectID,
 	}, nil
 }
+
+func (t *ThanosStack) inputRegisterCandidate() (*RegisterCandidateInput, error) {
+	var (
+		amount   float64
+		memo     string
+		useWTON  bool
+		nameInfo string
+		err      error
+	)
+	for {
+		fmt.Print("Please enter the amount of TON to stake (minimum 1000.1): ")
+		amount, err = scanner.ScanFloat()
+		if err != nil {
+			fmt.Printf("Error while reading amount: %s\n", err)
+			continue
+		}
+		if amount < 1000.1 {
+			fmt.Println("Error: Amount must be at least 1000.1 TON")
+			continue
+		}
+		break
+	}
+
+	for {
+		fmt.Print("Please enter a memo for the registration: ")
+		memo, err = scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error while reading memo: %s", err)
+			return nil, err
+		}
+
+		if memo == "" {
+			fmt.Println("Memo cannot be empty")
+			continue
+		}
+		break
+	}
+
+	fmt.Print("Please enter a name for the registration (default: \"\"): ")
+	nameInfo, err = scanner.ScanString()
+	if err != nil {
+		fmt.Printf("Error while reading name: %s", err)
+		return nil, err
+	}
+	fmt.Print("Would you like to use WTON instead of TON for staking? [Y or N] (default: N): ")
+	useWTON, err = scanner.ScanBool(false)
+	if err != nil {
+		fmt.Printf("Error while reading use-wton setting: %s", err)
+		return nil, err
+	}
+	//TODO: Check and update this with further updates
+	if useWTON {
+		fmt.Printf("Currently only TON is accepted %s", err)
+		return nil, err
+	}
+
+	return &RegisterCandidateInput{
+		amount:   amount,
+		useTon:   !useWTON,
+		memo:     memo,
+		nameInfo: nameInfo,
+	}, nil
+}
