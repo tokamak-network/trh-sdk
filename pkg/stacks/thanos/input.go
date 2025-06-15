@@ -643,10 +643,11 @@ func InputAWSLogin() (*types.AWSConfig, error) {
 	}
 
 	return &types.AWSConfig{
-		SecretKey:     awsSecretKey,
-		Region:        awsRegion,
-		AccessKey:     awsAccessKeyID,
-		DefaultFormat: "json",
+		SecretKey:        awsSecretKey,
+		Region:           awsRegion,
+		AccessKey:        awsAccessKeyID,
+		DefaultFormat:    "json",
+		SwitchAWSContext: true,
 	}, nil
 }
 

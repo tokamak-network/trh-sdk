@@ -21,6 +21,7 @@ type ThanosStack struct {
 }
 
 func NewThanosStack(
+	ctx context.Context,
 	l *zap.SugaredLogger,
 	network string,
 	usePromptInput bool,
@@ -42,19 +43,26 @@ func NewThanosStack(
 	var awsProfile *types.AWSProfile
 
 	if awsConfig != nil {
-		awsProfile, err = aws.LoginAWS(context.Background(), awsConfig)
+		awsProfile, err = aws.LoginAWS(ctx, awsConfig)
 		if err != nil {
 			fmt.Println("Failed to login aws", "err", err)
 			return nil, err
 		}
-	}
 
-	if awsConfig != nil {
-		if config != nil && config.K8s != nil && config.K8s.Namespace != "" {
+		fmt.Println("AWS Profile:", awsConfig.SwitchAWSContext)
+
+		if awsConfig.SwitchAWSContext {
+			if config == nil {
+				return nil, fmt.Errorf("config is nil")
+			}
+
+			if config.K8s == nil {
+				return nil, fmt.Errorf("k8s is nil")
+			}
+
 			// Switch to this context
-			err = utils.SwitchKubernetesContext(context.Background(), config.K8s.Namespace, awsConfig.Region)
+			err = utils.SwitchKubernetesContext(ctx, config.K8s.Namespace, awsConfig.Region)
 			if err != nil {
-				fmt.Println("Failed to switch k8s context", "err", err)
 				return nil, err
 			}
 		}

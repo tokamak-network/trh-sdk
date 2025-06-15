@@ -88,7 +88,7 @@ func ActionDeploy() cli.ActionFunc {
 				}
 			}
 
-			thanosStack, err := thanos.NewThanosStack(l, network, true, deploymentPath, awsConfig)
+			thanosStack, err := thanos.NewThanosStack(ctx, l, network, true, deploymentPath, awsConfig)
 			if err != nil {
 				fmt.Println("Failed to initialize thanos stack", "err", err)
 				return err

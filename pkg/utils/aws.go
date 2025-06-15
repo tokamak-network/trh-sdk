@@ -63,7 +63,7 @@ func SwitchKubernetesContext(ctx context.Context, namespace string, region strin
 	}...)
 	if err != nil {
 		fmt.Println("Error configuring EKS access:", err, "details:", eksSetup)
-		return err
+		return fmt.Errorf("error configuring EKS access: %w, details: %s", err, eksSetup)
 	}
 
 	fmt.Println("EKS configuration updated:", eksSetup)

@@ -31,7 +31,7 @@ func ActionDeployContracts() cli.ActionFunc {
 
 		switch stack {
 		case constants.ThanosStack:
-			thanosStack, err := thanos.NewThanosStack(l, network, true, deploymentPath, nil)
+			thanosStack, err := thanos.NewThanosStack(ctx, l, network, true, deploymentPath, nil)
 			if err != nil {
 				fmt.Println("Failed to initialize thanos stack", "err", err)
 				return err

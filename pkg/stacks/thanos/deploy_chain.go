@@ -255,18 +255,11 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	time.Sleep(30 * time.Second)
 
 	// Step 7. Configure EKS access
-	eksSetup, err := utils.ExecuteCommand(ctx, "aws", []string{
-		"eks",
-		"update-kubeconfig",
-		"--region", awsLoginInputs.Region,
-		"--name", namespace,
-	}...)
+	err = utils.SwitchKubernetesContext(ctx, namespace, awsLoginInputs.Region)
 	if err != nil {
-		fmt.Println("Error configuring EKS access:", err, "details:", eksSetup)
+		fmt.Println("Error switching Kubernetes context:", err)
 		return err
 	}
-
-	fmt.Println("EKS configuration updated:", eksSetup)
 
 	// Step 7.1. Check if K8s cluster is ready
 	fmt.Println("Checking if K8s cluster is ready...")
