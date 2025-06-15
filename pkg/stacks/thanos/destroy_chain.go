@@ -86,6 +86,13 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 		return err
 	}
 
+	t.deployConfig.K8s = nil
+	err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
+	if err != nil {
+		fmt.Printf("Failed to write the updated config, err: %s", err.Error())
+		return err
+	}
+
 	fmt.Println("✅The chain has been destroyed successfully!")
 	return nil
 }

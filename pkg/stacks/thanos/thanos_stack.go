@@ -49,18 +49,8 @@ func NewThanosStack(
 			return nil, err
 		}
 
-		fmt.Println("AWS Profile:", awsConfig.SwitchAWSContext)
-
-		if awsConfig.SwitchAWSContext {
-			if config == nil {
-				return nil, fmt.Errorf("config is nil")
-			}
-
-			if config.K8s == nil {
-				return nil, fmt.Errorf("k8s is nil")
-			}
-
-			// Switch to this context
+		// Switch to this context
+		if config != nil && config.K8s != nil {
 			err = utils.SwitchKubernetesContext(ctx, config.K8s.Namespace, awsConfig.Region)
 			if err != nil {
 				return nil, err

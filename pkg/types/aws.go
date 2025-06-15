@@ -12,12 +12,11 @@ type AccountProfile struct {
 }
 
 type AWSConfig struct {
-	SecretKey        string `json:"secret_key"`
-	AccessKey        string `json:"access_key"`
-	Region           string `json:"region"`
-	DefaultFormat    string `json:"default_format" default:"json"`
-	VpcID            string `json:"vpc_id,omitempty"`
-	SwitchAWSContext bool   `json:"switch_aws_context"`
+	SecretKey     string `json:"secret_key"`
+	AccessKey     string `json:"access_key"`
+	Region        string `json:"region"`
+	DefaultFormat string `json:"default_format" default:"json"`
+	VpcID         string `json:"vpc_id,omitempty"`
 }
 
 type AvailabilityZone struct {
