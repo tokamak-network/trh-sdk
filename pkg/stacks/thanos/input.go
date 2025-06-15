@@ -1152,13 +1152,32 @@ func (t *ThanosStack) cloneSourcecode(ctx context.Context, repositoryName, url s
 			fmt.Println("Error while cloning the repository")
 			return err
 		}
-	} else {
-		err := utils.PullLatestCode(ctx, t.l, t.deploymentPath, repositoryName)
-		if err != nil {
-			fmt.Printf("Error while pulling the latest code for repository %s: %v\n", repositoryName, err)
-			return err
-		}
+		return nil
 	}
+
+	// Case 2: Repo exists → try pulling
+	t.l.Info("Repository exists. Trying to pull latest changes...", "repo", repositoryName)
+	err = utils.PullLatestCode(ctx, t.l, t.deploymentPath, repositoryName)
+	if err == nil {
+		t.l.Info("Successfully pulled latest changes", "repo", repositoryName)
+		fmt.Printf("\r✅ Clone the %s repository successfully \n", repositoryName)
+		return nil
+	}
+
+	// Case 3: Pull failed → likely broken repo → remove and re-clone
+	t.l.Warn("Pull failed. Re-cloning repository...", "repo", repositoryName, "err", err)
+	if removeErr := os.RemoveAll(fmt.Sprintf("%s/%s", t.deploymentPath, repositoryName)); removeErr != nil {
+		t.l.Error("Failed to remove broken repository folder", "path", t.deploymentPath, "repo", repositoryName, "err", removeErr)
+		return removeErr
+	}
+
+	t.l.Info("Re-cloning repository after cleanup...", "repo", repositoryName)
+	err = utils.CloneRepo(ctx, t.l, t.deploymentPath, url, repositoryName)
+	if err != nil {
+		t.l.Error("Failed to re-clone repository", "repo", repositoryName, "err", err)
+		return err
+	}
+
 	fmt.Printf("\r✅ Clone the %s repository successfully \n", repositoryName)
 
 	return nil
