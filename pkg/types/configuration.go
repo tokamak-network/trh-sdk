@@ -115,12 +115,12 @@ type Config struct {
 	L2RpcUrl string `json:"l2_rpc_url"`
 
 	// AWS config
-	AWS *AWSConfig `json:"aws"`
+	AWS *AWSConfig `json:"aws,omitempty"`
 
 	// K8s config
-	K8s *K8sConfig `json:"k8s"`
+	K8s *K8sConfig `json:"k8s,omitempty"`
 
-	ChainName string `json:"chain_name"`
+	ChainName string `json:"chain_name,omitempty"`
 
 	ChainConfiguration *ChainConfiguration `json:"chain_configuration"`
 

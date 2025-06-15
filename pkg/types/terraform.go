@@ -9,7 +9,7 @@ type UpdateTerraformEnvConfig struct {
 }
 
 type TerraformEnvConfig struct {
-	ThanosStackName     string
+	Namespace           string
 	AwsRegion           string
 	BackendBucketName   string
 	SequencerKey        string

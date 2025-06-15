@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -69,4 +71,15 @@ func SwitchKubernetesContext(ctx context.Context, namespace string, region strin
 	fmt.Println("EKS configuration updated:", eksSetup)
 
 	return nil
+}
+
+func ConvertChainNameToNamespace(chainName string) string {
+	processed := strings.ToLower(chainName)
+	processed = strings.ReplaceAll(processed, " ", "-")
+	processed = regexp.MustCompile(`[^a-z0-9-]`).ReplaceAllString(processed, "")
+	processed = strings.Trim(processed, "-")
+	if len(processed) > 20 {
+		processed = processed[:20]
+	}
+	return fmt.Sprintf("%s-%d", processed, time.Now().Unix())
 }
