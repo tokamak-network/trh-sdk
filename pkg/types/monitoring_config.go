@@ -72,6 +72,9 @@ type MonitoringValuesConfig struct {
 			ClassName   string            `yaml:"className"`
 			Annotations map[string]string `yaml:"annotations"`
 			Hosts       []IngressHost     `yaml:"hosts"`
+			TLS         struct {
+				Enabled bool `yaml:"enabled"`
+			} `yaml:"tls"`
 		} `yaml:"ingress"`
 		Datasources []Datasource `yaml:"datasources"`
 		Dashboards  struct {
@@ -110,6 +113,15 @@ type RelabelConfig struct {
 	Replacement  string   `yaml:"replacement,omitempty"`
 }
 
+// Datasource represents a Grafana datasource configuration
+type Datasource struct {
+	Name      string `yaml:"name"`
+	Type      string `yaml:"type"`
+	URL       string `yaml:"url"`
+	Access    string `yaml:"access"`
+	IsDefault bool   `yaml:"isDefault"`
+}
+
 // IngressHost represents an ingress host configuration
 type IngressHost struct {
 	Host  string        `yaml:"host"`
@@ -120,13 +132,4 @@ type IngressHost struct {
 type IngressPath struct {
 	Path     string `yaml:"path"`
 	PathType string `yaml:"pathType"`
-}
-
-// Datasource represents a Grafana datasource configuration
-type Datasource struct {
-	Name      string `yaml:"name"`
-	Type      string `yaml:"type"`
-	URL       string `yaml:"url"`
-	Access    string `yaml:"access"`
-	IsDefault bool   `yaml:"isDefault"`
 }

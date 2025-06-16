@@ -239,18 +239,12 @@ func (t *ThanosStack) installMonitoring(ctx context.Context) error {
 	monitoringConfig.Grafana.Ingress.Annotations = map[string]string{
 		"alb.ingress.kubernetes.io/scheme":           "internet-facing",
 		"alb.ingress.kubernetes.io/target-type":      "ip",
-		"alb.ingress.kubernetes.io/listen-ports":     "[{\"HTTP\": 80}, {\"HTTPS\": 443}]",
+		"alb.ingress.kubernetes.io/listen-ports":     "[{\"HTTP\": 80}]",
 		"alb.ingress.kubernetes.io/group.name":       "thanos-monitoring",
 		"alb.ingress.kubernetes.io/healthcheck-path": "/api/health",
 	}
-	monitoringConfig.Grafana.Ingress.Hosts = []types.IngressHost{
-		{
-			Host: "grafana-thanos.yourdomain.com",
-			Paths: []types.IngressPath{
-				{Path: "/", PathType: "Prefix"},
-			},
-		},
-	}
+	// Hosts 설정을 제거하여 ALB가 기본 엔드포인트를 자동 생성하도록 함
+	// ALB Ingress Controller는 hosts 없이도 작동하며, 자동으로 ALB DNS 이름을 제공함
 
 	// Configure Grafana datasources
 	monitoringConfig.Grafana.Datasources = []types.Datasource{
@@ -570,21 +564,22 @@ func (t *ThanosStack) getServiceNames(namespace string) (map[string]string, erro
 	}
 
 	// Set default names if not found
+	// Use chainName as the release name pattern for thanos-stack services
 	chainName := t.deployConfig.ChainName
 	if serviceNames["op-node"] == "" {
-		serviceNames["op-node"] = fmt.Sprintf("%s-thanos-stack-op-node-svc", chainName)
+		serviceNames["op-node"] = fmt.Sprintf("%s-thanos-stack-op-node", chainName)
 	}
 	if serviceNames["op-batcher"] == "" {
-		serviceNames["op-batcher"] = fmt.Sprintf("%s-thanos-stack-op-batcher-svc", chainName)
+		serviceNames["op-batcher"] = fmt.Sprintf("%s-thanos-stack-op-batcher", chainName)
 	}
 	if serviceNames["op-proposer"] == "" {
-		serviceNames["op-proposer"] = fmt.Sprintf("%s-thanos-stack-op-proposer-svc", chainName)
+		serviceNames["op-proposer"] = fmt.Sprintf("%s-thanos-stack-op-proposer", chainName)
 	}
 	if serviceNames["op-geth"] == "" {
-		serviceNames["op-geth"] = fmt.Sprintf("%s-thanos-stack-op-geth-svc", chainName)
+		serviceNames["op-geth"] = fmt.Sprintf("%s-thanos-stack-op-geth", chainName)
 	}
 	if serviceNames["blockscout"] == "" {
-		serviceNames["blockscout"] = fmt.Sprintf("%s-blockscout-stack-blockscout-svc", chainName)
+		serviceNames["blockscout"] = fmt.Sprintf("%s-blockscout-stack-blockscout", chainName)
 	}
 
 	return serviceNames, nil
