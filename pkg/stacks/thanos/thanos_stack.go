@@ -487,8 +487,9 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 	}
 
 	// STEP 3. Create .envrc file
+	namespace := utils.ConvertChainNameToNamespace(inputs.ChainName)
 	err = makeTerraformEnvFile("tokamak-thanos-stack/terraform", types.TerraformEnvConfig{
-		ThanosStackName:     inputs.ChainName,
+		Namespace:           namespace,
 		AwsRegion:           awsLoginInputs.Region,
 		SequencerKey:        t.deployConfig.SequencerPrivateKey,
 		BatcherKey:          t.deployConfig.BatcherPrivateKey,
@@ -575,7 +576,6 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context) error {
 		return fmt.Errorf("configuration file thanos-stack-values.yaml not found")
 	}
 
-	namespace := utils.ConvertChainNameToNamespace(inputs.ChainName)
 	t.deployConfig.ChainName = inputs.ChainName
 	if err := t.deployConfig.WriteToJSONFile(); err != nil {
 		return fmt.Errorf("failed to write settings file: %w", err)

@@ -307,10 +307,8 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	}
 	defer output.Close()
 
-	bucketName := utils.ConvertToHyphen(config.ThanosStackName)
-
 	writer := bufio.NewWriter(output)
-	writer.WriteString(fmt.Sprintf("export TF_VAR_thanos_stack_name=\"%s\"\n", bucketName))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_thanos_stack_name=\"%s\"\n", config.Namespace))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_aws_region=\"%s\"\n", config.AwsRegion))
 
 	writer.WriteString(fmt.Sprintf("export TF_VAR_backend_bucket_name=\"%s\"\n", ""))
