@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
@@ -108,8 +109,8 @@ func ConvertChainNameToNamespace(chainName string) string {
 	processed = strings.ReplaceAll(processed, " ", "-")
 	processed = regexp.MustCompile(`[^a-z0-9-]`).ReplaceAllString(processed, "")
 	processed = strings.Trim(processed, "-")
-	if len(processed) > 63 {
-		processed = processed[:63]
+	if len(processed) > 20 {
+		processed = processed[:20]
 	}
-	return processed
+	return fmt.Sprintf("%s-%d", processed, time.Now().Unix())
 }
