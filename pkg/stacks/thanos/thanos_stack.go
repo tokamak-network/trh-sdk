@@ -305,6 +305,9 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 
 	// If --no-candidate flag is NOT provided, register the candidate
 	if t.registerCandidate {
+		if t.deployConfig.Network == "Mainnet" {
+			return fmt.Errorf("register candidates verification is not supported on Mainnet")
+		}
 		fmt.Println("Setting up the safe wallet...")
 		if err := t.setupSafeWallet(ctx, cwd); err != nil {
 			return err

@@ -19,7 +19,6 @@ var L1ChainConfigurations = map[uint64]struct {
 	ChainName                        string `json:"chain_name"`
 	BlockExplorer                    string `json:"block_explorer"`
 	L1VerificationContractAddress    string `json:"l1_verification_contract_address"`
-	L2TonAddress                     string `json:"l2_ton_address"`
 	L2ManagerAddress                 string `json:"l2_manager_address"`
 	L1BridgeRegistry                 string `json:"l1_bridge_registry"`
 	TON                              string `json:"ton"`
@@ -40,7 +39,6 @@ var L1ChainConfigurations = map[uint64]struct {
 		ChainName:                        "Ethereum Mainnet",
 		BlockExplorer:                    "https://etherscan.io",
 		L1VerificationContractAddress:    "0x0000000000000000000000000000000000000000",
-		L2TonAddress:                     "0x0000000000000000000000000000000000000000",
 		L2ManagerAddress:                 "0x0000000000000000000000000000000000000000",
 		L1BridgeRegistry:                 "0x0000000000000000000000000000000000000000",
 		TON:                              "0x0000000000000000000000000000000000000000",
@@ -60,8 +58,7 @@ var L1ChainConfigurations = map[uint64]struct {
 		USDTAddress:                      "0xaa8e23fb1079ea71e0a56f48a2aa51851d8433d0",
 		ChainName:                        "Ethereum Sepolia",
 		BlockExplorer:                    "https://sepolia.etherscan.io/",
-		L1VerificationContractAddress:    "0x919DD1710EFbd45232a8d9aef90ed4284303f227",
-		L2TonAddress:                     "0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000",
+		L1VerificationContractAddress:    "0xe18a97CD99056A790E5153d554C58a32c5D596Ce",
 		L2ManagerAddress:                 "0x58B4C2FEf19f5CDdd944AadD8DC99cCC71bfeFDc",
 		L1BridgeRegistry:                 "0x2D47fa57101203855b336e9E61BC9da0A6dd0Dbc",
 		TON:                              "0xa30fe40285B8f5c0457DbC3B7C8A280373c40044",
@@ -82,7 +79,6 @@ var L1ChainConfigurations = map[uint64]struct {
 		ChainName:                        "Ethereum Holesky",
 		BlockExplorer:                    "https://holesky.etherscan.io/",
 		L1VerificationContractAddress:    "0x0000000000000000000000000000000000000000",
-		L2TonAddress:                     "0x0000000000000000000000000000000000000000",
 		L2ManagerAddress:                 "0x0000000000000000000000000000000000000000",
 		L1BridgeRegistry:                 "0x0000000000000000000000000000000000000000",
 		TON:                              "0x0000000000000000000000000000000000000000",

@@ -133,11 +133,6 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 		return fmt.Errorf("ProxyAdmin is not set")
 	}
 
-	l2TonAddress := chainConfig.L2TonAddress
-	if l2TonAddress == "" {
-		return fmt.Errorf("L2TonAddress variable is not set")
-	}
-
 	safeWalletAddress := contracts.SystemOwnerSafe
 	if safeWalletAddress == "" {
 		return fmt.Errorf("SafeWallet addresss is not set")
@@ -174,8 +169,6 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 			auth,
 			ethCommon.HexToAddress(systemConfigProxy),
 			ethCommon.HexToAddress(proxyAdmin),
-			2, //TODO: Need to check and update this using TON
-			ethCommon.HexToAddress(l2TonAddress),
 			registerCandidate.nameInfo,
 			ethCommon.HexToAddress(safeWalletAddress),
 		)
@@ -197,26 +190,8 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 
 		fmt.Printf("Transaction confirmed in block %d\n", receiptVerifyRegisterConfig.BlockNumber.Uint64())
 	} else if rollupType == 0 {
-		txRegisterConfig, err := bridgeRegistryContract.RegisterRollupConfig(auth, ethCommon.HexToAddress(systemConfigProxy), 2, ethCommon.HexToAddress(l2TonAddress),
-			registerCandidate.nameInfo)
-
-		if err != nil {
-			return fmt.Errorf("failed to register candidate: %v", err)
-		}
-
-		fmt.Printf("Register config transaction submitted: %s\n", txRegisterConfig.Hash().Hex())
-
-		// Wait for transaction confirmation
-		receiptRegisterConfig, err := bind.WaitMined(ctx, l1Client, txRegisterConfig)
-		if err != nil {
-			return fmt.Errorf("failed waiting for transaction confirmation: %v", err)
-		}
-
-		if receiptRegisterConfig.Status != 1 {
-			return fmt.Errorf("transaction failed with status: %d", receiptRegisterConfig.Status)
-		}
-
-		fmt.Printf("Transaction confirmed in block %d\n", receiptRegisterConfig.BlockNumber.Uint64())
+		fmt.Println("❌ Verification is not possible. Verification contract not registered as registrant")
+		return fmt.Errorf("verification is not possible. Verification contract not registered as registrant")
 	}
 
 	// Convert amount to Wei

@@ -27,6 +27,9 @@ func ActionVerifyRegisterCandidates() cli.ActionFunc {
 		switch config.Stack {
 		case constants.ThanosStack:
 			thanosStack := thanos.NewThanosStack(config.Network, config.Stack, config)
+			if config.Network == "Mainnet" {
+				return fmt.Errorf("register candidates verification is not supported on Mainnet")
+			}
 			err = thanosStack.VerifyRegisterCandidates(ctx, cwd)
 			return err
 		default:
