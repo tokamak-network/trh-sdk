@@ -59,8 +59,8 @@ func (t *ThanosStack) checkAdminBalance(ctx context.Context, adminAddress ethCom
 }
 
 // fromDeployContract flag would be true if the function would be called from the deploy contract function
-func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, config *types.Config, registerCandidate *RegisterCandidateInput) error {
-	l1Client, err := ethclient.DialContext(ctx, config.L1RPCURL)
+func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCandidate *RegisterCandidateInput) error {
+	l1Client, err := ethclient.DialContext(ctx, t.deployConfig.L1RPCURL)
 	if err != nil {
 		return err
 	}
@@ -92,7 +92,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, config *type
 		return err
 	}
 
-	privateKeyString := config.AdminPrivateKey
+	privateKeyString := t.deployConfig.AdminPrivateKey
 
 	// Parse private key
 	privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKeyString, "0x"))
@@ -264,6 +264,8 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, config *type
 		return fmt.Errorf("failed to create contract instance: %v", err)
 	}
 
+	fmt.Println("Initiating transaction to register DAO candidate...")
+
 	// Call registerCandidateAddOn
 	txRegisterCandidate, err := l2ManagerContract.RegisterCandidateAddOn(
 		auth,
@@ -313,11 +315,11 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, cwd string) 
 	if err != nil {
 		return err
 	}
-	err = t.setupSafeWallet(ctx, t.deployConfig, cwd)
+	err = t.setupSafeWallet(ctx, cwd)
 	if err != nil {
 		return fmt.Errorf("❌ failed to set up Safe Wallet: %w", err)
 	}
-	err = t.verifyRegisterCandidates(ctx, t.deployConfig, registerCandidate)
+	err = t.verifyRegisterCandidates(ctx, registerCandidate)
 	if err != nil {
 		return fmt.Errorf("❌ candidate verification failed: %w", err)
 	}
@@ -325,9 +327,9 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, cwd string) 
 	return nil
 }
 
-func (t *ThanosStack) setupSafeWallet(ctx context.Context, config *types.Config, cwd string) error {
+func (t *ThanosStack) setupSafeWallet(ctx context.Context, cwd string) error {
 	// Set the safe wallet address
-	deployJSONPath := filepath.Join(cwd, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "deployments", fmt.Sprintf("%d-deploy.json", config.L1ChainID))
+	deployJSONPath := filepath.Join(cwd, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "deployments", fmt.Sprintf("%d-deploy.json", t.deployConfig.L1ChainID))
 	deployData, err := os.ReadFile(deployJSONPath)
 	if err != nil {
 		return fmt.Errorf("failed to read deployment file: %v", err)
@@ -346,7 +348,7 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, config *types.Config,
 	fmt.Println("Checking if safe wallet is set up properly...")
 
 	// Connect to the L1
-	l1Client, err := ethclient.Dial(config.L1RPCURL)
+	l1Client, err := ethclient.Dial(t.deployConfig.L1RPCURL)
 	if err != nil {
 		return fmt.Errorf("failed to connect to Ethereum client: %v", err)
 	}
@@ -378,7 +380,7 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, config *types.Config,
 		return fmt.Errorf("failed to call getOwners: %v", err)
 	}
 
-	ownersInfo, err := GetDesignatedOwnersByChainID(config.L1ChainID)
+	ownersInfo, err := GetDesignatedOwnersByChainID(t.deployConfig.L1ChainID)
 	if err != nil {
 		return fmt.Errorf("failed to get designated owners: %v", err)
 	}
@@ -427,7 +429,7 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, config *types.Config,
 
 	// Run hardhat task
 	sdkPath := filepath.Join(cwd, "tokamak-thanos", "packages", "tokamak", "sdk")
-	cmdStr := fmt.Sprintf("cd %s && L1_URL=%s PRIVATE_KEY=%s SAFE_WALLET_ADDRESS=%s npx hardhat set-safe-wallet", sdkPath, config.L1RPCURL, config.AdminPrivateKey, safeWalletAddress)
+	cmdStr := fmt.Sprintf("cd %s && L1_URL=%s PRIVATE_KEY=%s SAFE_WALLET_ADDRESS=%s npx hardhat set-safe-wallet", sdkPath, t.deployConfig.L1RPCURL, t.deployConfig.AdminPrivateKey, safeWalletAddress)
 	if err := utils.ExecuteCommandStream("bash", "-c", cmdStr); err != nil {
 		fmt.Print("\rfailed to setup the Safe wallet!\n")
 		return err

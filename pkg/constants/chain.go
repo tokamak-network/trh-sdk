@@ -62,9 +62,9 @@ var L1ChainConfigurations = map[uint64]struct {
 		BlockExplorer:                    "https://sepolia.etherscan.io/",
 		L1VerificationContractAddress:    "0x919DD1710EFbd45232a8d9aef90ed4284303f227",
 		L2TonAddress:                     "0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000",
-		L2ManagerAddress:                 "0xb5e7b66D695485C96cb7Cf33ceE75383B8800D14",
-		L1BridgeRegistry:                 "0x472591A35A0c43Ad1942C6c47d1939BCcA7F6c13",
-		TON:                              "0x33a66929dE3559315c928556FcFF449b3E708c62",
+		L2ManagerAddress:                 "0x58B4C2FEf19f5CDdd944AadD8DC99cCC71bfeFDc",
+		L1BridgeRegistry:                 "0x2D47fa57101203855b336e9E61BC9da0A6dd0Dbc",
+		TON:                              "0xa30fe40285B8f5c0457DbC3B7C8A280373c40044",
 		MaxChannelDuration:               120,
 	},
 	EthereumHoleskyChainID: {
