@@ -1,94 +1,221 @@
 package types
 
-// MonitoringValuesConfig represents the new values.yaml structure for monitoring
-type MonitoringValuesConfig struct {
-	Global struct {
-		L1RpcUrl   string `yaml:"l1RpcUrl"`
-		Dashboards struct {
-			AutoImport bool `yaml:"autoImport"`
-		} `yaml:"dashboards"`
-	} `yaml:"global"`
+// ThanosStackMonitoringConfig represents the new Helm dependencies-based monitoring configuration
+type ThanosStackMonitoringConfig struct {
+	Global                     GlobalConfig              `yaml:"global"`
+	ThanosStack                ThanosStackConfig         `yaml:"thanosStack"`
+	KubePrometheusStack        KubePrometheusStackConfig `yaml:"kube-prometheus-stack"`
+	PrometheusBlackboxExporter BlackboxExporterConfig    `yaml:"prometheus-blackbox-exporter"`
+}
 
-	EnablePersistence bool `yaml:"enablePersistence"`
+// GlobalConfig represents global configuration values
+type GlobalConfig struct {
+	L1RpcUrl string        `yaml:"l1RpcUrl"`
+	Storage  StorageConfig `yaml:"storage"`
+}
 
-	Prometheus struct {
-		Enabled   bool `yaml:"enabled"`
-		Resources struct {
-			Requests struct {
-				CPU    string `yaml:"cpu"`
-				Memory string `yaml:"memory"`
-			} `yaml:"requests"`
-		} `yaml:"resources"`
-		Retention          string `yaml:"retention"`
-		RetentionSize      string `yaml:"retentionSize"`
-		ScrapeInterval     string `yaml:"scrapeInterval"`
-		EvaluationInterval string `yaml:"evaluationInterval"`
-		Persistence        struct {
-			Enabled      bool   `yaml:"enabled"`
-			StorageClass string `yaml:"storageClass"`
-			Size         string `yaml:"size"`
-		} `yaml:"persistence"`
-		Volume struct {
-			Capacity         string `yaml:"capacity"`
-			StorageClassName string `yaml:"storageClassName"`
-			CSI              struct {
-				Driver       string `yaml:"driver"`
-				VolumeHandle string `yaml:"volumeHandle"`
-			} `yaml:"csi"`
-		} `yaml:"volume"`
-		ScrapeConfigs []ScrapeConfig `yaml:"scrapeConfigs"`
-	} `yaml:"prometheus"`
+// StorageConfig represents global storage configuration
+type StorageConfig struct {
+	Enabled         bool                    `yaml:"enabled"`
+	StorageClass    string                  `yaml:"storageClass"`
+	EfsFileSystemId string                  `yaml:"efsFileSystemId,omitempty"`
+	ForceEFS        bool                    `yaml:"forceEFS"`
+	Prometheus      PrometheusStorageConfig `yaml:"prometheus"`
+	Grafana         GrafanaStorageConfig    `yaml:"grafana"`
+}
 
-	Grafana struct {
-		Enabled       bool   `yaml:"enabled"`
-		AdminUser     string `yaml:"adminUser"`
-		AdminPassword string `yaml:"adminPassword"`
-		Resources     struct {
-			Requests struct {
-				CPU    string `yaml:"cpu"`
-				Memory string `yaml:"memory"`
-			} `yaml:"requests"`
-		} `yaml:"resources"`
-		Persistence struct {
-			Enabled      bool   `yaml:"enabled"`
-			Size         string `yaml:"size"`
-			StorageClass string `yaml:"storageClass"`
-		} `yaml:"persistence"`
-		Volume struct {
-			Capacity         string `yaml:"capacity"`
-			StorageClassName string `yaml:"storageClassName"`
-			CSI              struct {
-				Driver       string `yaml:"driver"`
-				VolumeHandle string `yaml:"volumeHandle"`
-			} `yaml:"csi"`
-		} `yaml:"volume"`
-		Service struct {
-			Type       string `yaml:"type"`
-			Port       int    `yaml:"port"`
-			TargetPort int    `yaml:"targetPort"`
-		} `yaml:"service"`
-		Ingress struct {
-			Enabled     bool              `yaml:"enabled"`
-			ClassName   string            `yaml:"className"`
-			Annotations map[string]string `yaml:"annotations"`
-			Hosts       []IngressHost     `yaml:"hosts"`
-			TLS         struct {
-				Enabled bool `yaml:"enabled"`
-			} `yaml:"tls"`
-		} `yaml:"ingress"`
-		Datasources []Datasource `yaml:"datasources"`
-		Dashboards  struct {
-			Enabled string `yaml:"enabled"`
-		} `yaml:"dashboards"`
-	} `yaml:"grafana"`
+// PrometheusStorageConfig represents Prometheus storage configuration
+type PrometheusStorageConfig struct {
+	Size string `yaml:"size"`
+}
 
-	BlackboxExporter struct {
-		Enabled bool `yaml:"enabled"`
-		Service struct {
-			Type string `yaml:"type"`
-			Port int    `yaml:"port"`
-		} `yaml:"service"`
-	} `yaml:"blackboxExporter"`
+// GrafanaStorageConfig represents Grafana storage configuration
+type GrafanaStorageConfig struct {
+	Size string `yaml:"size"`
+}
+
+// ThanosStackConfig represents trh-sdk specific configuration
+type ThanosStackConfig struct {
+	ReleaseName string `yaml:"releaseName"`
+	Namespace   string `yaml:"namespace"`
+	ChainName   string `yaml:"chainName"`
+}
+
+// KubePrometheusStackConfig represents kube-prometheus-stack subchart configuration
+type KubePrometheusStackConfig struct {
+	Enabled          bool                   `yaml:"enabled"`
+	Prometheus       PrometheusConfig       `yaml:"prometheus"`
+	Grafana          GrafanaConfig          `yaml:"grafana"`
+	Alertmanager     AlertmanagerConfig     `yaml:"alertmanager"`
+	NodeExporter     NodeExporterConfig     `yaml:"nodeExporter"`
+	KubeStateMetrics KubeStateMetricsConfig `yaml:"kubeStateMetrics"`
+}
+
+// PrometheusConfig represents Prometheus configuration
+type PrometheusConfig struct {
+	PrometheusSpec PrometheusSpecConfig `yaml:"prometheusSpec"`
+}
+
+// PrometheusSpecConfig represents Prometheus spec configuration
+type PrometheusSpecConfig struct {
+	Resources               ResourcesConfig     `yaml:"resources"`
+	Retention               string              `yaml:"retention"`
+	RetentionSize           string              `yaml:"retentionSize"`
+	ScrapeInterval          string              `yaml:"scrapeInterval"`
+	EvaluationInterval      string              `yaml:"evaluationInterval"`
+	StorageSpec             *StorageSpecConfig  `yaml:"storageSpec,omitempty"`
+	AdditionalScrapeConfigs []ScrapeConfig      `yaml:"additionalScrapeConfigs"`
+	SecurityContext         *SecurityContext    `yaml:"securityContext,omitempty"`
+	PodSecurityContext      *PodSecurityContext `yaml:"podSecurityContext,omitempty"`
+}
+
+// GrafanaConfig represents Grafana configuration
+type GrafanaConfig struct {
+	Enabled            bool                `yaml:"enabled"`
+	AdminUser          string              `yaml:"adminUser"`
+	AdminPassword      string              `yaml:"adminPassword"`
+	Resources          ResourcesConfig     `yaml:"resources"`
+	Persistence        PersistenceConfig   `yaml:"persistence"`
+	Ingress            IngressConfig       `yaml:"ingress"`
+	Sidecar            SidecarConfig       `yaml:"sidecar"`
+	SecurityContext    *SecurityContext    `yaml:"securityContext,omitempty"`
+	PodSecurityContext *PodSecurityContext `yaml:"podSecurityContext,omitempty"`
+}
+
+// BlackboxExporterConfig represents prometheus-blackbox-exporter subchart configuration
+type BlackboxExporterConfig struct {
+	Enabled        bool                         `yaml:"enabled"`
+	Config         BlackboxConfig               `yaml:"config"`
+	Resources      ResourcesConfig              `yaml:"resources"`
+	ServiceMonitor BlackboxServiceMonitorConfig `yaml:"serviceMonitor"`
+}
+
+// BlackboxConfig represents blackbox exporter configuration
+type BlackboxConfig struct {
+	Modules map[string]BlackboxModule `yaml:"modules"`
+}
+
+// BlackboxModule represents a blackbox module configuration
+type BlackboxModule struct {
+	Prober string              `yaml:"prober"`
+	HTTP   *BlackboxHTTPConfig `yaml:"http,omitempty"`
+}
+
+// BlackboxHTTPConfig represents HTTP probe configuration
+type BlackboxHTTPConfig struct {
+	Method                     string            `yaml:"method"`
+	Headers                    map[string]string `yaml:"headers"`
+	Body                       string            `yaml:"body"`
+	ValidStatusCodes           []int             `yaml:"valid_status_codes"`
+	FailIfBodyNotMatchesRegexp []string          `yaml:"fail_if_body_not_matches_regexp"`
+}
+
+// BlackboxServiceMonitorConfig represents blackbox ServiceMonitor configuration
+type BlackboxServiceMonitorConfig struct {
+	Enabled  bool                           `yaml:"enabled"`
+	Defaults BlackboxServiceMonitorDefaults `yaml:"defaults"`
+}
+
+// BlackboxServiceMonitorDefaults represents default ServiceMonitor settings
+type BlackboxServiceMonitorDefaults struct {
+	Labels        map[string]string `yaml:"labels"`
+	Interval      string            `yaml:"interval"`
+	ScrapeTimeout string            `yaml:"scrapeTimeout"`
+	Targets       []BlackboxTarget  `yaml:"targets"`
+}
+
+// BlackboxTarget represents a blackbox monitoring target
+type BlackboxTarget struct {
+	Name   string `yaml:"name"`
+	URL    string `yaml:"url"`
+	Module string `yaml:"module"`
+}
+
+// ResourcesConfig represents resource configuration
+type ResourcesConfig struct {
+	Requests ResourceRequests `yaml:"requests"`
+	Limits   ResourceLimits   `yaml:"limits"`
+}
+
+// ResourceRequests represents resource requests
+type ResourceRequests struct {
+	CPU    string `yaml:"cpu"`
+	Memory string `yaml:"memory"`
+}
+
+// ResourceLimits represents resource limits
+type ResourceLimits struct {
+	CPU    string `yaml:"cpu"`
+	Memory string `yaml:"memory"`
+}
+
+// StorageSpecConfig represents storage specification
+type StorageSpecConfig struct {
+	VolumeClaimTemplate VolumeClaimTemplateConfig `yaml:"volumeClaimTemplate"`
+}
+
+// VolumeClaimTemplateConfig represents volume claim template
+type VolumeClaimTemplateConfig struct {
+	Spec VolumeClaimSpec `yaml:"spec"`
+}
+
+// VolumeClaimSpec represents volume claim specification
+type VolumeClaimSpec struct {
+	StorageClassName string               `yaml:"storageClassName"`
+	AccessModes      []string             `yaml:"accessModes"`
+	Resources        VolumeClaimResources `yaml:"resources"`
+}
+
+// VolumeClaimResources represents volume claim resources
+type VolumeClaimResources struct {
+	Requests VolumeClaimRequests `yaml:"requests"`
+}
+
+// VolumeClaimRequests represents volume claim requests
+type VolumeClaimRequests struct {
+	Storage string `yaml:"storage"`
+}
+
+// PersistenceConfig represents persistence configuration
+type PersistenceConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	Size         string `yaml:"size,omitempty"`
+	StorageClass string `yaml:"storageClass,omitempty"`
+}
+
+// IngressConfig represents ingress configuration
+type IngressConfig struct {
+	Enabled     bool              `yaml:"enabled"`
+	ClassName   string            `yaml:"className"`
+	Annotations map[string]string `yaml:"annotations"`
+}
+
+// SidecarConfig represents sidecar configuration
+type SidecarConfig struct {
+	Dashboards DashboardSidecarConfig `yaml:"dashboards"`
+}
+
+// DashboardSidecarConfig represents dashboard sidecar configuration
+type DashboardSidecarConfig struct {
+	Enabled         bool   `yaml:"enabled"`
+	Label           string `yaml:"label"`
+	LabelValue      string `yaml:"labelValue"`
+	SearchNamespace string `yaml:"searchNamespace"`
+}
+
+// AlertmanagerConfig represents Alertmanager configuration
+type AlertmanagerConfig struct {
+	Enabled bool `yaml:"enabled"`
+}
+
+// NodeExporterConfig represents Node Exporter configuration
+type NodeExporterConfig struct {
+	Enabled bool `yaml:"enabled"`
+}
+
+// KubeStateMetricsConfig represents Kube State Metrics configuration
+type KubeStateMetricsConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // ScrapeConfig represents a Prometheus scrape configuration
@@ -113,23 +240,19 @@ type RelabelConfig struct {
 	Replacement  string   `yaml:"replacement,omitempty"`
 }
 
-// Datasource represents a Grafana datasource configuration
-type Datasource struct {
-	Name      string `yaml:"name"`
-	Type      string `yaml:"type"`
-	URL       string `yaml:"url"`
-	Access    string `yaml:"access"`
-	IsDefault bool   `yaml:"isDefault"`
+// SecurityContext represents container security context (Fargate compatible)
+type SecurityContext struct {
+	RunAsNonRoot             *bool  `yaml:"runAsNonRoot,omitempty"`
+	RunAsUser                *int64 `yaml:"runAsUser,omitempty"`
+	RunAsGroup               *int64 `yaml:"runAsGroup,omitempty"`
+	ReadOnlyRootFilesystem   *bool  `yaml:"readOnlyRootFilesystem,omitempty"`
+	AllowPrivilegeEscalation *bool  `yaml:"allowPrivilegeEscalation,omitempty"`
 }
 
-// IngressHost represents an ingress host configuration
-type IngressHost struct {
-	Host  string        `yaml:"host"`
-	Paths []IngressPath `yaml:"paths"`
-}
-
-// IngressPath represents an ingress path configuration
-type IngressPath struct {
-	Path     string `yaml:"path"`
-	PathType string `yaml:"pathType"`
+// PodSecurityContext represents pod security context (Fargate compatible)
+type PodSecurityContext struct {
+	RunAsNonRoot *bool  `yaml:"runAsNonRoot,omitempty"`
+	RunAsUser    *int64 `yaml:"runAsUser,omitempty"`
+	RunAsGroup   *int64 `yaml:"runAsGroup,omitempty"`
+	FSGroup      *int64 `yaml:"fsGroup,omitempty"`
 }
