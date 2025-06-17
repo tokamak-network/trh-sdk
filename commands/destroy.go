@@ -51,7 +51,10 @@ func ActionDestroyInfra() cli.ActionFunc {
 
 		// Initialize the logger
 		fileName := fmt.Sprintf("%s/logs/destroy_%s_%s_%d.log", deploymentPath, stack, network, time.Now().Unix())
-		l := logging.InitLogger(fileName)
+		l, err := logging.InitLogger(fileName)
+		if err != nil {
+			return fmt.Errorf("failed to initialize logger: %w", err)
+		}
 
 		switch stack {
 		case constants.ThanosStack:
