@@ -161,17 +161,17 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, inputs *UpdateNetworkIn
 			continue
 		}
 		// Update the helm release
-		_, err = utils.ExecuteCommand(ctx, "helm", []string{
+		output, err := utils.ExecuteCommand(ctx, "helm", []string{
 			"upgrade",
 			release,
-			fmt.Sprintf("%s/%s", t.deploymentPath, chartPath),
+			chartPath,
 			"--values",
 			fileValuesPath,
 			"--namespace",
 			namespace,
 		}...)
 		if err != nil {
-			fmt.Printf("Error updating helm release: %s, err: %s \n", release, err.Error())
+			fmt.Printf("Error updating helm release: %s, err: %s, output: %s \n", release, err.Error(), output)
 			return err
 		}
 	}
