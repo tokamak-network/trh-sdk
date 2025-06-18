@@ -775,10 +775,6 @@ func (t *ThanosStack) uninstallMonitoring(ctx context.Context) error {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
-	var (
-		namespace = t.deployConfig.K8s.Namespace
-	)
-
 	_, _, err := t.loginAWS(ctx)
 	if err != nil {
 		fmt.Println("Error to login in AWS:", err)
@@ -789,8 +785,11 @@ func (t *ThanosStack) uninstallMonitoring(ctx context.Context) error {
 		return fmt.Errorf("AWS configuration is not set. Please run the deploy command first")
 	}
 
-	// Find monitoring releases
-	releases, err := utils.FilterHelmReleases(namespace, "monitoring")
+	// Use the correct monitoring namespace instead of Thanos Stack namespace
+	monitoringNamespace := "monitoring"
+
+	// Find monitoring releases in the monitoring namespace
+	releases, err := utils.FilterHelmReleases(monitoringNamespace, "monitoring")
 	if err != nil {
 		fmt.Println("Error to filter helm releases:", err)
 		return err
@@ -802,7 +801,7 @@ func (t *ThanosStack) uninstallMonitoring(ctx context.Context) error {
 			"uninstall",
 			release,
 			"--namespace",
-			namespace,
+			monitoringNamespace,
 		}...)
 		if err != nil {
 			fmt.Println("Error uninstalling monitoring helm chart:", err)

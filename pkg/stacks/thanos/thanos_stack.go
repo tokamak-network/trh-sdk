@@ -832,7 +832,15 @@ func (t *ThanosStack) InstallPlugins(ctx context.Context, pluginNames []string) 
 			continue
 		}
 
-		fmt.Printf("Installing plugin: %s in namespace: %s...\n", pluginName, namespace)
+		// Display the correct namespace for each plugin
+		var displayNamespace string
+		if pluginName == constants.PluginMonitoring {
+			displayNamespace = "monitoring"
+		} else {
+			displayNamespace = namespace
+		}
+
+		fmt.Printf("Installing plugin: %s in namespace: %s...\n", pluginName, displayNamespace)
 
 		switch pluginName {
 		case constants.PluginBlockExplorer:
@@ -881,7 +889,15 @@ func (t *ThanosStack) UninstallPlugins(ctx context.Context, pluginNames []string
 			continue
 		}
 
-		fmt.Printf("Uninstalling plugin: %s in namespace: %s...\n", pluginName, namespace)
+		// Display the correct namespace for each plugin
+		var displayNamespace string
+		if pluginName == constants.PluginMonitoring {
+			displayNamespace = "monitoring"
+		} else {
+			displayNamespace = namespace
+		}
+
+		fmt.Printf("Uninstalling plugin: %s in namespace: %s...\n", pluginName, displayNamespace)
 
 		switch pluginName {
 		case constants.PluginBridge:
