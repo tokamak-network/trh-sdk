@@ -63,7 +63,6 @@ func (t *ThanosStack) installMonitoring(ctx context.Context) error {
 	close(errorChan)
 
 	// Create dashboard ConfigMaps after successful Helm installation
-	fmt.Println("📊 Creating dashboard ConfigMaps...")
 	if err := t.createDashboardConfigMaps(config); err != nil {
 		fmt.Printf("⚠️  Failed to create dashboard ConfigMaps: %v\n", err)
 		fmt.Println("   Dashboards can be imported manually later")
@@ -102,26 +101,6 @@ func (t *ThanosStack) displayMonitoringInfo(config *MonitoringConfig) {
 	fmt.Printf("   # Port forward to access Grafana locally:\n")
 	fmt.Printf("   kubectl port-forward -n %s svc/%s-grafana 3000:80\n", config.Namespace, config.HelmReleaseName)
 	fmt.Printf("   # Then visit: http://localhost:3000\n\n")
-
-	fmt.Printf("   # Port forward to access Prometheus locally:\n")
-	fmt.Printf("   kubectl port-forward -n %s svc/%s-kube-prometheus-prometheus 9090:9090\n", config.Namespace, config.HelmReleaseName)
-	fmt.Printf("   # Then visit: http://localhost:9090\n\n")
-
-	fmt.Printf("📈 **Monitoring Targets:**\n")
-	for component, serviceName := range config.ServiceNames {
-		if serviceName != "" {
-			fmt.Printf("   • %s: %s\n", component, serviceName)
-		}
-	}
-	fmt.Printf("   • L1 RPC Health: %s\n\n", config.L1RpcUrl)
-
-	fmt.Printf("🛠️  **Management Commands:**\n")
-	fmt.Printf("   # Check status:\n")
-	fmt.Printf("   helm status %s -n %s\n", config.HelmReleaseName, config.Namespace)
-	fmt.Printf("   kubectl get pods -n %s\n\n", config.Namespace)
-
-	fmt.Printf("   # Uninstall:\n")
-	fmt.Printf("   helm uninstall %s -n %s\n", config.HelmReleaseName, config.Namespace)
 }
 
 // MonitoringConfig holds all configuration needed for monitoring installation
@@ -147,7 +126,7 @@ func (t *ThanosStack) getMonitoringConfig(ctx context.Context) (*MonitoringConfi
 		ChainName: t.deployConfig.ChainName,
 	}
 
-	// Generate unique release name with timestamp
+	// Use timestamped release name for monitoring
 	timestamp := time.Now().Unix()
 	config.HelmReleaseName = fmt.Sprintf("monitoring-%d", timestamp)
 
@@ -340,170 +319,215 @@ func (t *ThanosStack) getFargatePodSecurityContext() *types.PodSecurityContext {
 	}
 }
 
+// validateServiceMetrics validates that each scrape target service exists
+func (t *ThanosStack) validateServiceMetrics(config *MonitoringConfig) {
+	fmt.Println("🔍 Validating service metrics availability...")
+
+	// Validate that each scrape target service exists
+	for componentName, serviceName := range config.ServiceNames {
+		// Check if service exists in the target namespace
+		_, err := utils.ExecuteCommand("kubectl", "get", "service", serviceName, "-n", t.deployConfig.K8s.Namespace)
+		if err != nil {
+			fmt.Printf("⚠️  Service %s not found for component %s, metrics may not be collected\n", serviceName, componentName)
+		} else {
+			fmt.Printf("✅ Verified service %s exists for component %s\n", serviceName, componentName)
+		}
+	}
+
+	fmt.Println("✅ Service validation completed")
+}
+
+// displayMetricsDebuggingInfo provides debugging information for dashboard connectivity
+func (t *ThanosStack) displayMetricsDebuggingInfo(config *MonitoringConfig) {
+	fmt.Println("\n🔧 Dashboard Connectivity Debugging Information:")
+	fmt.Println("=" + strings.Repeat("=", 60))
+
+	fmt.Printf("📊 Expected Dashboard Metrics:\n")
+	fmt.Printf("   • up{job=\"op-node\"} - OP Node status\n")
+	fmt.Printf("   • up{job=\"op-batcher\"} - OP Batcher status\n")
+	fmt.Printf("   • up{job=\"op-proposer\"} - OP Proposer status\n")
+	fmt.Printf("   • up{job=\"op-geth\"} - OP Geth status\n")
+	fmt.Printf("   • chain_head_block{job=\"op-geth\"} - L2 block height\n")
+	fmt.Printf("   • op_batcher_default_* - Batcher specific metrics\n")
+	fmt.Printf("   • probe_success{job=\"blackbox-eth-*\"} - L1 RPC health\n\n")
+
+	fmt.Printf("🎯 Service Discovery Configuration:\n")
+	fmt.Printf("   • Thanos Stack Namespace: %s\n", t.deployConfig.K8s.Namespace)
+	fmt.Printf("   • Monitoring Namespace: %s\n", config.Namespace)
+	fmt.Printf("   • Chain Name: %s\n", config.ChainName)
+	fmt.Printf("   • L1 RPC URL: %s\n", config.L1RpcUrl)
+	fmt.Printf("   • Helm Release: %s\n\n", config.HelmReleaseName)
+
+	fmt.Printf("🔍 Manual Dashboard Debugging Commands:\n")
+	fmt.Printf("   # Check if Prometheus is discovering targets:\n")
+	fmt.Printf("   kubectl port-forward -n %s svc/%s-kube-prometheus-stack-prometheus 9090:9090\n", config.Namespace, config.HelmReleaseName)
+	fmt.Printf("   # Then visit: http://localhost:9090/targets\n\n")
+
+	fmt.Printf("   # Check ServiceMonitors:\n")
+	fmt.Printf("   kubectl get servicemonitor -n %s\n", config.Namespace)
+	fmt.Printf("   kubectl describe servicemonitor -n %s\n\n", config.Namespace)
+
+	fmt.Printf("   # Check if services have correct labels:\n")
+	for _, serviceName := range config.ServiceNames {
+		fmt.Printf("   kubectl get service %s -n %s --show-labels\n", serviceName, t.deployConfig.K8s.Namespace)
+	}
+	fmt.Printf("\n   # Check Prometheus configuration:\n")
+	fmt.Printf("   kubectl get secret %s-kube-prometheus-stack-prometheus -n %s -o yaml\n", config.HelmReleaseName, config.Namespace)
+
+	fmt.Printf("\n💡 Common Issues:\n")
+	fmt.Printf("   1. Services missing 'app.kubernetes.io/name' label\n")
+	fmt.Printf("   2. Firewall/NetworkPolicy blocking metrics ports\n")
+	fmt.Printf("   3. Metrics endpoints not responding (check /metrics path)\n")
+	fmt.Printf("   4. ServiceMonitor selector not matching service labels\n")
+	fmt.Printf("   5. Wrong namespace configuration\n\n")
+}
+
 // generateValuesFile creates the values.yaml file for monitoring configuration
 func (t *ThanosStack) generateValuesFile(config *MonitoringConfig) error {
 	fmt.Println("📝 Generating monitoring values file...")
 
-	// Create monitoring configuration using structured types
-	valuesConfig := types.ThanosStackMonitoringConfig{
-		Global: types.GlobalConfig{
-			L1RpcUrl: config.L1RpcUrl,
-			Storage: types.StorageConfig{
-				Enabled:         config.EnablePersistence,
-				StorageClass:    "efs-sc",
-				EfsFileSystemId: config.EfsId,
-				ForceEFS:        config.ForceEFS,
-				Prometheus: types.PrometheusStorageConfig{
-					Size: "50Gi",
+	// Validate services before generating values
+	t.validateServiceMetrics(config)
+
+	// Display troubleshooting information
+	fmt.Println("\n🔧 Dashboard Connectivity Debugging Information:")
+	fmt.Println("=" + strings.Repeat("=", 60))
+
+	fmt.Printf("📊 Expected Dashboard Metrics:\n")
+	fmt.Printf("   • up{job=\"op-node\"} - OP Node status\n")
+	fmt.Printf("   • up{job=\"op-batcher\"} - OP Batcher status\n")
+	fmt.Printf("   • up{job=\"op-proposer\"} - OP Proposer status\n")
+	fmt.Printf("   • up{job=\"op-geth\"} - OP Geth status\n")
+	fmt.Printf("   • chain_head_block{job=\"op-geth\"} - L2 block height\n")
+	fmt.Printf("   • op_batcher_default_* - Batcher specific metrics\n")
+	fmt.Printf("   • probe_success{job=\"blackbox-eth-*\"} - L1 RPC health\n\n")
+
+	fmt.Printf("🎯 Service Discovery Configuration:\n")
+	fmt.Printf("   • Thanos Stack Namespace: %s\n", t.deployConfig.K8s.Namespace)
+	fmt.Printf("   • Monitoring Namespace: %s\n", config.Namespace)
+	fmt.Printf("   • Chain Name: %s\n", config.ChainName)
+	fmt.Printf("   • L1 RPC URL: %s\n", config.L1RpcUrl)
+	fmt.Printf("   • Helm Release: %s\n\n", config.HelmReleaseName)
+
+	// Create values configuration matching the chart's values.yaml structure exactly
+	valuesConfig := map[string]interface{}{
+		"createNamespace": false, // Handled by Helm --create-namespace flag
+		"global": map[string]interface{}{
+			"l1RpcUrl": config.L1RpcUrl,
+			"storage": map[string]interface{}{
+				"enabled":         config.EnablePersistence,
+				"storageClass":    "efs-sc",
+				"efsFileSystemId": config.EfsId,
+				"forceEFS":        config.ForceEFS,
+				"prometheus": map[string]interface{}{
+					"size": "50Gi",
 				},
-				Grafana: types.GrafanaStorageConfig{
-					Size: "10Gi",
+				"grafana": map[string]interface{}{
+					"size": "10Gi",
 				},
+			},
+			"securityContext": map[string]interface{}{
+				"runAsNonRoot":             true,
+				"runAsUser":                65534,
+				"runAsGroup":               65534,
+				"readOnlyRootFilesystem":   false,
+				"allowPrivilegeEscalation": false,
+			},
+			"podSecurityContext": map[string]interface{}{
+				"runAsNonRoot": true,
+				"runAsUser":    65534,
+				"runAsGroup":   65534,
+				"fsGroup":      65534,
 			},
 		},
-		ThanosStack: types.ThanosStackConfig{
-			ReleaseName: config.ChainName,
-			Namespace:   config.Namespace,
-			ChainName:   config.ChainName,
+		"thanosStack": map[string]interface{}{
+			"chainName":   config.ChainName,
+			"namespace":   t.deployConfig.K8s.Namespace, // Use the Thanos Stack namespace
+			"releaseName": config.ChainName,
 		},
-		KubePrometheusStack: types.KubePrometheusStackConfig{
-			Enabled: true,
-			Prometheus: types.PrometheusConfig{
-				PrometheusSpec: types.PrometheusSpecConfig{
-					Resources: types.ResourcesConfig{
-						Requests: types.ResourceRequests{
-							CPU:    "1500m",
-							Memory: "3Gi",
-						},
-						Limits: types.ResourceLimits{
-							CPU:    "2000m",
-							Memory: "4Gi",
-						},
-					},
-					Retention:               "1y",
-					RetentionSize:           "10GB",
-					ScrapeInterval:          "30s",
-					EvaluationInterval:      "30s",
-					StorageSpec:             t.getStorageSpecTyped(config),
-					AdditionalScrapeConfigs: t.generateScrapeConfigsTyped(config),
-					SecurityContext:         t.getFargateSecurityContext(),
-					PodSecurityContext:      t.getFargatePodSecurityContext(),
-				},
+		"kube-prometheus-stack": map[string]interface{}{
+			"prometheus": map[string]interface{}{
+				"prometheusSpec": t.generatePrometheusSpec(config),
 			},
-			Grafana: types.GrafanaConfig{
-				Enabled:       true,
-				AdminUser:     "admin",
-				AdminPassword: config.AdminPassword,
-				Resources: types.ResourcesConfig{
-					Requests: types.ResourceRequests{
-						CPU:    "500m",
-						Memory: "1Gi",
-					},
-					Limits: types.ResourceLimits{
-						CPU:    "1000m",
-						Memory: "2Gi",
-					},
-				},
-				Persistence: t.getGrafanaPersistenceTyped(config),
-				Ingress: types.IngressConfig{
-					Enabled:   true,
-					ClassName: "alb",
-					Annotations: map[string]string{
-						"alb.ingress.kubernetes.io/scheme":      "internet-facing",
-						"alb.ingress.kubernetes.io/target-type": "ip",
-						"alb.ingress.kubernetes.io/group.name":  "thanos-monitoring",
-					},
-				},
-				Sidecar: types.SidecarConfig{
-					Dashboards: types.DashboardSidecarConfig{
-						Enabled:         true,
-						Label:           "grafana_dashboard",
-						LabelValue:      "1",
-						SearchNamespace: "ALL",
-					},
-				},
-				SecurityContext:    t.getFargateSecurityContext(),
-				PodSecurityContext: t.getFargatePodSecurityContext(),
+			"grafana": t.generateGrafanaConfig(config),
+			"alertmanager": map[string]interface{}{
+				"enabled": false,
 			},
-			Alertmanager: types.AlertmanagerConfig{
-				Enabled: false,
+			"nodeExporter": map[string]interface{}{
+				"enabled": false,
 			},
-			NodeExporter: types.NodeExporterConfig{
-				Enabled: false, // Always disabled for Fargate compatibility
-			},
-			KubeStateMetrics: types.KubeStateMetricsConfig{
-				Enabled: true,
+			"kubeStateMetrics": map[string]interface{}{
+				"enabled": true,
 			},
 		},
-		PrometheusBlackboxExporter: types.BlackboxExporterConfig{
-			Enabled: true,
-			Config: types.BlackboxConfig{
-				Modules: map[string]types.BlackboxModule{
-					"http_post_eth_node_synced_2xx": {
-						Prober: "http",
-						HTTP: &types.BlackboxHTTPConfig{
-							Method: "POST",
-							Headers: map[string]string{
+		"prometheus-blackbox-exporter": map[string]interface{}{
+			"enabled": true,
+			"config": map[string]interface{}{
+				"modules": map[string]interface{}{
+					"http_post_eth_node_synced_2xx": map[string]interface{}{
+						"prober":  "http",
+						"timeout": "10s",
+						"http": map[string]interface{}{
+							"method": "POST",
+							"headers": map[string]interface{}{
 								"Content-Type": "application/json",
 							},
-							Body:                       `{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}`,
-							ValidStatusCodes:           []int{200},
-							FailIfBodyNotMatchesRegexp: []string{"false"},
+							"body":                            `{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}`,
+							"valid_status_codes":              []int{200},
+							"preferred_ip_protocol":           "ip4",
+							"fail_if_body_not_matches_regexp": []string{`"result"\s*:\s*false`},
 						},
 					},
-					"http_post_eth_block_number_2xx": {
-						Prober: "http",
-						HTTP: &types.BlackboxHTTPConfig{
-							Method: "POST",
-							Headers: map[string]string{
+					"http_post_eth_block_number_2xx": map[string]interface{}{
+						"prober":  "http",
+						"timeout": "10s",
+						"http": map[string]interface{}{
+							"method": "POST",
+							"headers": map[string]interface{}{
 								"Content-Type": "application/json",
 							},
-							Body:                       `{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":83}`,
-							ValidStatusCodes:           []int{200},
-							FailIfBodyNotMatchesRegexp: []string{"0x"},
+							"body":                            `{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":83}`,
+							"valid_status_codes":              []int{200},
+							"preferred_ip_protocol":           "ip4",
+							"fail_if_body_not_matches_regexp": []string{`"result"\s*:\s*"0x[0-9a-fA-F]+"`},
 						},
 					},
-					"tcp_connect": {
-						Prober: "tcp",
+					"tcp_connect": map[string]interface{}{
+						"prober":  "tcp",
+						"timeout": "5s",
 					},
 				},
 			},
-			Resources: types.ResourcesConfig{
-				Requests: types.ResourceRequests{
-					CPU:    "100m",
-					Memory: "128Mi",
+			"resources": map[string]interface{}{
+				"requests": map[string]interface{}{
+					"cpu":    "100m",
+					"memory": "128Mi",
 				},
-				Limits: types.ResourceLimits{
-					CPU:    "500m",
-					Memory: "256Mi",
+				"limits": map[string]interface{}{
+					"cpu":    "500m",
+					"memory": "256Mi",
 				},
 			},
-			ServiceMonitor: types.BlackboxServiceMonitorConfig{
-				Enabled: true,
-				Defaults: types.BlackboxServiceMonitorDefaults{
-					Labels: map[string]string{
+			"service": map[string]interface{}{
+				"type": "ClusterIP",
+				"port": 9115,
+			},
+			"serviceMonitor": map[string]interface{}{
+				"enabled": true,
+				"defaults": map[string]interface{}{
+					"labels": map[string]interface{}{
 						"app": "blackbox-exporter",
 					},
-					Interval:      "30s",
-					ScrapeTimeout: "30s",
-					Targets: []types.BlackboxTarget{
-						{
-							Name:   "blackbox-eth-node-synced",
-							URL:    config.L1RpcUrl,
-							Module: "http_post_eth_node_synced_2xx",
-						},
-						{
-							Name:   "blackbox-eth-block-number",
-							URL:    config.L1RpcUrl,
-							Module: "http_post_eth_block_number_2xx",
-						},
-					},
+					"interval":      "30s",
+					"scrapeTimeout": "30s",
 				},
 			},
 		},
+		"scrapeTargets":           t.generateScrapeTargets(config),
+		"additionalScrapeConfigs": t.generateAdditionalScrapeConfigs(config),
 	}
 
-	// Marshal to YAML
+	// Convert to YAML
 	yamlData, err := yaml.Marshal(valuesConfig)
 	if err != nil {
 		return fmt.Errorf("failed to marshal values to YAML: %w", err)
@@ -529,244 +553,323 @@ func (t *ThanosStack) generateValuesFile(config *MonitoringConfig) error {
 	return nil
 }
 
-// getStorageSpecTyped returns storage configuration using typed structs
-func (t *ThanosStack) getStorageSpecTyped(config *MonitoringConfig) *types.StorageSpecConfig {
-	if !config.EnablePersistence {
-		return nil
+// generatePrometheusSpec creates Prometheus specification with proper storage configuration
+func (t *ThanosStack) generatePrometheusSpec(config *MonitoringConfig) map[string]interface{} {
+	prometheusSpec := map[string]interface{}{
+		"resources": map[string]interface{}{
+			"requests": map[string]interface{}{
+				"cpu":    "1500m",
+				"memory": "3Gi",
+			},
+		},
+		"retention":               "1y",
+		"retentionSize":           "10GB",
+		"scrapeInterval":          "1m",
+		"evaluationInterval":      "1m",
+		"additionalScrapeConfigs": t.generateAdditionalScrapeConfigs(config),
+		"securityContext": map[string]interface{}{
+			"runAsNonRoot":             true,
+			"runAsUser":                65534,
+			"runAsGroup":               65534,
+			"readOnlyRootFilesystem":   false,
+			"allowPrivilegeEscalation": false,
+		},
+		"podSecurityContext": map[string]interface{}{
+			"runAsNonRoot": true,
+			"runAsUser":    65534,
+			"runAsGroup":   65534,
+			"fsGroup":      65534,
+		},
 	}
 
-	// Use EFS-based storage if ForceEFS is enabled or EFS is available
-	if config.ForceEFS || config.EfsId != "" {
-		return &types.StorageSpecConfig{
-			VolumeClaimTemplate: types.VolumeClaimTemplateConfig{
-				Spec: types.VolumeClaimSpec{
-					StorageClassName: "efs-sc",
-					AccessModes:      []string{"ReadWriteMany"},
-					Resources: types.VolumeClaimResources{
-						Requests: types.VolumeClaimRequests{
-							Storage: "50Gi",
+	// Add storage configuration if persistence is enabled
+	if config.EnablePersistence {
+		storageSpec := map[string]interface{}{
+			"volumeClaimTemplate": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"storageClassName": "efs-sc",
+					"accessModes":      []string{"ReadWriteMany"},
+					"resources": map[string]interface{}{
+						"requests": map[string]interface{}{
+							"storage": "50Gi",
 						},
 					},
 				},
 			},
 		}
+		prometheusSpec["storageSpec"] = storageSpec
 	}
 
-	// For Fargate or when EFS is not available, return nil to use EmptyDir
-	return nil
+	return prometheusSpec
 }
 
-// getGrafanaPersistenceTyped returns Grafana persistence configuration using typed structs
-func (t *ThanosStack) getGrafanaPersistenceTyped(config *MonitoringConfig) types.PersistenceConfig {
-	if !config.EnablePersistence {
-		return types.PersistenceConfig{
-			Enabled: false,
+// generateGrafanaConfig creates Grafana configuration with proper service naming and storage
+func (t *ThanosStack) generateGrafanaConfig(config *MonitoringConfig) map[string]interface{} {
+	grafanaConfig := map[string]interface{}{
+		"enabled":       true,
+		"adminUser":     "admin",
+		"adminPassword": config.AdminPassword,
+		"resources": map[string]interface{}{
+			"requests": map[string]interface{}{
+				"cpu":    "1500m",
+				"memory": "4Gi",
+			},
+		},
+		// Use dynamic service naming (removes fullnameOverride for timestamp compatibility)
+		// "fullnameOverride": removed to allow timestamped release names,
+		"ingress": map[string]interface{}{
+			"enabled":          true,
+			"ingressClassName": "alb",
+			"annotations": map[string]interface{}{
+				"alb.ingress.kubernetes.io/scheme":       "internet-facing",
+				"alb.ingress.kubernetes.io/target-type":  "ip",
+				"alb.ingress.kubernetes.io/group.name":   "thanos-monitoring",
+				"alb.ingress.kubernetes.io/listen-ports": `[{"HTTP":80}]`,
+			},
+			"hosts": []string{}, // Empty hosts array for ALB auto-discovery
+			"path":  "/",        // Single path for Grafana ingress
+		},
+		"defaultDashboardsEnabled":  false,
+		"defaultDashboardsTimezone": "utc",
+		"sidecar": map[string]interface{}{
+			"dashboards": map[string]interface{}{
+				"enabled":         true,
+				"label":           "grafana_dashboard",
+				"labelValue":      "1",
+				"searchNamespace": "ALL",
+			},
+			"datasources": map[string]interface{}{
+				"enabled":                  true,
+				"defaultDatasourceEnabled": true,
+			},
+		},
+		"securityContext": map[string]interface{}{
+			"runAsNonRoot":             true,
+			"runAsUser":                65534,
+			"runAsGroup":               65534,
+			"readOnlyRootFilesystem":   false,
+			"allowPrivilegeEscalation": false,
+		},
+		"podSecurityContext": map[string]interface{}{
+			"runAsNonRoot": true,
+			"runAsUser":    65534,
+			"runAsGroup":   65534,
+			"fsGroup":      65534,
+		},
+	}
+
+	// Add persistence configuration if enabled
+	if config.EnablePersistence {
+		grafanaConfig["persistence"] = map[string]interface{}{
+			"enabled":          true,
+			"storageClassName": "efs-sc",
+			"size":             "10Gi",
+			"accessModes":      []string{"ReadWriteMany"},
+		}
+	} else {
+		grafanaConfig["persistence"] = map[string]interface{}{
+			"enabled": false,
 		}
 	}
 
-	// Use EFS if ForceEFS is enabled or EFS is available
-	if config.ForceEFS || config.EfsId != "" {
-		return types.PersistenceConfig{
-			Enabled:      true,
-			Size:         "10Gi",
-			StorageClass: "efs-sc",
-		}
-	}
+	return grafanaConfig
+}
 
-	return types.PersistenceConfig{
-		Enabled: false,
+// generateScrapeTargets creates scrape target configuration for Thanos Stack services
+func (t *ThanosStack) generateScrapeTargets(config *MonitoringConfig) map[string]interface{} {
+	return map[string]interface{}{
+		"op-node": map[string]interface{}{
+			"enabled":  true,
+			"port":     7300,
+			"path":     "/metrics",
+			"interval": "30s",
+		},
+		"op-batcher": map[string]interface{}{
+			"enabled":  true,
+			"port":     7300,
+			"path":     "/metrics",
+			"interval": "30s",
+		},
+		"op-proposer": map[string]interface{}{
+			"enabled":  true,
+			"port":     7300,
+			"path":     "/metrics",
+			"interval": "30s",
+		},
+		"op-geth": map[string]interface{}{
+			"enabled":  true,
+			"port":     6060,
+			"path":     "/debug/metrics/prometheus",
+			"interval": "30s",
+		},
+		"blockscout": map[string]interface{}{
+			"enabled":  true,
+			"port":     3000,
+			"path":     "/metrics",
+			"interval": "1m",
+		},
+		"block-explorer-frontend": map[string]interface{}{
+			"enabled":  true,
+			"port":     80,
+			"path":     "/api/healthz",
+			"interval": "1m",
+		},
 	}
 }
 
-// generateScrapeConfigsTyped creates Prometheus scrape configurations using typed structs
-func (t *ThanosStack) generateScrapeConfigsTyped(config *MonitoringConfig) []types.ScrapeConfig {
-	scrapeConfigs := []types.ScrapeConfig{}
+// getServiceNames returns a map of component names to their Kubernetes service names
+func (t *ThanosStack) getServiceNames(namespace, chainName string) (map[string]string, error) {
+	fmt.Printf("🔍 Discovering services in namespace: %s\n", namespace)
 
-	// OP Stack components scrape configs
-	components := map[string]map[string]interface{}{
+	// First, get all services in the namespace
+	output, err := utils.ExecuteCommand("kubectl", "get", "services", "-n", namespace, "-o", "custom-columns=NAME:.metadata.name,TYPE:.spec.type", "--no-headers")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get services in namespace %s: %w", namespace, err)
+	}
+
+	if strings.TrimSpace(output) == "" {
+		return nil, fmt.Errorf("no services found in namespace %s", namespace)
+	}
+
+	// Parse the service list
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	var allServices []string
+	fmt.Println("📋 Available services:")
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 1 {
+			serviceName := fields[0]
+			serviceType := "ClusterIP"
+			if len(fields) >= 2 {
+				serviceType = fields[1]
+			}
+			allServices = append(allServices, serviceName)
+			fmt.Printf("   - %s (%s)\n", serviceName, serviceType)
+		}
+	}
+
+	// Component mapping patterns for OP Stack services (dashboard-compatible naming)
+	componentPatterns := map[string][]string{
 		"op-node": {
-			"port": 7300,
-			"path": "/metrics",
+			"op-node", "node", "opnode",
+			fmt.Sprintf("%s-op-node", chainName),
+			fmt.Sprintf("%s-node", chainName),
+			fmt.Sprintf("%s-thanos-stack-op-node", chainName),
 		},
 		"op-batcher": {
-			"port": 7300,
-			"path": "/metrics",
+			"op-batcher", "batcher", "opbatcher",
+			fmt.Sprintf("%s-op-batcher", chainName),
+			fmt.Sprintf("%s-batcher", chainName),
+			fmt.Sprintf("%s-thanos-stack-op-batcher", chainName),
 		},
 		"op-proposer": {
-			"port": 7300,
-			"path": "/metrics",
+			"op-proposer", "proposer", "opproposer",
+			fmt.Sprintf("%s-op-proposer", chainName),
+			fmt.Sprintf("%s-proposer", chainName),
+			fmt.Sprintf("%s-thanos-stack-op-proposer", chainName),
 		},
 		"op-geth": {
-			"port": 6060,
-			"path": "/debug/metrics/prometheus",
+			"op-geth", "geth", "opgeth", "l2geth",
+			fmt.Sprintf("%s-op-geth", chainName),
+			fmt.Sprintf("%s-geth", chainName),
+			fmt.Sprintf("%s-thanos-stack-op-geth", chainName),
 		},
 		"blockscout": {
-			"port": 3000,
-			"path": "/metrics",
+			"blockscout", "explorer", "block-explorer",
+			fmt.Sprintf("%s-blockscout", chainName),
+			fmt.Sprintf("%s-explorer", chainName),
+			fmt.Sprintf("%s-thanos-stack-blockscout", chainName),
 		},
 		"block-explorer-frontend": {
-			"port": 80,
-			"path": "/api/healthz",
+			"block-explorer-frontend", "frontend", "explorer-frontend",
+			fmt.Sprintf("%s-block-explorer-frontend", chainName),
+			fmt.Sprintf("%s-frontend", chainName),
+			fmt.Sprintf("%s-thanos-stack-block-explorer-frontend", chainName),
 		},
 	}
 
-	for component, settings := range components {
-		if serviceName, exists := config.ServiceNames[component]; exists && serviceName != "" {
-			// Use FQDN for cross-namespace service access
-			serviceTarget := fmt.Sprintf("%s.%s.svc.cluster.local:%d",
-				serviceName,
-				t.deployConfig.K8s.Namespace, // Original Thanos Stack namespace
-				settings["port"])
+	serviceNames := make(map[string]string)
 
-			scrapeConfig := types.ScrapeConfig{
-				JobName: component,
-				StaticConfigs: []types.StaticConfig{
-					{
-						Targets: []string{serviceTarget},
-					},
-				},
-				ScrapeInterval: "30s",
-				MetricsPath:    settings["path"].(string),
+	fmt.Println("\n🔗 Mapping components to services:")
+
+	// Try to match services to components
+	for component, patterns := range componentPatterns {
+		var foundService string
+
+		// First try exact matches
+		for _, pattern := range patterns {
+			for _, service := range allServices {
+				if service == pattern {
+					foundService = service
+					break
+				}
 			}
-			scrapeConfigs = append(scrapeConfigs, scrapeConfig)
+			if foundService != "" {
+				break
+			}
+		}
+
+		// If no exact match, try substring matching
+		if foundService == "" {
+			for _, pattern := range patterns {
+				for _, service := range allServices {
+					if strings.Contains(strings.ToLower(service), strings.ToLower(pattern)) ||
+						strings.Contains(strings.ToLower(pattern), strings.ToLower(service)) {
+						foundService = service
+						break
+					}
+				}
+				if foundService != "" {
+					break
+				}
+			}
+		}
+
+		if foundService != "" {
+			serviceNames[component] = foundService
+			fmt.Printf("   ✅ %s -> %s\n", component, foundService)
+		} else {
+			// Try with timestamped release name pattern for monitoring compatibility
+			timestampedName := fmt.Sprintf("%s-thanos-stack-%s", chainName, component)
+			fmt.Printf("   ⚠️  %s -> not found, using timestamped pattern: %s\n", component, timestampedName)
+			serviceNames[component] = timestampedName
 		}
 	}
 
-	// Blackbox exporter scrape configs for L1 RPC health checks
-	blackboxConfigs := []types.ScrapeConfig{
-		{
-			JobName: "blackbox-eth-node-synced",
-			StaticConfigs: []types.StaticConfig{
-				{
-					Targets: []string{config.L1RpcUrl},
-				},
-			},
-			MetricsPath: "/probe",
-			Params: map[string][]string{
-				"module": {"http_post_eth_node_synced_2xx"},
-			},
-			RelabelConfigs: []types.RelabelConfig{
-				{
-					SourceLabels: []string{"__address__"},
-					TargetLabel:  "__param_target",
-				},
-				{
-					SourceLabels: []string{"__param_target"},
-					TargetLabel:  "instance",
-				},
-				{
-					TargetLabel: "__address__",
-					Replacement: fmt.Sprintf("%s-prometheus-blackbox-exporter:9115", config.HelmReleaseName),
-				},
-			},
-		},
-		{
-			JobName: "blackbox-eth-block-number",
-			StaticConfigs: []types.StaticConfig{
-				{
-					Targets: []string{config.L1RpcUrl},
-				},
-			},
-			MetricsPath: "/probe",
-			Params: map[string][]string{
-				"module": {"http_post_eth_block_number_2xx"},
-			},
-			RelabelConfigs: []types.RelabelConfig{
-				{
-					SourceLabels: []string{"__address__"},
-					TargetLabel:  "__param_target",
-				},
-				{
-					SourceLabels: []string{"__param_target"},
-					TargetLabel:  "instance",
-				},
-				{
-					TargetLabel: "__address__",
-					Replacement: fmt.Sprintf("%s-prometheus-blackbox-exporter:9115", config.HelmReleaseName),
-				},
-			},
-		},
-	}
-
-	scrapeConfigs = append(scrapeConfigs, blackboxConfigs...)
-
-	return scrapeConfigs
-}
-
-// getServiceNames discovers service names in the namespace using trh-sdk patterns
-func (t *ThanosStack) getServiceNames(namespace, chainName string) (map[string]string, error) {
-	serviceNames := map[string]string{
-		"op-node":                 "",
-		"op-batcher":              "",
-		"op-proposer":             "",
-		"op-geth":                 "",
-		"blockscout":              "",
-		"block-explorer-frontend": "",
-	}
-
-	// Get all services in the namespace
-	services, err := utils.ExecuteCommand("kubectl", []string{
-		"get", "services",
-		"-n", namespace,
-		"-o", "jsonpath={.items[*].metadata.name}",
-	}...)
-	if err != nil {
-		fmt.Printf("⚠️  Could not get services from namespace %s: %s\n", namespace, err)
-		fmt.Println("📝 Using default trh-sdk service naming pattern")
-	} else {
-		serviceList := strings.Split(strings.TrimSpace(services), " ")
-
-		// Match services to components
-		for _, service := range serviceList {
-			service = strings.TrimSpace(service)
-			if service == "" {
-				continue
+	// Also detect any additional services that might be related but not in our standard list
+	fmt.Println("\n🔍 Additional services detected:")
+	for _, service := range allServices {
+		found := false
+		for _, mappedService := range serviceNames {
+			if mappedService == service {
+				found = true
+				break
 			}
-
-			switch {
-			case strings.Contains(service, "op-node") && !strings.Contains(service, "op-geth"):
-				serviceNames["op-node"] = service
-			case strings.Contains(service, "op-batcher"):
-				serviceNames["op-batcher"] = service
-			case strings.Contains(service, "op-proposer"):
-				serviceNames["op-proposer"] = service
-			case strings.Contains(service, "op-geth") || strings.Contains(service, "geth"):
-				serviceNames["op-geth"] = service
-			case strings.Contains(service, "blockscout") && !strings.Contains(service, "frontend"):
-				serviceNames["blockscout"] = service
-			case strings.Contains(service, "block-explorer-fe") && strings.Contains(service, "frontend"):
-				serviceNames["block-explorer-frontend"] = service
+		}
+		if !found {
+			// Check if this service might be a monitoring-related service
+			serviceLower := strings.ToLower(service)
+			if strings.Contains(serviceLower, "metric") ||
+				strings.Contains(serviceLower, "monitor") ||
+				strings.Contains(serviceLower, "prom") ||
+				strings.Contains(serviceLower, "grafana") {
+				fmt.Printf("   📊 Monitoring service: %s\n", service)
+			} else if strings.Contains(serviceLower, chainName) {
+				fmt.Printf("   🔧 Chain-related service: %s\n", service)
+			} else {
+				fmt.Printf("   ℹ️  Other service: %s\n", service)
 			}
 		}
 	}
 
-	// Set trh-sdk default names if not found (without namespace suffix as per requirements)
-	if serviceNames["op-node"] == "" {
-		serviceNames["op-node"] = fmt.Sprintf("%s-thanos-stack-op-node", chainName)
-	}
-	if serviceNames["op-batcher"] == "" {
-		serviceNames["op-batcher"] = fmt.Sprintf("%s-thanos-stack-op-batcher", chainName)
-	}
-	if serviceNames["op-proposer"] == "" {
-		serviceNames["op-proposer"] = fmt.Sprintf("%s-thanos-stack-op-proposer", chainName)
-	}
-	if serviceNames["op-geth"] == "" {
-		serviceNames["op-geth"] = fmt.Sprintf("%s-thanos-stack-op-geth", chainName)
-	}
-	if serviceNames["blockscout"] == "" {
-		serviceNames["blockscout"] = fmt.Sprintf("%s-thanos-stack-blockscout", chainName)
-	}
-	if serviceNames["block-explorer-frontend"] == "" {
-		serviceNames["block-explorer-frontend"] = fmt.Sprintf("%s-thanos-stack-block-explorer-frontend", chainName)
+	if len(serviceNames) == 0 {
+		return nil, fmt.Errorf("no matching OP Stack services found in namespace %s", namespace)
 	}
 
-	fmt.Printf("📋 Discovered service names:\n")
-	for component, serviceName := range serviceNames {
-		if serviceName != "" {
-			fmt.Printf("   - %s: %s\n", component, serviceName)
-		}
-	}
-
+	fmt.Printf("\n✅ Mapped %d components for monitoring\n", len(serviceNames))
 	return serviceNames, nil
 }
 
@@ -933,14 +1036,7 @@ func (t *ThanosStack) waitForIngressEndpoint(config *MonitoringConfig) string {
 			grafanaURL := fmt.Sprintf("http://%s", strings.TrimSpace(hostname))
 			fmt.Printf("   ✅ ALB Ingress endpoint ready: %s\n", grafanaURL)
 
-			// Test if the endpoint is actually accessible
-			fmt.Println("   🔍 Testing endpoint accessibility...")
-			if t.testEndpointAccessibility(grafanaURL) {
-				fmt.Println("   ✅ Endpoint is accessible!")
-				return grafanaURL
-			} else {
-				fmt.Println("   ⚠️  Endpoint created but not yet accessible, continuing to wait...")
-			}
+			return grafanaURL
 		} else {
 			fmt.Printf("   ⏳ [%d/%d] ALB provisioning in progress...\n", i+1, maxRetries)
 		}
@@ -953,14 +1049,6 @@ func (t *ThanosStack) waitForIngressEndpoint(config *MonitoringConfig) string {
 	fmt.Printf("   🔧 Check status manually: kubectl get ingress -n %s -w\n", config.Namespace)
 
 	return ""
-}
-
-// testEndpointAccessibility tests if the endpoint is accessible
-func (t *ThanosStack) testEndpointAccessibility(url string) bool {
-	// Simple curl test to check if endpoint responds
-	_, err := utils.ExecuteCommand("curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-		"--connect-timeout", "5", "--max-time", "10", url)
-	return err == nil
 }
 
 // monitorInstallationErrors monitors installation progress and reports errors in real-time
@@ -1314,4 +1402,140 @@ data:
 
 	fmt.Println("✅ Dashboard ConfigMaps created successfully")
 	return nil
+}
+
+// generateAdditionalScrapeConfigs creates additional scrape configurations for Prometheus
+func (t *ThanosStack) generateAdditionalScrapeConfigs(config *MonitoringConfig) []interface{} {
+	var scrapeConfigs []interface{}
+
+	// Add scrape configs for each Thanos Stack service
+	for component, serviceName := range config.ServiceNames {
+		var scrapeConfig map[string]interface{}
+
+		switch component {
+		case "op-node", "op-batcher", "op-proposer":
+			scrapeConfig = map[string]interface{}{
+				"job_name": component,
+				"static_configs": []map[string]interface{}{
+					{
+						"targets": []string{fmt.Sprintf("%s.%s:7300", serviceName, t.deployConfig.K8s.Namespace)},
+					},
+				},
+				"metrics_path":    "/metrics",
+				"scrape_interval": "30s",
+			}
+		case "op-geth":
+			scrapeConfig = map[string]interface{}{
+				"job_name": component,
+				"static_configs": []map[string]interface{}{
+					{
+						"targets": []string{fmt.Sprintf("%s.%s:6060", serviceName, t.deployConfig.K8s.Namespace)},
+					},
+				},
+				"metrics_path":    "/debug/metrics/prometheus",
+				"scrape_interval": "30s",
+			}
+		case "blockscout":
+			scrapeConfig = map[string]interface{}{
+				"job_name": component,
+				"static_configs": []map[string]interface{}{
+					{
+						"targets": []string{fmt.Sprintf("%s.%s:3000", serviceName, t.deployConfig.K8s.Namespace)},
+					},
+				},
+				"metrics_path":    "/metrics",
+				"scrape_interval": "1m",
+			}
+		case "block-explorer-frontend":
+			scrapeConfig = map[string]interface{}{
+				"job_name": component,
+				"static_configs": []map[string]interface{}{
+					{
+						"targets": []string{fmt.Sprintf("%s.%s:80", serviceName, t.deployConfig.K8s.Namespace)},
+					},
+				},
+				"metrics_path":    "/api/healthz",
+				"scrape_interval": "1m",
+			}
+		}
+
+		if scrapeConfig != nil {
+			scrapeConfigs = append(scrapeConfigs, scrapeConfig)
+			fmt.Printf("✅ Added scrape config for %s -> %s\n", component, serviceName)
+		}
+	}
+
+	// Add blackbox exporter configurations for L1 RPC monitoring
+	if config.L1RpcUrl != "" {
+		// L1 RPC sync check
+		syncConfig := map[string]interface{}{
+			"job_name":     "blackbox-eth-node-synced",
+			"metrics_path": "/probe",
+			"params": map[string][]string{
+				"module": {"http_post_eth_node_synced_2xx"},
+			},
+			"static_configs": []map[string]interface{}{
+				{
+					"targets": []string{config.L1RpcUrl},
+				},
+			},
+			"relabel_configs": []map[string]interface{}{
+				{
+					"source_labels": []string{"module"},
+					"target_label":  "__param_module",
+				},
+				{
+					"source_labels": []string{"__address__"},
+					"target_label":  "__param_target",
+				},
+				{
+					"source_labels": []string{"__param_target"},
+					"target_label":  "target",
+				},
+				{
+					"target_label": "__address__",
+					"replacement":  fmt.Sprintf("%s-prometheus-blackbox-exporter.%s:9115", config.HelmReleaseName, config.Namespace),
+				},
+			},
+		}
+		scrapeConfigs = append(scrapeConfigs, syncConfig)
+
+		// L1 RPC block number check
+		blockConfig := map[string]interface{}{
+			"job_name":     "blackbox-eth-block-number",
+			"metrics_path": "/probe",
+			"params": map[string][]string{
+				"module": {"http_post_eth_block_number_2xx"},
+			},
+			"static_configs": []map[string]interface{}{
+				{
+					"targets": []string{config.L1RpcUrl},
+				},
+			},
+			"relabel_configs": []map[string]interface{}{
+				{
+					"source_labels": []string{"module"},
+					"target_label":  "__param_module",
+				},
+				{
+					"source_labels": []string{"__address__"},
+					"target_label":  "__param_target",
+				},
+				{
+					"source_labels": []string{"__param_target"},
+					"target_label":  "target",
+				},
+				{
+					"target_label": "__address__",
+					"replacement":  fmt.Sprintf("%s-prometheus-blackbox-exporter.%s:9115", config.HelmReleaseName, config.Namespace),
+				},
+			},
+		}
+		scrapeConfigs = append(scrapeConfigs, blockConfig)
+
+		fmt.Printf("✅ Added blackbox exporter configs for L1 RPC: %s\n", config.L1RpcUrl)
+	}
+
+	fmt.Printf("📊 Generated %d additional scrape configurations\n", len(scrapeConfigs))
+	return scrapeConfigs
 }
