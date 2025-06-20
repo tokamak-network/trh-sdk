@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/ethereum/go-ethereum/common"
+	ethCommon "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"os"
@@ -23,20 +23,34 @@ import (
 )
 
 type ThanosStack struct {
-	network string
-	stack   string
+	network           string
+	stack             string
+	registerCandidate bool
 
 	s3Client *s3.Client
 
 	deployConfig *types.Config
 }
 
+type RegisterCandidateInput struct {
+	amount   float64
+	useTon   bool
+	memo     string
+	nameInfo string
+}
+
 func NewThanosStack(network string, stack string, config *types.Config) *ThanosStack {
 	return &ThanosStack{
-		network:      network,
-		stack:        stack,
-		deployConfig: config,
+		network:           network,
+		stack:             stack,
+		deployConfig:      config,
+		registerCandidate: true,
 	}
+}
+
+func (t *ThanosStack) SetRegisterCandidate(value bool) *ThanosStack {
+	t.registerCandidate = value
+	return t
 }
 
 // ----------------------------------------- Deploy contracts command  ----------------------------- //
@@ -55,6 +69,8 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		err      error
 		isResume bool
 	)
+
+	var registerCandidate *RegisterCandidateInput
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -95,9 +111,28 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		l1Rpc := t.deployConfig.L1RPCURL
 		l1Client, err := ethclient.DialContext(ctx, l1Rpc)
 		if err != nil {
-			fmt.Printf("Failed to connect to L1 RPC: %s", err)
-			return err
+			return fmt.Errorf("failed to connect to L1 RPC: %s", err)
 		}
+
+		if t.registerCandidate {
+			registerCandidate, err = t.inputRegisterCandidate()
+			if err != nil {
+				return fmt.Errorf("failed to get the register candidate inputs, err: %w", err)
+			}
+		}
+
+		if t.registerCandidate {
+			adminAddress, err := utils.GetAddressFromPrivateKey(t.deployConfig.AdminPrivateKey)
+			if err != nil {
+				return fmt.Errorf("failed to get admin address from private key: %s", err)
+			}
+			err = t.checkAdminBalance(ctx, adminAddress, registerCandidate.amount, l1Client)
+			if err != nil {
+				return fmt.Errorf("failed to check admin balance: %s", err)
+			}
+		}
+
+		fmt.Println("Resuming the contracts deployment...", t.deployConfig.AdminPrivateKey)
 
 		err = t.deployContracts(ctx, l1Client, true)
 		if err != nil {
@@ -110,6 +145,13 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		deployContractsConfig, err := t.inputDeployContracts(ctx)
 		if err != nil {
 			return err
+		}
+
+		if t.registerCandidate {
+			registerCandidate, err = t.inputRegisterCandidate()
+			if err != nil {
+				return fmt.Errorf("failed to get the register candidate inputs, err: %w", err)
+			}
 		}
 
 		l1Client, err := ethclient.DialContext(ctx, deployContractsConfig.l1RPCurl)
@@ -126,13 +168,20 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig, l2ChainID)
 
 		// Select operators Accounts
-		operators, err := selectAccounts(ctx, l1Client, deployContractsConfig.fraudProof, deployContractsConfig.seed)
+		operators, err := selectAccounts(ctx, l1Client, deployContractsConfig.fraudProof, deployContractsConfig.seed, t.registerCandidate)
 		if err != nil {
 			return err
 		}
 
 		if len(operators) == 0 {
 			return fmt.Errorf("no operators were found")
+		}
+
+		if t.registerCandidate {
+			err = t.checkAdminBalance(ctx, ethCommon.HexToAddress(operators[0].Address), registerCandidate.amount, l1Client)
+			if err != nil {
+				return err
+			}
 		}
 
 		fmt.Print("🔎 The SDK is ready to deploy the contracts to the L1 network. Do you want to proceed(Y/n)? ")
@@ -198,7 +247,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		// STEP 4. Deploy the contracts
 		// Check admin balance and estimated deployment cost
 		adminAddress := operators[0].Address
-		balance, err := l1Client.BalanceAt(ctx, common.HexToAddress(adminAddress), nil)
+		balance, err := l1Client.BalanceAt(ctx, ethCommon.HexToAddress(adminAddress), nil)
 		if err != nil {
 			fmt.Printf("❌ Failed to retrieve admin account balance: %v\n", err)
 			return err
@@ -253,6 +302,26 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 	fmt.Printf("\r Rollup file path: %s/tokamak-thanos/build/rollup.json\n", cwd)
 
 	fmt.Printf("✅ Configuration successfully saved to: %s/settings.json \n", cwd)
+
+	// If --no-candidate flag is NOT provided, register the candidate
+	if t.registerCandidate {
+		if t.deployConfig.Network == "Mainnet" {
+			return fmt.Errorf("register candidates verification is not supported on Mainnet")
+		}
+		fmt.Println("Setting up the safe wallet...")
+		if err := t.setupSafeWallet(ctx, cwd); err != nil {
+			return err
+		}
+		fmt.Println("🔍 Verifying and registering candidate...")
+		verifyRegisterError := t.verifyRegisterCandidates(ctx, registerCandidate)
+		if verifyRegisterError != nil {
+			return fmt.Errorf("candidate registration failed: %v", verifyRegisterError)
+		}
+		fmt.Println("✅ Candidate registration completed successfully!")
+	} else {
+		fmt.Println("ℹ️ Skipping candidate registration (--no-candidate flag provided)")
+	}
+
 	return nil
 }
 
