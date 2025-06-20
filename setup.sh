@@ -8,10 +8,65 @@ CURRENT_SHELL=$(ps -p $$ -o comm=)
 if [ "$(uname)" = "Darwin" ] && [ -z "$SKIP_SHEBANG_CHECK" ]; then
     if [ " $CURRENT_SHELL" != "zsh" ]; then
         export SKIP_SHEBANG_CHECK=1
-        echo "macOS detected. Current shell: $CURRENT_SHELL.Switching to zsh interpreter......"
         exec /bin/zsh "$0" "$@"
     fi
 fi
+
+# Parse command line arguments (after shell re-execution)
+INSTALL_MODE="release"  # Default: install latest release
+COMMIT_HASH=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -c|--commit)
+            if [[ -n "$2" && "$2" != -* ]]; then
+                INSTALL_MODE="commit"
+                COMMIT_HASH="$2"
+                shift 2
+            else
+                echo "Error: -c/--commit requires a commit hash argument"
+                echo "Usage: $0 [-c <commit_hash>] [--latest]"
+                echo
+                echo "Example:"
+                echo "  No arguments: Install latest release version"
+                echo "  -c <hash>: Install specific commit hash"
+                echo "  --latest: Install latest from main branch"
+                exit 1
+            fi
+            ;;
+        --latest)
+            INSTALL_MODE="main"
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: $0 [-c <commit_hash>] [--latest]"
+            echo
+            echo "Example:"
+            echo "  No arguments: Install latest release version"
+            echo "  -c <hash>: Install specific commit hash"
+            echo "  --latest: Install latest from main branch"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [-c <commit_hash>] [--latest]"
+            exit 1
+            ;;
+    esac
+done
+
+# Display installation mode
+case $INSTALL_MODE in
+    "release")
+        echo "🚀 Installing TRH SDK from latest release version"
+        ;;
+    "commit")
+        echo "🚀 Installing TRH SDK from commit: $COMMIT_HASH"
+        ;;
+    "main")
+        echo "🚀 Installing TRH SDK from main branch (latest)"
+        ;;
+esac
 
 # Detect OS
 # Detect Operating System
@@ -340,7 +395,22 @@ go version
 # Install TRH SDK CLI
 echo "Installing TRH SDK CLI..."
 # Use full path to go binary since PATH may not be updated yet
-go install github.com/tokamak-network/trh-sdk@latest
+
+# Install based on the specified mode
+case $INSTALL_MODE in
+    "release")
+        echo "Installing latest release version..."
+        go install github.com/tokamak-network/trh-sdk@latest
+        ;;
+    "commit")
+        echo "Installing from commit: $COMMIT_HASH"
+        go install github.com/tokamak-network/trh-sdk@$COMMIT_HASH
+        ;;
+    "main")
+        echo "Installing from main branch..."
+        go install github.com/tokamak-network/trh-sdk@main
+        ;;
+esac
 
 echo "✅ TRH SDK has been installed successfully!"
 
