@@ -524,7 +524,7 @@ func (t *ThanosStack) generateValuesFile(config *MonitoringConfig) error {
 			},
 		},
 		"scrapeTargets":           t.generateScrapeTargets(config),
-		"additionalScrapeConfigs": t.generateAdditionalScrapeConfigs(config),
+		"additionalScrapeConfigs": []interface{}{}, // Use Helm template-based configuration instead
 	}
 
 	// Convert to YAML
@@ -566,7 +566,7 @@ func (t *ThanosStack) generatePrometheusSpec(config *MonitoringConfig) map[strin
 		"retentionSize":           "10GB",
 		"scrapeInterval":          "1m",
 		"evaluationInterval":      "1m",
-		"additionalScrapeConfigs": t.generateAdditionalScrapeConfigs(config),
+		"additionalScrapeConfigs": []interface{}{}, // Configured via Helm template
 		"securityContext": map[string]interface{}{
 			"runAsNonRoot":             true,
 			"runAsUser":                65534,
@@ -675,8 +675,10 @@ func (t *ThanosStack) generateGrafanaConfig(config *MonitoringConfig) map[string
 	return grafanaConfig
 }
 
-// generateScrapeTargets creates scrape target configuration for Thanos Stack services
+// generateScrapeTargets creates scrape target configuration for dynamic L2 Stack services
+// This provides the default configuration which can be overridden in values.yaml
 func (t *ThanosStack) generateScrapeTargets(config *MonitoringConfig) map[string]interface{} {
+	// Use default values from chart, allowing for runtime customization
 	return map[string]interface{}{
 		"op-node": map[string]interface{}{
 			"enabled":  true,
@@ -1404,138 +1406,6 @@ data:
 	return nil
 }
 
-// generateAdditionalScrapeConfigs creates additional scrape configurations for Prometheus
-func (t *ThanosStack) generateAdditionalScrapeConfigs(config *MonitoringConfig) []interface{} {
-	var scrapeConfigs []interface{}
-
-	// Add scrape configs for each Thanos Stack service
-	for component, serviceName := range config.ServiceNames {
-		var scrapeConfig map[string]interface{}
-
-		switch component {
-		case "op-node", "op-batcher", "op-proposer":
-			scrapeConfig = map[string]interface{}{
-				"job_name": component,
-				"static_configs": []map[string]interface{}{
-					{
-						"targets": []string{fmt.Sprintf("%s.%s:7300", serviceName, t.deployConfig.K8s.Namespace)},
-					},
-				},
-				"metrics_path":    "/metrics",
-				"scrape_interval": "30s",
-			}
-		case "op-geth":
-			scrapeConfig = map[string]interface{}{
-				"job_name": component,
-				"static_configs": []map[string]interface{}{
-					{
-						"targets": []string{fmt.Sprintf("%s.%s:6060", serviceName, t.deployConfig.K8s.Namespace)},
-					},
-				},
-				"metrics_path":    "/debug/metrics/prometheus",
-				"scrape_interval": "30s",
-			}
-		case "blockscout":
-			scrapeConfig = map[string]interface{}{
-				"job_name": component,
-				"static_configs": []map[string]interface{}{
-					{
-						"targets": []string{fmt.Sprintf("%s.%s:3000", serviceName, t.deployConfig.K8s.Namespace)},
-					},
-				},
-				"metrics_path":    "/metrics",
-				"scrape_interval": "1m",
-			}
-		case "block-explorer-frontend":
-			scrapeConfig = map[string]interface{}{
-				"job_name": component,
-				"static_configs": []map[string]interface{}{
-					{
-						"targets": []string{fmt.Sprintf("%s.%s:80", serviceName, t.deployConfig.K8s.Namespace)},
-					},
-				},
-				"metrics_path":    "/api/healthz",
-				"scrape_interval": "1m",
-			}
-		}
-
-		if scrapeConfig != nil {
-			scrapeConfigs = append(scrapeConfigs, scrapeConfig)
-			fmt.Printf("✅ Added scrape config for %s -> %s\n", component, serviceName)
-		}
-	}
-
-	// Add blackbox exporter configurations for L1 RPC monitoring
-	if config.L1RpcUrl != "" {
-		// L1 RPC sync check
-		syncConfig := map[string]interface{}{
-			"job_name":     "blackbox-eth-node-synced",
-			"metrics_path": "/probe",
-			"params": map[string][]string{
-				"module": {"http_post_eth_node_synced_2xx"},
-			},
-			"static_configs": []map[string]interface{}{
-				{
-					"targets": []string{config.L1RpcUrl},
-				},
-			},
-			"relabel_configs": []map[string]interface{}{
-				{
-					"source_labels": []string{"module"},
-					"target_label":  "__param_module",
-				},
-				{
-					"source_labels": []string{"__address__"},
-					"target_label":  "__param_target",
-				},
-				{
-					"source_labels": []string{"__param_target"},
-					"target_label":  "target",
-				},
-				{
-					"target_label": "__address__",
-					"replacement":  fmt.Sprintf("%s-prometheus-blackbox-exporter.%s:9115", config.HelmReleaseName, config.Namespace),
-				},
-			},
-		}
-		scrapeConfigs = append(scrapeConfigs, syncConfig)
-
-		// L1 RPC block number check
-		blockConfig := map[string]interface{}{
-			"job_name":     "blackbox-eth-block-number",
-			"metrics_path": "/probe",
-			"params": map[string][]string{
-				"module": {"http_post_eth_block_number_2xx"},
-			},
-			"static_configs": []map[string]interface{}{
-				{
-					"targets": []string{config.L1RpcUrl},
-				},
-			},
-			"relabel_configs": []map[string]interface{}{
-				{
-					"source_labels": []string{"module"},
-					"target_label":  "__param_module",
-				},
-				{
-					"source_labels": []string{"__address__"},
-					"target_label":  "__param_target",
-				},
-				{
-					"source_labels": []string{"__param_target"},
-					"target_label":  "target",
-				},
-				{
-					"target_label": "__address__",
-					"replacement":  fmt.Sprintf("%s-prometheus-blackbox-exporter.%s:9115", config.HelmReleaseName, config.Namespace),
-				},
-			},
-		}
-		scrapeConfigs = append(scrapeConfigs, blockConfig)
-
-		fmt.Printf("✅ Added blackbox exporter configs for L1 RPC: %s\n", config.L1RpcUrl)
-	}
-
-	fmt.Printf("📊 Generated %d additional scrape configurations\n", len(scrapeConfigs))
-	return scrapeConfigs
-}
+// NOTE: generateAdditionalScrapeConfigs function has been removed
+// Scrape configuration is now handled entirely by Helm templates in charts/monitoring
+// This eliminates the 3-way duplication between Go code, values.yaml, and templates
