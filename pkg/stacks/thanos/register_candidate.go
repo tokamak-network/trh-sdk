@@ -415,12 +415,12 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, cwd string) error {
 
 func GetDesignatedOwnersByChainID(chainID uint64) (DesignatedOwners, error) {
 	switch chainID {
-	case 11155111: // Sepolia
+	case constants.EthereumSepoliaChainID: // Sepolia
 		return DesignatedOwners{
 			TokamakDAO: ethCommon.HexToAddress("0x0Fd5632f3b52458C31A2C3eE1F4b447001872Be9"),
 			Foundation: ethCommon.HexToAddress("0x61dc95E5f27266b94805ED23D95B4C9553A3D049"),
 		}, nil
-	case 1: // Ethereum (TODO: need to update)
+	case constants.EthereumMainnetChainID: // Ethereum (TODO: need to update)
 		return DesignatedOwners{
 			TokamakDAO: ethCommon.HexToAddress("0xYourMainnetTokamakDAOAddress"),
 			Foundation: ethCommon.HexToAddress("0xYourMainnetFoundationAddress"),

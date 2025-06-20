@@ -110,25 +110,24 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		l1Rpc := t.deployConfig.L1RPCURL
 		l1Client, err := ethclient.DialContext(ctx, l1Rpc)
 		if err != nil {
-			fmt.Printf("Failed to connect to L1 RPC: %s", err)
-			return err
+			return fmt.Errorf("failed to connect to L1 RPC: %s", err)
 		}
 
 		if t.registerCandidate {
 			registerCandidate, err = t.inputRegisterCandidate()
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to get the register candidate inputs, err: %w", err)
 			}
 		}
 
 		if t.registerCandidate {
 			adminAddress, err := utils.GetAddressFromPrivateKey(t.deployConfig.AdminPrivateKey)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to get admin address from private key: %s", err)
 			}
 			err = t.checkAdminBalance(ctx, adminAddress, registerCandidate.amount, l1Client)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to check admin balance: %s", err)
 			}
 		}
 
@@ -150,7 +149,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context) error {
 		if t.registerCandidate {
 			registerCandidate, err = t.inputRegisterCandidate()
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to get the register candidate inputs, err: %w", err)
 			}
 		}
 
