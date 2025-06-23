@@ -118,7 +118,7 @@ type MonitoringConfig struct {
 	L1RpcUrl          string
 	ServiceNames      map[string]string
 	EnablePersistence bool
-	StorageClass      string // Storage class to use (efs-sc for EFS, gp2 for EBS)
+	StorageClass      string // Storage class to use (efs-sc for EFS, empty for EmptyDir)
 	EfsId             string
 	ChartsPath        string
 	ValuesFilePath    string
@@ -179,6 +179,9 @@ func (t *ThanosStack) getMonitoringConfig(ctx context.Context) (*MonitoringConfi
 	}
 
 	// Ask user about persistent storage preference first
+	fmt.Println("\n💾 Storage Configuration:")
+	fmt.Println("   • Yes: Use EFS for persistent monitoring data (survives pod restarts)")
+	fmt.Println("   • No:  Use EmptyDir for temporary data (lost on pod restart)")
 	fmt.Print("🤔 Do you want to use persistent storage for monitoring data? (y/n): ")
 	usePersistence, err := scanner.ScanString()
 	if err != nil {
@@ -194,9 +197,9 @@ func (t *ThanosStack) getMonitoringConfig(ctx context.Context) (*MonitoringConfi
 		efsCSIAvailable := t.isEFSCSIDriverInstalled()
 		if !efsCSIAvailable {
 			fmt.Println("❌ EFS CSI driver not found")
-			fmt.Println("📦 EFS CSI driver will be automatically installed during monitoring setup")
+			fmt.Println("🔧 EFS CSI driver will be automatically installed and configured")
 		} else {
-			fmt.Println("✅ EFS CSI driver is available")
+			fmt.Println("✅ EFS CSI driver is already available")
 		}
 
 		// Try to get or create EFS
@@ -221,7 +224,7 @@ func (t *ThanosStack) getMonitoringConfig(ctx context.Context) (*MonitoringConfi
 	} else {
 		fmt.Println("📝 Using EmptyDir volumes (no persistent storage)")
 		config.EnablePersistence = false
-		config.StorageClass = "gp2"
+		config.StorageClass = "" // No storage class needed for EmptyDir
 
 		if isFargate {
 			fmt.Println("📝 Applying Fargate-compatible configuration:")
