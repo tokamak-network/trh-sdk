@@ -16,12 +16,10 @@ type GlobalConfig struct {
 
 // StorageConfig represents global storage configuration
 type StorageConfig struct {
-	Enabled         bool                    `yaml:"enabled"`
-	StorageClass    string                  `yaml:"storageClass"`
-	EfsFileSystemId string                  `yaml:"efsFileSystemId,omitempty"`
-	ForceEFS        bool                    `yaml:"forceEFS"`
-	Prometheus      PrometheusStorageConfig `yaml:"prometheus"`
-	Grafana         GrafanaStorageConfig    `yaml:"grafana"`
+	Enabled      bool                    `yaml:"enabled"`
+	StorageClass string                  `yaml:"storageClass"`
+	Prometheus   PrometheusStorageConfig `yaml:"prometheus"`
+	Grafana      GrafanaStorageConfig    `yaml:"grafana"`
 }
 
 // PrometheusStorageConfig represents Prometheus storage configuration

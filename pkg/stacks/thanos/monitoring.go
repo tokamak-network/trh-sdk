@@ -2,6 +2,7 @@ package thanos
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,11 +24,11 @@ func (t *ThanosStack) installMonitoring(ctx context.Context) error {
 		return fmt.Errorf("failed to get monitoring configuration: %w", err)
 	}
 
-	// Check and install EFS CSI driver if needed for EFS storage
-	if config.EnablePersistence && config.StorageClass == "efs-sc" {
-		fmt.Println("📦 Checking EFS CSI driver...")
-		if err := t.ensureEFSCSIDriver(ctx); err != nil {
-			return fmt.Errorf("failed to ensure EFS CSI driver: %w", err)
+	// Deploy Terraform infrastructure if persistent storage is enabled
+	if config.EnablePersistence {
+		fmt.Println("📦 Deploying persistent storage infrastructure...")
+		if err := t.deployMonitoringInfrastructure(ctx, config); err != nil {
+			return fmt.Errorf("failed to deploy monitoring infrastructure: %w", err)
 		}
 	}
 
@@ -112,17 +113,16 @@ func (t *ThanosStack) displayMonitoringInfo(config *MonitoringConfig) {
 
 // MonitoringConfig holds all configuration needed for monitoring installation
 type MonitoringConfig struct {
-	Namespace         string
-	HelmReleaseName   string
-	AdminPassword     string
-	L1RpcUrl          string
-	ServiceNames      map[string]string
-	EnablePersistence bool
-	StorageClass      string // Storage class to use (efs-sc for EFS, empty for EmptyDir)
-	EfsId             string
-	ChartsPath        string
-	ValuesFilePath    string
-	ChainName         string
+	Namespace             string
+	HelmReleaseName       string
+	AdminPassword         string
+	L1RpcUrl              string
+	ServiceNames          map[string]string
+	EnablePersistence     bool
+	UseStaticProvisioning bool // Use static provisioning with pre-created PV/PVC
+	ChartsPath            string
+	ValuesFilePath        string
+	ChainName             string
 }
 
 // getMonitoringConfig gathers all required configuration for monitoring
@@ -168,20 +168,7 @@ func (t *ThanosStack) getMonitoringConfig(ctx context.Context) (*MonitoringConfi
 	}
 	config.ServiceNames = serviceNames
 
-	// Check for Fargate environment first
-	isFargate := t.detectFargateEnvironment()
-
-	// Ask user about EFS preference
-	fmt.Println("\n📦 Storage Configuration:")
-	if isFargate {
-		fmt.Println("🚀 Detected AWS Fargate environment")
-		fmt.Println("⚠️  Fargate has limited storage options")
-	}
-
 	// Ask user about persistent storage preference first
-	fmt.Println("\n💾 Storage Configuration:")
-	fmt.Println("   • Yes: Use EFS for persistent monitoring data (survives pod restarts)")
-	fmt.Println("   • No:  Use EmptyDir for temporary data (lost on pod restart)")
 	fmt.Print("🤔 Do you want to use persistent storage for monitoring data? (y/n): ")
 	usePersistence, err := scanner.ScanString()
 	if err != nil {
@@ -189,49 +176,11 @@ func (t *ThanosStack) getMonitoringConfig(ctx context.Context) (*MonitoringConfi
 	}
 
 	if strings.ToLower(usePersistence) == "y" || strings.ToLower(usePersistence) == "yes" {
-		fmt.Println("📦 Configuring EFS persistent storage...")
 		config.EnablePersistence = true
-		config.StorageClass = "efs-sc"
-
-		// Check if EFS CSI driver is available
-		efsCSIAvailable := t.isEFSCSIDriverInstalled()
-		if !efsCSIAvailable {
-			fmt.Println("❌ EFS CSI driver not found")
-			fmt.Println("🔧 EFS CSI driver will be automatically installed and configured")
-		} else {
-			fmt.Println("✅ EFS CSI driver is already available")
-		}
-
-		// Try to get or create EFS
-		efsId, err := t.getEFSFileSystemId(ctx)
-		if err != nil {
-			fmt.Printf("⚠️  EFS not available: %s\n", err)
-			fmt.Println("🔧 EFS will be created automatically during installation")
-			config.EfsId = ""
-		} else {
-			fmt.Printf("✅ EFS available: %s\n", efsId)
-			config.EfsId = efsId
-		}
-
-		if isFargate {
-			fmt.Println("📝 Applying EFS + Fargate configuration:")
-			fmt.Println("   • Using EFS volumes for persistent storage")
-			fmt.Println("   • Applying Fargate-compatible SecurityContext")
-			fmt.Println("   • Using non-root user (UID: 65534)")
-		} else {
-			fmt.Println("📝 Using EFS for persistent storage")
-		}
+		config.UseStaticProvisioning = true
 	} else {
-		fmt.Println("📝 Using EmptyDir volumes (no persistent storage)")
 		config.EnablePersistence = false
-		config.StorageClass = "" // No storage class needed for EmptyDir
-
-		if isFargate {
-			fmt.Println("📝 Applying Fargate-compatible configuration:")
-			fmt.Println("   • Using EmptyDir volumes")
-			fmt.Println("   • Applying Fargate-compatible SecurityContext")
-			fmt.Println("   • Using non-root user (UID: 65534)")
-		}
+		config.UseStaticProvisioning = false
 	}
 
 	return config, nil
@@ -267,50 +216,9 @@ func (t *ThanosStack) detectFargateEnvironment() bool {
 	return false
 }
 
-// validateServiceMetrics validates that each scrape target service exists
-func (t *ThanosStack) validateServiceMetrics(config *MonitoringConfig) {
-	fmt.Println("🔍 Validating service metrics availability...")
-
-	// Validate that each scrape target service exists
-	for componentName, serviceName := range config.ServiceNames {
-		// Check if service exists in the target namespace
-		_, err := utils.ExecuteCommand("kubectl", "get", "service", serviceName, "-n", t.deployConfig.K8s.Namespace)
-		if err != nil {
-			fmt.Printf("⚠️  Service %s not found for component %s, metrics may not be collected\n", serviceName, componentName)
-		} else {
-			fmt.Printf("✅ Verified service %s exists for component %s\n", serviceName, componentName)
-		}
-	}
-
-	fmt.Println("✅ Service validation completed")
-}
-
 // generateValuesFile creates the values.yaml file for monitoring configuration
 func (t *ThanosStack) generateValuesFile(config *MonitoringConfig) error {
 	fmt.Println("📝 Generating monitoring values file...")
-
-	// Validate services before generating values
-	t.validateServiceMetrics(config)
-
-	// Display troubleshooting information
-	fmt.Println("\n🔧 Dashboard Connectivity Debugging Information:")
-	fmt.Println("=" + strings.Repeat("=", 60))
-
-	fmt.Printf("📊 Expected Dashboard Metrics:\n")
-	fmt.Printf("   • up{job=\"op-node\"} - OP Node status\n")
-	fmt.Printf("   • up{job=\"op-batcher\"} - OP Batcher status\n")
-	fmt.Printf("   • up{job=\"op-proposer\"} - OP Proposer status\n")
-	fmt.Printf("   • up{job=\"op-geth\"} - OP Geth status\n")
-	fmt.Printf("   • chain_head_block{job=\"op-geth\"} - L2 block height\n")
-	fmt.Printf("   • op_batcher_default_* - Batcher specific metrics\n")
-	fmt.Printf("   • probe_success{job=\"blackbox-eth-*\"} - L1 RPC health\n\n")
-
-	fmt.Printf("🎯 Service Discovery Configuration:\n")
-	fmt.Printf("   • Thanos Stack Namespace: %s\n", t.deployConfig.K8s.Namespace)
-	fmt.Printf("   • Monitoring Namespace: %s\n", config.Namespace)
-	fmt.Printf("   • Chain Name: %s\n", config.ChainName)
-	fmt.Printf("   • L1 RPC URL: %s\n", config.L1RpcUrl)
-	fmt.Printf("   • Helm Release: %s\n\n", config.HelmReleaseName)
 
 	// Create values configuration matching the chart's values.yaml structure exactly
 	valuesConfig := map[string]interface{}{
@@ -318,15 +226,9 @@ func (t *ThanosStack) generateValuesFile(config *MonitoringConfig) error {
 		"global": map[string]interface{}{
 			"l1RpcUrl": config.L1RpcUrl,
 			"storage": map[string]interface{}{
-				"enabled":         config.EnablePersistence,
-				"storageClass":    config.StorageClass,
-				"efsFileSystemId": config.EfsId,
-				"prometheus": map[string]interface{}{
-					"size": "50Gi",
-				},
-				"grafana": map[string]interface{}{
-					"size": "10Gi",
-				},
+				"enabled":               config.EnablePersistence,
+				"useStaticProvisioning": config.UseStaticProvisioning,
+				"awsRegion":             t.deployConfig.AWS.Region,
 			},
 			"securityContext": map[string]interface{}{
 				"runAsNonRoot":             true,
@@ -484,23 +386,8 @@ func (t *ThanosStack) generatePrometheusSpec(config *MonitoringConfig) map[strin
 		},
 	}
 
-	// Add storage configuration if persistence is enabled
-	if config.EnablePersistence {
-		storageSpec := map[string]interface{}{
-			"volumeClaimTemplate": map[string]interface{}{
-				"spec": map[string]interface{}{
-					"storageClassName": "efs-sc",
-					"accessModes":      []string{"ReadWriteMany"},
-					"resources": map[string]interface{}{
-						"requests": map[string]interface{}{
-							"storage": "50Gi",
-						},
-					},
-				},
-			},
-		}
-		prometheusSpec["storageSpec"] = storageSpec
-	}
+	// Use EmptyDir for temporary storage (Static Provisioning handles persistent storage)
+	prometheusSpec["storageSpec"] = map[string]interface{}{}
 
 	return prometheusSpec
 }
@@ -560,18 +447,9 @@ func (t *ThanosStack) generateGrafanaConfig(config *MonitoringConfig) map[string
 		},
 	}
 
-	// Add persistence configuration if enabled
-	if config.EnablePersistence {
-		grafanaConfig["persistence"] = map[string]interface{}{
-			"enabled":          true,
-			"storageClassName": "efs-sc",
-			"size":             "10Gi",
-			"accessModes":      []string{"ReadWriteMany"},
-		}
-	} else {
-		grafanaConfig["persistence"] = map[string]interface{}{
-			"enabled": false,
-		}
+	// Use EmptyDir for temporary storage (Static Provisioning handles persistent storage)
+	grafanaConfig["persistence"] = map[string]interface{}{
+		"enabled": false,
 	}
 
 	return grafanaConfig
@@ -638,7 +516,6 @@ func (t *ThanosStack) getServiceNames(namespace, chainName string) (map[string]s
 	// Parse the service list
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	var allServices []string
-	fmt.Println("📋 Available services:")
 	for _, line := range lines {
 		if line == "" {
 			continue
@@ -646,12 +523,7 @@ func (t *ThanosStack) getServiceNames(namespace, chainName string) (map[string]s
 		fields := strings.Fields(line)
 		if len(fields) >= 1 {
 			serviceName := fields[0]
-			serviceType := "ClusterIP"
-			if len(fields) >= 2 {
-				serviceType = fields[1]
-			}
 			allServices = append(allServices, serviceName)
-			fmt.Printf("   - %s (%s)\n", serviceName, serviceType)
 		}
 	}
 
@@ -697,8 +569,6 @@ func (t *ThanosStack) getServiceNames(namespace, chainName string) (map[string]s
 
 	serviceNames := make(map[string]string)
 
-	fmt.Println("\n🔗 Mapping components to services:")
-
 	// Try to match services to components
 	for component, patterns := range componentPatterns {
 		var foundService string
@@ -734,38 +604,10 @@ func (t *ThanosStack) getServiceNames(namespace, chainName string) (map[string]s
 
 		if foundService != "" {
 			serviceNames[component] = foundService
-			fmt.Printf("   ✅ %s -> %s\n", component, foundService)
 		} else {
 			// Try with timestamped release name pattern for monitoring compatibility
 			timestampedName := fmt.Sprintf("%s-thanos-stack-%s", chainName, component)
-			fmt.Printf("   ⚠️  %s -> not found, using timestamped pattern: %s\n", component, timestampedName)
 			serviceNames[component] = timestampedName
-		}
-	}
-
-	// Also detect any additional services that might be related but not in our standard list
-	fmt.Println("\n🔍 Additional services detected:")
-	for _, service := range allServices {
-		found := false
-		for _, mappedService := range serviceNames {
-			if mappedService == service {
-				found = true
-				break
-			}
-		}
-		if !found {
-			// Check if this service might be a monitoring-related service
-			serviceLower := strings.ToLower(service)
-			if strings.Contains(serviceLower, "metric") ||
-				strings.Contains(serviceLower, "monitor") ||
-				strings.Contains(serviceLower, "prom") ||
-				strings.Contains(serviceLower, "grafana") {
-				fmt.Printf("   📊 Monitoring service: %s\n", service)
-			} else if strings.Contains(serviceLower, chainName) {
-				fmt.Printf("   🔧 Chain-related service: %s\n", service)
-			} else {
-				fmt.Printf("   ℹ️  Other service: %s\n", service)
-			}
 		}
 	}
 
@@ -773,7 +615,6 @@ func (t *ThanosStack) getServiceNames(namespace, chainName string) (map[string]s
 		return nil, fmt.Errorf("no matching OP Stack services found in namespace %s", namespace)
 	}
 
-	fmt.Printf("\n✅ Mapped %d components for monitoring\n", len(serviceNames))
 	return serviceNames, nil
 }
 
@@ -822,98 +663,6 @@ func (t *ThanosStack) uninstallMonitoring(ctx context.Context) error {
 }
 
 // getEFSFileSystemId retrieves EFS file system ID from AWS
-func (t *ThanosStack) getEFSFileSystemId(ctx context.Context) (string, error) {
-	// Check if EFS is available in the region
-	efsOutput, err := utils.ExecuteCommand("aws", []string{
-		"efs", "describe-file-systems",
-		"--region", t.deployConfig.AWS.Region,
-		"--query", "FileSystems[?Tags[?Key=='Name' && Value=='thanos-monitoring']].FileSystemId",
-		"--output", "text",
-	}...)
-	if err != nil {
-		fmt.Printf("⚠️  Could not find existing EFS file system: %s\n", err)
-		return "", fmt.Errorf("failed to check EFS: %s", err)
-	}
-
-	efsId := strings.TrimSpace(efsOutput)
-	if efsId == "" || efsId == "None" {
-		// Try to create a new EFS file system
-		fmt.Println("🔧 Creating new EFS file system for monitoring...")
-		createOutput, createErr := utils.ExecuteCommand("aws", []string{
-			"efs", "create-file-system",
-			"--region", t.deployConfig.AWS.Region,
-			"--performance-mode", "generalPurpose",
-			"--throughput-mode", "provisioned",
-			"--provisioned-throughput-in-mibps", "100",
-			"--tags", "Key=Name,Value=thanos-monitoring",
-			"--query", "FileSystemId",
-			"--output", "text",
-		}...)
-		if createErr != nil {
-			fmt.Printf("❌ Failed to create EFS file system: %s\n", createErr)
-			return "", fmt.Errorf("failed to create EFS: %s", createErr)
-		}
-
-		efsId = strings.TrimSpace(createOutput)
-		fmt.Printf("✅ Created new EFS file system: %s\n", efsId)
-
-		// Wait for EFS to be available
-		fmt.Println("⏳ Waiting for EFS to become available...")
-		for i := 0; i < 30; i++ {
-			statusOutput, _ := utils.ExecuteCommand("aws", []string{
-				"efs", "describe-file-systems",
-				"--region", t.deployConfig.AWS.Region,
-				"--file-system-id", efsId,
-				"--query", "FileSystems[0].LifeCycleState",
-				"--output", "text",
-			}...)
-
-			if strings.TrimSpace(statusOutput) == "available" {
-				fmt.Printf("✅ EFS file system %s is now available\n", efsId)
-
-				// Create mount targets if needed
-				t.ensureEFSMountTargets(efsId)
-
-				return efsId, nil
-			}
-
-			fmt.Printf("⏳ EFS status: %s (waiting...)\n", strings.TrimSpace(statusOutput))
-			time.Sleep(10 * time.Second)
-		}
-
-		return efsId, nil
-	}
-
-	fmt.Printf("✅ Found existing EFS file system: %s\n", efsId)
-	return efsId, nil
-}
-
-// ensureEFSMountTargets creates EFS mount targets for all subnets if they don't exist
-func (t *ThanosStack) ensureEFSMountTargets(efsId string) {
-	fmt.Println("🔧 Checking EFS mount targets...")
-
-	// Get existing mount targets
-	mountTargetsOutput, err := utils.ExecuteCommand("aws", "efs", "describe-mount-targets",
-		"--region", t.deployConfig.AWS.Region,
-		"--file-system-id", efsId,
-		"--query", "MountTargets[].SubnetId",
-		"--output", "text")
-
-	if err != nil {
-		fmt.Printf("⚠️  Could not check mount targets: %s\n", err)
-		return
-	}
-
-	existingSubnets := strings.Fields(strings.TrimSpace(mountTargetsOutput))
-	fmt.Printf("📍 Found %d existing mount targets\n", len(existingSubnets))
-
-	if len(existingSubnets) > 0 {
-		fmt.Printf("✅ EFS mount targets already exist in %d subnets\n", len(existingSubnets))
-	} else {
-		fmt.Println("💡 EFS mount targets will be created automatically by the EFS CSI driver")
-		fmt.Println("💡 This may take a few minutes during first PVC creation")
-	}
-}
 
 // waitForIngressEndpoint waits for the ALB ingress endpoint to be ready
 func (t *ThanosStack) waitForIngressEndpoint(config *MonitoringConfig) string {
@@ -957,7 +706,7 @@ func (t *ThanosStack) waitForIngressEndpoint(config *MonitoringConfig) string {
 
 // monitorInstallationErrors monitors installation progress and reports errors in real-time
 func (t *ThanosStack) monitorInstallationErrors(config *MonitoringConfig, errorChan chan error) {
-	fmt.Println("🔍 Starting installation error monitoring...")
+	fmt.Println("🔍 Starting installation issue monitoring...")
 
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
@@ -1238,6 +987,153 @@ kubectl describe pvc -n %s
 }
 
 // createDashboardConfigMaps creates ConfigMaps for Grafana dashboards
+// deployMonitoringInfrastructure deploys Terraform infrastructure for monitoring persistence
+func (t *ThanosStack) deployMonitoringInfrastructure(ctx context.Context, config *MonitoringConfig) error {
+	fmt.Println("🏗️  Deploying monitoring infrastructure with Terraform...")
+
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("error determining current directory: %w", err)
+	}
+
+	// Set Terraform working directory
+	terraformDir := filepath.Join(cwd, "tokamak-thanos-stack", "terraform", "monitoring")
+	if _, err := os.Stat(terraformDir); os.IsNotExist(err) {
+		return fmt.Errorf("terraform monitoring directory not found: %s", terraformDir)
+	}
+
+	// Get cluster name from kubectl context
+	clusterName, err := t.getClusterName()
+	if err != nil {
+		return fmt.Errorf("failed to get cluster name: %w", err)
+	}
+
+	// Get EFS file system ID for the cluster
+	efsFileSystemId, err := t.getEFSFileSystemId(clusterName)
+	if err != nil {
+		return fmt.Errorf("failed to get EFS file system ID: %w", err)
+	}
+
+	// Change to terraform directory
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+
+	if err := os.Chdir(terraformDir); err != nil {
+		return fmt.Errorf("failed to change to terraform directory: %w", err)
+	}
+
+	// Initialize Terraform
+	fmt.Println("🔧 Initializing Terraform...")
+	if _, err := utils.ExecuteCommand("terraform", "init"); err != nil {
+		return fmt.Errorf("failed to initialize terraform: %w", err)
+	}
+
+	// Apply Terraform with variables
+	fmt.Println("🚀 Applying Terraform configuration...")
+	applyArgs := []string{
+		"apply",
+		"-auto-approve",
+		fmt.Sprintf("-var=cluster_name=%s", clusterName),
+		fmt.Sprintf("-var=monitoring_stack_name=%s", config.ChainName),
+		"-var=enable_monitoring_persistence=true",
+		fmt.Sprintf("-var=aws_region=%s", t.deployConfig.AWS.Region),
+		fmt.Sprintf("-var=efs_file_system_id=%s", efsFileSystemId),
+	}
+
+	if _, err := utils.ExecuteCommand("terraform", applyArgs...); err != nil {
+		return fmt.Errorf("failed to apply terraform: %w", err)
+	}
+
+	fmt.Println("✅ Monitoring infrastructure deployed successfully!")
+	return nil
+}
+
+// getClusterName gets the current EKS cluster name from kubectl context
+func (t *ThanosStack) getClusterName() (string, error) {
+	output, err := utils.ExecuteCommand("kubectl", "config", "current-context")
+	if err != nil {
+		return "", fmt.Errorf("failed to get current context: %w", err)
+	}
+
+	// Extract cluster name from context (format: arn:aws:eks:region:account:cluster/cluster-name)
+	contextStr := strings.TrimSpace(output)
+	if strings.Contains(contextStr, "/") {
+		parts := strings.Split(contextStr, "/")
+		if len(parts) > 0 {
+			return parts[len(parts)-1], nil
+		}
+	}
+
+	// If context format is different, try to extract from cluster info
+	clusterInfo, err := utils.ExecuteCommand("kubectl", "cluster-info")
+	if err != nil {
+		return "", fmt.Errorf("failed to get cluster info: %w", err)
+	}
+
+	// Parse cluster info to extract cluster name
+	lines := strings.Split(clusterInfo, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "Kubernetes control plane") {
+			// Extract cluster name from URL
+			if strings.Contains(line, "https://") {
+				start := strings.Index(line, "https://")
+				if start != -1 {
+					url := line[start:]
+					if strings.Contains(url, ".") {
+						parts := strings.Split(url, ".")
+						if len(parts) > 0 && strings.Contains(parts[0], "-") {
+							clusterParts := strings.Split(parts[0], "-")
+							if len(clusterParts) >= 2 {
+								return strings.Join(clusterParts[1:], "-"), nil
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("could not extract cluster name from context or cluster info")
+}
+
+// getEFSFileSystemId gets the EFS file system ID for the cluster
+func (t *ThanosStack) getEFSFileSystemId(clusterName string) (string, error) {
+	// Try to find EFS with cluster name tag
+	output, err := utils.ExecuteCommand("aws", "efs", "describe-file-systems",
+		"--region", t.deployConfig.AWS.Region,
+		"--output", "json")
+	if err != nil {
+		return "", fmt.Errorf("failed to describe EFS file systems: %w", err)
+	}
+
+	// Parse JSON output to find matching EFS
+	var efsResponse struct {
+		FileSystems []struct {
+			FileSystemId string `json:"FileSystemId"`
+			Tags         []struct {
+				Key   string `json:"Key"`
+				Value string `json:"Value"`
+			} `json:"Tags"`
+		} `json:"FileSystems"`
+	}
+
+	if err := json.Unmarshal([]byte(output), &efsResponse); err != nil {
+		return "", fmt.Errorf("failed to parse EFS response: %w", err)
+	}
+
+	// Look for EFS with matching cluster name
+	for _, fs := range efsResponse.FileSystems {
+		for _, tag := range fs.Tags {
+			if tag.Key == "Name" && tag.Value == clusterName {
+				return fs.FileSystemId, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no EFS file system found with Name tag matching cluster: %s", clusterName)
+}
+
 func (t *ThanosStack) createDashboardConfigMaps(config *MonitoringConfig) error {
 	fmt.Println("📊 Creating dashboard ConfigMaps...")
 
@@ -1311,205 +1207,3 @@ data:
 // NOTE: generateAdditionalScrapeConfigs function has been removed
 // Scrape configuration is now handled entirely by Helm templates in charts/monitoring
 // This eliminates the 3-way duplication between Go code, values.yaml, and templates
-
-// ensureEFSCSIDriver checks if EFS CSI driver is installed and installs it if not
-func (t *ThanosStack) ensureEFSCSIDriver(ctx context.Context) error {
-	fmt.Println("🔍 Checking EFS CSI driver status...")
-
-	// Check if EFS CSI driver is already installed
-	if t.isEFSCSIDriverInstalled() {
-		fmt.Println("✅ EFS CSI driver is already installed")
-		return nil
-	}
-
-	fmt.Println("❌ EFS CSI driver not found")
-	fmt.Println("📦 Installing EFS CSI driver...")
-
-	// Try to install via EKS addon first (recommended method)
-	if err := t.installEFSCSIDriverAsAddon(ctx); err != nil {
-		fmt.Printf("⚠️  EKS addon installation failed: %v\n", err)
-		fmt.Println("🔄 Trying Helm installation as fallback...")
-
-		// Fallback to Helm installation
-		if err := t.installEFSCSIDriverWithHelm(); err != nil {
-			return fmt.Errorf("both EKS addon and Helm installation failed: %w", err)
-		}
-	}
-
-	// Verify installation
-	if err := t.verifyEFSCSIDriverInstallation(); err != nil {
-		return fmt.Errorf("EFS CSI driver installation verification failed: %w", err)
-	}
-
-	fmt.Println("✅ EFS CSI driver installed and verified successfully")
-	return nil
-}
-
-// isEFSCSIDriverInstalled checks if EFS CSI driver is installed
-func (t *ThanosStack) isEFSCSIDriverInstalled() bool {
-	// Method 1: Check CSI driver registration
-	if _, err := utils.ExecuteCommand("kubectl", "get", "csidriver", "efs.csi.aws.com"); err == nil {
-		return true
-	}
-
-	// Method 2: Check for controller deployment
-	if _, err := utils.ExecuteCommand("kubectl", "get", "deployment", "-n", "kube-system", "-l", "app=efs-csi-controller"); err == nil {
-		return true
-	}
-
-	// Method 3: Check for node daemonset
-	if _, err := utils.ExecuteCommand("kubectl", "get", "daemonset", "-n", "kube-system", "-l", "app=efs-csi-node"); err == nil {
-		return true
-	}
-
-	// Method 4: Check for any EFS CSI pods
-	if output, err := utils.ExecuteCommand("kubectl", "get", "pods", "--all-namespaces", "-o", "name"); err == nil {
-		if strings.Contains(output, "efs-csi") {
-			return true
-		}
-	}
-
-	return false
-}
-
-// installEFSCSIDriverAsAddon installs EFS CSI driver as EKS addon
-func (t *ThanosStack) installEFSCSIDriverAsAddon(ctx context.Context) error {
-	// Check if AWS CLI is available
-	if _, err := utils.ExecuteCommand("aws", "--version"); err != nil {
-		return fmt.Errorf("AWS CLI not available: %w", err)
-	}
-
-	// Get cluster name from current context
-	contextOutput, err := utils.ExecuteCommand("kubectl", "config", "current-context")
-	if err != nil {
-		return fmt.Errorf("failed to get current context: %w", err)
-	}
-
-	// Extract cluster name from context (format: arn:aws:eks:region:account:cluster/cluster-name)
-	contextParts := strings.Split(strings.TrimSpace(contextOutput), "/")
-	if len(contextParts) < 2 {
-		return fmt.Errorf("cannot extract cluster name from context: %s", contextOutput)
-	}
-	clusterName := contextParts[len(contextParts)-1]
-
-	fmt.Printf("🎯 Installing EFS CSI driver addon for cluster: %s\n", clusterName)
-
-	// Get latest addon version
-	versionOutput, err := utils.ExecuteCommand("aws", "eks", "describe-addon-versions",
-		"--addon-name", "aws-efs-csi-driver",
-		"--query", "addons[0].addonVersions[0].addonVersion",
-		"--output", "text")
-	if err != nil {
-		return fmt.Errorf("failed to get addon version: %w", err)
-	}
-	addonVersion := strings.TrimSpace(versionOutput)
-
-	fmt.Printf("📋 Installing addon version: %s\n", addonVersion)
-
-	// Install the addon
-	_, err = utils.ExecuteCommand("aws", "eks", "create-addon",
-		"--cluster-name", clusterName,
-		"--addon-name", "aws-efs-csi-driver",
-		"--addon-version", addonVersion,
-		"--resolve-conflicts", "OVERWRITE")
-	if err != nil {
-		return fmt.Errorf("failed to create EFS CSI driver addon: %w", err)
-	}
-
-	// Wait for addon to become active
-	fmt.Println("⏳ Waiting for EFS CSI driver addon to become active...")
-	return t.waitForAddonActive(clusterName, "aws-efs-csi-driver", 300)
-}
-
-// installEFSCSIDriverWithHelm installs EFS CSI driver using Helm
-func (t *ThanosStack) installEFSCSIDriverWithHelm() error {
-	fmt.Println("📦 Installing EFS CSI driver using Helm...")
-
-	// Add Helm repository
-	fmt.Println("➕ Adding AWS EFS CSI driver Helm repository...")
-	if _, err := utils.ExecuteCommand("helm", "repo", "add", "aws-efs-csi-driver",
-		"https://kubernetes-sigs.github.io/aws-efs-csi-driver/"); err != nil {
-		return fmt.Errorf("failed to add Helm repository: %w", err)
-	}
-
-	// Update Helm repositories
-	if _, err := utils.ExecuteCommand("helm", "repo", "update"); err != nil {
-		return fmt.Errorf("failed to update Helm repositories: %w", err)
-	}
-
-	// Install EFS CSI driver
-	fmt.Println("⚙️  Installing EFS CSI driver chart...")
-	_, err := utils.ExecuteCommand("helm", "install", "aws-efs-csi-driver",
-		"aws-efs-csi-driver/aws-efs-csi-driver",
-		"--namespace", "kube-system",
-		"--set", "image.repository=602401143452.dkr.ecr.us-east-1.amazonaws.com/eks/aws-efs-csi-driver",
-		"--timeout", "5m",
-		"--wait")
-	if err != nil {
-		return fmt.Errorf("failed to install EFS CSI driver via Helm: %w", err)
-	}
-
-	return nil
-}
-
-// waitForAddonActive waits for EKS addon to become active
-func (t *ThanosStack) waitForAddonActive(clusterName, addonName string, timeoutSeconds int) error {
-	for i := 0; i < timeoutSeconds; i += 10 {
-		statusOutput, err := utils.ExecuteCommand("aws", "eks", "describe-addon",
-			"--cluster-name", clusterName,
-			"--addon-name", addonName,
-			"--query", "addon.status",
-			"--output", "text")
-		if err != nil {
-			return fmt.Errorf("failed to check addon status: %w", err)
-		}
-
-		status := strings.TrimSpace(statusOutput)
-		fmt.Printf("⏳ Addon status: %s (%ds/%ds)\n", status, i, timeoutSeconds)
-
-		switch status {
-		case "ACTIVE":
-			fmt.Println("✅ EFS CSI driver addon is now active")
-			return nil
-		case "CREATE_FAILED", "DEGRADED":
-			return fmt.Errorf("addon installation failed with status: %s", status)
-		}
-
-		time.Sleep(10 * time.Second)
-	}
-
-	return fmt.Errorf("timeout waiting for addon to become active")
-}
-
-// verifyEFSCSIDriverInstallation verifies that EFS CSI driver is working properly
-func (t *ThanosStack) verifyEFSCSIDriverInstallation() error {
-	fmt.Println("🔍 Verifying EFS CSI driver installation...")
-
-	// Check CSI driver registration
-	if _, err := utils.ExecuteCommand("kubectl", "get", "csidriver", "efs.csi.aws.com"); err != nil {
-		return fmt.Errorf("EFS CSI driver not registered: %w", err)
-	}
-	fmt.Println("✅ CSI driver registered")
-
-	// Check controller pods
-	controllerOutput, err := utils.ExecuteCommand("kubectl", "get", "pods", "-n", "kube-system",
-		"-l", "app=efs-csi-controller", "--field-selector=status.phase=Running", "-o", "name")
-	if err != nil || strings.TrimSpace(controllerOutput) == "" {
-		return fmt.Errorf("EFS CSI controller pods not running: %w", err)
-	}
-	controllerCount := len(strings.Split(strings.TrimSpace(controllerOutput), "\n"))
-	fmt.Printf("✅ EFS CSI controller pods running: %d\n", controllerCount)
-
-	// Check node daemonset (if not Fargate)
-	nodeOutput, err := utils.ExecuteCommand("kubectl", "get", "pods", "-n", "kube-system",
-		"-l", "app=efs-csi-node", "--field-selector=status.phase=Running", "-o", "name")
-	if err == nil && strings.TrimSpace(nodeOutput) != "" {
-		nodeCount := len(strings.Split(strings.TrimSpace(nodeOutput), "\n"))
-		fmt.Printf("✅ EFS CSI node pods running: %d\n", nodeCount)
-	} else {
-		fmt.Println("ℹ️  EFS CSI node pods not found (expected in Fargate)")
-	}
-
-	fmt.Println("✅ EFS CSI driver verification completed successfully")
-	return nil
-}
