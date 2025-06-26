@@ -17,6 +17,7 @@ func ActionDeployContracts() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
 		stack := cmd.String(flags.StackFlag.Name)
 		network := cmd.String(flags.NetworkFlag.Name)
+		registerCandidate := !cmd.Bool(flags.NoCandidateFlag.Name)
 
 		now := time.Now().Unix()
 
@@ -45,6 +46,16 @@ func ActionDeployContracts() cli.ActionFunc {
 			if err != nil {
 				return err
 			}
+			thanosStack.SetRegisterCandidate(registerCandidate)
+
+			if registerCandidate {
+				registerCandidate, err := thanosStack.InputRegisterCandidate()
+				if err != nil {
+					return fmt.Errorf("❌ failed to get register candidate input: %w", err)
+				}
+				deployContractsConfig.RegisterCandidate = registerCandidate
+			}
+
 			return thanosStack.DeployContracts(ctx, deployContractsConfig)
 		default:
 			return fmt.Errorf("unsupported stack: %s", stack)
