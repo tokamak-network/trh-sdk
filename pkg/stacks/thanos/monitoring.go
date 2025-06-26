@@ -2,7 +2,6 @@ package thanos
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,7 +26,7 @@ func (t *ThanosStack) installMonitoring(ctx context.Context) error {
 	// Deploy Terraform infrastructure if persistent storage is enabled
 	if config.EnablePersistence {
 		fmt.Println("📦 Deploying persistent storage infrastructure...")
-		if err := t.deployMonitoringInfrastructure(ctx, config); err != nil {
+		if err := t.deployMonitoringInfrastructure(config); err != nil {
 			return fmt.Errorf("failed to deploy monitoring infrastructure: %w", err)
 		}
 	}
@@ -113,29 +112,23 @@ func (t *ThanosStack) displayMonitoringInfo(config *MonitoringConfig) {
 
 // MonitoringConfig holds all configuration needed for monitoring installation
 type MonitoringConfig struct {
-	Namespace             string
-	HelmReleaseName       string
-	AdminPassword         string
-	L1RpcUrl              string
-	ServiceNames          map[string]string
-	EnablePersistence     bool
-	UseStaticProvisioning bool // Use static provisioning with pre-created PV/PVC
-	ChartsPath            string
-	ValuesFilePath        string
-	ChainName             string
+	Namespace         string
+	HelmReleaseName   string
+	AdminPassword     string
+	L1RpcUrl          string
+	ServiceNames      map[string]string
+	EnablePersistence bool
+	EFSFileSystemId   string
+	ChartsPath        string
+	ValuesFilePath    string
+	ChainName         string
 }
 
 // getMonitoringConfig gathers all required configuration for monitoring
 func (t *ThanosStack) getMonitoringConfig(ctx context.Context) (*MonitoringConfig, error) {
-	config := &MonitoringConfig{
-		Namespace: "monitoring",
-		L1RpcUrl:  t.deployConfig.L1RPCURL,
-		ChainName: t.deployConfig.ChainName,
-	}
-
 	// Use timestamped release name for monitoring
 	timestamp := time.Now().Unix()
-	config.HelmReleaseName = fmt.Sprintf("monitoring-%d", timestamp)
+	helmReleaseName := fmt.Sprintf("monitoring-%d", timestamp)
 
 	// Get admin password from user
 	fmt.Print("🔐 Enter Grafana admin password: ")
@@ -146,7 +139,6 @@ func (t *ThanosStack) getMonitoringConfig(ctx context.Context) (*MonitoringConfi
 	if adminPassword == "" {
 		return nil, fmt.Errorf("admin password cannot be empty")
 	}
-	config.AdminPassword = adminPassword
 
 	// Get current working directory
 	cwd, err := os.Getwd()
@@ -155,348 +147,142 @@ func (t *ThanosStack) getMonitoringConfig(ctx context.Context) (*MonitoringConfi
 	}
 
 	// Set charts path
-	config.ChartsPath = fmt.Sprintf("%s/tokamak-thanos-stack/charts/monitoring", cwd)
-	if _, err := os.Stat(config.ChartsPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("chart directory not found: %s", config.ChartsPath)
+	chartsPath := fmt.Sprintf("%s/tokamak-thanos-stack/charts/monitoring", cwd)
+	if _, err := os.Stat(chartsPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("chart directory not found: %s", chartsPath)
 	}
 
 	// Get service names dynamically from trh-sdk configuration
-	// Note: Services are in the original Thanos Stack namespace
-	serviceNames, err := t.getServiceNames(t.deployConfig.K8s.Namespace, config.ChainName)
+	serviceNames, err := t.getServiceNames(t.deployConfig.K8s.Namespace, t.deployConfig.ChainName)
 	if err != nil {
 		return nil, fmt.Errorf("error getting service names: %w", err)
 	}
-	config.ServiceNames = serviceNames
 
-	// Ask user about persistent storage preference first
-	fmt.Print("🤔 Do you want to use persistent storage for monitoring data? (y/n): ")
-	usePersistence, err := scanner.ScanString()
+	// Get EFS filesystem ID from existing op-geth PV
+	efsFileSystemId, err := t.getEFSFileSystemId()
 	if err != nil {
-		return nil, fmt.Errorf("error reading storage preference: %w", err)
+		return nil, fmt.Errorf("error getting EFS filesystem ID: %w", err)
 	}
 
-	if strings.ToLower(usePersistence) == "y" || strings.ToLower(usePersistence) == "yes" {
-		config.EnablePersistence = true
-		config.UseStaticProvisioning = true
-	} else {
-		config.EnablePersistence = false
-		config.UseStaticProvisioning = false
+	config := &MonitoringConfig{
+		Namespace:         "monitoring",
+		HelmReleaseName:   helmReleaseName,
+		AdminPassword:     adminPassword,
+		L1RpcUrl:          t.deployConfig.L1RPCURL,
+		ServiceNames:      serviceNames,
+		EnablePersistence: true,
+		EFSFileSystemId:   efsFileSystemId,
+		ChartsPath:        chartsPath,
+		ValuesFilePath:    "", // Will be set in generateValuesFile
+		ChainName:         t.deployConfig.ChainName,
 	}
 
 	return config, nil
-}
-
-// detectFargateEnvironment checks if the cluster is running on AWS Fargate
-func (t *ThanosStack) detectFargateEnvironment() bool {
-	// Check for Fargate nodes by looking for fargate in node names or labels
-	output, err := utils.ExecuteCommand("kubectl", "get", "nodes", "-o", "jsonpath={.items[*].metadata.name}")
-	if err != nil {
-		// If we can't get nodes, assume it might be Fargate for safety
-		fmt.Printf("⚠️  Could not check node information: %s\n", err)
-		return false
-	}
-
-	// Check if any node name contains "fargate"
-	if strings.Contains(strings.ToLower(output), "fargate") {
-		return true
-	}
-
-	// Check node labels for Fargate indicators
-	labelOutput, err := utils.ExecuteCommand("kubectl", "get", "nodes", "-o", "jsonpath={.items[*].metadata.labels}")
-	if err == nil && strings.Contains(strings.ToLower(labelOutput), "fargate") {
-		return true
-	}
-
-	// Check for EKS Fargate profile indicators
-	profileOutput, err := utils.ExecuteCommand("kubectl", "get", "nodes", "-o", "jsonpath={.items[*].metadata.labels.eks\\.amazonaws\\.com/compute-type}")
-	if err == nil && strings.Contains(strings.ToLower(profileOutput), "fargate") {
-		return true
-	}
-
-	return false
 }
 
 // generateValuesFile creates the values.yaml file for monitoring configuration
 func (t *ThanosStack) generateValuesFile(config *MonitoringConfig) error {
 	fmt.Println("📝 Generating monitoring values file...")
 
-	// Create values configuration matching the chart's values.yaml structure exactly
+	// Create values configuration with only dynamically set values
 	valuesConfig := map[string]interface{}{
-		"createNamespace": false, // Handled by Helm --create-namespace flag
 		"global": map[string]interface{}{
 			"l1RpcUrl": config.L1RpcUrl,
 			"storage": map[string]interface{}{
-				"enabled":               config.EnablePersistence,
-				"useStaticProvisioning": config.UseStaticProvisioning,
-				"awsRegion":             t.deployConfig.AWS.Region,
-			},
-			"securityContext": map[string]interface{}{
-				"runAsNonRoot":             true,
-				"runAsUser":                65534,
-				"runAsGroup":               65534,
-				"readOnlyRootFilesystem":   false,
-				"allowPrivilegeEscalation": false,
-			},
-			"podSecurityContext": map[string]interface{}{
-				"runAsNonRoot": true,
-				"runAsUser":    65534,
-				"runAsGroup":   65534,
-				"fsGroup":      65534,
+				"enabled":         config.EnablePersistence,
+				"efsFileSystemId": config.EFSFileSystemId,
+				"awsRegion":       t.deployConfig.AWS.Region,
 			},
 		},
 		"thanosStack": map[string]interface{}{
 			"chainName":   config.ChainName,
-			"namespace":   t.deployConfig.K8s.Namespace, // Use the Thanos Stack namespace
+			"namespace":   t.deployConfig.K8s.Namespace,
 			"releaseName": config.ChainName,
 		},
 		"kube-prometheus-stack": map[string]interface{}{
 			"prometheus": map[string]interface{}{
-				"prometheusSpec": t.generatePrometheusSpec(config),
+				"prometheusSpec": t.generatePrometheusStorageSpec(config),
 			},
-			"grafana": t.generateGrafanaConfig(config),
-			"alertmanager": map[string]interface{}{
-				"enabled": false,
-			},
-			"nodeExporter": map[string]interface{}{
-				"enabled": false,
-			},
-			"kubeStateMetrics": map[string]interface{}{
-				"enabled": true,
-			},
+			"grafana": t.generateGrafanaStorageConfig(config),
 		},
-		"prometheus-blackbox-exporter": map[string]interface{}{
-			"enabled": true,
-			"config": map[string]interface{}{
-				"modules": map[string]interface{}{
-					"http_post_eth_node_synced_2xx": map[string]interface{}{
-						"prober":  "http",
-						"timeout": "10s",
-						"http": map[string]interface{}{
-							"method": "POST",
-							"headers": map[string]interface{}{
-								"Content-Type": "application/json",
-							},
-							"body":                            `{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}`,
-							"valid_status_codes":              []int{200},
-							"preferred_ip_protocol":           "ip4",
-							"fail_if_body_not_matches_regexp": []string{`"result"\s*:\s*false`},
-						},
-					},
-					"http_post_eth_block_number_2xx": map[string]interface{}{
-						"prober":  "http",
-						"timeout": "10s",
-						"http": map[string]interface{}{
-							"method": "POST",
-							"headers": map[string]interface{}{
-								"Content-Type": "application/json",
-							},
-							"body":                            `{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":83}`,
-							"valid_status_codes":              []int{200},
-							"preferred_ip_protocol":           "ip4",
-							"fail_if_body_not_matches_regexp": []string{`"result"\s*:\s*"0x[0-9a-fA-F]+"`},
-						},
-					},
-					"tcp_connect": map[string]interface{}{
-						"prober":  "tcp",
-						"timeout": "5s",
-					},
-				},
-			},
-			"resources": map[string]interface{}{
-				"requests": map[string]interface{}{
-					"cpu":    "100m",
-					"memory": "128Mi",
-				},
-				"limits": map[string]interface{}{
-					"cpu":    "500m",
-					"memory": "256Mi",
-				},
-			},
-			"service": map[string]interface{}{
-				"type": "ClusterIP",
-				"port": 9115,
-			},
-			"serviceMonitor": map[string]interface{}{
-				"enabled": true,
-				"defaults": map[string]interface{}{
-					"labels": map[string]interface{}{
-						"app": "blackbox-exporter",
-					},
-					"interval":      "30s",
-					"scrapeTimeout": "30s",
-				},
-			},
-		},
-		"scrapeTargets":           t.generateScrapeTargets(config),
-		"additionalScrapeConfigs": []interface{}{}, // Use Helm template-based configuration instead
 	}
 
-	// Convert to YAML
-	yamlData, err := yaml.Marshal(valuesConfig)
+	// Generate YAML content
+	yamlContent, err := yaml.Marshal(valuesConfig)
 	if err != nil {
-		return fmt.Errorf("failed to marshal values to YAML: %w", err)
+		return fmt.Errorf("error marshaling values to YAML: %w", err)
 	}
 
-	// Set values file path to terraform/thanos-stack directory
-	terraformDir := fmt.Sprintf("%s/../../tokamak-thanos-stack/terraform/thanos-stack",
-		filepath.Dir(config.ChartsPath))
-
-	// Create directory if it doesn't exist
-	if err := os.MkdirAll(terraformDir, 0755); err != nil {
-		return fmt.Errorf("failed to create terraform directory: %w", err)
+	// Write values file
+	valuesFilePath := filepath.Join(config.ChartsPath, "generated-values.yaml")
+	if err := os.WriteFile(valuesFilePath, yamlContent, 0644); err != nil {
+		return fmt.Errorf("error writing values file: %w", err)
 	}
 
-	config.ValuesFilePath = filepath.Join(terraformDir, "monitoring-values.yaml")
-
-	// Write to file
-	if err := os.WriteFile(config.ValuesFilePath, yamlData, 0644); err != nil {
-		return fmt.Errorf("failed to write values file: %w", err)
-	}
-
-	fmt.Printf("✅ Generated values file: %s\n", config.ValuesFilePath)
+	config.ValuesFilePath = valuesFilePath
+	fmt.Printf("✅ Generated values file: %s\n", valuesFilePath)
 	return nil
 }
 
-// generatePrometheusSpec creates Prometheus specification with proper storage configuration
-func (t *ThanosStack) generatePrometheusSpec(config *MonitoringConfig) map[string]interface{} {
-	prometheusSpec := map[string]interface{}{
-		"resources": map[string]interface{}{
-			"requests": map[string]interface{}{
-				"cpu":    "1500m",
-				"memory": "3Gi",
-			},
-		},
-		"retention":               "1y",
-		"retentionSize":           "10GB",
-		"scrapeInterval":          "1m",
-		"evaluationInterval":      "1m",
-		"additionalScrapeConfigs": []interface{}{}, // Configured via Helm template
-		"securityContext": map[string]interface{}{
-			"runAsNonRoot":             true,
-			"runAsUser":                65534,
-			"runAsGroup":               65534,
-			"readOnlyRootFilesystem":   false,
-			"allowPrivilegeEscalation": false,
-		},
-		"podSecurityContext": map[string]interface{}{
+// generatePrometheusStorageSpec creates Prometheus storage specification
+func (t *ThanosStack) generatePrometheusStorageSpec(config *MonitoringConfig) map[string]interface{} {
+	spec := map[string]interface{}{}
+
+	// Add storage configuration if persistence is enabled
+	if config.EnablePersistence {
+		// Static Provisioning: Disable volumeClaimTemplate since we create PVC manually
+		// Prometheus will use the manually created PVC
+		fmt.Println("📦 Using manually created PVC for Prometheus Static Provisioning")
+
+		// Fix EFS permission issue: Run Prometheus as grafana user (472)
+		// This ensures compatibility with EFS directories owned by grafana
+		spec["securityContext"] = map[string]interface{}{
+			"runAsUser":    472,
+			"runAsGroup":   472,
 			"runAsNonRoot": true,
-			"runAsUser":    65534,
-			"runAsGroup":   65534,
-			"fsGroup":      65534,
-		},
+			"fsGroup":      472,
+			"seccompProfile": map[string]interface{}{
+				"type": "RuntimeDefault",
+			},
+		}
 	}
 
-	// Use EmptyDir for temporary storage (Static Provisioning handles persistent storage)
-	prometheusSpec["storageSpec"] = map[string]interface{}{}
-
-	return prometheusSpec
+	return spec
 }
 
-// generateGrafanaConfig creates Grafana configuration with proper service naming and storage
-func (t *ThanosStack) generateGrafanaConfig(config *MonitoringConfig) map[string]interface{} {
+// generateGrafanaStorageConfig creates Grafana storage configuration
+func (t *ThanosStack) generateGrafanaStorageConfig(config *MonitoringConfig) map[string]interface{} {
 	grafanaConfig := map[string]interface{}{
-		"enabled":       true,
-		"adminUser":     "admin",
 		"adminPassword": config.AdminPassword,
-		"resources": map[string]interface{}{
-			"requests": map[string]interface{}{
-				"cpu":    "1500m",
-				"memory": "4Gi",
-			},
-		},
-		// Use dynamic service naming (removes fullnameOverride for timestamp compatibility)
-		// "fullnameOverride": removed to allow timestamped release names,
-		"ingress": map[string]interface{}{
-			"enabled":          true,
-			"ingressClassName": "alb",
-			"annotations": map[string]interface{}{
-				"alb.ingress.kubernetes.io/scheme":       "internet-facing",
-				"alb.ingress.kubernetes.io/target-type":  "ip",
-				"alb.ingress.kubernetes.io/group.name":   "thanos-monitoring",
-				"alb.ingress.kubernetes.io/listen-ports": `[{"HTTP":80}]`,
-			},
-			"hosts": []string{}, // Empty hosts array for ALB auto-discovery
-			"path":  "/",        // Single path for Grafana ingress
-		},
-		"defaultDashboardsEnabled":  false,
-		"defaultDashboardsTimezone": "utc",
-		"sidecar": map[string]interface{}{
-			"dashboards": map[string]interface{}{
-				"enabled":         true,
-				"label":           "grafana_dashboard",
-				"labelValue":      "1",
-				"searchNamespace": "ALL",
-			},
-			"datasources": map[string]interface{}{
-				"enabled":                  true,
-				"defaultDatasourceEnabled": true,
-			},
-		},
-		"securityContext": map[string]interface{}{
-			"runAsNonRoot":             true,
-			"runAsUser":                65534,
-			"runAsGroup":               65534,
-			"readOnlyRootFilesystem":   false,
-			"allowPrivilegeEscalation": false,
-		},
-		"podSecurityContext": map[string]interface{}{
-			"runAsNonRoot": true,
-			"runAsUser":    65534,
-			"runAsGroup":   65534,
-			"fsGroup":      65534,
-		},
 	}
 
-	// Use EmptyDir for temporary storage (Static Provisioning handles persistent storage)
-	grafanaConfig["persistence"] = map[string]interface{}{
-		"enabled": false,
+	// Add storage configuration if persistence is enabled
+	if config.EnablePersistence {
+		persistenceConfig := map[string]interface{}{
+			"enabled":          true,
+			"storageClassName": "efs-sc",
+			"accessModes":      []string{"ReadWriteMany"},
+			"size":             "10Gi",
+		}
+
+		// For Static Provisioning, specify the PV name that matches our created PV
+		timestamp, err := t.getTimestampFromExistingPV(config.ChainName)
+		if err != nil {
+			fmt.Printf("⚠️  Warning: Could not get timestamp for Grafana PV naming: %v\n", err)
+			timestamp = "static" // Fallback
+		}
+
+		pvName := fmt.Sprintf("%s-%s-thanos-stack-grafana", config.ChainName, timestamp)
+		persistenceConfig["volumeName"] = pvName
+
+		grafanaConfig["persistence"] = persistenceConfig
+	} else {
+		grafanaConfig["persistence"] = map[string]interface{}{
+			"enabled": false,
+		}
 	}
 
 	return grafanaConfig
-}
-
-// generateScrapeTargets creates scrape target configuration for dynamic L2 Stack services
-// This provides the default configuration which can be overridden in values.yaml
-func (t *ThanosStack) generateScrapeTargets(config *MonitoringConfig) map[string]interface{} {
-	// Use default values from chart, allowing for runtime customization
-	return map[string]interface{}{
-		"op-node": map[string]interface{}{
-			"enabled":  true,
-			"port":     7300,
-			"path":     "/metrics",
-			"interval": "30s",
-		},
-		"op-batcher": map[string]interface{}{
-			"enabled":  true,
-			"port":     7300,
-			"path":     "/metrics",
-			"interval": "30s",
-		},
-		"op-proposer": map[string]interface{}{
-			"enabled":  true,
-			"port":     7300,
-			"path":     "/metrics",
-			"interval": "30s",
-		},
-		"op-geth": map[string]interface{}{
-			"enabled":  true,
-			"port":     6060,
-			"path":     "/debug/metrics/prometheus",
-			"interval": "30s",
-		},
-		"blockscout": map[string]interface{}{
-			"enabled":  true,
-			"port":     3000,
-			"path":     "/metrics",
-			"interval": "1m",
-		},
-		"block-explorer-frontend": map[string]interface{}{
-			"enabled":  true,
-			"port":     80,
-			"path":     "/api/healthz",
-			"interval": "1m",
-		},
-	}
 }
 
 // getServiceNames returns a map of component names to their Kubernetes service names
@@ -643,8 +429,13 @@ func (t *ThanosStack) uninstallMonitoring(ctx context.Context) error {
 		return err
 	}
 
+	// Store release names for cleanup
+	var releasesToCleanup []string
+
 	for _, release := range releases {
 		fmt.Printf("🗑️  Uninstalling monitoring release: %s\n", release)
+		releasesToCleanup = append(releasesToCleanup, release)
+
 		_, err = utils.ExecuteCommand("helm", []string{
 			"uninstall",
 			release,
@@ -657,12 +448,161 @@ func (t *ThanosStack) uninstallMonitoring(ctx context.Context) error {
 		}
 	}
 
+	// Clean up orphaned services in kube-system after Helm uninstall
+	if len(releasesToCleanup) > 0 {
+		if err := t.cleanupOrphanedKubeSystemServices(releasesToCleanup); err != nil {
+			fmt.Printf("⚠️  Warning: Failed to cleanup orphaned services: %v\n", err)
+			// Continue anyway - this is cleanup, not critical
+		}
+	}
+
 	fmt.Println("✅ Uninstall monitoring component successfully")
 
 	return nil
 }
 
-// getEFSFileSystemId retrieves EFS file system ID from AWS
+// cleanupOrphanedKubeSystemServices removes orphaned services in kube-system left by monitoring releases
+func (t *ThanosStack) cleanupOrphanedKubeSystemServices(releases []string) error {
+	// Get all services in kube-system
+	output, err := utils.ExecuteCommand("kubectl", "get", "svc", "-n", "kube-system", "-o", "name")
+	if err != nil {
+		return fmt.Errorf("failed to get services in kube-system: %w", err)
+	}
+
+	if strings.TrimSpace(output) == "" {
+		fmt.Println("✅ No services found in kube-system")
+		return nil
+	}
+
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	var servicesToDelete []string
+
+	// Find services that match any of the release names
+	for _, line := range lines {
+		serviceName := strings.TrimPrefix(line, "service/")
+
+		// Check if this service belongs to any of our monitoring releases
+		for _, release := range releases {
+			if strings.Contains(serviceName, release) {
+				servicesToDelete = append(servicesToDelete, serviceName)
+				break
+			}
+		}
+	}
+
+	// Delete orphaned services
+	if len(servicesToDelete) > 0 {
+		for _, serviceName := range servicesToDelete {
+			_, err := utils.ExecuteCommand("kubectl", "delete", "svc", serviceName, "-n", "kube-system", "--ignore-not-found=true")
+			if err != nil {
+				fmt.Printf("⚠️  Warning: Failed to delete service %s: %v\n", serviceName, err)
+			}
+		}
+	}
+
+	if err := t.cleanupGenericMonitoringServices(); err != nil {
+		fmt.Printf("⚠️  Warning: Failed to cleanup generic monitoring services: %v\n", err)
+	}
+
+	return nil
+}
+
+// cleanupGenericMonitoringServices removes services with generic monitoring patterns
+func (t *ThanosStack) cleanupGenericMonitoringServices() error {
+	// Common patterns for monitoring services that might be left behind
+	patterns := []string{
+		"kubelet",
+		"coredns",
+		"kube-controller-manager",
+		"kube-etcd",
+		"kube-proxy",
+		"kube-scheduler",
+	}
+
+	output, err := utils.ExecuteCommand("kubectl", "get", "svc", "-n", "kube-system", "-o", "name")
+	if err != nil {
+		return fmt.Errorf("failed to get services in kube-system: %w", err)
+	}
+
+	if strings.TrimSpace(output) == "" {
+		return nil
+	}
+
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	var servicesToDelete []string
+
+	for _, line := range lines {
+		serviceName := strings.TrimPrefix(line, "service/")
+
+		// Check if this service contains "monitoring" and any of the patterns
+		if strings.Contains(serviceName, "monitoring") {
+			for _, pattern := range patterns {
+				if strings.Contains(serviceName, pattern) {
+					servicesToDelete = append(servicesToDelete, serviceName)
+					break
+				}
+			}
+		}
+	}
+
+	// Delete matching services
+	if len(servicesToDelete) > 0 {
+		for _, serviceName := range servicesToDelete {
+			_, err := utils.ExecuteCommand("kubectl", "delete", "svc", serviceName, "-n", "kube-system", "--ignore-not-found=true")
+			if err != nil {
+				fmt.Printf("⚠️  Warning: Failed to delete service %s: %v\n", serviceName, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// getEFSFileSystemId extracts EFS filesystem ID from existing PV
+func (t *ThanosStack) getEFSFileSystemId() (string, error) {
+	fmt.Println("🔍 Getting EFS filesystem ID from existing PV...")
+
+	chainName := t.deployConfig.ChainName
+
+	// Get all PVs and filter for op-geth
+	pvListOutput, err := utils.ExecuteCommand("kubectl", "get", "pv", "-o", "name")
+	if err != nil {
+		return "", fmt.Errorf("failed to list PVs: %w", err)
+	}
+
+	var opGethPVName string
+	lines := strings.Split(strings.TrimSpace(pvListOutput), "\n")
+	for _, line := range lines {
+		pvName := strings.TrimPrefix(line, "persistentvolume/")
+		if strings.Contains(pvName, "thanos-stack-op-geth") && strings.Contains(pvName, chainName) {
+			opGethPVName = pvName
+			break
+		}
+	}
+
+	if opGethPVName == "" {
+		return "", fmt.Errorf("no existing PV found for chain: %s", chainName)
+	}
+
+	// Get volumeHandle from the specific PV
+	output, err := utils.ExecuteCommand("kubectl", "get", "pv", opGethPVName, "-o", "jsonpath={.spec.csi.volumeHandle}")
+	if err != nil {
+		return "", fmt.Errorf("failed to get volumeHandle from PV %s: %w", opGethPVName, err)
+	}
+
+	volumeHandle := strings.TrimSpace(output)
+	if volumeHandle == "" {
+		return "", fmt.Errorf("volumeHandle is empty for PV: %s", opGethPVName)
+	}
+
+	// Extract EFS filesystem ID (format: fs-xxxxxxxxx)
+	if !strings.HasPrefix(volumeHandle, "fs-") {
+		return "", fmt.Errorf("invalid EFS filesystem ID format: %s", volumeHandle)
+	}
+
+	fmt.Printf("✅ Found EFS filesystem ID: %s\n", volumeHandle)
+	return volumeHandle, nil
+}
 
 // waitForIngressEndpoint waits for the ALB ingress endpoint to be ready
 func (t *ThanosStack) waitForIngressEndpoint(config *MonitoringConfig) string {
@@ -717,12 +657,8 @@ func (t *ThanosStack) monitorInstallationErrors(config *MonitoringConfig, errorC
 			// Installation completed or stopped
 			return
 		case <-ticker.C:
-			// Check for failed pods
-			t.checkFailedPods(config)
 			// Check for pending pods with issues
 			t.checkPendingPods(config)
-			// Check recent events for errors
-			t.checkRecentEvents(config)
 		}
 	}
 }
@@ -766,16 +702,6 @@ func (t *ThanosStack) gatherInstallationErrors(config *MonitoringConfig) {
 	t.provideTroubleshootingCommands(config)
 }
 
-// checkFailedPods checks for failed pods and reports them
-func (t *ThanosStack) checkFailedPods(config *MonitoringConfig) {
-	output, err := utils.ExecuteCommand("kubectl", "get", "pods", "-n", config.Namespace,
-		"--field-selector=status.phase=Failed", "-o", "custom-columns=NAME:.metadata.name,REASON:.status.reason")
-
-	if err == nil && strings.TrimSpace(output) != "" && !strings.Contains(output, "No resources found") {
-		fmt.Printf("🚨 Failed pods detected:\n%s\n", output)
-	}
-}
-
 // checkPendingPods checks for pending pods with issues
 func (t *ThanosStack) checkPendingPods(config *MonitoringConfig) {
 	output, err := utils.ExecuteCommand("kubectl", "get", "pods", "-n", config.Namespace,
@@ -783,24 +709,6 @@ func (t *ThanosStack) checkPendingPods(config *MonitoringConfig) {
 
 	if err == nil && strings.TrimSpace(output) != "" && !strings.Contains(output, "No resources found") {
 		fmt.Printf("⏳ Pending pods with issues:\n%s\n", output)
-	}
-}
-
-// checkRecentEvents checks for recent error events
-func (t *ThanosStack) checkRecentEvents(config *MonitoringConfig) {
-	output, err := utils.ExecuteCommand("kubectl", "get", "events", "-n", config.Namespace,
-		"--field-selector=type=Warning", "--sort-by=.lastTimestamp", "-o", "custom-columns=TIME:.lastTimestamp,REASON:.reason,MESSAGE:.message")
-
-	if err == nil && strings.TrimSpace(output) != "" && !strings.Contains(output, "No resources found") {
-		lines := strings.Split(output, "\n")
-		if len(lines) > 1 { // More than just header
-			// Safely calculate the start index to avoid negative slice bounds
-			startIndex := len(lines) - 3
-			if startIndex < 1 { // Ensure we don't go below the header line
-				startIndex = 1
-			}
-			fmt.Printf("⚠️  Recent warning events:\n%s\n", strings.Join(lines[startIndex:], "\n"))
-		}
 	}
 }
 
@@ -986,154 +894,272 @@ kubectl describe pvc -n %s
 		config.ValuesFilePath, config.Namespace, config.Namespace, config.Namespace)
 }
 
-// createDashboardConfigMaps creates ConfigMaps for Grafana dashboards
-// deployMonitoringInfrastructure deploys Terraform infrastructure for monitoring persistence
-func (t *ThanosStack) deployMonitoringInfrastructure(ctx context.Context, config *MonitoringConfig) error {
-	fmt.Println("🏗️  Deploying monitoring infrastructure with Terraform...")
-
-	// Get current working directory
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("error determining current directory: %w", err)
+// deployMonitoringInfrastructure creates PVs for Static Provisioning using existing efs-sc
+func (t *ThanosStack) deployMonitoringInfrastructure(config *MonitoringConfig) error {
+	// Create PVs using kubectl and existing efs-sc StorageClass
+	if err := t.createStaticPVs(config); err != nil {
+		return fmt.Errorf("failed to create static PVs: %w", err)
 	}
 
-	// Set Terraform working directory
-	terraformDir := filepath.Join(cwd, "tokamak-thanos-stack", "terraform", "monitoring")
-	if _, err := os.Stat(terraformDir); os.IsNotExist(err) {
-		return fmt.Errorf("terraform monitoring directory not found: %s", terraformDir)
-	}
-
-	// Get cluster name from kubectl context
-	clusterName, err := t.getClusterName()
-	if err != nil {
-		return fmt.Errorf("failed to get cluster name: %w", err)
-	}
-
-	// Get EFS file system ID for the cluster
-	efsFileSystemId, err := t.getEFSFileSystemId(clusterName)
-	if err != nil {
-		return fmt.Errorf("failed to get EFS file system ID: %w", err)
-	}
-
-	// Change to terraform directory
-	originalDir, _ := os.Getwd()
-	defer os.Chdir(originalDir)
-
-	if err := os.Chdir(terraformDir); err != nil {
-		return fmt.Errorf("failed to change to terraform directory: %w", err)
-	}
-
-	// Initialize Terraform
-	fmt.Println("🔧 Initializing Terraform...")
-	if _, err := utils.ExecuteCommand("terraform", "init"); err != nil {
-		return fmt.Errorf("failed to initialize terraform: %w", err)
-	}
-
-	// Apply Terraform with variables
-	fmt.Println("🚀 Applying Terraform configuration...")
-	applyArgs := []string{
-		"apply",
-		"-auto-approve",
-		fmt.Sprintf("-var=cluster_name=%s", clusterName),
-		fmt.Sprintf("-var=monitoring_stack_name=%s", config.ChainName),
-		"-var=enable_monitoring_persistence=true",
-		fmt.Sprintf("-var=aws_region=%s", t.deployConfig.AWS.Region),
-		fmt.Sprintf("-var=efs_file_system_id=%s", efsFileSystemId),
-	}
-
-	if _, err := utils.ExecuteCommand("terraform", applyArgs...); err != nil {
-		return fmt.Errorf("failed to apply terraform: %w", err)
-	}
-
-	fmt.Println("✅ Monitoring infrastructure deployed successfully!")
 	return nil
 }
 
-// getClusterName gets the current EKS cluster name from kubectl context
-func (t *ThanosStack) getClusterName() (string, error) {
-	output, err := utils.ExecuteCommand("kubectl", "config", "current-context")
+// createStaticPVs creates PersistentVolumes and PVCs for Static Provisioning with op-geth/op-node naming pattern
+func (t *ThanosStack) createStaticPVs(config *MonitoringConfig) error {
+	// Get timestamp from existing op-geth PV to match naming pattern
+	timestamp, err := t.getTimestampFromExistingPV(config.ChainName)
 	if err != nil {
-		return "", fmt.Errorf("failed to get current context: %w", err)
+		return fmt.Errorf("failed to get timestamp from existing PV: %w", err)
 	}
 
-	// Extract cluster name from context (format: arn:aws:eks:region:account:cluster/cluster-name)
-	contextStr := strings.TrimSpace(output)
-	if strings.Contains(contextStr, "/") {
-		parts := strings.Split(contextStr, "/")
-		if len(parts) > 0 {
-			return parts[len(parts)-1], nil
+	// Clean up existing PVs and PVCs for monitoring components
+	fmt.Println("🧹 Cleaning up existing monitoring PVs and PVCs...")
+	if err := t.cleanupExistingMonitoringResources(config, timestamp); err != nil {
+		fmt.Printf("⚠️  Warning: Failed to cleanup existing resources: %v\n", err)
+		// Continue anyway - we'll try to create new ones
+	}
+
+	// Wait a moment for cleanup to complete
+	time.Sleep(5 * time.Second)
+
+	// Create Prometheus PV and PVC
+	prometheusPV := t.generateStaticPVManifest("prometheus", config, "20Gi", timestamp)
+	if err := t.applyPVManifest("prometheus", prometheusPV); err != nil {
+		return fmt.Errorf("failed to create Prometheus PV: %w", err)
+	}
+
+	prometheusPVC := t.generateStaticPVCManifest("prometheus", config, "20Gi", timestamp)
+	if err := t.applyPVCManifest("prometheus", prometheusPVC); err != nil {
+		return fmt.Errorf("failed to create Prometheus PVC: %w", err)
+	}
+
+	// Create Grafana PV and PVC
+	grafanaPV := t.generateStaticPVManifest("grafana", config, "10Gi", timestamp)
+	if err := t.applyPVManifest("grafana", grafanaPV); err != nil {
+		return fmt.Errorf("failed to create Grafana PV: %w", err)
+	}
+
+	grafanaPVC := t.generateStaticPVCManifest("grafana", config, "10Gi", timestamp)
+	if err := t.applyPVCManifest("grafana", grafanaPVC); err != nil {
+		return fmt.Errorf("failed to create Grafana PVC: %w", err)
+	}
+
+	// Verify PV/PVC binding
+	if err := t.verifyPVCBinding(config, timestamp); err != nil {
+		fmt.Printf("⚠️  Warning: PV/PVC binding verification failed: %v\n", err)
+		// Continue anyway - binding might take some time
+	}
+
+	return nil
+}
+
+// cleanupExistingMonitoringResources removes existing monitoring PVs and PVCs
+func (t *ThanosStack) cleanupExistingMonitoringResources(config *MonitoringConfig, timestamp string) error {
+	components := []string{"prometheus", "grafana"}
+
+	for _, component := range components {
+		pvName := fmt.Sprintf("%s-%s-thanos-stack-%s", config.ChainName, timestamp, component)
+
+		// Delete PVC first (it might be bound to the PV)
+		_, err := utils.ExecuteCommand("kubectl", "delete", "pvc", pvName, "-n", config.Namespace, "--ignore-not-found=true")
+		if err != nil {
+			fmt.Printf("⚠️  Warning: Failed to delete PVC %s: %v\n", pvName, err)
 		}
+
+		// Wait a moment for PVC deletion to complete
+		time.Sleep(2 * time.Second)
+
+		// Delete PV (it might be in Released state)
+		_, err = utils.ExecuteCommand("kubectl", "delete", "pv", pvName, "--ignore-not-found=true")
+		if err != nil {
+			fmt.Printf("⚠️  Warning: Failed to delete PV %s: %v\n", pvName, err)
+		}
+
+		// Also try to delete any PVs that might have old naming patterns
+		t.cleanupOldPVPattern(component, config.ChainName)
 	}
 
-	// If context format is different, try to extract from cluster info
-	clusterInfo, err := utils.ExecuteCommand("kubectl", "cluster-info")
+	return nil
+}
+
+// cleanupOldPVPattern removes PVs with old naming patterns that might conflict
+func (t *ThanosStack) cleanupOldPVPattern(component, chainName string) {
+	// Get all PVs and find ones that match the component pattern
+	output, err := utils.ExecuteCommand("kubectl", "get", "pv", "-o", "custom-columns=NAME:.metadata.name,STATUS:.status.phase", "--no-headers")
 	if err != nil {
-		return "", fmt.Errorf("failed to get cluster info: %w", err)
+		return
 	}
 
-	// Parse cluster info to extract cluster name
-	lines := strings.Split(clusterInfo, "\n")
+	lines := strings.Split(strings.TrimSpace(output), "\n")
 	for _, line := range lines {
-		if strings.Contains(line, "Kubernetes control plane") {
-			// Extract cluster name from URL
-			if strings.Contains(line, "https://") {
-				start := strings.Index(line, "https://")
-				if start != -1 {
-					url := line[start:]
-					if strings.Contains(url, ".") {
-						parts := strings.Split(url, ".")
-						if len(parts) > 0 && strings.Contains(parts[0], "-") {
-							clusterParts := strings.Split(parts[0], "-")
-							if len(clusterParts) >= 2 {
-								return strings.Join(clusterParts[1:], "-"), nil
-							}
-						}
-					}
-				}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+
+		pvName := fields[0]
+		pvStatus := fields[1]
+
+		// Check if this PV matches our component and is in Released state
+		if strings.Contains(pvName, chainName) &&
+			strings.Contains(pvName, fmt.Sprintf("thanos-stack-%s", component)) &&
+			(pvStatus == "Released" || pvStatus == "Available") {
+
+			fmt.Printf("🗑️  Cleaning up old %s PV: %s (status: %s)\n", component, pvName, pvStatus)
+			_, err := utils.ExecuteCommand("kubectl", "delete", "pv", pvName, "--ignore-not-found=true")
+			if err != nil {
+				fmt.Printf("⚠️  Warning: Failed to delete old PV %s: %v\n", pvName, err)
+			}
+		}
+	}
+}
+
+// verifyPVCBinding checks if PVCs are properly bound to PVs
+func (t *ThanosStack) verifyPVCBinding(config *MonitoringConfig, timestamp string) error {
+	components := []string{"prometheus", "grafana"}
+
+	for _, component := range components {
+		pvcName := fmt.Sprintf("%s-%s-thanos-stack-%s", config.ChainName, timestamp, component)
+
+		// Check PVC status with timeout
+		maxRetries := 12 // 1 minute total (5 seconds * 12)
+		for i := 0; i < maxRetries; i++ {
+			output, err := utils.ExecuteCommand("kubectl", "get", "pvc", pvcName, "-n", config.Namespace, "-o", "jsonpath={.status.phase}")
+			if err != nil {
+				fmt.Printf("⚠️  Warning: Failed to check PVC %s status: %v\n", pvcName, err)
+				break
+			}
+
+			status := strings.TrimSpace(output)
+
+			if status == "Bound" {
+				fmt.Printf("✅ %s PVC is bound successfully\n", component)
+				break
+			} else if status == "Pending" && i == maxRetries-1 {
+				return fmt.Errorf("%s PVC is still pending after timeout", component)
+			}
+
+			if i < maxRetries-1 {
+				time.Sleep(5 * time.Second)
 			}
 		}
 	}
 
-	return "", fmt.Errorf("could not extract cluster name from context or cluster info")
+	return nil
 }
 
-// getEFSFileSystemId gets the EFS file system ID for the cluster
-func (t *ThanosStack) getEFSFileSystemId(clusterName string) (string, error) {
-	// Try to find EFS with cluster name tag
-	output, err := utils.ExecuteCommand("aws", "efs", "describe-file-systems",
-		"--region", t.deployConfig.AWS.Region,
-		"--output", "json")
+// getTimestampFromExistingPV extracts timestamp from op-geth PV name
+func (t *ThanosStack) getTimestampFromExistingPV(chainName string) (string, error) {
+	output, err := utils.ExecuteCommand("kubectl", "get", "pv", "-o", "custom-columns=NAME:.metadata.name", "--no-headers")
 	if err != nil {
-		return "", fmt.Errorf("failed to describe EFS file systems: %w", err)
+		return "", fmt.Errorf("failed to get PVs: %w", err)
 	}
 
-	// Parse JSON output to find matching EFS
-	var efsResponse struct {
-		FileSystems []struct {
-			FileSystemId string `json:"FileSystemId"`
-			Tags         []struct {
-				Key   string `json:"Key"`
-				Value string `json:"Value"`
-			} `json:"Tags"`
-		} `json:"FileSystems"`
-	}
-
-	if err := json.Unmarshal([]byte(output), &efsResponse); err != nil {
-		return "", fmt.Errorf("failed to parse EFS response: %w", err)
-	}
-
-	// Look for EFS with matching cluster name
-	for _, fs := range efsResponse.FileSystems {
-		for _, tag := range fs.Tags {
-			if tag.Key == "Name" && tag.Value == clusterName {
-				return fs.FileSystemId, nil
+	// Look for op-geth PV pattern: chainName-timestamp-thanos-stack-op-geth
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, chainName) && strings.Contains(line, "thanos-stack-op-geth") {
+			// Extract timestamp from: theo0624-1750743380-thanos-stack-op-geth
+			parts := strings.Split(line, "-")
+			if len(parts) >= 2 {
+				return parts[1], nil // Return timestamp part
 			}
 		}
 	}
 
-	return "", fmt.Errorf("no EFS file system found with Name tag matching cluster: %s", clusterName)
+	return "", fmt.Errorf("could not find existing op-geth PV to extract timestamp")
 }
 
+// generateStaticPVManifest generates PV manifest for Static Provisioning with op-geth/op-node naming pattern
+func (t *ThanosStack) generateStaticPVManifest(component string, config *MonitoringConfig, size string, timestamp string) string {
+	// Use same naming pattern as op-geth/op-node: chainName-timestamp-thanos-stack-component
+	pvName := fmt.Sprintf("%s-%s-thanos-stack-%s", config.ChainName, timestamp, component)
+
+	// Add subdirectory to volumeHandle for proper EFS directory separation
+	volumeHandle := fmt.Sprintf("%s::%s", config.EFSFileSystemId, component)
+
+	return fmt.Sprintf(`apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: %s
+  labels:
+    app: %s
+spec:
+  capacity:
+    storage: %s
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: efs-sc
+  csi:
+    driver: efs.csi.aws.com
+    volumeHandle: %s
+`, pvName, pvName, size, volumeHandle)
+}
+
+// applyPVManifest applies PV manifest using kubectl
+func (t *ThanosStack) applyPVManifest(component string, manifest string) error {
+	tempFile := filepath.Join(os.TempDir(), fmt.Sprintf("monitoring-%s-pv.yaml", component))
+
+	if err := os.WriteFile(tempFile, []byte(manifest), 0644); err != nil {
+		return fmt.Errorf("failed to write PV manifest: %w", err)
+	}
+	defer os.Remove(tempFile)
+
+	if _, err := utils.ExecuteCommand("kubectl", "apply", "-f", tempFile); err != nil {
+		return fmt.Errorf("failed to apply PV manifest: %w", err)
+	}
+
+	return nil
+}
+
+// generateStaticPVCManifest generates PVC manifest for Static Provisioning with selector
+func (t *ThanosStack) generateStaticPVCManifest(component string, config *MonitoringConfig, size string, timestamp string) string {
+	// Use same naming pattern as op-geth/op-node: chainName-timestamp-thanos-stack-component
+	pvName := fmt.Sprintf("%s-%s-thanos-stack-%s", config.ChainName, timestamp, component)
+	pvcName := pvName // PVC name matches PV name for op-geth/op-node compatibility
+
+	return fmt.Sprintf(`apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: %s
+  selector:
+    matchLabels:
+      app: %s
+  storageClassName: efs-sc
+  volumeMode: Filesystem
+`, pvcName, config.Namespace, size, pvName)
+}
+
+// applyPVCManifest applies PVC manifest using kubectl
+func (t *ThanosStack) applyPVCManifest(component string, manifest string) error {
+	tempFile := filepath.Join(os.TempDir(), fmt.Sprintf("monitoring-%s-pvc.yaml", component))
+
+	if err := os.WriteFile(tempFile, []byte(manifest), 0644); err != nil {
+		return fmt.Errorf("failed to write PVC manifest: %w", err)
+	}
+	defer os.Remove(tempFile)
+
+	if _, err := utils.ExecuteCommand("kubectl", "apply", "-f", tempFile); err != nil {
+		return fmt.Errorf("failed to apply PVC manifest: %w", err)
+	}
+
+	return nil
+}
+
+// createDashboardConfigMaps creates ConfigMaps for Grafana dashboards
 func (t *ThanosStack) createDashboardConfigMaps(config *MonitoringConfig) error {
 	fmt.Println("📊 Creating dashboard ConfigMaps...")
 
@@ -1189,18 +1215,13 @@ data:
 			continue
 		}
 
-		fmt.Printf("📊 Creating ConfigMap: %s\n", configMapName)
 		if _, err := utils.ExecuteCommand("kubectl", "apply", "-f", tempFile); err != nil {
 			fmt.Printf("⚠️  Failed to create ConfigMap %s: %v\n", configMapName, err)
-		} else {
-			fmt.Printf("✅ Created dashboard ConfigMap: %s\n", configMapName)
 		}
 
 		// Clean up temp file
 		os.Remove(tempFile)
 	}
-
-	fmt.Println("✅ Dashboard ConfigMaps created successfully")
 	return nil
 }
 
