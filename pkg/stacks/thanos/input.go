@@ -1021,6 +1021,7 @@ func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainI
 		GovernanceTokenOwner:                     "0x0000000000000000000000000000000000000333",
 		GovernanceTokenSymbol:                    "OP",
 		L2OutputOracleChallenger:                 "0x0000000000000000000000000000000000000001",
+		ReuseDeployment:                          true,
 	}
 
 	return defaultTemplate

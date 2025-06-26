@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/big"
 
-	ethCommon "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/dependencies"
@@ -111,26 +110,25 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 
 	registerCandidate := deployContractsConfig.RegisterCandidate
 
-	if t.registerCandidate {
-		if registerCandidate == nil {
-			return fmt.Errorf("register candidate is required")
-		}
-
-		adminAddress, err := utils.GetAddressFromPrivateKey(t.deployConfig.AdminPrivateKey)
-		if err != nil {
-			return fmt.Errorf("failed to get admin address from private key: %s", err)
-		}
-		err = t.checkAdminBalance(ctx, adminAddress, registerCandidate.amount, l1Client)
-		if err != nil {
-			return fmt.Errorf("failed to check admin balance: %s", err)
-		}
-	}
-
 	if isResume {
 		err = t.deployContracts(ctx, l1Client, true)
 		if err != nil {
 			fmt.Print("\r❌ Resume the contracts deployment failed!       \n")
 			return err
+		}
+		if t.registerCandidate {
+			if registerCandidate == nil {
+				return fmt.Errorf("register candidate is required")
+			}
+
+			adminAddress, err := utils.GetAddressFromPrivateKey(t.deployConfig.AdminPrivateKey)
+			if err != nil {
+				return fmt.Errorf("failed to get admin address from private key: %s", err)
+			}
+			err = t.checkAdminBalance(ctx, adminAddress, registerCandidate.amount, l1Client)
+			if err != nil {
+				return fmt.Errorf("failed to check admin balance: %s", err)
+			}
 		}
 	} else {
 		l2ChainID, err := utils.GenerateL2ChainId()
@@ -156,9 +154,13 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			operators.ProposerPrivateKey == "" {
 			return fmt.Errorf("at least 5 operators are required for deploying contracts")
 		}
+		adminAccount, err := utils.GetAddressFromPrivateKey(operators.AdminPrivateKey)
+		if err != nil {
+			return fmt.Errorf("failed to get admin address from private key: %s", err)
+		}
 
 		if t.registerCandidate {
-			err = t.checkAdminBalance(ctx, ethCommon.HexToAddress(operators.AdminPrivateKey), registerCandidate.amount, l1Client)
+			err = t.checkAdminBalance(ctx, adminAccount, registerCandidate.amount, l1Client)
 			if err != nil {
 				return err
 			}
@@ -234,12 +236,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 
 		// STEP 4. Deploy the contracts
 		// Check admin balance and estimated deployment cost
-		adminAddress, err := utils.GetAddressFromPrivateKey(operators.AdminPrivateKey)
-		if err != nil {
-			fmt.Printf("❌ Failed to get admin address from private key: %v\n", err)
-			return err
-		}
-		balance, err := l1Client.BalanceAt(ctx, adminAddress, nil)
+		balance, err := l1Client.BalanceAt(ctx, adminAccount, nil)
 		if err != nil {
 			fmt.Printf("❌ Failed to retrieve admin account balance: %v\n", err)
 			return err
