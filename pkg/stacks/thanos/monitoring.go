@@ -457,6 +457,20 @@ func (t *ThanosStack) uninstallMonitoring(ctx context.Context) error {
 		}
 	}
 
+	chainName := strings.ToLower(t.deployConfig.ChainName)
+
+	// Clean up existing PVs and PVCs for monitoring components
+	fmt.Println("🧹 Cleaning up existing monitoring PVs and PVCs...")
+	// Get timestamp from existing op-geth PV to match naming pattern
+	timestamp, err := t.getTimestampFromExistingPV(chainName)
+	if err != nil {
+		return fmt.Errorf("failed to get timestamp from existing PV: %w", err)
+	}
+	if err := t.cleanupExistingMonitoringResources(monitoringNamespace, chainName, timestamp); err != nil {
+		fmt.Printf("⚠️  Warning: Failed to cleanup existing resources: %v\n", err)
+		// Continue anyway - we'll try to create new ones
+	}
+
 	// delete the namespace
 	if err := t.tryToDeleteK8sNamespace(ctx, monitoringNamespace); err != nil {
 		fmt.Printf("⚠️  Warning: Failed to delete namespace %s: %v\n", monitoringNamespace, err)
@@ -948,7 +962,7 @@ func (t *ThanosStack) createStaticPVs(config *MonitoringConfig) error {
 
 	// Clean up existing PVs and PVCs for monitoring components
 	fmt.Println("🧹 Cleaning up existing monitoring PVs and PVCs...")
-	if err := t.cleanupExistingMonitoringResources(config, timestamp); err != nil {
+	if err := t.cleanupExistingMonitoringResources(config.Namespace, config.ChainName, timestamp); err != nil {
 		fmt.Printf("⚠️  Warning: Failed to cleanup existing resources: %v\n", err)
 		// Continue anyway - we'll try to create new ones
 	}
@@ -988,14 +1002,14 @@ func (t *ThanosStack) createStaticPVs(config *MonitoringConfig) error {
 }
 
 // cleanupExistingMonitoringResources removes existing monitoring PVs and PVCs
-func (t *ThanosStack) cleanupExistingMonitoringResources(config *MonitoringConfig, timestamp string) error {
+func (t *ThanosStack) cleanupExistingMonitoringResources(namespace string, chainName string, timestamp string) error {
 	components := []string{"prometheus", "grafana"}
 
 	for _, component := range components {
-		pvName := fmt.Sprintf("%s-%s-thanos-stack-%s", config.ChainName, timestamp, component)
+		pvName := fmt.Sprintf("%s-%s-thanos-stack-%s", chainName, timestamp, component)
 
 		// Delete PVC first (it might be bound to the PV)
-		_, err := utils.ExecuteCommand("kubectl", "delete", "pvc", pvName, "-n", config.Namespace, "--ignore-not-found=true")
+		_, err := utils.ExecuteCommand("kubectl", "delete", "pvc", pvName, "-n", namespace, "--ignore-not-found=true")
 		if err != nil {
 			fmt.Printf("⚠️  Warning: Failed to delete PVC %s: %v\n", pvName, err)
 		}
@@ -1010,7 +1024,7 @@ func (t *ThanosStack) cleanupExistingMonitoringResources(config *MonitoringConfi
 		}
 
 		// Also try to delete any PVs that might have old naming patterns
-		t.cleanupOldPVPattern(component, config.ChainName)
+		t.cleanupOldPVPattern(component, chainName)
 	}
 
 	return nil
