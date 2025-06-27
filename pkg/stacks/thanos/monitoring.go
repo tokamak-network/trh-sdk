@@ -97,7 +97,7 @@ func (t *ThanosStack) displayMonitoringInfo(config *MonitoringConfig) {
 	grafanaURL := t.waitForIngressEndpoint(config)
 
 	if grafanaURL != "" {
-		fmt.Printf("   🌐 **Grafana Web URL: %s**\n", grafanaURL)
+		fmt.Printf("   🌐 Grafana Web URL: %s \n", grafanaURL)
 		fmt.Printf("   🎯 You can now access Grafana directly via the web!\n\n")
 	} else {
 		fmt.Printf("   ⚠️  ALB Ingress endpoint not ready within timeout\n")
