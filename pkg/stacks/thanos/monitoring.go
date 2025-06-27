@@ -895,9 +895,38 @@ kubectl describe pvc -n %s
 
 // deployMonitoringInfrastructure creates PVs for Static Provisioning using existing efs-sc
 func (t *ThanosStack) deployMonitoringInfrastructure(config *MonitoringConfig) error {
+	// Create namespace if it doesn't exist
+	if err := t.ensureNamespaceExists(config.Namespace); err != nil {
+		return fmt.Errorf("failed to ensure namespace exists: %w", err)
+	}
+
 	// Create PVs using kubectl and existing efs-sc StorageClass
 	if err := t.createStaticPVs(config); err != nil {
 		return fmt.Errorf("failed to create static PVs: %w", err)
+	}
+
+	return nil
+}
+
+// ensureNamespaceExists checks if namespace exists and creates it if needed
+func (t *ThanosStack) ensureNamespaceExists(namespace string) error {
+	fmt.Printf("🔍 Checking if namespace '%s' exists...\n", namespace)
+
+	// Check if namespace exists
+	output, err := utils.ExecuteCommand("kubectl", "get", "namespace", namespace, "--ignore-not-found=true")
+	if err != nil {
+		return fmt.Errorf("failed to check namespace existence: %w", err)
+	}
+
+	if strings.TrimSpace(output) == "" {
+		// Namespace doesn't exist, create it
+		fmt.Printf("📦 Creating namespace '%s'...\n", namespace)
+		if _, err := utils.ExecuteCommand("kubectl", "create", "namespace", namespace); err != nil {
+			return fmt.Errorf("failed to create namespace: %w", err)
+		}
+		fmt.Printf("✅ Namespace '%s' created successfully\n", namespace)
+	} else {
+		fmt.Printf("✅ Namespace '%s' already exists\n", namespace)
 	}
 
 	return nil
