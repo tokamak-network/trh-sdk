@@ -97,7 +97,7 @@ func (t *ThanosStack) displayMonitoringInfo(config *MonitoringConfig) {
 	grafanaURL := t.waitForIngressEndpoint(config)
 
 	if grafanaURL != "" {
-		fmt.Printf("   🌐 **Grafana Web URL: %s**\n", grafanaURL)
+		fmt.Printf("   🌐 Grafana Web URL: %s \n", grafanaURL)
 		fmt.Printf("   🎯 You can now access Grafana directly via the web!\n\n")
 	} else {
 		fmt.Printf("   ⚠️  ALB Ingress endpoint not ready within timeout\n")
@@ -125,8 +125,9 @@ type MonitoringConfig struct {
 }
 
 // getMonitoringConfig gathers all required configuration for monitoring
-func (t *ThanosStack) getMonitoringConfig(ctx context.Context) (*MonitoringConfig, error) {
+func (t *ThanosStack) getMonitoringConfig(_ context.Context) (*MonitoringConfig, error) {
 	// Use timestamped release name for monitoring
+	chainName := strings.ToLower(t.deployConfig.ChainName)
 	timestamp := time.Now().Unix()
 	helmReleaseName := fmt.Sprintf("monitoring-%d", timestamp)
 
@@ -153,13 +154,13 @@ func (t *ThanosStack) getMonitoringConfig(ctx context.Context) (*MonitoringConfi
 	}
 
 	// Get service names dynamically from trh-sdk configuration
-	serviceNames, err := t.getServiceNames(t.deployConfig.K8s.Namespace, t.deployConfig.ChainName)
+	serviceNames, err := t.getServiceNames(t.deployConfig.K8s.Namespace, chainName)
 	if err != nil {
 		return nil, fmt.Errorf("error getting service names: %w", err)
 	}
 
 	// Get EFS filesystem ID from existing op-geth PV
-	efsFileSystemId, err := t.getEFSFileSystemId()
+	efsFileSystemId, err := t.getEFSFileSystemId(chainName)
 	if err != nil {
 		return nil, fmt.Errorf("error getting EFS filesystem ID: %w", err)
 	}
@@ -174,7 +175,7 @@ func (t *ThanosStack) getMonitoringConfig(ctx context.Context) (*MonitoringConfi
 		EFSFileSystemId:   efsFileSystemId,
 		ChartsPath:        chartsPath,
 		ValuesFilePath:    "", // Will be set in generateValuesFile
-		ChainName:         t.deployConfig.ChainName,
+		ChainName:         chainName,
 	}
 
 	return config, nil
@@ -456,6 +457,12 @@ func (t *ThanosStack) uninstallMonitoring(ctx context.Context) error {
 		}
 	}
 
+	// delete the namespace
+	if err := t.tryToDeleteK8sNamespace(ctx, monitoringNamespace); err != nil {
+		fmt.Printf("⚠️  Warning: Failed to delete namespace %s: %v\n", monitoringNamespace, err)
+		// Continue anyway - this is cleanup, not critical
+	}
+
 	fmt.Println("✅ Uninstall monitoring component successfully")
 
 	return nil
@@ -559,10 +566,8 @@ func (t *ThanosStack) cleanupGenericMonitoringServices() error {
 }
 
 // getEFSFileSystemId extracts EFS filesystem ID from existing PV
-func (t *ThanosStack) getEFSFileSystemId() (string, error) {
+func (t *ThanosStack) getEFSFileSystemId(chainName string) (string, error) {
 	fmt.Println("🔍 Getting EFS filesystem ID from existing PV...")
-
-	chainName := t.deployConfig.ChainName
 
 	// Get all PVs and filter for op-geth
 	pvListOutput, err := utils.ExecuteCommand("kubectl", "get", "pv", "-o", "name")
@@ -896,9 +901,38 @@ kubectl describe pvc -n %s
 
 // deployMonitoringInfrastructure creates PVs for Static Provisioning using existing efs-sc
 func (t *ThanosStack) deployMonitoringInfrastructure(config *MonitoringConfig) error {
+	// Create namespace if it doesn't exist
+	if err := t.ensureNamespaceExists(config.Namespace); err != nil {
+		return fmt.Errorf("failed to ensure namespace exists: %w", err)
+	}
+
 	// Create PVs using kubectl and existing efs-sc StorageClass
 	if err := t.createStaticPVs(config); err != nil {
 		return fmt.Errorf("failed to create static PVs: %w", err)
+	}
+
+	return nil
+}
+
+// ensureNamespaceExists checks if namespace exists and creates it if needed
+func (t *ThanosStack) ensureNamespaceExists(namespace string) error {
+	fmt.Printf("🔍 Checking if namespace '%s' exists...\n", namespace)
+
+	// Check if namespace exists
+	output, err := utils.ExecuteCommand("kubectl", "get", "namespace", namespace, "--ignore-not-found=true")
+	if err != nil {
+		return fmt.Errorf("failed to check namespace existence: %w", err)
+	}
+
+	if strings.TrimSpace(output) == "" {
+		// Namespace doesn't exist, create it
+		fmt.Printf("📦 Creating namespace '%s'...\n", namespace)
+		if _, err := utils.ExecuteCommand("kubectl", "create", "namespace", namespace); err != nil {
+			return fmt.Errorf("failed to create namespace: %w", err)
+		}
+		fmt.Printf("✅ Namespace '%s' created successfully\n", namespace)
+	} else {
+		fmt.Printf("✅ Namespace '%s' already exists\n", namespace)
 	}
 
 	return nil
@@ -1146,11 +1180,12 @@ spec:
 // applyPVCManifest applies PVC manifest using kubectl
 func (t *ThanosStack) applyPVCManifest(component string, manifest string) error {
 	tempFile := filepath.Join(os.TempDir(), fmt.Sprintf("monitoring-%s-pvc.yaml", component))
+	fmt.Println("tempFile:", tempFile)
 
 	if err := os.WriteFile(tempFile, []byte(manifest), 0644); err != nil {
 		return fmt.Errorf("failed to write PVC manifest: %w", err)
 	}
-	defer os.Remove(tempFile)
+	// defer os.Remove(tempFile)
 
 	if _, err := utils.ExecuteCommand("kubectl", "apply", "-f", tempFile); err != nil {
 		return fmt.Errorf("failed to apply PVC manifest: %w", err)
