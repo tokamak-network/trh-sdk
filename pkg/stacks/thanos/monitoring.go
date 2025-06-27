@@ -125,8 +125,9 @@ type MonitoringConfig struct {
 }
 
 // getMonitoringConfig gathers all required configuration for monitoring
-func (t *ThanosStack) getMonitoringConfig(ctx context.Context) (*MonitoringConfig, error) {
+func (t *ThanosStack) getMonitoringConfig(_ context.Context) (*MonitoringConfig, error) {
 	// Use timestamped release name for monitoring
+	chainName := strings.ToLower(t.deployConfig.ChainName)
 	timestamp := time.Now().Unix()
 	helmReleaseName := fmt.Sprintf("monitoring-%d", timestamp)
 
@@ -153,13 +154,13 @@ func (t *ThanosStack) getMonitoringConfig(ctx context.Context) (*MonitoringConfi
 	}
 
 	// Get service names dynamically from trh-sdk configuration
-	serviceNames, err := t.getServiceNames(t.deployConfig.K8s.Namespace, t.deployConfig.ChainName)
+	serviceNames, err := t.getServiceNames(t.deployConfig.K8s.Namespace, chainName)
 	if err != nil {
 		return nil, fmt.Errorf("error getting service names: %w", err)
 	}
 
 	// Get EFS filesystem ID from existing op-geth PV
-	efsFileSystemId, err := t.getEFSFileSystemId()
+	efsFileSystemId, err := t.getEFSFileSystemId(chainName)
 	if err != nil {
 		return nil, fmt.Errorf("error getting EFS filesystem ID: %w", err)
 	}
@@ -174,7 +175,7 @@ func (t *ThanosStack) getMonitoringConfig(ctx context.Context) (*MonitoringConfi
 		EFSFileSystemId:   efsFileSystemId,
 		ChartsPath:        chartsPath,
 		ValuesFilePath:    "", // Will be set in generateValuesFile
-		ChainName:         t.deployConfig.ChainName,
+		ChainName:         chainName,
 	}
 
 	return config, nil
@@ -559,10 +560,8 @@ func (t *ThanosStack) cleanupGenericMonitoringServices() error {
 }
 
 // getEFSFileSystemId extracts EFS filesystem ID from existing PV
-func (t *ThanosStack) getEFSFileSystemId() (string, error) {
+func (t *ThanosStack) getEFSFileSystemId(chainName string) (string, error) {
 	fmt.Println("🔍 Getting EFS filesystem ID from existing PV...")
-
-	chainName := t.deployConfig.ChainName
 
 	// Get all PVs and filter for op-geth
 	pvListOutput, err := utils.ExecuteCommand("kubectl", "get", "pv", "-o", "name")
@@ -1146,11 +1145,12 @@ spec:
 // applyPVCManifest applies PVC manifest using kubectl
 func (t *ThanosStack) applyPVCManifest(component string, manifest string) error {
 	tempFile := filepath.Join(os.TempDir(), fmt.Sprintf("monitoring-%s-pvc.yaml", component))
+	fmt.Println("tempFile:", tempFile)
 
 	if err := os.WriteFile(tempFile, []byte(manifest), 0644); err != nil {
 		return fmt.Errorf("failed to write PVC manifest: %w", err)
 	}
-	defer os.Remove(tempFile)
+	// defer os.Remove(tempFile)
 
 	if _, err := utils.ExecuteCommand("kubectl", "apply", "-f", tempFile); err != nil {
 		return fmt.Errorf("failed to apply PVC manifest: %w", err)

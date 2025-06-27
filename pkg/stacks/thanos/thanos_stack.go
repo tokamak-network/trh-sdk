@@ -858,6 +858,7 @@ func (t *ThanosStack) InstallPlugins(ctx context.Context, pluginNames []string) 
 		case constants.PluginMonitoring:
 			err := t.installMonitoring(ctx)
 			if err != nil {
+				fmt.Println("Error installing monitoring:", err)
 				return t.uninstallMonitoring(ctx)
 			}
 			return nil
