@@ -457,6 +457,12 @@ func (t *ThanosStack) uninstallMonitoring(ctx context.Context) error {
 		}
 	}
 
+	// delete the namespace
+	if err := t.tryToDeleteK8sNamespace(ctx, monitoringNamespace); err != nil {
+		fmt.Printf("⚠️  Warning: Failed to delete namespace %s: %v\n", monitoringNamespace, err)
+		// Continue anyway - this is cleanup, not critical
+	}
+
 	fmt.Println("✅ Uninstall monitoring component successfully")
 
 	return nil
