@@ -11,9 +11,16 @@ const (
 )
 
 type IndexAccount struct {
-	Index      int
 	Address    string
 	PrivateKey string
 }
 
 type OperatorMap map[Operator]*IndexAccount
+
+type Operators struct {
+	AdminPrivateKey      string
+	SequencerPrivateKey  string
+	BatcherPrivateKey    string
+	ProposerPrivateKey   string
+	ChallengerPrivateKey string
+}

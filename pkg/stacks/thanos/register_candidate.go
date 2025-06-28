@@ -26,6 +26,18 @@ type DesignatedOwners struct {
 	Foundation ethCommon.Address
 }
 
+type RegisterCandidateInput struct {
+	amount   float64
+	useTon   bool
+	memo     string
+	nameInfo string
+}
+
+func (t *ThanosStack) SetRegisterCandidate(value bool) *ThanosStack {
+	t.registerCandidate = value
+	return t
+}
+
 func (t *ThanosStack) checkAdminBalance(ctx context.Context, adminAddress ethCommon.Address, amount float64, l1Client *ethclient.Client) error {
 	fmt.Printf("Checking admin's TON token balance... \n")
 
@@ -72,13 +84,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 
 	chainConfig := constants.L1ChainConfigurations[chainID.Uint64()]
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Println("Error determining current directory:", err)
-		return err
-	}
-
-	file, err := os.Open(fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%s", cwd, fmt.Sprintf("%d-deploy.json", chainID)))
+	file, err := os.Open(fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%s", t.deploymentPath, fmt.Sprintf("%d-deploy.json", chainID)))
 	if err != nil {
 		fmt.Println("Error opening deployment file:", err)
 		return err
@@ -270,14 +276,11 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 	return nil
 }
 
-func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, cwd string) error {
+func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, registerCandidate *RegisterCandidateInput) error {
 	var err error
 	fmt.Println("Starting candidate registration process...")
 	fmt.Println("💲 Admin account will be used to register the candidate. Please ensure it has sufficient TON token balance.")
-	registerCandidate, err := t.inputRegisterCandidate()
-	if err != nil {
-		return fmt.Errorf("❌ failed to get register candidate input: %w", err)
-	}
+
 	l1Client, err := ethclient.DialContext(ctx, t.deployConfig.L1RPCURL)
 	if err != nil {
 		return err
@@ -290,7 +293,7 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, cwd string) 
 	if err != nil {
 		return err
 	}
-	err = t.setupSafeWallet(ctx, cwd)
+	err = t.setupSafeWallet(ctx, t.deploymentPath)
 	if err != nil {
 		return fmt.Errorf("❌ failed to set up Safe Wallet: %w", err)
 	}
@@ -405,7 +408,7 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, cwd string) error {
 	// Run hardhat task
 	sdkPath := filepath.Join(cwd, "tokamak-thanos", "packages", "tokamak", "sdk")
 	cmdStr := fmt.Sprintf("cd %s && L1_URL=%s PRIVATE_KEY=%s SAFE_WALLET_ADDRESS=%s npx hardhat set-safe-wallet", sdkPath, t.deployConfig.L1RPCURL, t.deployConfig.AdminPrivateKey, safeWalletAddress)
-	if err := utils.ExecuteCommandStream("bash", "-c", cmdStr); err != nil {
+	if err := utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", cmdStr); err != nil {
 		fmt.Print("\rfailed to setup the Safe wallet!\n")
 		return err
 	}

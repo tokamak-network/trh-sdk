@@ -13,32 +13,40 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// InstallMonitoring installs monitoring stack using Helm dependencies
-func (t *ThanosStack) installMonitoring(ctx context.Context) error {
-	fmt.Println("🚀 Starting monitoring installation...")
+// MonitoringConfig holds all configuration needed for monitoring installation
+type MonitoringConfig struct {
+	Namespace         string
+	HelmReleaseName   string
+	AdminPassword     string
+	L1RpcUrl          string
+	ServiceNames      map[string]string
+	EnablePersistence bool
+	EFSFileSystemId   string
+	ChartsPath        string
+	ValuesFilePath    string
+	ChainName         string
+}
 
-	// Get monitoring configuration
-	config, err := t.getMonitoringConfig(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get monitoring configuration: %w", err)
-	}
+// InstallMonitoring installs monitoring stack using Helm dependencies
+func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *MonitoringConfig) error {
+	fmt.Println("🚀 Starting monitoring installation...")
 
 	// Deploy Terraform infrastructure if persistent storage is enabled
 	if config.EnablePersistence {
 		fmt.Println("📦 Deploying persistent storage infrastructure...")
-		if err := t.deployMonitoringInfrastructure(config); err != nil {
+		if err := t.deployMonitoringInfrastructure(ctx, config); err != nil {
 			return fmt.Errorf("failed to deploy monitoring infrastructure: %w", err)
 		}
 	}
 
 	// Generate values file
-	if err := t.generateValuesFile(config); err != nil {
+	if err := t.generateValuesFile(ctx, config); err != nil {
 		return fmt.Errorf("failed to generate values file: %w", err)
 	}
 
 	// Update chart dependencies
 	fmt.Println("📦 Updating chart dependencies...")
-	if _, err := utils.ExecuteCommand("helm", "dependency", "update", config.ChartsPath); err != nil {
+	if _, err := utils.ExecuteCommand(ctx, "helm", "dependency", "update", config.ChartsPath); err != nil {
 		return fmt.Errorf("failed to update chart dependencies: %w", err)
 	}
 
@@ -57,12 +65,12 @@ func (t *ThanosStack) installMonitoring(ctx context.Context) error {
 
 	// Start error monitoring in background
 	errorChan := make(chan error, 1)
-	go t.monitorInstallationErrors(config, errorChan)
+	go t.monitorInstallationErrors(ctx, config, errorChan)
 
-	if _, err := utils.ExecuteCommand("helm", installCmd...); err != nil {
+	if _, err := utils.ExecuteCommand(ctx, "helm", installCmd...); err != nil {
 		// Installation failed, gather error information
 		fmt.Println("\n❌ Installation failed! Gathering error information...")
-		t.gatherInstallationErrors(config)
+		t.gatherInstallationErrors(ctx, config)
 		return fmt.Errorf("failed to install monitoring stack: %w", err)
 	}
 
@@ -70,62 +78,19 @@ func (t *ThanosStack) installMonitoring(ctx context.Context) error {
 	close(errorChan)
 
 	// Create dashboard ConfigMaps after successful Helm installation
-	if err := t.createDashboardConfigMaps(config); err != nil {
+	if err := t.createDashboardConfigMaps(ctx, config); err != nil {
 		fmt.Printf("⚠️  Failed to create dashboard ConfigMaps: %v\n", err)
 		fmt.Println("   Dashboards can be imported manually later")
 	}
 
 	// Display access information
-	t.displayMonitoringInfo(config)
+	t.displayMonitoringInfo(ctx, config)
 
 	return nil
 }
 
-// displayMonitoringInfo shows access information for the monitoring stack
-func (t *ThanosStack) displayMonitoringInfo(config *MonitoringConfig) {
-	fmt.Println("\n🎉 Monitoring Stack Installation Complete!")
-	fmt.Println("==========================================")
-
-	fmt.Printf("📊 **Grafana Dashboard Access:**\n")
-	fmt.Printf("   • Username: admin\n")
-	fmt.Printf("   • Password: %s\n", config.AdminPassword)
-	fmt.Printf("   • Namespace: %s\n", config.Namespace)
-	fmt.Printf("   • Release: %s\n\n", config.HelmReleaseName)
-
-	// Wait for ALB ingress endpoint to be ready
-	fmt.Println("🔗 **ALB Ingress Endpoint:**")
-	grafanaURL := t.waitForIngressEndpoint(config)
-
-	if grafanaURL != "" {
-		fmt.Printf("   🌐 Grafana Web URL: %s \n", grafanaURL)
-		fmt.Printf("   🎯 You can now access Grafana directly via the web!\n\n")
-	} else {
-		fmt.Printf("   ⚠️  ALB Ingress endpoint not ready within timeout\n")
-		fmt.Printf("   🔧 Check status: kubectl get ingress -n %s -w\n\n", config.Namespace)
-	}
-
-	fmt.Printf("🔗 **Local Access Commands (Alternative):**\n")
-	fmt.Printf("   # Port forward to access Grafana locally:\n")
-	fmt.Printf("   kubectl port-forward -n %s svc/%s-grafana 3000:80\n", config.Namespace, config.HelmReleaseName)
-	fmt.Printf("   # Then visit: http://localhost:3000\n\n")
-}
-
-// MonitoringConfig holds all configuration needed for monitoring installation
-type MonitoringConfig struct {
-	Namespace         string
-	HelmReleaseName   string
-	AdminPassword     string
-	L1RpcUrl          string
-	ServiceNames      map[string]string
-	EnablePersistence bool
-	EFSFileSystemId   string
-	ChartsPath        string
-	ValuesFilePath    string
-	ChainName         string
-}
-
-// getMonitoringConfig gathers all required configuration for monitoring
-func (t *ThanosStack) getMonitoringConfig(_ context.Context) (*MonitoringConfig, error) {
+// GetMonitoringConfig gathers all required configuration for monitoring
+func (t *ThanosStack) GetMonitoringConfig(ctx context.Context) (*MonitoringConfig, error) {
 	// Use timestamped release name for monitoring
 	chainName := strings.ToLower(t.deployConfig.ChainName)
 	timestamp := time.Now().Unix()
@@ -142,10 +107,7 @@ func (t *ThanosStack) getMonitoringConfig(_ context.Context) (*MonitoringConfig,
 	}
 
 	// Get current working directory
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, fmt.Errorf("error determining current directory: %w", err)
-	}
+	cwd := t.deploymentPath
 
 	// Set charts path
 	chartsPath := fmt.Sprintf("%s/tokamak-thanos-stack/charts/monitoring", cwd)
@@ -154,13 +116,13 @@ func (t *ThanosStack) getMonitoringConfig(_ context.Context) (*MonitoringConfig,
 	}
 
 	// Get service names dynamically from trh-sdk configuration
-	serviceNames, err := t.getServiceNames(t.deployConfig.K8s.Namespace, chainName)
+	serviceNames, err := t.getServiceNames(ctx, t.deployConfig.K8s.Namespace, chainName)
 	if err != nil {
 		return nil, fmt.Errorf("error getting service names: %w", err)
 	}
 
 	// Get EFS filesystem ID from existing op-geth PV
-	efsFileSystemId, err := t.getEFSFileSystemId(chainName)
+	efsFileSystemId, err := t.getEFSFileSystemId(ctx, chainName)
 	if err != nil {
 		return nil, fmt.Errorf("error getting EFS filesystem ID: %w", err)
 	}
@@ -181,8 +143,108 @@ func (t *ThanosStack) getMonitoringConfig(_ context.Context) (*MonitoringConfig,
 	return config, nil
 }
 
+func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
+	if t.deployConfig.K8s == nil {
+		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+	}
+
+	if t.deployConfig.AWS == nil {
+		return fmt.Errorf("AWS configuration is not set. Please run the deploy command first")
+	}
+
+	// Use the correct monitoring namespace instead of Thanos Stack namespace
+	monitoringNamespace := "monitoring"
+
+	// Find monitoring releases in the monitoring namespace
+	releases, err := utils.FilterHelmReleases(ctx, monitoringNamespace, "monitoring")
+	if err != nil {
+		fmt.Println("Error to filter helm releases:", err)
+		return err
+	}
+
+	// Store release names for cleanup
+	var releasesToCleanup []string
+
+	for _, release := range releases {
+		fmt.Printf("🗑️  Uninstalling monitoring release: %s\n", release)
+		releasesToCleanup = append(releasesToCleanup, release)
+
+		_, err = utils.ExecuteCommand(ctx, "helm", []string{
+			"uninstall",
+			release,
+			"--namespace",
+			monitoringNamespace,
+		}...)
+		if err != nil {
+			fmt.Println("Error uninstalling monitoring helm chart:", err)
+			return err
+		}
+	}
+
+	// Clean up orphaned services in kube-system after Helm uninstall
+	if len(releasesToCleanup) > 0 {
+		if err := t.cleanupOrphanedKubeSystemServices(ctx, releasesToCleanup); err != nil {
+			fmt.Printf("⚠️  Warning: Failed to cleanup orphaned services: %v\n", err)
+			// Continue anyway - this is cleanup, not critical
+		}
+	}
+
+	chainName := strings.ToLower(t.deployConfig.ChainName)
+
+	// Clean up existing PVs and PVCs for monitoring components
+	fmt.Println("🧹 Cleaning up existing monitoring PVs and PVCs...")
+	// Get timestamp from existing op-geth PV to match naming pattern
+	timestamp, err := t.getTimestampFromExistingPV(ctx, chainName)
+	if err != nil {
+		return fmt.Errorf("failed to get timestamp from existing PV: %w", err)
+	}
+	if err := t.cleanupExistingMonitoringResources(ctx, monitoringNamespace, chainName, timestamp); err != nil {
+		fmt.Printf("⚠️  Warning: Failed to cleanup existing resources: %v\n", err)
+		// Continue anyway - we'll try to create new ones
+	}
+
+	// delete the namespace
+	if err := t.tryToDeleteK8sNamespace(ctx, monitoringNamespace); err != nil {
+		fmt.Printf("⚠️  Warning: Failed to delete namespace %s: %v\n", monitoringNamespace, err)
+		// Continue anyway - this is cleanup, not critical
+	}
+
+	fmt.Println("✅ Uninstall monitoring component successfully")
+
+	return nil
+}
+
+// displayMonitoringInfo shows access information for the monitoring stack
+func (t *ThanosStack) displayMonitoringInfo(ctx context.Context, config *MonitoringConfig) {
+	fmt.Println("\n🎉 Monitoring Stack Installation Complete!")
+	fmt.Println("==========================================")
+
+	fmt.Printf("📊 **Grafana Dashboard Access:**\n")
+	fmt.Printf("   • Username: admin\n")
+	fmt.Printf("   • Password: %s\n", config.AdminPassword)
+	fmt.Printf("   • Namespace: %s\n", config.Namespace)
+	fmt.Printf("   • Release: %s\n\n", config.HelmReleaseName)
+
+	// Wait for ALB ingress endpoint to be ready
+	fmt.Println("🔗 **ALB Ingress Endpoint:**")
+	grafanaURL := t.waitForIngressEndpoint(ctx, config)
+
+	if grafanaURL != "" {
+		fmt.Printf("   🌐 Grafana Web URL: %s \n", grafanaURL)
+		fmt.Printf("   🎯 You can now access Grafana directly via the web!\n\n")
+	} else {
+		fmt.Printf("   ⚠️  ALB Ingress endpoint not ready within timeout\n")
+		fmt.Printf("   🔧 Check status: kubectl get ingress -n %s -w\n\n", config.Namespace)
+	}
+
+	fmt.Printf("🔗 **Local Access Commands (Alternative):**\n")
+	fmt.Printf("   # Port forward to access Grafana locally:\n")
+	fmt.Printf("   kubectl port-forward -n %s svc/%s-grafana 3000:80\n", config.Namespace, config.HelmReleaseName)
+	fmt.Printf("   # Then visit: http://localhost:3000\n\n")
+}
+
 // generateValuesFile creates the values.yaml file for monitoring configuration
-func (t *ThanosStack) generateValuesFile(config *MonitoringConfig) error {
+func (t *ThanosStack) generateValuesFile(ctx context.Context, config *MonitoringConfig) error {
 	fmt.Println("📝 Generating monitoring values file...")
 
 	// Create values configuration with only dynamically set values
@@ -204,7 +266,7 @@ func (t *ThanosStack) generateValuesFile(config *MonitoringConfig) error {
 			"prometheus": map[string]interface{}{
 				"prometheusSpec": t.generatePrometheusStorageSpec(config),
 			},
-			"grafana": t.generateGrafanaStorageConfig(config),
+			"grafana": t.generateGrafanaStorageConfig(ctx, config),
 		},
 	}
 
@@ -252,7 +314,7 @@ func (t *ThanosStack) generatePrometheusStorageSpec(config *MonitoringConfig) ma
 }
 
 // generateGrafanaStorageConfig creates Grafana storage configuration
-func (t *ThanosStack) generateGrafanaStorageConfig(config *MonitoringConfig) map[string]interface{} {
+func (t *ThanosStack) generateGrafanaStorageConfig(ctx context.Context, config *MonitoringConfig) map[string]interface{} {
 	grafanaConfig := map[string]interface{}{
 		"adminPassword": config.AdminPassword,
 	}
@@ -267,7 +329,7 @@ func (t *ThanosStack) generateGrafanaStorageConfig(config *MonitoringConfig) map
 		}
 
 		// For Static Provisioning, specify the PV name that matches our created PV
-		timestamp, err := t.getTimestampFromExistingPV(config.ChainName)
+		timestamp, err := t.getTimestampFromExistingPV(ctx, config.ChainName)
 		if err != nil {
 			fmt.Printf("⚠️  Warning: Could not get timestamp for Grafana PV naming: %v\n", err)
 			timestamp = "static" // Fallback
@@ -287,11 +349,11 @@ func (t *ThanosStack) generateGrafanaStorageConfig(config *MonitoringConfig) map
 }
 
 // getServiceNames returns a map of component names to their Kubernetes service names
-func (t *ThanosStack) getServiceNames(namespace, chainName string) (map[string]string, error) {
+func (t *ThanosStack) getServiceNames(ctx context.Context, namespace, chainName string) (map[string]string, error) {
 	fmt.Printf("🔍 Discovering services in namespace: %s\n", namespace)
 
 	// First, get all services in the namespace
-	output, err := utils.ExecuteCommand("kubectl", "get", "services", "-n", namespace, "-o", "custom-columns=NAME:.metadata.name,TYPE:.spec.type", "--no-headers")
+	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "services", "-n", namespace, "-o", "custom-columns=NAME:.metadata.name,TYPE:.spec.type", "--no-headers")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get services in namespace %s: %w", namespace, err)
 	}
@@ -405,87 +467,10 @@ func (t *ThanosStack) getServiceNames(namespace, chainName string) (map[string]s
 	return serviceNames, nil
 }
 
-func (t *ThanosStack) uninstallMonitoring(ctx context.Context) error {
-	if t.deployConfig.K8s == nil {
-		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
-	}
-
-	_, _, err := t.loginAWS(ctx)
-	if err != nil {
-		fmt.Println("Error to login in AWS:", err)
-		return err
-	}
-
-	if t.deployConfig.AWS == nil {
-		return fmt.Errorf("AWS configuration is not set. Please run the deploy command first")
-	}
-
-	// Use the correct monitoring namespace instead of Thanos Stack namespace
-	monitoringNamespace := "monitoring"
-
-	// Find monitoring releases in the monitoring namespace
-	releases, err := utils.FilterHelmReleases(monitoringNamespace, "monitoring")
-	if err != nil {
-		fmt.Println("Error to filter helm releases:", err)
-		return err
-	}
-
-	// Store release names for cleanup
-	var releasesToCleanup []string
-
-	for _, release := range releases {
-		fmt.Printf("🗑️  Uninstalling monitoring release: %s\n", release)
-		releasesToCleanup = append(releasesToCleanup, release)
-
-		_, err = utils.ExecuteCommand("helm", []string{
-			"uninstall",
-			release,
-			"--namespace",
-			monitoringNamespace,
-		}...)
-		if err != nil {
-			fmt.Println("Error uninstalling monitoring helm chart:", err)
-			return err
-		}
-	}
-
-	// Clean up orphaned services in kube-system after Helm uninstall
-	if len(releasesToCleanup) > 0 {
-		if err := t.cleanupOrphanedKubeSystemServices(releasesToCleanup); err != nil {
-			fmt.Printf("⚠️  Warning: Failed to cleanup orphaned services: %v\n", err)
-			// Continue anyway - this is cleanup, not critical
-		}
-	}
-
-	chainName := strings.ToLower(t.deployConfig.ChainName)
-
-	// Clean up existing PVs and PVCs for monitoring components
-	fmt.Println("🧹 Cleaning up existing monitoring PVs and PVCs...")
-	// Get timestamp from existing op-geth PV to match naming pattern
-	timestamp, err := t.getTimestampFromExistingPV(chainName)
-	if err != nil {
-		return fmt.Errorf("failed to get timestamp from existing PV: %w", err)
-	}
-	if err := t.cleanupExistingMonitoringResources(monitoringNamespace, chainName, timestamp); err != nil {
-		fmt.Printf("⚠️  Warning: Failed to cleanup existing resources: %v\n", err)
-		// Continue anyway - we'll try to create new ones
-	}
-
-	// delete the namespace
-	if err := t.tryToDeleteK8sNamespace(ctx, monitoringNamespace); err != nil {
-		fmt.Printf("⚠️  Warning: Failed to delete namespace %s: %v\n", monitoringNamespace, err)
-		// Continue anyway - this is cleanup, not critical
-	}
-
-	fmt.Println("✅ Uninstall monitoring component successfully")
-
-	return nil
-}
-
 // cleanupOrphanedKubeSystemServices removes orphaned services in kube-system left by monitoring releases
-func (t *ThanosStack) cleanupOrphanedKubeSystemServices(releases []string) error {
+func (t *ThanosStack) cleanupOrphanedKubeSystemServices(ctx context.Context, releases []string) error {
 	// Get all services in kube-system
-	output, err := utils.ExecuteCommand("kubectl", "get", "svc", "-n", "kube-system", "-o", "name")
+	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "svc", "-n", "kube-system", "-o", "name")
 	if err != nil {
 		return fmt.Errorf("failed to get services in kube-system: %w", err)
 	}
@@ -514,14 +499,14 @@ func (t *ThanosStack) cleanupOrphanedKubeSystemServices(releases []string) error
 	// Delete orphaned services
 	if len(servicesToDelete) > 0 {
 		for _, serviceName := range servicesToDelete {
-			_, err := utils.ExecuteCommand("kubectl", "delete", "svc", serviceName, "-n", "kube-system", "--ignore-not-found=true")
+			_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "svc", serviceName, "-n", "kube-system", "--ignore-not-found=true")
 			if err != nil {
 				fmt.Printf("⚠️  Warning: Failed to delete service %s: %v\n", serviceName, err)
 			}
 		}
 	}
 
-	if err := t.cleanupGenericMonitoringServices(); err != nil {
+	if err := t.cleanupGenericMonitoringServices(ctx); err != nil {
 		fmt.Printf("⚠️  Warning: Failed to cleanup generic monitoring services: %v\n", err)
 	}
 
@@ -529,7 +514,7 @@ func (t *ThanosStack) cleanupOrphanedKubeSystemServices(releases []string) error
 }
 
 // cleanupGenericMonitoringServices removes services with generic monitoring patterns
-func (t *ThanosStack) cleanupGenericMonitoringServices() error {
+func (t *ThanosStack) cleanupGenericMonitoringServices(ctx context.Context) error {
 	// Common patterns for monitoring services that might be left behind
 	patterns := []string{
 		"kubelet",
@@ -540,7 +525,7 @@ func (t *ThanosStack) cleanupGenericMonitoringServices() error {
 		"kube-scheduler",
 	}
 
-	output, err := utils.ExecuteCommand("kubectl", "get", "svc", "-n", "kube-system", "-o", "name")
+	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "svc", "-n", "kube-system", "-o", "name")
 	if err != nil {
 		return fmt.Errorf("failed to get services in kube-system: %w", err)
 	}
@@ -569,7 +554,7 @@ func (t *ThanosStack) cleanupGenericMonitoringServices() error {
 	// Delete matching services
 	if len(servicesToDelete) > 0 {
 		for _, serviceName := range servicesToDelete {
-			_, err := utils.ExecuteCommand("kubectl", "delete", "svc", serviceName, "-n", "kube-system", "--ignore-not-found=true")
+			_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "svc", serviceName, "-n", "kube-system", "--ignore-not-found=true")
 			if err != nil {
 				fmt.Printf("⚠️  Warning: Failed to delete service %s: %v\n", serviceName, err)
 			}
@@ -580,11 +565,11 @@ func (t *ThanosStack) cleanupGenericMonitoringServices() error {
 }
 
 // getEFSFileSystemId extracts EFS filesystem ID from existing PV
-func (t *ThanosStack) getEFSFileSystemId(chainName string) (string, error) {
+func (t *ThanosStack) getEFSFileSystemId(ctx context.Context, chainName string) (string, error) {
 	fmt.Println("🔍 Getting EFS filesystem ID from existing PV...")
 
 	// Get all PVs and filter for op-geth
-	pvListOutput, err := utils.ExecuteCommand("kubectl", "get", "pv", "-o", "name")
+	pvListOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pv", "-o", "name")
 	if err != nil {
 		return "", fmt.Errorf("failed to list PVs: %w", err)
 	}
@@ -604,7 +589,7 @@ func (t *ThanosStack) getEFSFileSystemId(chainName string) (string, error) {
 	}
 
 	// Get volumeHandle from the specific PV
-	output, err := utils.ExecuteCommand("kubectl", "get", "pv", opGethPVName, "-o", "jsonpath={.spec.csi.volumeHandle}")
+	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pv", opGethPVName, "-o", "jsonpath={.spec.csi.volumeHandle}")
 	if err != nil {
 		return "", fmt.Errorf("failed to get volumeHandle from PV %s: %w", opGethPVName, err)
 	}
@@ -624,7 +609,7 @@ func (t *ThanosStack) getEFSFileSystemId(chainName string) (string, error) {
 }
 
 // waitForIngressEndpoint waits for the ALB ingress endpoint to be ready
-func (t *ThanosStack) waitForIngressEndpoint(config *MonitoringConfig) string {
+func (t *ThanosStack) waitForIngressEndpoint(ctx context.Context, config *MonitoringConfig) string {
 	fmt.Println("⏳ Waiting for ALB Ingress endpoint to be provisioned...")
 	fmt.Println("   (This may take 2-3 minutes for AWS ALB to be created)")
 
@@ -633,7 +618,7 @@ func (t *ThanosStack) waitForIngressEndpoint(config *MonitoringConfig) string {
 
 	for i := 0; i < maxRetries; i++ {
 		// Check if ingress exists first
-		ingressExists, err := utils.ExecuteCommand("kubectl", "get", "ingress", "-n", config.Namespace, "-o", "name")
+		ingressExists, err := utils.ExecuteCommand(ctx, "kubectl", "get", "ingress", "-n", config.Namespace, "-o", "name")
 		if err != nil || strings.TrimSpace(ingressExists) == "" {
 			fmt.Printf("   ⏳ [%d/%d] Ingress not found yet, waiting...\n", i+1, maxRetries)
 			time.Sleep(retryInterval)
@@ -641,7 +626,7 @@ func (t *ThanosStack) waitForIngressEndpoint(config *MonitoringConfig) string {
 		}
 
 		// Get ingress hostname
-		hostname, err := utils.ExecuteCommand("kubectl", "get", "ingress", "-n", config.Namespace,
+		hostname, err := utils.ExecuteCommand(ctx, "kubectl", "get", "ingress", "-n", config.Namespace,
 			"-o", "jsonpath={.items[0].status.loadBalancer.ingress[0].hostname}")
 
 		if err == nil && strings.TrimSpace(hostname) != "" {
@@ -664,7 +649,7 @@ func (t *ThanosStack) waitForIngressEndpoint(config *MonitoringConfig) string {
 }
 
 // monitorInstallationErrors monitors installation progress and reports errors in real-time
-func (t *ThanosStack) monitorInstallationErrors(config *MonitoringConfig, errorChan chan error) {
+func (t *ThanosStack) monitorInstallationErrors(ctx context.Context, config *MonitoringConfig, errorChan chan error) {
 	fmt.Println("🔍 Starting installation issue monitoring...")
 
 	ticker := time.NewTicker(15 * time.Second)
@@ -677,19 +662,19 @@ func (t *ThanosStack) monitorInstallationErrors(config *MonitoringConfig, errorC
 			return
 		case <-ticker.C:
 			// Check for pending pods with issues
-			t.checkPendingPods(config)
+			t.checkPendingPods(ctx, config)
 		}
 	}
 }
 
 // gatherInstallationErrors gathers comprehensive error information when installation fails
-func (t *ThanosStack) gatherInstallationErrors(config *MonitoringConfig) {
+func (t *ThanosStack) gatherInstallationErrors(ctx context.Context, config *MonitoringConfig) {
 	fmt.Println("\n🔍 Gathering detailed error information...")
 	fmt.Println("=" + strings.Repeat("=", 50))
 
 	// 1. Check Helm release status
 	fmt.Println("\n📊 Helm Release Status:")
-	if output, err := utils.ExecuteCommand("helm", "status", config.HelmReleaseName, "-n", config.Namespace); err != nil {
+	if output, err := utils.ExecuteCommand(ctx, "helm", "status", config.HelmReleaseName, "-n", config.Namespace); err != nil {
 		fmt.Printf("❌ Failed to get Helm status: %v\n", err)
 	} else {
 		fmt.Println(output)
@@ -697,11 +682,11 @@ func (t *ThanosStack) gatherInstallationErrors(config *MonitoringConfig) {
 
 	// 2. Check failed pods with detailed information
 	fmt.Println("\n🚨 Failed Pods Analysis:")
-	t.analyzeFailedPods(config)
+	t.analyzeFailedPods(ctx, config)
 
 	// 3. Check recent events
 	fmt.Println("\n📅 Recent Events (Last 10):")
-	if output, err := utils.ExecuteCommand("kubectl", "get", "events", "-n", config.Namespace,
+	if output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "events", "-n", config.Namespace,
 		"--sort-by=.lastTimestamp", "--field-selector=type=Warning"); err != nil {
 		fmt.Printf("❌ Failed to get events: %v\n", err)
 	} else {
@@ -710,20 +695,20 @@ func (t *ThanosStack) gatherInstallationErrors(config *MonitoringConfig) {
 
 	// 4. Check resource quotas and limits
 	fmt.Println("\n💾 Resource Status:")
-	t.checkResourceStatus(config)
+	t.checkResourceStatus(ctx, config)
 
 	// 5. Check storage issues
 	fmt.Println("\n🗄️  Storage Issues:")
-	t.checkStorageIssues(config)
+	t.checkStorageIssues(ctx, config)
 
 	// 6. Provide troubleshooting commands
 	fmt.Println("\n🛠️  Troubleshooting Commands:")
-	t.provideTroubleshootingCommands(config)
+	t.provideTroubleshootingCommands(ctx, config)
 }
 
 // checkPendingPods checks for pending pods with issues
-func (t *ThanosStack) checkPendingPods(config *MonitoringConfig) {
-	output, err := utils.ExecuteCommand("kubectl", "get", "pods", "-n", config.Namespace,
+func (t *ThanosStack) checkPendingPods(ctx context.Context, config *MonitoringConfig) {
+	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pods", "-n", config.Namespace,
 		"--field-selector=status.phase=Pending", "-o", "custom-columns=NAME:.metadata.name,STATUS:.status.phase,REASON:.status.conditions[0].reason")
 
 	if err == nil && strings.TrimSpace(output) != "" && !strings.Contains(output, "No resources found") {
@@ -732,9 +717,9 @@ func (t *ThanosStack) checkPendingPods(config *MonitoringConfig) {
 }
 
 // analyzeFailedPods provides detailed analysis of failed pods
-func (t *ThanosStack) analyzeFailedPods(config *MonitoringConfig) {
+func (t *ThanosStack) analyzeFailedPods(ctx context.Context, config *MonitoringConfig) {
 	// Get all pods in the namespace
-	output, err := utils.ExecuteCommand("kubectl", "get", "pods", "-n", config.Namespace, "-o", "wide")
+	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pods", "-n", config.Namespace, "-o", "wide")
 	if err != nil {
 		fmt.Printf("❌ Failed to get pods: %v\n", err)
 		return
@@ -763,7 +748,7 @@ func (t *ThanosStack) analyzeFailedPods(config *MonitoringConfig) {
 				fmt.Printf("\n🔍 Analyzing pod: %s (Status: %s)\n", podName, status)
 
 				// Describe pod
-				if descOutput, err := utils.ExecuteCommand("kubectl", "describe", "pod", podName, "-n", config.Namespace); err == nil {
+				if descOutput, err := utils.ExecuteCommand(ctx, "kubectl", "describe", "pod", podName, "-n", config.Namespace); err == nil {
 					// Extract events section
 					descLines := strings.Split(descOutput, "\n")
 					inEvents := false
@@ -778,7 +763,7 @@ func (t *ThanosStack) analyzeFailedPods(config *MonitoringConfig) {
 				}
 
 				// Get logs if available
-				if logOutput, err := utils.ExecuteCommand("kubectl", "logs", podName, "-n", config.Namespace, "--tail=10"); err == nil && logOutput != "" {
+				if logOutput, err := utils.ExecuteCommand(ctx, "kubectl", "logs", podName, "-n", config.Namespace, "--tail=10"); err == nil && logOutput != "" {
 					fmt.Printf("Recent logs:\n%s\n", logOutput)
 				}
 			}
@@ -787,14 +772,14 @@ func (t *ThanosStack) analyzeFailedPods(config *MonitoringConfig) {
 }
 
 // checkResourceStatus checks resource quotas and node capacity
-func (t *ThanosStack) checkResourceStatus(config *MonitoringConfig) {
+func (t *ThanosStack) checkResourceStatus(ctx context.Context, config *MonitoringConfig) {
 	// Check resource quotas
-	if output, err := utils.ExecuteCommand("kubectl", "get", "resourcequota", "-n", config.Namespace); err == nil {
+	if output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "resourcequota", "-n", config.Namespace); err == nil {
 		fmt.Printf("Resource quotas:\n%s\n", output)
 	}
 
 	// Check node resources
-	if output, err := utils.ExecuteCommand("kubectl", "top", "nodes"); err == nil {
+	if output, err := utils.ExecuteCommand(ctx, "kubectl", "top", "nodes"); err == nil {
 		fmt.Printf("Node resource usage:\n%s\n", output)
 	} else {
 		fmt.Println("⚠️  Metrics server not available for resource usage")
@@ -802,10 +787,10 @@ func (t *ThanosStack) checkResourceStatus(config *MonitoringConfig) {
 }
 
 // checkStorageIssues checks for storage-related problems
-func (t *ThanosStack) checkStorageIssues(config *MonitoringConfig) {
+func (t *ThanosStack) checkStorageIssues(ctx context.Context, config *MonitoringConfig) {
 	// Check PVCs with detailed status
 	fmt.Println("🗄️  Checking Persistent Volume Claims...")
-	if output, err := utils.ExecuteCommand("kubectl", "get", "pvc", "-n", config.Namespace, "-o", "wide"); err == nil {
+	if output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", "-n", config.Namespace, "-o", "wide"); err == nil {
 		fmt.Printf("Persistent Volume Claims:\n%s\n", output)
 
 		// Check for unbound PVCs
@@ -813,7 +798,7 @@ func (t *ThanosStack) checkStorageIssues(config *MonitoringConfig) {
 			fmt.Println("⚠️  Found pending PVCs - checking details...")
 
 			// Get PVC details
-			if pvcList, err := utils.ExecuteCommand("kubectl", "get", "pvc", "-n", config.Namespace, "-o", "name"); err == nil {
+			if pvcList, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", "-n", config.Namespace, "-o", "name"); err == nil {
 				pvcs := strings.Split(strings.TrimSpace(pvcList), "\n")
 				for _, pvc := range pvcs {
 					if pvc == "" {
@@ -822,7 +807,7 @@ func (t *ThanosStack) checkStorageIssues(config *MonitoringConfig) {
 					pvcName := strings.TrimPrefix(pvc, "persistentvolumeclaim/")
 
 					// Describe the PVC to get error details
-					if descOutput, err := utils.ExecuteCommand("kubectl", "describe", "pvc", pvcName, "-n", config.Namespace); err == nil {
+					if descOutput, err := utils.ExecuteCommand(ctx, "kubectl", "describe", "pvc", pvcName, "-n", config.Namespace); err == nil {
 						if strings.Contains(descOutput, "FailedBinding") || strings.Contains(descOutput, "no persistent volumes available") {
 							fmt.Printf("❌ PVC %s binding failed:\n%s\n", pvcName, descOutput)
 						}
@@ -836,7 +821,7 @@ func (t *ThanosStack) checkStorageIssues(config *MonitoringConfig) {
 
 	// Check storage classes
 	fmt.Println("\n💾 Checking Storage Classes...")
-	if output, err := utils.ExecuteCommand("kubectl", "get", "storageclass", "-o", "wide"); err == nil {
+	if output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "storageclass", "-o", "wide"); err == nil {
 		fmt.Printf("Available Storage Classes:\n%s\n", output)
 
 		// Check specifically for EFS StorageClass
@@ -851,7 +836,7 @@ func (t *ThanosStack) checkStorageIssues(config *MonitoringConfig) {
 
 	// Check for EFS CSI driver
 	fmt.Println("\n🔧 Checking EFS CSI Driver...")
-	if output, err := utils.ExecuteCommand("kubectl", "get", "daemonset", "-n", "kube-system", "-l", "app=efs-csi-node"); err == nil && strings.TrimSpace(output) != "" {
+	if output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "daemonset", "-n", "kube-system", "-l", "app=efs-csi-node"); err == nil && strings.TrimSpace(output) != "" {
 		fmt.Printf("EFS CSI Driver status:\n%s\n", output)
 	} else {
 		fmt.Println("⚠️  EFS CSI Driver not found - this confirms Fargate environment")
@@ -860,7 +845,7 @@ func (t *ThanosStack) checkStorageIssues(config *MonitoringConfig) {
 }
 
 // provideTroubleshootingCommands provides useful commands for manual troubleshooting
-func (t *ThanosStack) provideTroubleshootingCommands(config *MonitoringConfig) {
+func (t *ThanosStack) provideTroubleshootingCommands(_ context.Context, config *MonitoringConfig) {
 	fmt.Printf(`
 Manual Troubleshooting Commands:
 ================================
@@ -914,14 +899,14 @@ kubectl describe pvc -n %s
 }
 
 // deployMonitoringInfrastructure creates PVs for Static Provisioning using existing efs-sc
-func (t *ThanosStack) deployMonitoringInfrastructure(config *MonitoringConfig) error {
+func (t *ThanosStack) deployMonitoringInfrastructure(ctx context.Context, config *MonitoringConfig) error {
 	// Create namespace if it doesn't exist
-	if err := t.ensureNamespaceExists(config.Namespace); err != nil {
+	if err := t.ensureNamespaceExists(ctx, config.Namespace); err != nil {
 		return fmt.Errorf("failed to ensure namespace exists: %w", err)
 	}
 
 	// Create PVs using kubectl and existing efs-sc StorageClass
-	if err := t.createStaticPVs(config); err != nil {
+	if err := t.createStaticPVs(ctx, config); err != nil {
 		return fmt.Errorf("failed to create static PVs: %w", err)
 	}
 
@@ -929,11 +914,11 @@ func (t *ThanosStack) deployMonitoringInfrastructure(config *MonitoringConfig) e
 }
 
 // ensureNamespaceExists checks if namespace exists and creates it if needed
-func (t *ThanosStack) ensureNamespaceExists(namespace string) error {
+func (t *ThanosStack) ensureNamespaceExists(ctx context.Context, namespace string) error {
 	fmt.Printf("🔍 Checking if namespace '%s' exists...\n", namespace)
 
 	// Check if namespace exists
-	output, err := utils.ExecuteCommand("kubectl", "get", "namespace", namespace, "--ignore-not-found=true")
+	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "namespace", namespace, "--ignore-not-found=true")
 	if err != nil {
 		return fmt.Errorf("failed to check namespace existence: %w", err)
 	}
@@ -941,7 +926,7 @@ func (t *ThanosStack) ensureNamespaceExists(namespace string) error {
 	if strings.TrimSpace(output) == "" {
 		// Namespace doesn't exist, create it
 		fmt.Printf("📦 Creating namespace '%s'...\n", namespace)
-		if _, err := utils.ExecuteCommand("kubectl", "create", "namespace", namespace); err != nil {
+		if _, err := utils.ExecuteCommand(ctx, "kubectl", "create", "namespace", namespace); err != nil {
 			return fmt.Errorf("failed to create namespace: %w", err)
 		}
 		fmt.Printf("✅ Namespace '%s' created successfully\n", namespace)
@@ -953,16 +938,16 @@ func (t *ThanosStack) ensureNamespaceExists(namespace string) error {
 }
 
 // createStaticPVs creates PersistentVolumes and PVCs for Static Provisioning with op-geth/op-node naming pattern
-func (t *ThanosStack) createStaticPVs(config *MonitoringConfig) error {
+func (t *ThanosStack) createStaticPVs(ctx context.Context, config *MonitoringConfig) error {
 	// Get timestamp from existing op-geth PV to match naming pattern
-	timestamp, err := t.getTimestampFromExistingPV(config.ChainName)
+	timestamp, err := t.getTimestampFromExistingPV(ctx, config.ChainName)
 	if err != nil {
 		return fmt.Errorf("failed to get timestamp from existing PV: %w", err)
 	}
 
 	// Clean up existing PVs and PVCs for monitoring components
 	fmt.Println("🧹 Cleaning up existing monitoring PVs and PVCs...")
-	if err := t.cleanupExistingMonitoringResources(config.Namespace, config.ChainName, timestamp); err != nil {
+	if err := t.cleanupExistingMonitoringResources(ctx, config.Namespace, config.ChainName, timestamp); err != nil {
 		fmt.Printf("⚠️  Warning: Failed to cleanup existing resources: %v\n", err)
 		// Continue anyway - we'll try to create new ones
 	}
@@ -972,28 +957,28 @@ func (t *ThanosStack) createStaticPVs(config *MonitoringConfig) error {
 
 	// Create Prometheus PV and PVC
 	prometheusPV := t.generateStaticPVManifest("prometheus", config, "20Gi", timestamp)
-	if err := t.applyPVManifest("prometheus", prometheusPV); err != nil {
+	if err := t.applyPVManifest(ctx, "prometheus", prometheusPV); err != nil {
 		return fmt.Errorf("failed to create Prometheus PV: %w", err)
 	}
 
 	prometheusPVC := t.generateStaticPVCManifest("prometheus", config, "20Gi", timestamp)
-	if err := t.applyPVCManifest("prometheus", prometheusPVC); err != nil {
+	if err := t.applyPVCManifest(ctx, "prometheus", prometheusPVC); err != nil {
 		return fmt.Errorf("failed to create Prometheus PVC: %w", err)
 	}
 
 	// Create Grafana PV and PVC
 	grafanaPV := t.generateStaticPVManifest("grafana", config, "10Gi", timestamp)
-	if err := t.applyPVManifest("grafana", grafanaPV); err != nil {
+	if err := t.applyPVManifest(ctx, "grafana", grafanaPV); err != nil {
 		return fmt.Errorf("failed to create Grafana PV: %w", err)
 	}
 
 	grafanaPVC := t.generateStaticPVCManifest("grafana", config, "10Gi", timestamp)
-	if err := t.applyPVCManifest("grafana", grafanaPVC); err != nil {
+	if err := t.applyPVCManifest(ctx, "grafana", grafanaPVC); err != nil {
 		return fmt.Errorf("failed to create Grafana PVC: %w", err)
 	}
 
 	// Verify PV/PVC binding
-	if err := t.verifyPVCBinding(config, timestamp); err != nil {
+	if err := t.verifyPVCBinding(ctx, config, timestamp); err != nil {
 		fmt.Printf("⚠️  Warning: PV/PVC binding verification failed: %v\n", err)
 		// Continue anyway - binding might take some time
 	}
@@ -1002,14 +987,14 @@ func (t *ThanosStack) createStaticPVs(config *MonitoringConfig) error {
 }
 
 // cleanupExistingMonitoringResources removes existing monitoring PVs and PVCs
-func (t *ThanosStack) cleanupExistingMonitoringResources(namespace string, chainName string, timestamp string) error {
+func (t *ThanosStack) cleanupExistingMonitoringResources(ctx context.Context, namespace string, chainName string, timestamp string) error {
 	components := []string{"prometheus", "grafana"}
 
 	for _, component := range components {
 		pvName := fmt.Sprintf("%s-%s-thanos-stack-%s", chainName, timestamp, component)
 
 		// Delete PVC first (it might be bound to the PV)
-		_, err := utils.ExecuteCommand("kubectl", "delete", "pvc", pvName, "-n", namespace, "--ignore-not-found=true")
+		_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "pvc", pvName, "-n", namespace, "--ignore-not-found=true")
 		if err != nil {
 			fmt.Printf("⚠️  Warning: Failed to delete PVC %s: %v\n", pvName, err)
 		}
@@ -1018,22 +1003,22 @@ func (t *ThanosStack) cleanupExistingMonitoringResources(namespace string, chain
 		time.Sleep(2 * time.Second)
 
 		// Delete PV (it might be in Released state)
-		_, err = utils.ExecuteCommand("kubectl", "delete", "pv", pvName, "--ignore-not-found=true")
+		_, err = utils.ExecuteCommand(ctx, "kubectl", "delete", "pv", pvName, "--ignore-not-found=true")
 		if err != nil {
 			fmt.Printf("⚠️  Warning: Failed to delete PV %s: %v\n", pvName, err)
 		}
 
 		// Also try to delete any PVs that might have old naming patterns
-		t.cleanupOldPVPattern(component, chainName)
+		t.cleanupOldPVPattern(ctx, component, chainName)
 	}
 
 	return nil
 }
 
 // cleanupOldPVPattern removes PVs with old naming patterns that might conflict
-func (t *ThanosStack) cleanupOldPVPattern(component, chainName string) {
+func (t *ThanosStack) cleanupOldPVPattern(ctx context.Context, component, chainName string) {
 	// Get all PVs and find ones that match the component pattern
-	output, err := utils.ExecuteCommand("kubectl", "get", "pv", "-o", "custom-columns=NAME:.metadata.name,STATUS:.status.phase", "--no-headers")
+	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pv", "-o", "custom-columns=NAME:.metadata.name,STATUS:.status.phase", "--no-headers")
 	if err != nil {
 		return
 	}
@@ -1058,7 +1043,7 @@ func (t *ThanosStack) cleanupOldPVPattern(component, chainName string) {
 			(pvStatus == "Released" || pvStatus == "Available") {
 
 			fmt.Printf("🗑️  Cleaning up old %s PV: %s (status: %s)\n", component, pvName, pvStatus)
-			_, err := utils.ExecuteCommand("kubectl", "delete", "pv", pvName, "--ignore-not-found=true")
+			_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "pv", pvName, "--ignore-not-found=true")
 			if err != nil {
 				fmt.Printf("⚠️  Warning: Failed to delete old PV %s: %v\n", pvName, err)
 			}
@@ -1067,7 +1052,7 @@ func (t *ThanosStack) cleanupOldPVPattern(component, chainName string) {
 }
 
 // verifyPVCBinding checks if PVCs are properly bound to PVs
-func (t *ThanosStack) verifyPVCBinding(config *MonitoringConfig, timestamp string) error {
+func (t *ThanosStack) verifyPVCBinding(ctx context.Context, config *MonitoringConfig, timestamp string) error {
 	components := []string{"prometheus", "grafana"}
 
 	for _, component := range components {
@@ -1076,7 +1061,7 @@ func (t *ThanosStack) verifyPVCBinding(config *MonitoringConfig, timestamp strin
 		// Check PVC status with timeout
 		maxRetries := 12 // 1 minute total (5 seconds * 12)
 		for i := 0; i < maxRetries; i++ {
-			output, err := utils.ExecuteCommand("kubectl", "get", "pvc", pvcName, "-n", config.Namespace, "-o", "jsonpath={.status.phase}")
+			output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", pvcName, "-n", config.Namespace, "-o", "jsonpath={.status.phase}")
 			if err != nil {
 				fmt.Printf("⚠️  Warning: Failed to check PVC %s status: %v\n", pvcName, err)
 				break
@@ -1101,8 +1086,8 @@ func (t *ThanosStack) verifyPVCBinding(config *MonitoringConfig, timestamp strin
 }
 
 // getTimestampFromExistingPV extracts timestamp from op-geth PV name
-func (t *ThanosStack) getTimestampFromExistingPV(chainName string) (string, error) {
-	output, err := utils.ExecuteCommand("kubectl", "get", "pv", "-o", "custom-columns=NAME:.metadata.name", "--no-headers")
+func (t *ThanosStack) getTimestampFromExistingPV(ctx context.Context, chainName string) (string, error) {
+	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pv", "-o", "custom-columns=NAME:.metadata.name", "--no-headers")
 	if err != nil {
 		return "", fmt.Errorf("failed to get PVs: %w", err)
 	}
@@ -1151,15 +1136,15 @@ spec:
 }
 
 // applyPVManifest applies PV manifest using kubectl
-func (t *ThanosStack) applyPVManifest(component string, manifest string) error {
-	tempFile := filepath.Join(os.TempDir(), fmt.Sprintf("monitoring-%s-pv.yaml", component))
+func (t *ThanosStack) applyPVManifest(ctx context.Context, component string, manifest string) error {
+	tempFile := filepath.Join(t.deploymentPath, fmt.Sprintf("monitoring-%s-pv.yaml", component))
 
 	if err := os.WriteFile(tempFile, []byte(manifest), 0644); err != nil {
 		return fmt.Errorf("failed to write PV manifest: %w", err)
 	}
 	defer os.Remove(tempFile)
 
-	if _, err := utils.ExecuteCommand("kubectl", "apply", "-f", tempFile); err != nil {
+	if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile); err != nil {
 		return fmt.Errorf("failed to apply PV manifest: %w", err)
 	}
 
@@ -1192,16 +1177,15 @@ spec:
 }
 
 // applyPVCManifest applies PVC manifest using kubectl
-func (t *ThanosStack) applyPVCManifest(component string, manifest string) error {
-	tempFile := filepath.Join(os.TempDir(), fmt.Sprintf("monitoring-%s-pvc.yaml", component))
-	fmt.Println("tempFile:", tempFile)
+func (t *ThanosStack) applyPVCManifest(ctx context.Context, component string, manifest string) error {
+	tempFile := filepath.Join(t.deploymentPath, fmt.Sprintf("monitoring-%s-pvc.yaml", component))
 
 	if err := os.WriteFile(tempFile, []byte(manifest), 0644); err != nil {
 		return fmt.Errorf("failed to write PVC manifest: %w", err)
 	}
-	// defer os.Remove(tempFile)
+	defer os.Remove(tempFile)
 
-	if _, err := utils.ExecuteCommand("kubectl", "apply", "-f", tempFile); err != nil {
+	if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile); err != nil {
 		return fmt.Errorf("failed to apply PVC manifest: %w", err)
 	}
 
@@ -1209,7 +1193,7 @@ func (t *ThanosStack) applyPVCManifest(component string, manifest string) error 
 }
 
 // createDashboardConfigMaps creates ConfigMaps for Grafana dashboards
-func (t *ThanosStack) createDashboardConfigMaps(config *MonitoringConfig) error {
+func (t *ThanosStack) createDashboardConfigMaps(ctx context.Context, config *MonitoringConfig) error {
 	fmt.Println("📊 Creating dashboard ConfigMaps...")
 
 	dashboardsPath := filepath.Join(config.ChartsPath, "dashboards")
@@ -1264,7 +1248,7 @@ data:
 			continue
 		}
 
-		if _, err := utils.ExecuteCommand("kubectl", "apply", "-f", tempFile); err != nil {
+		if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile); err != nil {
 			fmt.Printf("⚠️  Failed to create ConfigMap %s: %v\n", configMapName, err)
 		}
 

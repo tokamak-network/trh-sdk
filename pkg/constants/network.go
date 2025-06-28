@@ -1,13 +1,13 @@
 package constants
 
 const (
-	LocalDevnet = "local-devnet"
+	LocalDevnet = "local_devnet"
 	Testnet     = "testnet"
 	Mainnet     = "mainnet"
 )
 
 var SupportedNetworks = map[string]bool{
-	"local-devnet": true,
+	"local_devnet": true,
 	"testnet":      true,
 	"mainnet":      true,
 }

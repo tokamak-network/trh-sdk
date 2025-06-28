@@ -30,12 +30,9 @@ go.work.sum
 main
 trh-sdk
 
-tokamak-thanos
-tokamak-thanos-stack
-
-deploy-config.json
-settings.json
-
-nam@tokamak.network_accessKeys.csv
 logs/
 *.log
+
+settings.json
+tokamak-thanos
+tokamak-thanos-stack
