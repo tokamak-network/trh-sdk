@@ -28,26 +28,26 @@ type MonitoringConfig struct {
 }
 
 // InstallMonitoring installs monitoring stack using Helm dependencies
-func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *MonitoringConfig) error {
+func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *MonitoringConfig) (string, error) {
 	fmt.Println("🚀 Starting monitoring installation...")
 
 	// Deploy Terraform infrastructure if persistent storage is enabled
 	if config.EnablePersistence {
 		fmt.Println("📦 Deploying persistent storage infrastructure...")
 		if err := t.deployMonitoringInfrastructure(ctx, config); err != nil {
-			return fmt.Errorf("failed to deploy monitoring infrastructure: %w", err)
+			return "", fmt.Errorf("failed to deploy monitoring infrastructure: %w", err)
 		}
 	}
 
 	// Generate values file
 	if err := t.generateValuesFile(ctx, config); err != nil {
-		return fmt.Errorf("failed to generate values file: %w", err)
+		return "", fmt.Errorf("failed to generate values file: %w", err)
 	}
 
 	// Update chart dependencies
 	fmt.Println("📦 Updating chart dependencies...")
 	if _, err := utils.ExecuteCommand(ctx, "helm", "dependency", "update", config.ChartsPath); err != nil {
-		return fmt.Errorf("failed to update chart dependencies: %w", err)
+		return "", fmt.Errorf("failed to update chart dependencies: %w", err)
 	}
 
 	// Install monitoring stack with error monitoring
@@ -71,7 +71,7 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *MonitoringC
 		// Installation failed, gather error information
 		fmt.Println("\n❌ Installation failed! Gathering error information...")
 		t.gatherInstallationErrors(ctx, config)
-		return fmt.Errorf("failed to install monitoring stack: %w", err)
+		return "", fmt.Errorf("failed to install monitoring stack: %w", err)
 	}
 
 	// Stop error monitoring
@@ -84,9 +84,9 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *MonitoringC
 	}
 
 	// Display access information
-	t.displayMonitoringInfo(ctx, config)
+	grafanaURL := t.displayMonitoringInfo(ctx, config)
 
-	return nil
+	return grafanaURL, nil
 }
 
 // GetMonitoringConfig gathers all required configuration for monitoring
@@ -215,7 +215,7 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 }
 
 // displayMonitoringInfo shows access information for the monitoring stack
-func (t *ThanosStack) displayMonitoringInfo(ctx context.Context, config *MonitoringConfig) {
+func (t *ThanosStack) displayMonitoringInfo(ctx context.Context, config *MonitoringConfig) string {
 	fmt.Println("\n🎉 Monitoring Stack Installation Complete!")
 	fmt.Println("==========================================")
 
@@ -241,6 +241,8 @@ func (t *ThanosStack) displayMonitoringInfo(ctx context.Context, config *Monitor
 	fmt.Printf("   # Port forward to access Grafana locally:\n")
 	fmt.Printf("   kubectl port-forward -n %s svc/%s-grafana 3000:80\n", config.Namespace, config.HelmReleaseName)
 	fmt.Printf("   # Then visit: http://localhost:3000\n\n")
+
+	return grafanaURL
 }
 
 // generateValuesFile creates the values.yaml file for monitoring configuration

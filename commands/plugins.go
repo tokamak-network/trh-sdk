@@ -130,7 +130,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							if err != nil {
 								return fmt.Errorf("failed to get monitoring configuration: %w", err)
 							}
-							err = thanosStack.InstallMonitoring(ctx, config)
+							_, err = thanosStack.InstallMonitoring(ctx, config)
 							if err != nil {
 								fmt.Println("Error installing monitoring:", err)
 								return thanosStack.UninstallMonitoring(ctx)
