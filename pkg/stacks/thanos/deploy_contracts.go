@@ -78,7 +78,8 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 	}
 
 	if t.deployConfig.DeployContractState != nil {
-		if t.deployConfig.DeployContractState.Status == types.DeployContractStatusCompleted {
+		switch t.deployConfig.DeployContractState.Status {
+		case types.DeployContractStatusCompleted:
 			fmt.Println("The contracts have already been deployed successfully.")
 			if t.usePromptInput {
 				fmt.Print("Do you want to deploy the contracts again? (y/N): ")
@@ -94,7 +95,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			} else {
 				return nil
 			}
-		} else if t.deployConfig.DeployContractState.Status == types.DeployContractStatusInProgress {
+		case types.DeployContractStatusInProgress:
 			if t.usePromptInput {
 				fmt.Print("The contracts deployment is in progress. Do you want to resume? (Y/n): ")
 				isResume, err = scanner.ScanBool(true)
