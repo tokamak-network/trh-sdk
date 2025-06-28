@@ -126,7 +126,12 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							return nil
 						case constants.PluginMonitoring:
 							// Get monitoring configuration
-							config, err := thanosStack.GetMonitoringConfig(ctx)
+							installMonitoringInput, err := thanos.InputInstallMonitoring()
+							if err != nil || installMonitoringInput == nil {
+								fmt.Println("Error installing monitoring:", err)
+								return err
+							}
+							config, err := thanosStack.GetMonitoringConfig(ctx, installMonitoringInput.AdminPassword)
 							if err != nil {
 								return fmt.Errorf("failed to get monitoring configuration: %w", err)
 							}

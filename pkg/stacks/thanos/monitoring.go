@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"gopkg.in/yaml.v3"
 )
@@ -90,21 +89,11 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *MonitoringC
 }
 
 // GetMonitoringConfig gathers all required configuration for monitoring
-func (t *ThanosStack) GetMonitoringConfig(ctx context.Context) (*MonitoringConfig, error) {
+func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword string) (*MonitoringConfig, error) {
 	// Use timestamped release name for monitoring
 	chainName := strings.ToLower(t.deployConfig.ChainName)
 	timestamp := time.Now().Unix()
 	helmReleaseName := fmt.Sprintf("monitoring-%d", timestamp)
-
-	// Get admin password from user
-	fmt.Print("🔐 Enter Grafana admin password: ")
-	adminPassword, err := scanner.ScanString()
-	if err != nil {
-		return nil, fmt.Errorf("error reading admin password: %w", err)
-	}
-	if adminPassword == "" {
-		return nil, fmt.Errorf("admin password cannot be empty")
-	}
 
 	// Get current working directory
 	cwd := t.deploymentPath

@@ -94,6 +94,10 @@ type InstallBlockExplorerInput struct {
 	WalletConnectProjectID string
 }
 
+type InstallMonitoringInput struct {
+	AdminPassword string
+}
+
 func (c *InstallBlockExplorerInput) Validate(ctx context.Context) error {
 	if c.DatabaseUsername == "" {
 		return errors.New("database username is required")
@@ -529,6 +533,32 @@ func InputInstallBlockExplorer() (*InstallBlockExplorerInput, error) {
 		CoinmarketcapKey:       coinmarketcapKey,
 		CoinmarketcapTokenID:   constants.TonCoinMarketCapTokenID,
 		WalletConnectProjectID: walletConnectID,
+	}, nil
+}
+
+func InputInstallMonitoring() (*InstallMonitoringInput, error) {
+	var (
+		adminPassword string
+		err           error
+	)
+
+	for {
+		// Get admin password from user
+		fmt.Print("🔐 Enter Grafana admin password: ")
+		adminPassword, err = scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error while reading admin password: %s", err)
+			continue
+		}
+		if adminPassword == "" {
+			fmt.Println("Admin password cannot be empty")
+			continue
+		}
+		break
+	}
+
+	return &InstallMonitoringInput{
+		AdminPassword: adminPassword,
 	}, nil
 }
 
