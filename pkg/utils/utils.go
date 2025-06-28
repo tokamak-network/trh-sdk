@@ -2,21 +2,22 @@ package utils
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"errors"
 	"fmt"
 	"log"
 	"math/big"
+	"strings"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tyler-smith/go-bip32"
 	"github.com/tyler-smith/go-bip39"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/params"
+
+	ethCommon "github.com/ethereum/go-ethereum/common"
 )
 
 func WeiToEther(wei *big.Int) *big.Float {
@@ -38,23 +39,6 @@ func GWeiToWei(gwei *big.Int) *big.Int {
 }
 func GenerateBatchInboxAddress(l2ChainId uint64) string {
 	return fmt.Sprintf("%s%d", constants.BaseBatchInboxAddress[:len(constants.BaseBatchInboxAddress)-len(fmt.Sprintf("%d", l2ChainId))], l2ChainId)
-}
-
-func GetAddressFromPrivateKey(privateKeyStr string) (string, error) {
-	privateKey, err := crypto.HexToECDSA(privateKeyStr)
-	if err != nil {
-		log.Printf("Error converting hex to ECDSA: %v", err)
-		return "", err
-	}
-	if privateKey == nil {
-		log.Println("Private key is nil")
-		return "", errors.New("private key is nil")
-	}
-
-	publicKey := privateKey.Public().(*ecdsa.PublicKey)
-	address := crypto.PubkeyToAddress(*publicKey)
-
-	return address.Hex(), nil
 }
 
 func GetAccountMap(ctx context.Context, client *ethclient.Client, seedPhrase string) (map[int]types.Account, error) {
@@ -118,13 +102,13 @@ func GetAccountMap(ctx context.Context, client *ethclient.Client, seedPhrase str
 			return nil, err
 		}
 
-		balance, err := client.BalanceAt(ctx, common.HexToAddress(address), nil)
+		balance, err := client.BalanceAt(ctx, address, nil)
 		if err != nil {
 			log.Printf("Error retrieving account balance: %v", err)
 			return nil, err
 		}
 		account := types.Account{
-			Address:    address,
+			Address:    address.Hex(),
 			Balance:    balance.String(),
 			PrivateKey: fmt.Sprintf("%064x", privateKey.D),
 		}
@@ -134,4 +118,15 @@ func GetAccountMap(ctx context.Context, client *ethclient.Client, seedPhrase str
 	}
 
 	return accounts, nil
+}
+
+func GetAddressFromPrivateKey(privateKeyHex string) (ethCommon.Address, error) {
+	trimmedPrivateKey := strings.TrimPrefix(privateKeyHex, "0x")
+	privateKey, err := crypto.HexToECDSA(trimmedPrivateKey)
+	if err != nil {
+		return ethCommon.Address{}, fmt.Errorf("failed to parse private key: %w", err)
+	}
+	publicKey := privateKey.PublicKey
+	address := crypto.PubkeyToAddress(publicKey)
+	return address, nil
 }

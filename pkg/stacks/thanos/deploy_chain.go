@@ -113,6 +113,11 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		return err
 	}
 
+	// Check if the contracts deployed successfully
+	if t.deployConfig.DeployContractState.Status != types.DeployContractStatusCompleted {
+		return fmt.Errorf("contracts are not deployed successfully, please deploy the contracts first")
+	}
+
 	// STEP 1. Clone the charts repository
 	err := t.cloneSourcecode(ctx, "tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git")
 	if err != nil {

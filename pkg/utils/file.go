@@ -7,6 +7,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
@@ -113,4 +116,15 @@ func ReadConfigFromJSONFile(deploymentPath string) (*types.Config, error) {
 	}
 
 	return &config, nil
+}
+
+func ConvertChainNameToNamespace(chainName string) string {
+	processed := strings.ToLower(chainName)
+	processed = strings.ReplaceAll(processed, " ", "-")
+	processed = regexp.MustCompile(`[^a-z0-9-]`).ReplaceAllString(processed, "")
+	processed = strings.Trim(processed, "-")
+	if len(processed) > 20 {
+		processed = processed[:20]
+	}
+	return fmt.Sprintf("%s-%d", processed, time.Now().Unix())
 }

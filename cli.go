@@ -151,6 +151,11 @@ func Run() {
 				Usage:  "Upgrade the trh-sdk latest version",
 				Action: commands.ActionUpgrade(),
 			},
+			{
+				Name:   "verify-register-candidate",
+				Usage:  "Verify and Register Candidate",
+				Action: commands.ActionVerifyRegisterCandidates(),
+			},
 		},
 	}
 

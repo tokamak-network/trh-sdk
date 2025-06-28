@@ -31,6 +31,7 @@ type DeployContractsInput struct {
 	L1RPCurl           string
 	ChainConfiguration *types.ChainConfiguration
 	Operators          *types.Operators
+	RegisterCandidate  *RegisterCandidateInput
 }
 
 func (c *DeployContractsInput) Validate(ctx context.Context) error {
@@ -650,6 +651,69 @@ func InputAWSLogin() (*types.AWSConfig, error) {
 	}, nil
 }
 
+func (t *ThanosStack) InputRegisterCandidate() (*RegisterCandidateInput, error) {
+	var (
+		amount   float64
+		memo     string
+		useWTON  bool
+		nameInfo string
+		err      error
+	)
+	for {
+		fmt.Print("Please enter the amount of TON to stake (minimum 1000.1): ")
+		amount, err = scanner.ScanFloat()
+		if err != nil {
+			fmt.Printf("Error while reading amount: %s\n", err)
+			continue
+		}
+		if amount < 1000.1 {
+			fmt.Println("Error: Amount must be at least 1000.1 TON")
+			continue
+		}
+		break
+	}
+
+	for {
+		fmt.Print("Please enter a memo for the registration: ")
+		memo, err = scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error while reading memo: %s", err)
+			return nil, err
+		}
+
+		if memo == "" {
+			fmt.Println("Memo cannot be empty")
+			continue
+		}
+		break
+	}
+
+	fmt.Print("Please enter a name for the registration (default: \"\"): ")
+	nameInfo, err = scanner.ScanString()
+	if err != nil {
+		fmt.Printf("Error while reading name: %s", err)
+		return nil, err
+	}
+	fmt.Print("Would you like to use WTON instead of TON for staking? [Y or N] (default: N): ")
+	useWTON, err = scanner.ScanBool(false)
+	if err != nil {
+		fmt.Printf("Error while reading use-wton setting: %s", err)
+		return nil, err
+	}
+	//TODO: Check and update this with further updates
+	if useWTON {
+		fmt.Printf("Currently only TON is accepted %s", err)
+		return nil, err
+	}
+
+	return &RegisterCandidateInput{
+		amount:   amount,
+		useTon:   !useWTON,
+		memo:     memo,
+		nameInfo: nameInfo,
+	}, nil
+}
+
 func SelectAccounts(ctx context.Context, client *ethclient.Client, enableFraudProof bool, seed string) (*types.Operators, error) {
 	fmt.Println("Retrieving accounts...")
 	accounts, err := utils.GetAccountMap(ctx, client, seed)
@@ -798,18 +862,18 @@ func makeDeployContractConfigJsonFile(
 			return err
 		}
 
-		deployContractTemplate.FinalSystemOwner = address
-		deployContractTemplate.SuperchainConfigGuardian = address
-		deployContractTemplate.ProxyAdminOwner = address
-		deployContractTemplate.BaseFeeVaultRecipient = address
-		deployContractTemplate.L1FeeVaultRecipient = address
-		deployContractTemplate.SequencerFeeVaultRecipient = address
-		deployContractTemplate.NewPauser = address
-		deployContractTemplate.NewBlacklister = address
-		deployContractTemplate.MasterMinterOwner = address
-		deployContractTemplate.FiatTokenOwner = address
-		deployContractTemplate.UniswapV3FactoryOwner = address
-		deployContractTemplate.UniversalRouterRewardsDistributor = address
+		deployContractTemplate.FinalSystemOwner = address.Hex()
+		deployContractTemplate.SuperchainConfigGuardian = address.Hex()
+		deployContractTemplate.ProxyAdminOwner = address.Hex()
+		deployContractTemplate.BaseFeeVaultRecipient = address.Hex()
+		deployContractTemplate.L1FeeVaultRecipient = address.Hex()
+		deployContractTemplate.SequencerFeeVaultRecipient = address.Hex()
+		deployContractTemplate.NewPauser = address.Hex()
+		deployContractTemplate.NewBlacklister = address.Hex()
+		deployContractTemplate.MasterMinterOwner = address.Hex()
+		deployContractTemplate.FiatTokenOwner = address.Hex()
+		deployContractTemplate.UniswapV3FactoryOwner = address.Hex()
+		deployContractTemplate.UniversalRouterRewardsDistributor = address.Hex()
 	}
 	if account := operators.SequencerPrivateKey; account != "" {
 		address, err := utils.GetAddressFromPrivateKey(account)
@@ -817,7 +881,7 @@ func makeDeployContractConfigJsonFile(
 			fmt.Printf("Error getting address from private key: %s", err)
 			return err
 		}
-		deployContractTemplate.P2pSequencerAddress = address
+		deployContractTemplate.P2pSequencerAddress = address.Hex()
 	}
 	if account := operators.BatcherPrivateKey; account != "" {
 		address, err := utils.GetAddressFromPrivateKey(account)
@@ -825,7 +889,7 @@ func makeDeployContractConfigJsonFile(
 			fmt.Printf("Error getting address from private key: %s", err)
 			return err
 		}
-		deployContractTemplate.BatchSenderAddress = address
+		deployContractTemplate.BatchSenderAddress = address.Hex()
 	}
 	if account := operators.ProposerPrivateKey; account != "" {
 		address, err := utils.GetAddressFromPrivateKey(account)
@@ -833,7 +897,7 @@ func makeDeployContractConfigJsonFile(
 			fmt.Printf("Error getting address from private key: %s", err)
 			return err
 		}
-		deployContractTemplate.L2OutputOracleProposer = address
+		deployContractTemplate.L2OutputOracleProposer = address.Hex()
 	}
 	if account := operators.ChallengerPrivateKey; account != "" {
 		address, err := utils.GetAddressFromPrivateKey(account)
@@ -841,7 +905,7 @@ func makeDeployContractConfigJsonFile(
 			fmt.Printf("Error getting address from private key: %s", err)
 			return err
 		}
-		deployContractTemplate.L2OutputOracleChallenger = address
+		deployContractTemplate.L2OutputOracleChallenger = address.Hex()
 	}
 
 	// Fetch the latest block
@@ -957,6 +1021,7 @@ func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainI
 		GovernanceTokenOwner:                     "0x0000000000000000000000000000000000000333",
 		GovernanceTokenSymbol:                    "OP",
 		L2OutputOracleChallenger:                 "0x0000000000000000000000000000000000000001",
+		ReuseDeployment:                          true,
 	}
 
 	return defaultTemplate

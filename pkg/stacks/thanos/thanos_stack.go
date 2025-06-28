@@ -5,19 +5,21 @@ import (
 	"fmt"
 
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
-	"github.com/tokamak-network/trh-sdk/pkg/utils"
 
 	"github.com/tokamak-network/trh-sdk/pkg/types"
+	"github.com/tokamak-network/trh-sdk/pkg/utils"
+
 	"go.uber.org/zap"
 )
 
 type ThanosStack struct {
-	network        string
-	deployConfig   *types.Config
-	usePromptInput bool
-	awsProfile     *types.AWSProfile
-	l              *zap.SugaredLogger
-	deploymentPath string
+	network           string
+	deployConfig      *types.Config
+	usePromptInput    bool
+	awsProfile        *types.AWSProfile
+	l                 *zap.SugaredLogger
+	deploymentPath    string
+	registerCandidate bool
 }
 
 func NewThanosStack(
