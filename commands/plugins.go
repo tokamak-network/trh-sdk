@@ -96,6 +96,15 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							continue
 						}
 
+						var displayNamespace string
+						if pluginName == constants.PluginMonitoring {
+							displayNamespace = "monitoring"
+						} else {
+							displayNamespace = config.K8s.Namespace
+						}
+
+						fmt.Printf("Installing plugin: %s in namespace: %s...\n", pluginName, displayNamespace)
+
 						switch pluginName {
 						case constants.PluginBlockExplorer:
 							installBlockExplorerInput, err := thanos.InputInstallBlockExplorer()
@@ -115,6 +124,18 @@ func ActionInstallationPlugins() cli.ActionFunc {
 								return thanosStack.UninstallBridge(ctx)
 							}
 							return nil
+						case constants.PluginMonitoring:
+							// Get monitoring configuration
+							config, err := thanosStack.GetMonitoringConfig(ctx)
+							if err != nil {
+								return fmt.Errorf("failed to get monitoring configuration: %w", err)
+							}
+							err = thanosStack.InstallMonitoring(ctx, config)
+							if err != nil {
+								fmt.Println("Error installing monitoring:", err)
+								return thanosStack.UninstallMonitoring(ctx)
+							}
+							return nil
 						default:
 							return nil
 						}
@@ -130,12 +151,22 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							fmt.Printf("Plugin %s is not supported for this stack.\n", pluginName)
 							continue
 						}
+						var displayNamespace string
+						if pluginName == constants.PluginMonitoring {
+							displayNamespace = "monitoring"
+						} else {
+							displayNamespace = config.K8s.Namespace
+						}
+
+						fmt.Printf("Uninstalling plugin: %s in namespace: %s...\n", pluginName, displayNamespace)
 
 						switch pluginName {
 						case constants.PluginBridge:
 							return thanosStack.UninstallBridge(ctx)
 						case constants.PluginBlockExplorer:
 							return thanosStack.UninstallBlockExplorer(ctx)
+						case constants.PluginMonitoring:
+							return thanosStack.UninstallMonitoring(ctx)
 						}
 					}
 				default:

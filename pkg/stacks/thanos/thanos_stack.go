@@ -69,15 +69,3 @@ func NewThanosStack(
 		deployConfig:   config,
 	}, nil
 }
-
-type RegisterCandidateInput struct {
-	amount   float64
-	useTon   bool
-	memo     string
-	nameInfo string
-}
-
-func (t *ThanosStack) SetRegisterCandidate(value bool) *ThanosStack {
-	t.registerCandidate = value
-	return t
-}

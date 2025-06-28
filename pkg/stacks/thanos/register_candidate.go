@@ -26,6 +26,18 @@ type DesignatedOwners struct {
 	Foundation ethCommon.Address
 }
 
+type RegisterCandidateInput struct {
+	amount   float64
+	useTon   bool
+	memo     string
+	nameInfo string
+}
+
+func (t *ThanosStack) SetRegisterCandidate(value bool) *ThanosStack {
+	t.registerCandidate = value
+	return t
+}
+
 func (t *ThanosStack) checkAdminBalance(ctx context.Context, adminAddress ethCommon.Address, amount float64, l1Client *ethclient.Client) error {
 	fmt.Printf("Checking admin's TON token balance... \n")
 
