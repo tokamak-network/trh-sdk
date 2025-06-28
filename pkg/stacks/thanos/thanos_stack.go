@@ -901,7 +901,15 @@ func (t *ThanosStack) InstallPlugins(ctx context.Context, pluginNames []string) 
 			continue
 		}
 
-		fmt.Printf("Installing plugin: %s in namespace: %s...\n", pluginName, namespace)
+		// Display the correct namespace for each plugin
+		var displayNamespace string
+		if pluginName == constants.PluginMonitoring {
+			displayNamespace = "monitoring"
+		} else {
+			displayNamespace = namespace
+		}
+
+		fmt.Printf("Installing plugin: %s in namespace: %s...\n", pluginName, displayNamespace)
 
 		switch pluginName {
 		case constants.PluginBlockExplorer:
@@ -914,6 +922,13 @@ func (t *ThanosStack) InstallPlugins(ctx context.Context, pluginNames []string) 
 			err := t.installBridge(ctx)
 			if err != nil {
 				return t.uninstallBridge(ctx)
+			}
+			return nil
+		case constants.PluginMonitoring:
+			err := t.installMonitoring(ctx)
+			if err != nil {
+				fmt.Println("Error installing monitoring:", err)
+				return t.uninstallMonitoring(ctx)
 			}
 			return nil
 		}
@@ -944,13 +959,23 @@ func (t *ThanosStack) UninstallPlugins(ctx context.Context, pluginNames []string
 			continue
 		}
 
-		fmt.Printf("Uninstalling plugin: %s in namespace: %s...\n", pluginName, namespace)
+		// Display the correct namespace for each plugin
+		var displayNamespace string
+		if pluginName == constants.PluginMonitoring {
+			displayNamespace = "monitoring"
+		} else {
+			displayNamespace = namespace
+		}
+
+		fmt.Printf("Uninstalling plugin: %s in namespace: %s...\n", pluginName, displayNamespace)
 
 		switch pluginName {
 		case constants.PluginBridge:
 			return t.uninstallBridge(ctx)
 		case constants.PluginBlockExplorer:
 			return t.uninstallBlockExplorer(ctx)
+		case constants.PluginMonitoring:
+			return t.uninstallMonitoring(ctx)
 		}
 	}
 	return nil
