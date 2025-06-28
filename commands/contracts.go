@@ -49,7 +49,7 @@ func ActionDeployContracts() cli.ActionFunc {
 			thanosStack.SetRegisterCandidate(enableRegisterCandidate)
 
 			if enableRegisterCandidate {
-				registerCandidateInputs, err := thanosStack.InputRegisterCandidate()
+				registerCandidateInputs, err := thanos.InputRegisterCandidate()
 				if err != nil {
 					return fmt.Errorf("❌ failed to get register candidate input: %w", err)
 				}

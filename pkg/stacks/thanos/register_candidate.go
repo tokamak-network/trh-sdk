@@ -27,10 +27,26 @@ type DesignatedOwners struct {
 }
 
 type RegisterCandidateInput struct {
-	amount   float64
-	useTon   bool
-	memo     string
-	nameInfo string
+	Amount   float64
+	UseTon   bool
+	Memo     string
+	NameInfo string
+}
+
+func (r *RegisterCandidateInput) Validate(ctx context.Context) error {
+	if r.Amount < 1000.1 {
+		return fmt.Errorf("amount must be at least 1000.1")
+	}
+	if r.Memo == "" {
+		return fmt.Errorf("memo cannot be empty")
+	}
+
+	useWTON := !r.UseTon
+	if useWTON {
+		return fmt.Errorf("currently only TON is accepted")
+	}
+
+	return nil
 }
 
 func (t *ThanosStack) SetRegisterCandidate(value bool) *ThanosStack {
@@ -72,6 +88,10 @@ func (t *ThanosStack) checkAdminBalance(ctx context.Context, adminAddress ethCom
 
 // fromDeployContract flag would be true if the function would be called from the deploy contract function
 func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCandidate *RegisterCandidateInput) error {
+	if err := registerCandidate.Validate(ctx); err != nil {
+		return err
+	}
+
 	l1Client, err := ethclient.DialContext(ctx, t.deployConfig.L1RPCURL)
 	if err != nil {
 		return err
@@ -175,7 +195,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 			auth,
 			ethCommon.HexToAddress(systemConfigProxy),
 			ethCommon.HexToAddress(proxyAdmin),
-			registerCandidate.nameInfo,
+			registerCandidate.NameInfo,
 			ethCommon.HexToAddress(safeWalletAddress),
 		)
 		if err != nil {
@@ -201,7 +221,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 	}
 
 	// Convert amount to Wei
-	amountInWei := new(big.Float).Mul(big.NewFloat(registerCandidate.amount), big.NewFloat(1e18))
+	amountInWei := new(big.Float).Mul(big.NewFloat(registerCandidate.Amount), big.NewFloat(1e18))
 	amountBigInt, _ := amountInWei.Int(nil)
 
 	// Get contract address from environment
@@ -252,8 +272,8 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 		auth,
 		ethCommon.HexToAddress(systemConfigProxy),
 		amountBigInt,
-		registerCandidate.useTon,
-		registerCandidate.memo,
+		registerCandidate.UseTon,
+		registerCandidate.Memo,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to register candidate: %v", err)
@@ -281,6 +301,10 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, registerCand
 	fmt.Println("Starting candidate registration process...")
 	fmt.Println("💲 Admin account will be used to register the candidate. Please ensure it has sufficient TON token balance.")
 
+	if err := registerCandidate.Validate(ctx); err != nil {
+		return err
+	}
+
 	l1Client, err := ethclient.DialContext(ctx, t.deployConfig.L1RPCURL)
 	if err != nil {
 		return err
@@ -289,7 +313,7 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, registerCand
 	if err != nil {
 		return err
 	}
-	err = t.checkAdminBalance(ctx, adminAddress, registerCandidate.amount, l1Client)
+	err = t.checkAdminBalance(ctx, adminAddress, registerCandidate.Amount, l1Client)
 	if err != nil {
 		return err
 	}

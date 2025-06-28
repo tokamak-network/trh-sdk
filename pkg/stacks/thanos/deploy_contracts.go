@@ -55,7 +55,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		}
 	}
 
-	err := deployContractsConfig.Validate(ctx)
+	err := deployContractsConfig.Validate(ctx, t.registerCandidate)
 	if err != nil {
 		fmt.Println("Error validating deployContractsConfig, err:", err)
 		return err
@@ -126,7 +126,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			if err != nil {
 				return fmt.Errorf("failed to get admin address from private key: %s", err)
 			}
-			err = t.checkAdminBalance(ctx, adminAddress, registerCandidate.amount, l1Client)
+			err = t.checkAdminBalance(ctx, adminAddress, registerCandidate.Amount, l1Client)
 			if err != nil {
 				return fmt.Errorf("failed to check admin balance: %s", err)
 			}
@@ -161,7 +161,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		}
 
 		if t.registerCandidate {
-			err = t.checkAdminBalance(ctx, adminAccount, registerCandidate.amount, l1Client)
+			err = t.checkAdminBalance(ctx, adminAccount, registerCandidate.Amount, l1Client)
 			if err != nil {
 				return err
 			}

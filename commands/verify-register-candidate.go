@@ -67,7 +67,7 @@ func ActionVerifyRegisterCandidates() cli.ActionFunc {
 				return fmt.Errorf("failed to create thanos stack: %v", err)
 			}
 
-			registerCandidate, err := thanosStack.InputRegisterCandidate()
+			registerCandidate, err := thanos.InputRegisterCandidate()
 			if err != nil {
 				return fmt.Errorf("❌ failed to get register candidate input: %w", err)
 			}

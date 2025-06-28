@@ -34,7 +34,7 @@ type DeployContractsInput struct {
 	RegisterCandidate  *RegisterCandidateInput
 }
 
-func (c *DeployContractsInput) Validate(ctx context.Context) error {
+func (c *DeployContractsInput) Validate(ctx context.Context, registerCandidate bool) error {
 	if c.L1RPCurl == "" {
 		return errors.New("l1RPCurl is required")
 	}
@@ -59,6 +59,16 @@ func (c *DeployContractsInput) Validate(ctx context.Context) error {
 
 	if err := c.ChainConfiguration.Validate(l1ChainId.Uint64()); err != nil {
 		return fmt.Errorf("chain configuration is invalid: %w", err)
+	}
+
+	if registerCandidate {
+		if c.RegisterCandidate == nil {
+			return errors.New("register candidate is required")
+		}
+
+		if err := c.RegisterCandidate.Validate(ctx); err != nil {
+			return fmt.Errorf("register candidate is invalid: %w", err)
+		}
 	}
 
 	return nil
@@ -681,7 +691,7 @@ func InputAWSLogin() (*types.AWSConfig, error) {
 	}, nil
 }
 
-func (t *ThanosStack) InputRegisterCandidate() (*RegisterCandidateInput, error) {
+func InputRegisterCandidate() (*RegisterCandidateInput, error) {
 	var (
 		amount   float64
 		memo     string
@@ -737,10 +747,10 @@ func (t *ThanosStack) InputRegisterCandidate() (*RegisterCandidateInput, error) 
 	}
 
 	return &RegisterCandidateInput{
-		amount:   amount,
-		useTon:   !useWTON,
-		memo:     memo,
-		nameInfo: nameInfo,
+		Amount:   amount,
+		UseTon:   !useWTON,
+		Memo:     memo,
+		NameInfo: nameInfo,
 	}, nil
 }
 
