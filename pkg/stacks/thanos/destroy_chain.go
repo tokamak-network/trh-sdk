@@ -69,6 +69,12 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 		fmt.Println("Helm release removed successfully")
 	}
 
+	// Delete monitoring resources
+	err = t.UninstallMonitoring(ctx)
+	if err != nil {
+		fmt.Println("Error uninstalling monitoring:", err)
+	}
+
 	// Delete namespace before destroying the infrastructure
 	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()

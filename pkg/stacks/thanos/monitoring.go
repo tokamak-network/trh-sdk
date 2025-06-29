@@ -151,6 +151,11 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 		return err
 	}
 
+	if len(releases) == 0 {
+		fmt.Println("No monitoring releases found")
+		return nil
+	}
+
 	// Store release names for cleanup
 	var releasesToCleanup []string
 
