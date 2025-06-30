@@ -92,6 +92,7 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *MonitoringC
 func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword string) (*MonitoringConfig, error) {
 	// Use timestamped release name for monitoring
 	chainName := strings.ToLower(t.deployConfig.ChainName)
+	chainName = strings.ReplaceAll(chainName, " ", "-") // Match PV naming convention
 	timestamp := time.Now().Unix()
 	helmReleaseName := fmt.Sprintf("monitoring-%d", timestamp)
 
@@ -184,6 +185,7 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 	}
 
 	chainName := strings.ToLower(t.deployConfig.ChainName)
+	chainName = strings.ReplaceAll(chainName, " ", "-") // Match PV naming convention
 
 	// Clean up existing PVs and PVCs for monitoring components
 	fmt.Println("🧹 Cleaning up existing monitoring PVs and PVCs...")
