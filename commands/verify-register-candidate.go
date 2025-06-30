@@ -50,9 +50,6 @@ func ActionVerifyRegisterCandidates() cli.ActionFunc {
 
 		switch config.Stack {
 		case constants.ThanosStack:
-			if config.Network == constants.Mainnet {
-				return fmt.Errorf("register candidates verification is not supported on Mainnet")
-			}
 
 			// Initialize the logger
 			now := time.Now().Unix()
