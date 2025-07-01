@@ -32,6 +32,7 @@ trh-sdk
 
 tokamak-thanos
 tokamak-thanos-stack
+tokamak-rollup-metadata-repository
 
 deploy-config.json
 settings.json

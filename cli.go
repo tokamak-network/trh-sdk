@@ -156,6 +156,11 @@ func Run() {
 				Usage:  "Verify and Register Candidate",
 				Action: commands.ActionVerifyRegisterCandidates(),
 			},
+			{
+				Name:   "register-metadata",
+				Usage:  "Register L2 Metadata",
+				Action: commands.ActionRegisterMetadata(),
+			},
 		},
 	}
 
