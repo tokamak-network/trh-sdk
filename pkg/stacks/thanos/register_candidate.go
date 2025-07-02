@@ -5,15 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	ethCommon "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
-
-	"os"
 
 	"github.com/tokamak-network/trh-sdk/abis"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
@@ -526,6 +526,7 @@ func (t *ThanosStack) GetRegistrationAdditionalInfo(ctx context.Context, registe
 		RollupConfigAddress: contracts.SystemConfigProxy,
 		CandidateName:       registerCandidate.NameInfo,
 		CandidateMemo:       registerCandidate.Memo,
+		RegistrationTime:    time.Now().Format("2006-01-02:15:04:05"),
 	}
 
 	return result, nil

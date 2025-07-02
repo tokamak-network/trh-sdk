@@ -13,6 +13,7 @@ type CandidateRegistrationInfo struct {
 	RollupConfigAddress string  `json:"rollup_config_address"`
 	CandidateName       string  `json:"candidate_name"`
 	CandidateMemo       string  `json:"candidate_memo"`
+	RegistrationTime    string  `json:"registration_time"`
 }
 
 // RegistrationAdditionalInfo combines all registration-related information
