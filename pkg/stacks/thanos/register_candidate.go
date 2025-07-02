@@ -463,7 +463,7 @@ func GetDesignatedOwnersByChainID(chainID uint64) (DesignatedOwners, error) {
 }
 
 // GetRegistrationAdditionalInfo returns additional information after candidate registration
-func (t *ThanosStack) GetRegistrationAdditionalInfo(ctx context.Context, registerCandidate *RegisterCandidateInput) (map[string]interface{}, error) {
+func (t *ThanosStack) GetRegistrationAdditionalInfo(ctx context.Context, registerCandidate *RegisterCandidateInput) (*types.RegistrationAdditionalInfo, error) {
 	// Connect to L1 to get contract information
 	l1Client, err := ethclient.DialContext(ctx, t.deployConfig.L1RPCURL)
 	if err != nil {
@@ -490,7 +490,7 @@ func (t *ThanosStack) GetRegistrationAdditionalInfo(ctx context.Context, registe
 		return nil, fmt.Errorf("failed to decode deployment JSON: %w", err)
 	}
 
-	result := make(map[string]interface{})
+	result := &types.RegistrationAdditionalInfo{}
 
 	// 1. Safe wallet information
 	if contracts.SystemOwnerSafe != "" {
@@ -510,10 +510,10 @@ func (t *ThanosStack) GetRegistrationAdditionalInfo(ctx context.Context, registe
 				// Get threshold
 				threshold, err := safeContract.GetThreshold(callOpts)
 				if err == nil {
-					result["safe_wallet"] = map[string]interface{}{
-						"address":   contracts.SystemOwnerSafe,
-						"owners":    ownerStrings,
-						"threshold": threshold.Uint64(),
+					result.SafeWallet = &types.SafeWalletInfo{
+						Address:   contracts.SystemOwnerSafe,
+						Owners:    ownerStrings,
+						Threshold: threshold.Uint64(),
 					}
 				}
 			}
@@ -521,11 +521,11 @@ func (t *ThanosStack) GetRegistrationAdditionalInfo(ctx context.Context, registe
 	}
 
 	// 2. Candidate registration information
-	result["candidate_registration"] = map[string]interface{}{
-		"staking_amount":        registerCandidate.Amount,
-		"rollup_config_address": contracts.SystemConfigProxy,
-		"candidate_name":        registerCandidate.NameInfo,
-		"candidate_memo":        registerCandidate.Memo,
+	result.CandidateRegistration = &types.CandidateRegistrationInfo{
+		StakingAmount:       registerCandidate.Amount,
+		RollupConfigAddress: contracts.SystemConfigProxy,
+		CandidateName:       registerCandidate.NameInfo,
+		CandidateMemo:       registerCandidate.Memo,
 	}
 
 	return result, nil
