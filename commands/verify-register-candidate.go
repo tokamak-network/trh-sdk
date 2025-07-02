@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -68,8 +69,34 @@ func ActionVerifyRegisterCandidates() cli.ActionFunc {
 			if err != nil {
 				return fmt.Errorf("❌ failed to get register candidate input: %w", err)
 			}
+
+			// Register candidate
 			err = thanosStack.VerifyRegisterCandidates(ctx, registerCandidate)
-			return err
+			if err != nil {
+				return err
+			}
+
+			// Get and display additional registration information
+			fmt.Println("\n📊 Retrieving additional registration information...")
+			additionalInfo, err := thanosStack.GetRegistrationAdditionalInfo(ctx, registerCandidate)
+			if err != nil {
+				fmt.Printf("⚠️  Warning: Failed to retrieve additional information: %v\n", err)
+				return nil
+			}
+
+			// Pretty print the additional information
+			fmt.Println("\n✅ Additional Registration Information:")
+			fmt.Println("=" + fmt.Sprintf("%50s", "="))
+
+			prettyJSON, err := json.MarshalIndent(additionalInfo, "", "  ")
+			if err != nil {
+				fmt.Printf("Failed to format additional info: %v\n", err)
+				fmt.Printf("Raw data: %+v\n", additionalInfo)
+			} else {
+				fmt.Println(string(prettyJSON))
+			}
+
+			return nil
 		default:
 			return fmt.Errorf("unsupported stack: %s", config.Stack)
 		}

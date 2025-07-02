@@ -460,3 +460,72 @@ func GetDesignatedOwnersByChainID(chainID uint64) (DesignatedOwners, error) {
 		return DesignatedOwners{}, fmt.Errorf("unsupported chain ID: %d", chainID)
 	}
 }
+
+// GetRegistrationAdditionalInfo returns additional information after candidate registration
+func (t *ThanosStack) GetRegistrationAdditionalInfo(ctx context.Context, registerCandidate *RegisterCandidateInput) (map[string]interface{}, error) {
+	// Connect to L1 to get contract information
+	l1Client, err := ethclient.DialContext(ctx, t.deployConfig.L1RPCURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to L1 RPC: %w", err)
+	}
+	defer l1Client.Close()
+
+	chainID, err := l1Client.ChainID(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chain ID: %w", err)
+	}
+
+	// Read deployment file to get contract addresses
+	deploymentFile := fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", t.deploymentPath, chainID)
+	file, err := os.Open(deploymentFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open deployment file: %w", err)
+	}
+	defer file.Close()
+
+	var contracts types.Contracts
+	decoder := json.NewDecoder(file)
+	if err := decoder.Decode(&contracts); err != nil {
+		return nil, fmt.Errorf("failed to decode deployment JSON: %w", err)
+	}
+
+	result := make(map[string]interface{})
+
+	// 1. Safe wallet information
+	if contracts.SystemOwnerSafe != "" {
+		safeAddress := ethCommon.HexToAddress(contracts.SystemOwnerSafe)
+		safeContract, err := abis.NewSafeExtender(safeAddress, l1Client)
+		if err == nil {
+			callOpts := &bind.CallOpts{Context: ctx}
+
+			// Get owners
+			owners, err := safeContract.GetOwners(callOpts)
+			if err == nil {
+				ownerStrings := make([]string, len(owners))
+				for i, owner := range owners {
+					ownerStrings[i] = owner.Hex()
+				}
+
+				// Get threshold
+				threshold, err := safeContract.GetThreshold(callOpts)
+				if err == nil {
+					result["safe_wallet"] = map[string]interface{}{
+						"address":   contracts.SystemOwnerSafe,
+						"owners":    ownerStrings,
+						"threshold": threshold.Uint64(),
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Candidate registration information
+	result["candidate_registration"] = map[string]interface{}{
+		"staking_amount":        registerCandidate.Amount,
+		"rollup_config_address": contracts.SystemConfigProxy,
+		"candidate_name":        registerCandidate.NameInfo,
+		"candidate_memo":        registerCandidate.Memo,
+	}
+
+	return result, nil
+}
