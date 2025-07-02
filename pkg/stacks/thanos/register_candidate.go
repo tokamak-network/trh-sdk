@@ -186,7 +186,8 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 	}
 
 	if rollupType != 0 {
-		fmt.Printf("Config already registered \n")
+		fmt.Println("✅ Rollup config is already registered.")
+		return nil
 	}
 
 	// Verify and register config
