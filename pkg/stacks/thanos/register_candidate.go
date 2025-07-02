@@ -5,15 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	ethCommon "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
-
-	"os"
 
 	"github.com/tokamak-network/trh-sdk/abis"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
@@ -186,7 +186,8 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 	}
 
 	if rollupType != 0 {
-		fmt.Printf("Config already registered \n")
+		fmt.Println("✅ Rollup config is already registered.")
+		return nil
 	}
 
 	// Verify and register config
@@ -458,5 +459,95 @@ func GetDesignatedOwnersByChainID(chainID uint64) (DesignatedOwners, error) {
 		}, nil
 	default:
 		return DesignatedOwners{}, fmt.Errorf("unsupported chain ID: %d", chainID)
+	}
+}
+
+// GetRegistrationAdditionalInfo returns additional information after candidate registration
+func (t *ThanosStack) GetRegistrationAdditionalInfo(ctx context.Context, registerCandidate *RegisterCandidateInput) (*types.RegistrationAdditionalInfo, error) {
+	// Connect to L1 to get contract information
+	l1Client, err := ethclient.DialContext(ctx, t.deployConfig.L1RPCURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to L1 RPC: %w", err)
+	}
+	defer l1Client.Close()
+
+	chainID, err := l1Client.ChainID(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chain ID: %w", err)
+	}
+
+	// Read deployment file to get contract addresses
+	deploymentFile := fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", t.deploymentPath, chainID)
+	file, err := os.Open(deploymentFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open deployment file: %w", err)
+	}
+	defer file.Close()
+
+	var contracts types.Contracts
+	decoder := json.NewDecoder(file)
+	if err := decoder.Decode(&contracts); err != nil {
+		return nil, fmt.Errorf("failed to decode deployment JSON: %w", err)
+	}
+
+	result := &types.RegistrationAdditionalInfo{}
+
+	// 1. Safe wallet information
+	if contracts.SystemOwnerSafe != "" {
+		safeAddress := ethCommon.HexToAddress(contracts.SystemOwnerSafe)
+		safeContract, err := abis.NewSafeExtender(safeAddress, l1Client)
+		if err == nil {
+			callOpts := &bind.CallOpts{Context: ctx}
+
+			// Get owners
+			owners, err := safeContract.GetOwners(callOpts)
+			if err == nil {
+				ownerStrings := make([]string, len(owners))
+				for i, owner := range owners {
+					ownerStrings[i] = owner.Hex()
+				}
+
+				// Get threshold
+				threshold, err := safeContract.GetThreshold(callOpts)
+				if err == nil {
+					result.SafeWallet = &types.SafeWalletInfo{
+						Address:   contracts.SystemOwnerSafe,
+						Owners:    ownerStrings,
+						Threshold: threshold.Uint64(),
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Candidate registration information
+	result.CandidateRegistration = &types.CandidateRegistrationInfo{
+		StakingAmount:       registerCandidate.Amount,
+		RollupConfigAddress: contracts.SystemConfigProxy,
+		CandidateName:       registerCandidate.NameInfo,
+		CandidateMemo:       registerCandidate.Memo,
+		RegistrationTime:    time.Now().Format("2006-01-02 15:04:05 MST"),
+	}
+
+	return result, nil
+}
+
+// DisplayRegistrationAdditionalInfo retrieves and displays additional registration information
+func (t *ThanosStack) DisplayRegistrationAdditionalInfo(ctx context.Context, registerCandidate *RegisterCandidateInput) {
+	// Get and display additional registration information
+	additionalInfo, err := t.GetRegistrationAdditionalInfo(ctx, registerCandidate)
+	if err != nil {
+		fmt.Printf("⚠️  Warning: Failed to retrieve additional information: %v\n", err)
+		return
+	}
+
+	// Pretty print the additional information
+	fmt.Println("\n📋 Registration Summary:")
+	prettyJSON, err := json.MarshalIndent(additionalInfo, "", "  ")
+	if err != nil {
+		fmt.Printf("Failed to format additional info: %v\n", err)
+		fmt.Printf("Raw data: %+v\n", additionalInfo)
+	} else {
+		fmt.Println(string(prettyJSON))
 	}
 }

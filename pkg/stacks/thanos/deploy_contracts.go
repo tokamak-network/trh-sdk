@@ -312,7 +312,9 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		if verifyRegisterError != nil {
 			return fmt.Errorf("candidate registration failed: %v", verifyRegisterError)
 		}
-		fmt.Println("✅ Candidate registration completed successfully!")
+
+		// Display additional registration information
+		t.DisplayRegistrationAdditionalInfo(ctx, registerCandidate)
 	} else {
 		fmt.Println("ℹ️ Skipping candidate registration (--no-candidate flag provided)")
 	}

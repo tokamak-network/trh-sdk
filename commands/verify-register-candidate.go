@@ -68,8 +68,17 @@ func ActionVerifyRegisterCandidates() cli.ActionFunc {
 			if err != nil {
 				return fmt.Errorf("❌ failed to get register candidate input: %w", err)
 			}
+
+			// Register candidate
 			err = thanosStack.VerifyRegisterCandidates(ctx, registerCandidate)
-			return err
+			if err != nil {
+				return err
+			}
+
+			// Display additional registration information
+			thanosStack.DisplayRegistrationAdditionalInfo(ctx, registerCandidate)
+
+			return nil
 		default:
 			return fmt.Errorf("unsupported stack: %s", config.Stack)
 		}
