@@ -2,10 +2,12 @@ package utils
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log"
 	"math/big"
+	"regexp"
 	"strings"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
@@ -129,4 +131,25 @@ func GetAddressFromPrivateKey(privateKeyHex string) (ethCommon.Address, error) {
 	publicKey := privateKey.PublicKey
 	address := crypto.PubkeyToAddress(publicKey)
 	return address, nil
+}
+
+func ConvertChainNameToNamespace(chainName string) string {
+	processed := strings.ToLower(chainName)
+	processed = strings.ReplaceAll(processed, " ", "-")
+	processed = regexp.MustCompile(`[^a-z0-9-]`).ReplaceAllString(processed, "")
+	processed = strings.Trim(processed, "-")
+	if len(processed) > 20 {
+		processed = processed[:20]
+	}
+
+	// Generate random 5-character string with a-z and 0-9
+	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+	randomBytes := make([]byte, 5)
+	rand.Read(randomBytes)
+	randomStr := make([]byte, 5)
+	for i := range randomStr {
+		randomStr[i] = charset[randomBytes[i]%byte(len(charset))]
+	}
+
+	return fmt.Sprintf("%s-%s", processed, string(randomStr))
 }
