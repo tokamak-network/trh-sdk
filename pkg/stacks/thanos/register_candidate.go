@@ -526,8 +526,28 @@ func (t *ThanosStack) GetRegistrationAdditionalInfo(ctx context.Context, registe
 		RollupConfigAddress: contracts.SystemConfigProxy,
 		CandidateName:       registerCandidate.NameInfo,
 		CandidateMemo:       registerCandidate.Memo,
-		RegistrationTime:    time.Now().Format("2006-01-02:15:04:05"),
+		RegistrationTime:    time.Now().Format("2006-01-02 15:04:05 MST"),
 	}
 
 	return result, nil
+}
+
+// DisplayRegistrationAdditionalInfo retrieves and displays additional registration information
+func (t *ThanosStack) DisplayRegistrationAdditionalInfo(ctx context.Context, registerCandidate *RegisterCandidateInput) {
+	// Get and display additional registration information
+	additionalInfo, err := t.GetRegistrationAdditionalInfo(ctx, registerCandidate)
+	if err != nil {
+		fmt.Printf("⚠️  Warning: Failed to retrieve additional information: %v\n", err)
+		return
+	}
+
+	// Pretty print the additional information
+	fmt.Println("\n📋 Registration Summary:")
+	prettyJSON, err := json.MarshalIndent(additionalInfo, "", "  ")
+	if err != nil {
+		fmt.Printf("Failed to format additional info: %v\n", err)
+		fmt.Printf("Raw data: %+v\n", additionalInfo)
+	} else {
+		fmt.Println(string(prettyJSON))
+	}
 }
