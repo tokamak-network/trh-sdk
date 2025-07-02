@@ -77,23 +77,22 @@ func ActionVerifyRegisterCandidates() cli.ActionFunc {
 			}
 
 			// Get and display additional registration information
-			fmt.Println("\n📊 Retrieving additional registration information...")
 			additionalInfo, err := thanosStack.GetRegistrationAdditionalInfo(ctx, registerCandidate)
 			if err != nil {
 				fmt.Printf("⚠️  Warning: Failed to retrieve additional information: %v\n", err)
-				return nil
-			}
-
-			// Pretty print the additional information
-			fmt.Println("\n✅ Additional Registration Information:")
-			fmt.Println("=" + fmt.Sprintf("%50s", "="))
-
-			prettyJSON, err := json.MarshalIndent(additionalInfo, "", "  ")
-			if err != nil {
-				fmt.Printf("Failed to format additional info: %v\n", err)
-				fmt.Printf("Raw data: %+v\n", additionalInfo)
 			} else {
-				fmt.Println(string(prettyJSON))
+				// Pretty print the additional information
+				fmt.Println("\n📋 Registration Summary:")
+				fmt.Println("=" + fmt.Sprintf("%50s", "="))
+
+				prettyJSON, err := json.MarshalIndent(additionalInfo, "", "  ")
+				if err != nil {
+					fmt.Printf("Failed to format additional info: %v\n", err)
+					fmt.Printf("Raw data: %+v\n", additionalInfo)
+				} else {
+					fmt.Println(string(prettyJSON))
+				}
+				fmt.Println("=" + fmt.Sprintf("%50s", "="))
 			}
 
 			return nil
