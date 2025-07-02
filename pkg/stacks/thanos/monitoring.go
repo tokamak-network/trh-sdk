@@ -23,8 +23,12 @@ type MonitoringConfig struct {
 	EFSFileSystemId   string
 	ChartsPath        string
 	ValuesFilePath    string
-	ChainName         string
+	ResourceName      string
 }
+
+const (
+	monitoringNamespace = "monitoring"
+)
 
 // InstallMonitoring installs monitoring stack using Helm dependencies
 func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *MonitoringConfig) (string, error) {
@@ -91,10 +95,9 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *MonitoringC
 // GetMonitoringConfig gathers all required configuration for monitoring
 func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword string) (*MonitoringConfig, error) {
 	// Use timestamped release name for monitoring
-	chainName := strings.ToLower(t.deployConfig.ChainName)
-	chainName = strings.ReplaceAll(chainName, " ", "-") // Match PV naming convention
+	resourceName := convertChainNameToResourceName(t.deployConfig.ChainName)
 	timestamp := time.Now().Unix()
-	helmReleaseName := fmt.Sprintf("monitoring-%d", timestamp)
+	helmReleaseName := fmt.Sprintf("%s-%d", monitoringNamespace, timestamp)
 
 	// Get current working directory
 	cwd := t.deploymentPath
@@ -106,19 +109,19 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 	}
 
 	// Get service names dynamically from trh-sdk configuration
-	serviceNames, err := t.getServiceNames(ctx, t.deployConfig.K8s.Namespace, chainName)
+	serviceNames, err := t.getServiceNames(ctx, t.deployConfig.K8s.Namespace, resourceName)
 	if err != nil {
 		return nil, fmt.Errorf("error getting service names: %w", err)
 	}
 
 	// Get EFS filesystem ID from existing op-geth PV
-	efsFileSystemId, err := t.getEFSFileSystemId(ctx, chainName)
+	efsFileSystemId, err := t.getEFSFileSystemId(ctx, resourceName)
 	if err != nil {
 		return nil, fmt.Errorf("error getting EFS filesystem ID: %w", err)
 	}
 
 	config := &MonitoringConfig{
-		Namespace:         "monitoring",
+		Namespace:         monitoringNamespace,
 		HelmReleaseName:   helmReleaseName,
 		AdminPassword:     adminPassword,
 		L1RpcUrl:          t.deployConfig.L1RPCURL,
@@ -127,7 +130,7 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 		EFSFileSystemId:   efsFileSystemId,
 		ChartsPath:        chartsPath,
 		ValuesFilePath:    "", // Will be set in generateValuesFile
-		ChainName:         chainName,
+		ResourceName:      resourceName,
 	}
 
 	return config, nil
@@ -141,9 +144,6 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 	if t.deployConfig.AWS == nil {
 		return fmt.Errorf("AWS configuration is not set. Please run the deploy command first")
 	}
-
-	// Use the correct monitoring namespace instead of Thanos Stack namespace
-	monitoringNamespace := "monitoring"
 
 	// Find monitoring releases in the monitoring namespace
 	releases, err := utils.FilterHelmReleases(ctx, monitoringNamespace, "monitoring")
@@ -184,17 +184,16 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 		}
 	}
 
-	chainName := strings.ToLower(t.deployConfig.ChainName)
-	chainName = strings.ReplaceAll(chainName, " ", "-") // Match PV naming convention
+	resourceName := convertChainNameToResourceName(t.deployConfig.ChainName)
 
 	// Clean up existing PVs and PVCs for monitoring components
 	fmt.Println("🧹 Cleaning up existing monitoring PVs and PVCs...")
 	// Get timestamp from existing op-geth PV to match naming pattern
-	timestamp, err := t.getTimestampFromExistingPV(ctx, chainName)
+	timestamp, err := t.getTimestampFromExistingPV(ctx, resourceName)
 	if err != nil {
 		return fmt.Errorf("failed to get timestamp from existing PV: %w", err)
 	}
-	if err := t.cleanupExistingMonitoringResources(ctx, monitoringNamespace, chainName, timestamp); err != nil {
+	if err := t.cleanupExistingMonitoringResources(ctx, monitoringNamespace, resourceName, timestamp); err != nil {
 		fmt.Printf("⚠️  Warning: Failed to cleanup existing resources: %v\n", err)
 		// Continue anyway - we'll try to create new ones
 	}
@@ -256,9 +255,9 @@ func (t *ThanosStack) generateValuesFile(ctx context.Context, config *Monitoring
 			},
 		},
 		"thanosStack": map[string]interface{}{
-			"chainName":   config.ChainName,
+			"chainName":   t.deployConfig.ChainName,
 			"namespace":   t.deployConfig.K8s.Namespace,
-			"releaseName": config.ChainName,
+			"releaseName": config.ResourceName,
 		},
 		"kube-prometheus-stack": map[string]interface{}{
 			"prometheus": map[string]interface{}{
@@ -327,13 +326,13 @@ func (t *ThanosStack) generateGrafanaStorageConfig(ctx context.Context, config *
 		}
 
 		// For Static Provisioning, specify the PV name that matches our created PV
-		timestamp, err := t.getTimestampFromExistingPV(ctx, config.ChainName)
+		timestamp, err := t.getTimestampFromExistingPV(ctx, config.ResourceName)
 		if err != nil {
 			fmt.Printf("⚠️  Warning: Could not get timestamp for Grafana PV naming: %v\n", err)
 			timestamp = "static" // Fallback
 		}
 
-		pvName := fmt.Sprintf("%s-%s-thanos-stack-grafana", config.ChainName, timestamp)
+		pvName := fmt.Sprintf("%s-%s-thanos-stack-grafana", config.ResourceName, timestamp)
 		persistenceConfig["volumeName"] = pvName
 
 		grafanaConfig["persistence"] = persistenceConfig
@@ -347,7 +346,7 @@ func (t *ThanosStack) generateGrafanaStorageConfig(ctx context.Context, config *
 }
 
 // getServiceNames returns a map of component names to their Kubernetes service names
-func (t *ThanosStack) getServiceNames(ctx context.Context, namespace, chainName string) (map[string]string, error) {
+func (t *ThanosStack) getServiceNames(ctx context.Context, namespace, resourceName string) (map[string]string, error) {
 	fmt.Printf("🔍 Discovering services in namespace: %s\n", namespace)
 
 	// First, get all services in the namespace
@@ -378,39 +377,39 @@ func (t *ThanosStack) getServiceNames(ctx context.Context, namespace, chainName 
 	componentPatterns := map[string][]string{
 		"op-node": {
 			"op-node", "node", "opnode",
-			fmt.Sprintf("%s-op-node", chainName),
-			fmt.Sprintf("%s-node", chainName),
-			fmt.Sprintf("%s-thanos-stack-op-node", chainName),
+			fmt.Sprintf("%s-op-node", resourceName),
+			fmt.Sprintf("%s-node", resourceName),
+			fmt.Sprintf("%s-thanos-stack-op-node", resourceName),
 		},
 		"op-batcher": {
 			"op-batcher", "batcher", "opbatcher",
-			fmt.Sprintf("%s-op-batcher", chainName),
-			fmt.Sprintf("%s-batcher", chainName),
-			fmt.Sprintf("%s-thanos-stack-op-batcher", chainName),
+			fmt.Sprintf("%s-op-batcher", resourceName),
+			fmt.Sprintf("%s-batcher", resourceName),
+			fmt.Sprintf("%s-thanos-stack-op-batcher", resourceName),
 		},
 		"op-proposer": {
 			"op-proposer", "proposer", "opproposer",
-			fmt.Sprintf("%s-op-proposer", chainName),
-			fmt.Sprintf("%s-proposer", chainName),
-			fmt.Sprintf("%s-thanos-stack-op-proposer", chainName),
+			fmt.Sprintf("%s-op-proposer", resourceName),
+			fmt.Sprintf("%s-proposer", resourceName),
+			fmt.Sprintf("%s-thanos-stack-op-proposer", resourceName),
 		},
 		"op-geth": {
 			"op-geth", "geth", "opgeth", "l2geth",
-			fmt.Sprintf("%s-op-geth", chainName),
-			fmt.Sprintf("%s-geth", chainName),
-			fmt.Sprintf("%s-thanos-stack-op-geth", chainName),
+			fmt.Sprintf("%s-op-geth", resourceName),
+			fmt.Sprintf("%s-geth", resourceName),
+			fmt.Sprintf("%s-thanos-stack-op-geth", resourceName),
 		},
 		"blockscout": {
 			"blockscout", "explorer", "block-explorer",
-			fmt.Sprintf("%s-blockscout", chainName),
-			fmt.Sprintf("%s-explorer", chainName),
-			fmt.Sprintf("%s-thanos-stack-blockscout", chainName),
+			fmt.Sprintf("%s-blockscout", resourceName),
+			fmt.Sprintf("%s-explorer", resourceName),
+			fmt.Sprintf("%s-thanos-stack-blockscout", resourceName),
 		},
 		"block-explorer-frontend": {
 			"block-explorer-frontend", "frontend", "explorer-frontend",
-			fmt.Sprintf("%s-block-explorer-frontend", chainName),
-			fmt.Sprintf("%s-frontend", chainName),
-			fmt.Sprintf("%s-thanos-stack-block-explorer-frontend", chainName),
+			fmt.Sprintf("%s-block-explorer-frontend", resourceName),
+			fmt.Sprintf("%s-frontend", resourceName),
+			fmt.Sprintf("%s-thanos-stack-block-explorer-frontend", resourceName),
 		},
 	}
 
@@ -453,7 +452,7 @@ func (t *ThanosStack) getServiceNames(ctx context.Context, namespace, chainName 
 			serviceNames[component] = foundService
 		} else {
 			// Try with timestamped release name pattern for monitoring compatibility
-			timestampedName := fmt.Sprintf("%s-thanos-stack-%s", chainName, component)
+			timestampedName := fmt.Sprintf("%s-thanos-stack-%s", resourceName, component)
 			serviceNames[component] = timestampedName
 		}
 	}
@@ -563,7 +562,7 @@ func (t *ThanosStack) cleanupGenericMonitoringServices(ctx context.Context) erro
 }
 
 // getEFSFileSystemId extracts EFS filesystem ID from existing PV
-func (t *ThanosStack) getEFSFileSystemId(ctx context.Context, chainName string) (string, error) {
+func (t *ThanosStack) getEFSFileSystemId(ctx context.Context, resourceName string) (string, error) {
 	fmt.Println("🔍 Getting EFS filesystem ID from existing PV...")
 
 	// Get all PVs and filter for op-geth
@@ -576,14 +575,14 @@ func (t *ThanosStack) getEFSFileSystemId(ctx context.Context, chainName string) 
 	lines := strings.Split(strings.TrimSpace(pvListOutput), "\n")
 	for _, line := range lines {
 		pvName := strings.TrimPrefix(line, "persistentvolume/")
-		if strings.Contains(pvName, "thanos-stack-op-geth") && strings.Contains(pvName, chainName) {
+		if strings.Contains(pvName, "thanos-stack-op-geth") && strings.Contains(pvName, resourceName) {
 			opGethPVName = pvName
 			break
 		}
 	}
 
 	if opGethPVName == "" {
-		return "", fmt.Errorf("no existing PV found for chain: %s", chainName)
+		return "", fmt.Errorf("no existing PV found for resource: %s", resourceName)
 	}
 
 	// Get volumeHandle from the specific PV
@@ -938,14 +937,14 @@ func (t *ThanosStack) ensureNamespaceExists(ctx context.Context, namespace strin
 // createStaticPVs creates PersistentVolumes and PVCs for Static Provisioning with op-geth/op-node naming pattern
 func (t *ThanosStack) createStaticPVs(ctx context.Context, config *MonitoringConfig) error {
 	// Get timestamp from existing op-geth PV to match naming pattern
-	timestamp, err := t.getTimestampFromExistingPV(ctx, config.ChainName)
+	timestamp, err := t.getTimestampFromExistingPV(ctx, config.ResourceName)
 	if err != nil {
 		return fmt.Errorf("failed to get timestamp from existing PV: %w", err)
 	}
 
 	// Clean up existing PVs and PVCs for monitoring components
 	fmt.Println("🧹 Cleaning up existing monitoring PVs and PVCs...")
-	if err := t.cleanupExistingMonitoringResources(ctx, config.Namespace, config.ChainName, timestamp); err != nil {
+	if err := t.cleanupExistingMonitoringResources(ctx, config.Namespace, config.ResourceName, timestamp); err != nil {
 		fmt.Printf("⚠️  Warning: Failed to cleanup existing resources: %v\n", err)
 		// Continue anyway - we'll try to create new ones
 	}
@@ -985,11 +984,11 @@ func (t *ThanosStack) createStaticPVs(ctx context.Context, config *MonitoringCon
 }
 
 // cleanupExistingMonitoringResources removes existing monitoring PVs and PVCs
-func (t *ThanosStack) cleanupExistingMonitoringResources(ctx context.Context, namespace string, chainName string, timestamp string) error {
+func (t *ThanosStack) cleanupExistingMonitoringResources(ctx context.Context, namespace string, resourceName string, timestamp string) error {
 	components := []string{"prometheus", "grafana"}
 
 	for _, component := range components {
-		pvName := fmt.Sprintf("%s-%s-thanos-stack-%s", chainName, timestamp, component)
+		pvName := fmt.Sprintf("%s-%s-thanos-stack-%s", resourceName, timestamp, component)
 
 		// Delete PVC first (it might be bound to the PV)
 		_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "pvc", pvName, "-n", namespace, "--ignore-not-found=true")
@@ -1007,14 +1006,14 @@ func (t *ThanosStack) cleanupExistingMonitoringResources(ctx context.Context, na
 		}
 
 		// Also try to delete any PVs that might have old naming patterns
-		t.cleanupOldPVPattern(ctx, component, chainName)
+		t.cleanupOldPVPattern(ctx, component, resourceName)
 	}
 
 	return nil
 }
 
 // cleanupOldPVPattern removes PVs with old naming patterns that might conflict
-func (t *ThanosStack) cleanupOldPVPattern(ctx context.Context, component, chainName string) {
+func (t *ThanosStack) cleanupOldPVPattern(ctx context.Context, component, resourceName string) {
 	// Get all PVs and find ones that match the component pattern
 	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pv", "-o", "custom-columns=NAME:.metadata.name,STATUS:.status.phase", "--no-headers")
 	if err != nil {
@@ -1036,7 +1035,7 @@ func (t *ThanosStack) cleanupOldPVPattern(ctx context.Context, component, chainN
 		pvStatus := fields[1]
 
 		// Check if this PV matches our component and is in Released state
-		if strings.Contains(pvName, chainName) &&
+		if strings.Contains(pvName, resourceName) &&
 			strings.Contains(pvName, fmt.Sprintf("thanos-stack-%s", component)) &&
 			(pvStatus == "Released" || pvStatus == "Available") {
 
@@ -1054,7 +1053,7 @@ func (t *ThanosStack) verifyPVCBinding(ctx context.Context, config *MonitoringCo
 	components := []string{"prometheus", "grafana"}
 
 	for _, component := range components {
-		pvcName := fmt.Sprintf("%s-%s-thanos-stack-%s", config.ChainName, timestamp, component)
+		pvcName := fmt.Sprintf("%s-%s-thanos-stack-%s", config.ResourceName, timestamp, component)
 
 		// Check PVC status with timeout
 		maxRetries := 12 // 1 minute total (5 seconds * 12)
@@ -1084,17 +1083,17 @@ func (t *ThanosStack) verifyPVCBinding(ctx context.Context, config *MonitoringCo
 }
 
 // getTimestampFromExistingPV extracts timestamp from op-geth PV name
-func (t *ThanosStack) getTimestampFromExistingPV(ctx context.Context, chainName string) (string, error) {
+func (t *ThanosStack) getTimestampFromExistingPV(ctx context.Context, resourceName string) (string, error) {
 	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pv", "-o", "custom-columns=NAME:.metadata.name", "--no-headers")
 	if err != nil {
 		return "", fmt.Errorf("failed to get PVs: %w", err)
 	}
 
-	// Look for op-geth PV pattern: chainName-timestamp-thanos-stack-op-geth
+	// Look for op-geth PV pattern: resourceName-timestamp-thanos-stack-op-geth
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	for _, line := range lines {
-		if strings.Contains(line, chainName) && strings.Contains(line, "thanos-stack-op-geth") {
-			// Extract timestamp from: theo0624-1750743380-thanos-stack-op-geth
+		if strings.Contains(line, resourceName) && strings.Contains(line, "thanos-stack-op-geth") {
+			// E.g: Extract timestamp from: theo0624-1750743380-thanos-stack-op-geth
 			parts := strings.Split(line, "-")
 			if len(parts) >= 2 {
 				return parts[1], nil // Return timestamp part
@@ -1107,8 +1106,8 @@ func (t *ThanosStack) getTimestampFromExistingPV(ctx context.Context, chainName 
 
 // generateStaticPVManifest generates PV manifest for Static Provisioning with op-geth/op-node naming pattern
 func (t *ThanosStack) generateStaticPVManifest(component string, config *MonitoringConfig, size string, timestamp string) string {
-	// Use same naming pattern as op-geth/op-node: chainName-timestamp-thanos-stack-component
-	pvName := fmt.Sprintf("%s-%s-thanos-stack-%s", config.ChainName, timestamp, component)
+	// Use same naming pattern as op-geth/op-node: resourceName-timestamp-thanos-stack-component
+	pvName := fmt.Sprintf("%s-%s-thanos-stack-%s", config.ResourceName, timestamp, component)
 
 	// Add subdirectory to volumeHandle for proper EFS directory separation
 	volumeHandle := fmt.Sprintf("%s::%s", config.EFSFileSystemId, component)
@@ -1151,8 +1150,8 @@ func (t *ThanosStack) applyPVManifest(ctx context.Context, component string, man
 
 // generateStaticPVCManifest generates PVC manifest for Static Provisioning with selector
 func (t *ThanosStack) generateStaticPVCManifest(component string, config *MonitoringConfig, size string, timestamp string) string {
-	// Use same naming pattern as op-geth/op-node: chainName-timestamp-thanos-stack-component
-	pvName := fmt.Sprintf("%s-%s-thanos-stack-%s", config.ChainName, timestamp, component)
+	// Use same naming pattern as op-geth/op-node: resourceName-timestamp-thanos-stack-component
+	pvName := fmt.Sprintf("%s-%s-thanos-stack-%s", config.ResourceName, timestamp, component)
 	pvcName := pvName // PVC name matches PV name for op-geth/op-node compatibility
 
 	return fmt.Sprintf(`apiVersion: v1
@@ -1259,3 +1258,7 @@ data:
 // NOTE: generateAdditionalScrapeConfigs function has been removed
 // Scrape configuration is now handled entirely by Helm templates in charts/monitoring
 // This eliminates the 3-way duplication between Go code, values.yaml, and templates
+
+func convertChainNameToResourceName(chainName string) string {
+	return strings.ReplaceAll(strings.ToLower(chainName), " ", "-") // Match K8s naming convention
+}
