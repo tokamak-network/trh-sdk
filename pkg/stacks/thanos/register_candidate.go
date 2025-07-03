@@ -491,7 +491,7 @@ func (t *ThanosStack) GetRegistrationAdditionalInfo(ctx context.Context, registe
 	}
 
 	result := &types.RegistrationAdditionalInfo{
-		StakingURL: constants.L1ChainConfigurations[chainID.Uint64()].StakingURL,
+		URL: constants.L1ChainConfigurations[chainID.Uint64()].StakingURL,
 	}
 
 	// 1. Safe wallet information

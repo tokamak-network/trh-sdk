@@ -20,5 +20,5 @@ type CandidateRegistrationInfo struct {
 type RegistrationAdditionalInfo struct {
 	SafeWallet            *SafeWalletInfo            `json:"safe_wallet,omitempty"`
 	CandidateRegistration *CandidateRegistrationInfo `json:"candidate_registration,omitempty"`
-	StakingURL            string                     `json:"staking_url"`
+	URL                   string                     `json:"url"`
 }
