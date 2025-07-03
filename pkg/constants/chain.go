@@ -23,6 +23,7 @@ var L1ChainConfigurations = map[uint64]struct {
 	L1BridgeRegistry                 string `json:"l1_bridge_registry"`
 	TON                              string `json:"ton"`
 	MaxChannelDuration               uint64 `json:"max_channel_duration"`
+	StakingURL                       string `json:"staking_url"`
 }{
 	//TODO: Updated the addresses for L1VerificationContractAddress, L2TonAddress, L2ManagerAddress and L1BridgeRegistry for different chains
 	EthereumMainnetChainID: {
@@ -63,6 +64,7 @@ var L1ChainConfigurations = map[uint64]struct {
 		L1BridgeRegistry:                 "0x2D47fa57101203855b336e9E61BC9da0A6dd0Dbc",
 		TON:                              "0xa30fe40285B8f5c0457DbC3B7C8A280373c40044",
 		MaxChannelDuration:               120,
+		StakingURL:                       "https://sepolia.staking.tokamak.network/staking",
 	},
 	EthereumHoleskyChainID: {
 		BlockTimeInSeconds:   12,
