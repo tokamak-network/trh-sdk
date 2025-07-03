@@ -2,6 +2,7 @@ package thanos
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,6 +25,37 @@ type MonitoringConfig struct {
 	ChartsPath        string
 	ValuesFilePath    string
 	ResourceName      string
+	// AlertManager configuration
+	AlertManager AlertManagerConfig
+}
+
+// AlertManagerConfig holds alertmanager-specific configuration
+type AlertManagerConfig struct {
+	Telegram TelegramConfig
+	Email    EmailConfig
+}
+
+// TelegramConfig holds Telegram notification configuration
+type TelegramConfig struct {
+	Enabled           bool
+	ApiToken          string
+	CriticalReceivers []TelegramReceiver
+}
+
+// TelegramReceiver represents a Telegram chat recipient
+type TelegramReceiver struct {
+	ChatId string
+}
+
+// EmailConfig holds email notification configuration
+type EmailConfig struct {
+	Enabled           bool
+	SmtpSmarthost     string
+	SmtpFrom          string
+	SmtpAuthUsername  string
+	SmtpAuthPassword  string
+	DefaultReceivers  []string
+	CriticalReceivers []string
 }
 
 const (
@@ -33,6 +65,9 @@ const (
 // InstallMonitoring installs monitoring stack using Helm dependencies
 func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *MonitoringConfig) (string, error) {
 	fmt.Println("🚀 Starting monitoring installation...")
+
+	// Display AlertManager configuration summary (using predefined values from charts/monitoring/values.yaml)
+	fmt.Println(t.GetAlertManagerConfigSummary(config))
 
 	// Deploy Terraform infrastructure if persistent storage is enabled
 	if config.EnablePersistence {
@@ -62,8 +97,9 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *MonitoringC
 		"--values", config.ValuesFilePath,
 		"--namespace", config.Namespace,
 		"--create-namespace",
-		"--timeout", "10m",
+		"--timeout", "15m", // Extended timeout for complex monitoring stack
 		"--wait",
+		"--wait-for-jobs", // Wait for init jobs to complete
 	}
 
 	// Start error monitoring in background
@@ -79,6 +115,12 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *MonitoringC
 
 	// Stop error monitoring
 	close(errorChan)
+
+	// Create AlertManager Secret after successful Helm installation
+	if err := t.createAlertManagerSecret(ctx, config); err != nil {
+		fmt.Printf("⚠️  Failed to create AlertManager configuration secret: %v\n", err)
+		fmt.Println("   You can create it manually later using kubectl")
+	}
 
 	// Create dashboard ConfigMaps after successful Helm installation
 	if err := t.createDashboardConfigMaps(ctx, config); err != nil {
@@ -131,6 +173,7 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 		ChartsPath:        chartsPath,
 		ValuesFilePath:    "", // Will be set in generateValuesFile
 		ResourceName:      resourceName,
+		AlertManager:      t.getDefaultAlertManagerConfig(),
 	}
 
 	return config, nil
@@ -186,8 +229,6 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 
 	resourceName := convertChainNameToResourceName(t.deployConfig.ChainName)
 
-	// Clean up existing PVs and PVCs for monitoring components
-	fmt.Println("🧹 Cleaning up existing monitoring PVs and PVCs...")
 	// Get timestamp from existing op-geth PV to match naming pattern
 	timestamp, err := t.getTimestampFromExistingPV(ctx, resourceName)
 	if err != nil {
@@ -273,8 +314,14 @@ func (t *ThanosStack) generateValuesFile(ctx context.Context, config *Monitoring
 		return fmt.Errorf("error marshaling values to YAML: %w", err)
 	}
 
-	// Write values file
-	valuesFilePath := filepath.Join(config.ChartsPath, "generated-values.yaml")
+	// Create terraform/thanos-stack directory if it doesn't exist
+	configFileDir := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", t.deploymentPath)
+	if err := os.MkdirAll(configFileDir, os.ModePerm); err != nil {
+		return fmt.Errorf("error creating directory: %w", err)
+	}
+
+	// Write values file to terraform/thanos-stack directory
+	valuesFilePath := filepath.Join(configFileDir, "monitoring-values.yaml")
 	if err := os.WriteFile(valuesFilePath, yamlContent, 0644); err != nil {
 		return fmt.Errorf("error writing values file: %w", err)
 	}
@@ -318,24 +365,28 @@ func (t *ThanosStack) generateGrafanaStorageConfig(ctx context.Context, config *
 
 	// Add storage configuration if persistence is enabled
 	if config.EnablePersistence {
-		persistenceConfig := map[string]interface{}{
-			"enabled":          true,
-			"storageClassName": "efs-sc",
-			"accessModes":      []string{"ReadWriteMany"},
-			"size":             "10Gi",
-		}
-
-		// For Static Provisioning, specify the PV name that matches our created PV
+		// For Static Provisioning, use existingClaim instead of volumeName
+		// This prevents Grafana from creating a new PVC
 		timestamp, err := t.getTimestampFromExistingPV(ctx, config.ResourceName)
 		if err != nil {
 			fmt.Printf("⚠️  Warning: Could not get timestamp for Grafana PV naming: %v\n", err)
 			timestamp = "static" // Fallback
 		}
 
-		pvName := fmt.Sprintf("%s-%s-thanos-stack-grafana", config.ResourceName, timestamp)
-		persistenceConfig["volumeName"] = pvName
+		// Use the PVC name that we created in createStaticPVs
+		existingClaimName := fmt.Sprintf("%s-%s-thanos-stack-grafana", config.ResourceName, timestamp)
+
+		persistenceConfig := map[string]interface{}{
+			"enabled":       true,
+			"existingClaim": existingClaimName, // Use existing PVC instead of creating new one
+			// Remove storageClassName to prevent dynamic provisioning
+			// Remove volumeName as we're using existingClaim
+			"accessModes": []string{"ReadWriteMany"},
+			"size":        "10Gi",
+		}
 
 		grafanaConfig["persistence"] = persistenceConfig
+		fmt.Printf("📦 Grafana will use existing PVC: %s\n", existingClaimName)
 	} else {
 		grafanaConfig["persistence"] = map[string]interface{}{
 			"enabled": false,
@@ -343,6 +394,44 @@ func (t *ThanosStack) generateGrafanaStorageConfig(ctx context.Context, config *
 	}
 
 	return grafanaConfig
+}
+
+// getDefaultAlertManagerConfig returns AlertManager configuration from charts/monitoring/values.yaml
+func (t *ThanosStack) getDefaultAlertManagerConfig() AlertManagerConfig {
+	return AlertManagerConfig{
+		Telegram: TelegramConfig{
+			Enabled:  true,
+			ApiToken: "7904495507:AAE54gXGoj5X7oLsQHk_xzMFdO1kkn4xME8",
+			CriticalReceivers: []TelegramReceiver{
+				{ChatId: "1266746900"},
+			},
+		},
+		Email: EmailConfig{
+			Enabled:           true,
+			SmtpSmarthost:     "smtp.gmail.com:587",
+			SmtpFrom:          "theo@tokamak.network",
+			SmtpAuthUsername:  "theo@tokamak.network",
+			SmtpAuthPassword:  "myhz wsqg iqcs hwkv",
+			DefaultReceivers:  []string{"theo@tokamak.network"},
+			CriticalReceivers: []string{"theo@tokamak.network"},
+		},
+	}
+}
+
+// generateAlertManagerConfig creates AlertManager configuration for values file
+// AlertManager configuration is now handled via dynamically generated Secret
+
+// generateTelegramReceivers converts TelegramReceiver slice to map slice for YAML
+func (t *ThanosStack) generateTelegramReceivers(receivers []TelegramReceiver) []map[string]interface{} {
+	var result []map[string]interface{}
+	for _, receiver := range receivers {
+		if receiver.ChatId != "" { // Only include non-empty chat IDs
+			result = append(result, map[string]interface{}{
+				"chat_id": receiver.ChatId,
+			})
+		}
+	}
+	return result
 }
 
 // getServiceNames returns a map of component names to their Kubernetes service names
@@ -891,7 +980,7 @@ kubectl describe pvc -n %s
 `, config.Namespace, config.Namespace, config.Namespace, config.Namespace,
 		config.Namespace, config.HelmReleaseName, config.Namespace,
 		config.HelmReleaseName, config.Namespace, config.HelmReleaseName,
-		config.Namespace, config.HelmReleaseName, config.ChartsPath,
+		config.Namespace, config.ChartsPath,
 		config.ValuesFilePath, config.Namespace, config.Namespace, config.Namespace)
 }
 
@@ -1109,8 +1198,9 @@ func (t *ThanosStack) generateStaticPVManifest(component string, config *Monitor
 	// Use same naming pattern as op-geth/op-node: resourceName-timestamp-thanos-stack-component
 	pvName := fmt.Sprintf("%s-%s-thanos-stack-%s", config.ResourceName, timestamp, component)
 
-	// Add subdirectory to volumeHandle for proper EFS directory separation
-	volumeHandle := fmt.Sprintf("%s::%s", config.EFSFileSystemId, component)
+	// Use the same volumeHandle format as op-geth/op-node (no subdirectory)
+	// EFS will store all components in the same filesystem root
+	volumeHandle := config.EFSFileSystemId
 
 	return fmt.Sprintf(`apiVersion: v1
 kind: PersistentVolume
@@ -1258,6 +1348,270 @@ data:
 // NOTE: generateAdditionalScrapeConfigs function has been removed
 // Scrape configuration is now handled entirely by Helm templates in charts/monitoring
 // This eliminates the 3-way duplication between Go code, values.yaml, and templates
+
+// UpdateTelegramConfig updates Telegram configuration for AlertManager
+func (t *ThanosStack) UpdateTelegramConfig(config *MonitoringConfig, enabled bool, apiToken string, chatIds []string) {
+	config.AlertManager.Telegram.Enabled = enabled
+	config.AlertManager.Telegram.ApiToken = apiToken
+
+	// Convert chat IDs to TelegramReceiver slice
+	config.AlertManager.Telegram.CriticalReceivers = make([]TelegramReceiver, 0, len(chatIds))
+	for _, chatId := range chatIds {
+		if strings.TrimSpace(chatId) != "" {
+			config.AlertManager.Telegram.CriticalReceivers = append(
+				config.AlertManager.Telegram.CriticalReceivers,
+				TelegramReceiver{ChatId: strings.TrimSpace(chatId)},
+			)
+		}
+	}
+
+	if enabled {
+		fmt.Printf("✅ Telegram notifications enabled for %d recipients\n", len(config.AlertManager.Telegram.CriticalReceivers))
+	} else {
+		fmt.Println("❌ Telegram notifications disabled")
+	}
+}
+
+// UpdateEmailConfig updates Email configuration for AlertManager
+func (t *ThanosStack) UpdateEmailConfig(config *MonitoringConfig, enabled bool, smtpConfig EmailConfig) {
+	config.AlertManager.Email.Enabled = enabled
+	if enabled {
+		config.AlertManager.Email.SmtpSmarthost = smtpConfig.SmtpSmarthost
+		config.AlertManager.Email.SmtpFrom = smtpConfig.SmtpFrom
+		config.AlertManager.Email.SmtpAuthUsername = smtpConfig.SmtpAuthUsername
+		config.AlertManager.Email.SmtpAuthPassword = smtpConfig.SmtpAuthPassword
+		config.AlertManager.Email.DefaultReceivers = smtpConfig.DefaultReceivers
+		config.AlertManager.Email.CriticalReceivers = smtpConfig.CriticalReceivers
+
+		fmt.Printf("✅ Email notifications enabled for %d default and %d critical recipients\n",
+			len(config.AlertManager.Email.DefaultReceivers),
+			len(config.AlertManager.Email.CriticalReceivers))
+	} else {
+		fmt.Println("❌ Email notifications disabled")
+	}
+}
+
+// Alert Manager setup is now handled automatically with predefined values from values.yaml
+
+// GetAlertManagerConfigSummary returns a summary of current AlertManager configuration
+func (t *ThanosStack) GetAlertManagerConfigSummary(config *MonitoringConfig) string {
+	var summary strings.Builder
+
+	summary.WriteString("🔔 AlertManager Configuration Summary:\n")
+
+	// Telegram status
+	if config.AlertManager.Telegram.Enabled {
+		summary.WriteString(fmt.Sprintf("  📱 Telegram: ✅ Enabled (%d recipients)\n",
+			len(config.AlertManager.Telegram.CriticalReceivers)))
+		if config.AlertManager.Telegram.ApiToken != "" {
+			summary.WriteString("     Bot Token: Configured\n")
+		}
+	} else {
+		summary.WriteString("  📱 Telegram: ❌ Disabled\n")
+	}
+
+	// Email status
+	if config.AlertManager.Email.Enabled {
+		summary.WriteString(fmt.Sprintf("  📧 Email: ✅ Enabled (%d default, %d critical recipients)\n",
+			len(config.AlertManager.Email.DefaultReceivers),
+			len(config.AlertManager.Email.CriticalReceivers)))
+		if config.AlertManager.Email.SmtpFrom != "" {
+			summary.WriteString(fmt.Sprintf("     From: %s\n", config.AlertManager.Email.SmtpFrom))
+		}
+	} else {
+		summary.WriteString("  📧 Email: ❌ Disabled\n")
+	}
+
+	// Critical alerts info
+	summary.WriteString("\n🚨 Critical Alerts Will Be Sent For:\n")
+	summary.WriteString("  • OP Stack component failures (Node, Batcher, Proposer, Geth)\n")
+	summary.WriteString("  • L1 RPC connection issues\n")
+	summary.WriteString("  • Low ETH balances (< 0.01 ETH)\n")
+	summary.WriteString("  • Block production stalls\n")
+	summary.WriteString("  • System resource issues\n")
+
+	return summary.String()
+}
+
+// Quick setup functions are no longer needed as configuration is managed automatically
+
+// createAlertManagerSecret creates a Kubernetes Secret for AlertManager configuration
+func (t *ThanosStack) createAlertManagerSecret(ctx context.Context, config *MonitoringConfig) error {
+	fmt.Println("📝 Creating AlertManager configuration secret...")
+
+	// Generate AlertManager configuration YAML
+	alertManagerYaml, err := t.generateAlertManagerSecretConfig(config)
+	if err != nil {
+		return fmt.Errorf("failed to generate AlertManager configuration: %w", err)
+	}
+
+	// Create the Secret manifest
+	secretManifest := fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager-config
+  namespace: %s
+  labels:
+    app: alertmanager
+    release: %s
+type: Opaque
+data:
+  alertmanager.yml: %s
+`, config.Namespace, config.HelmReleaseName, alertManagerYaml)
+
+	// Apply the Secret
+	if err := t.applySecretManifest(ctx, secretManifest); err != nil {
+		return fmt.Errorf("failed to apply AlertManager secret: %w", err)
+	}
+
+	fmt.Println("✅ AlertManager configuration secret created successfully")
+	return nil
+}
+
+// generateAlertManagerSecretConfig generates AlertManager configuration YAML
+func (t *ThanosStack) generateAlertManagerSecretConfig(config *MonitoringConfig) (string, error) {
+	// Generate AlertManager configuration
+	alertManagerConfig := map[string]interface{}{
+		"global": map[string]interface{}{
+			"smtp_smarthost":     config.AlertManager.Email.SmtpSmarthost,
+			"smtp_from":          config.AlertManager.Email.SmtpFrom,
+			"smtp_auth_username": config.AlertManager.Email.SmtpAuthUsername,
+			"smtp_auth_password": config.AlertManager.Email.SmtpAuthPassword,
+			"smtp_auth_identity": config.AlertManager.Email.SmtpAuthUsername,
+		},
+		"route": map[string]interface{}{
+			"group_by":        []string{"alertname", "cluster", "service", "severity"},
+			"group_wait":      "30s",
+			"group_interval":  "5m",
+			"repeat_interval": "4h",
+			"receiver":        "telegram-critical",
+		},
+		"inhibit_rules": []map[string]interface{}{
+			{
+				"source_match": map[string]string{
+					"severity": "critical",
+				},
+				"target_match": map[string]string{
+					"severity": "warning",
+				},
+				"equal": []string{"alertname", "instance"},
+			},
+		},
+		"receivers": t.generateAlertManagerReceivers(config),
+	}
+
+	// Convert to YAML
+	yamlData, err := yaml.Marshal(alertManagerConfig)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal AlertManager config to YAML: %w", err)
+	}
+
+	// Base64 encode for Secret
+	encoded := base64.StdEncoding.EncodeToString(yamlData)
+	return encoded, nil
+}
+
+// generateAlertManagerReceivers generates receiver configurations for AlertManager
+func (t *ThanosStack) generateAlertManagerReceivers(config *MonitoringConfig) []map[string]interface{} {
+	receivers := []map[string]interface{}{
+		{
+			"name": "telegram-critical",
+		},
+	}
+
+	// Add Telegram configuration if enabled
+	if config.AlertManager.Telegram.Enabled {
+		telegramConfigs := []map[string]interface{}{}
+		for _, receiver := range config.AlertManager.Telegram.CriticalReceivers {
+			if receiver.ChatId != "" {
+				telegramConfigs = append(telegramConfigs, map[string]interface{}{
+					"api_url":    fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", config.AlertManager.Telegram.ApiToken),
+					"chat_id":    receiver.ChatId,
+					"parse_mode": "Markdown",
+					"message": `🚨 *Critical Alert - {{.GroupLabels.chain_name | title}} Chain*
+
+*Alert:* {{.GroupLabels.alertname}}
+*Severity:* {{.GroupLabels.severity | upper}}
+*Component:* {{.GroupLabels.service}}
+*Namespace:* {{.GroupLabels.namespace}}
+
+*Description:* {{range .Alerts}}{{.Annotations.description}}{{end}}
+
+*Time:* {{.GroupLabels.timestamp}}
+*Dashboard:* [View Details]({{.ExternalURL}})
+`,
+				})
+			}
+		}
+		if len(telegramConfigs) > 0 {
+			receivers[0]["telegram_configs"] = telegramConfigs
+		}
+	}
+
+	// Add Email configuration if enabled
+	if config.AlertManager.Email.Enabled {
+		emailConfigs := []map[string]interface{}{}
+		for _, email := range config.AlertManager.Email.CriticalReceivers {
+			if email != "" {
+				emailConfigs = append(emailConfigs, map[string]interface{}{
+					"to":      email,
+					"from":    config.AlertManager.Email.SmtpFrom,
+					"subject": "🚨 Critical Alert - {{.GroupLabels.chain_name | title}} Chain - {{.GroupLabels.alertname}}",
+					"html": `<h2>🚨 Critical Alert - {{.GroupLabels.chain_name | title}} Chain</h2>
+<table border="1" style="border-collapse: collapse;">
+<tr><td><strong>Alert</strong></td><td>{{.GroupLabels.alertname}}</td></tr>
+<tr><td><strong>Severity</strong></td><td>{{.GroupLabels.severity | upper}}</td></tr>
+<tr><td><strong>Component</strong></td><td>{{.GroupLabels.service}}</td></tr>
+<tr><td><strong>Namespace</strong></td><td>{{.GroupLabels.namespace}}</td></tr>
+<tr><td><strong>Description</strong></td><td>{{range .Alerts}}{{.Annotations.description}}{{end}}</td></tr>
+<tr><td><strong>Time</strong></td><td>{{.GroupLabels.timestamp}}</td></tr>
+</table>
+<br><a href="{{.ExternalURL}}">View Dashboard</a>`,
+				})
+			}
+		}
+		if len(emailConfigs) > 0 {
+			receivers[0]["email_configs"] = emailConfigs
+		}
+	}
+
+	return receivers
+}
+
+// applySecretManifest applies a Kubernetes Secret manifest
+func (t *ThanosStack) applySecretManifest(ctx context.Context, manifest string) error {
+	// Create temporary file for the manifest
+	tempFile, err := os.CreateTemp("", "alertmanager-secret-*.yaml")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary file: %w", err)
+	}
+	defer os.Remove(tempFile.Name())
+
+	// Write manifest to file
+	if _, err := tempFile.WriteString(manifest); err != nil {
+		return fmt.Errorf("failed to write manifest to file: %w", err)
+	}
+	tempFile.Close()
+
+	// Apply the manifest
+	if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile.Name()); err != nil {
+		return fmt.Errorf("failed to apply secret manifest: %w", err)
+	}
+
+	return nil
+}
+
+// deleteAlertManagerSecret deletes the AlertManager configuration secret
+func (t *ThanosStack) deleteAlertManagerSecret(ctx context.Context, namespace string) error {
+	fmt.Println("🗑️  Deleting AlertManager configuration secret...")
+
+	if _, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "secret", "alertmanager-config", "-n", namespace, "--ignore-not-found"); err != nil {
+		return fmt.Errorf("failed to delete AlertManager secret: %w", err)
+	}
+
+	fmt.Println("✅ AlertManager configuration secret deleted successfully")
+	return nil
+}
 
 func convertChainNameToResourceName(chainName string) string {
 	return strings.ReplaceAll(strings.ToLower(chainName), " ", "-") // Match K8s naming convention
