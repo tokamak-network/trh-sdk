@@ -224,6 +224,9 @@ func (t *ThanosStack) generateValuesFile(ctx context.Context, config *Monitoring
 			},
 			"grafana":      t.generateGrafanaStorageConfig(ctx, config),
 			"alertmanager": t.generateAlertManagerConfig(config),
+			"prometheusRule": map[string]interface{}{
+				"enabled": false, // Disable default PrometheusRules, only use thanos-stack-alerts
+			},
 		},
 	}
 
@@ -699,7 +702,7 @@ func (t *ThanosStack) ensureNamespaceExists(ctx context.Context, namespace strin
 	return nil
 }
 
-// getTimestampFromExistingPV extracts timestamp from op-geth PV name
+// getTimestampFromExistingPV extracts timestamp from existing monitoring PVs
 func (t *ThanosStack) getTimestampFromExistingPV(ctx context.Context, chainName string) (string, error) {
 	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pv", "-o", "custom-columns=NAME:.metadata.name", "--no-headers")
 	if err != nil {
@@ -707,6 +710,19 @@ func (t *ThanosStack) getTimestampFromExistingPV(ctx context.Context, chainName 
 	}
 
 	lines := strings.Split(strings.TrimSpace(output), "\n")
+	for _, line := range lines {
+		// Look for existing monitoring PVs (grafana or prometheus) that are Released
+		if strings.Contains(line, chainName) &&
+			(strings.Contains(line, "thanos-stack-grafana") || strings.Contains(line, "thanos-stack-prometheus")) {
+			// Extract timestamp from PV name like "theo0707-900hi-thanos-stack-grafana"
+			parts := strings.Split(line, "-")
+			if len(parts) >= 2 {
+				return parts[1], nil
+			}
+		}
+	}
+
+	// Fallback to op-geth PV if no monitoring PVs found
 	for _, line := range lines {
 		if strings.Contains(line, chainName) && strings.Contains(line, "thanos-stack-op-geth") {
 			parts := strings.Split(line, "-")
@@ -716,7 +732,7 @@ func (t *ThanosStack) getTimestampFromExistingPV(ctx context.Context, chainName 
 		}
 	}
 
-	return "", fmt.Errorf("could not find existing op-geth PV to extract timestamp")
+	return "", fmt.Errorf("could not find existing PV to extract timestamp")
 }
 
 // generateStaticPVManifest generates PV manifest
@@ -780,7 +796,8 @@ spec:
       app: %s
   storageClassName: efs-sc
   volumeMode: Filesystem
-`, pvcName, config.Namespace, size, pvName)
+  volumeName: %s
+`, pvcName, config.Namespace, size, pvName, pvName)
 }
 
 // applyPVCManifest applies PVC manifest using kubectl
