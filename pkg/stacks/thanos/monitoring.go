@@ -339,28 +339,110 @@ func (t *ThanosStack) generateAlertManagerValues(config *MonitoringConfig) map[s
 		emailReceivers = append(emailReceivers, config.AlertManager.Email.CriticalReceivers...)
 	}
 
-	return map[string]interface{}{
-		"telegram": map[string]interface{}{
-			"enabled":  config.AlertManager.Telegram.Enabled,
-			"apiToken": config.AlertManager.Telegram.ApiToken,
-			"chatIds":  telegramChatIds,
-		},
-		"email": map[string]interface{}{
-			"enabled":      config.AlertManager.Email.Enabled,
-			"smtpServer":   config.AlertManager.Email.SmtpSmarthost,
-			"smtpFrom":     config.AlertManager.Email.SmtpFrom,
-			"smtpUsername": config.AlertManager.Email.SmtpAuthUsername,
-			"smtpPassword": config.AlertManager.Email.SmtpAuthPassword,
-			"receivers":    emailReceivers,
-		},
-		"routing": map[string]interface{}{
-			"defaultReceiver": "telegram-critical",
-			"groupBy":         []string{"alertname", "cluster", "service", "severity"},
-			"groupWait":       "30s",
-			"groupInterval":   "5m",
-			"repeatInterval":  "4h",
+	// Generate receivers configuration
+	receivers := []map[string]interface{}{
+		{
+			"name": "telegram-critical",
 		},
 	}
+
+	// Add null receiver for Watchdog
+	receivers = append(receivers, map[string]interface{}{"name": "null"})
+
+	// Add Email configurations
+	if config.AlertManager.Email.Enabled {
+		emailConfigs := []map[string]interface{}{}
+		for _, email := range config.AlertManager.Email.CriticalReceivers {
+			if email != "" {
+				emailConfigs = append(emailConfigs, map[string]interface{}{
+					"to": email,
+					"headers": map[string]string{
+						"subject": "🚨 Critical Alert - {{ $labels.chain_name }}",
+					},
+					"html": `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset=\"UTF-8\">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .alert { border-left: 4px solid #dc3545; padding: 10px; margin: 10px 0; background-color: #f8f9fa; }
+        .header { color: #dc3545; font-weight: bold; margin-bottom: 15px; }
+        .info { margin: 5px 0; }
+        .dashboard { margin-top: 15px; }
+        a { color: #007bff; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class=\"alert\">
+        <div class=\"header\">🚨 Critical Alert - {{ $labels.chain_name }}</div>
+        <div class=\"info\"><strong>Alert:</strong> {{ $labels.alertname }}</div>
+        <div class=\"info\"><strong>Severity:</strong> {{ $labels.severity }}</div>
+        <div class=\"info\"><strong>Component:</strong> {{ $labels.component }}</div>
+        <div class=\"info\"><strong>Namespace:</strong> {{ $labels.namespace }}</div>
+        <div class=\"info\" style=\"margin-top: 15px;\"><strong>Description:</strong></div>
+        <div class=\"info\">{{ $annotations.description }}</div>
+        <div class=\"dashboard\">
+            <strong>Dashboard:</strong> <a href=\"https://grafana.example.com/\">View Details</a>
+        </div>
+    </div>
+</body>
+</html>`,
+				})
+			}
+		}
+		if len(emailConfigs) > 0 {
+			receivers[0]["email_configs"] = emailConfigs
+		}
+	}
+
+	// Add Telegram configurations
+	if config.AlertManager.Telegram.Enabled {
+		telegramConfigs := []map[string]interface{}{}
+		for _, receiver := range config.AlertManager.Telegram.CriticalReceivers {
+			if receiver.ChatId != "" {
+				// Convert chat_id to int64 for Prometheus Operator compatibility
+				chatIdInt, err := strconv.ParseInt(receiver.ChatId, 10, 64)
+				if err != nil {
+					return map[string]interface{}{}
+				}
+				telegramConfigs = append(telegramConfigs, map[string]interface{}{
+					"bot_token":  config.AlertManager.Telegram.ApiToken,
+					"chat_id":    chatIdInt,
+					"parse_mode": "Markdown",
+					"message":    "🚨 Critical Alert - {{ $labels.chain_name }}\n\nAlert: {{ $labels.alertname }}\nSeverity: {{ $labels.severity }}\nComponent: {{ $labels.component }}\nNamespace: {{ $labels.namespace }}\n\nDescription: {{ $annotations.description }}\n\nDashboard: [View Details](https://grafana.example.com/)",
+				})
+			}
+		}
+		if len(telegramConfigs) > 0 {
+			receivers[0]["telegram_configs"] = telegramConfigs
+		}
+	}
+
+	alertManagerConfig := map[string]interface{}{
+		"global": map[string]interface{}{
+			"smtp_smarthost":     config.AlertManager.Email.SmtpSmarthost,
+			"smtp_from":          config.AlertManager.Email.SmtpFrom,
+			"smtp_auth_username": config.AlertManager.Email.SmtpAuthUsername,
+			"smtp_auth_password": config.AlertManager.Email.SmtpAuthPassword,
+		},
+		"route": map[string]interface{}{
+			"group_by":        []string{"alertname", "cluster", "service", "severity"},
+			"group_wait":      "30s",
+			"group_interval":  "5m",
+			"repeat_interval": "4h",
+			"receiver":        "telegram-critical",
+			"routes": []map[string]interface{}{
+				{
+					"match":    map[string]string{"alertname": "Watchdog"},
+					"receiver": "null",
+				},
+			},
+		},
+		"receivers": receivers,
+	}
+
+	return alertManagerConfig
 }
 
 // getAlertManagerConfigFromUser gets AlertManager configuration from user input
@@ -636,8 +718,6 @@ func (t *ThanosStack) deployMonitoringInfrastructure(ctx context.Context, config
 
 // cleanupExistingMonitoringStorage removes existing monitoring PVs and PVCs
 func (t *ThanosStack) cleanupExistingMonitoringStorage(ctx context.Context, config *MonitoringConfig) error {
-	fmt.Println("🧹 Cleaning up existing monitoring PVs and PVCs...")
-
 	// Get existing monitoring PVCs
 	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", "-n", config.Namespace, "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
 	if err != nil {
@@ -711,7 +791,6 @@ func (t *ThanosStack) cleanupExistingMonitoringStorage(ctx context.Context, conf
 		}
 	}
 
-	fmt.Println("✅ Monitoring storage cleanup completed")
 	return nil
 }
 
@@ -924,6 +1003,56 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *MonitoringConfig)
 		},
 	}
 
+	// Add null receiver for Watchdog
+	receivers = append(receivers, map[string]interface{}{"name": "null"})
+
+	// Add Email configurations
+	if config.AlertManager.Email.Enabled {
+		emailConfigs := []map[string]interface{}{}
+		for _, email := range config.AlertManager.Email.CriticalReceivers {
+			if email != "" {
+				emailConfigs = append(emailConfigs, map[string]interface{}{
+					"to": email,
+					"headers": map[string]string{
+						"subject": "🚨 Critical Alert - {{ $labels.chain_name }}",
+					},
+					"html": `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset=\"UTF-8\">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .alert { border-left: 4px solid #dc3545; padding: 10px; margin: 10px 0; background-color: #f8f9fa; }
+        .header { color: #dc3545; font-weight: bold; margin-bottom: 15px; }
+        .info { margin: 5px 0; }
+        .dashboard { margin-top: 15px; }
+        a { color: #007bff; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class=\"alert\">
+        <div class=\"header\">🚨 Critical Alert - {{ $labels.chain_name }}</div>
+        <div class=\"info\"><strong>Alert:</strong> {{ $labels.alertname }}</div>
+        <div class=\"info\"><strong>Severity:</strong> {{ $labels.severity }}</div>
+        <div class=\"info\"><strong>Component:</strong> {{ $labels.component }}</div>
+        <div class=\"info\"><strong>Namespace:</strong> {{ $labels.namespace }}</div>
+        <div class=\"info\" style=\"margin-top: 15px;\"><strong>Description:</strong></div>
+        <div class=\"info\">{{ $annotations.description }}</div>
+        <div class=\"dashboard\">
+            <strong>Dashboard:</strong> <a href=\"https://grafana.example.com/\">View Details</a>
+        </div>
+    </div>
+</body>
+</html>`,
+				})
+			}
+		}
+		if len(emailConfigs) > 0 {
+			receivers[0]["email_configs"] = emailConfigs
+		}
+	}
+
 	// Add Telegram configurations
 	if config.AlertManager.Telegram.Enabled {
 		telegramConfigs := []map[string]interface{}{}
@@ -934,32 +1063,16 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *MonitoringConfig)
 				if err != nil {
 					return "", fmt.Errorf("invalid chat_id format: %s", receiver.ChatId)
 				}
-
 				telegramConfigs = append(telegramConfigs, map[string]interface{}{
 					"bot_token":  config.AlertManager.Telegram.ApiToken,
 					"chat_id":    chatIdInt,
 					"parse_mode": "Markdown",
-					"message":    "🚨 *Critical Alert*\n\n*Alert:* {{.GroupLabels.alertname}}\n*Description:* {{range .Alerts}}{{.Annotations.description}}{{end}}",
+					"message":    "🚨 Critical Alert - {{ $labels.chain_name }}\n\nAlert: {{ $labels.alertname }}\nSeverity: {{ $labels.severity }}\nComponent: {{ $labels.component }}\nNamespace: {{ $labels.namespace }}\n\nDescription: {{ $annotations.description }}\n\nDashboard: [View Details](https://grafana.example.com/)",
 				})
 			}
 		}
 		if len(telegramConfigs) > 0 {
 			receivers[0]["telegram_configs"] = telegramConfigs
-		}
-	}
-
-	// Add Email configurations
-	if config.AlertManager.Email.Enabled {
-		emailConfigs := []map[string]interface{}{}
-		for _, email := range config.AlertManager.Email.CriticalReceivers {
-			if email != "" {
-				emailConfigs = append(emailConfigs, map[string]interface{}{
-					"to": email,
-				})
-			}
-		}
-		if len(emailConfigs) > 0 {
-			receivers[0]["email_configs"] = emailConfigs
 		}
 	}
 
@@ -976,6 +1089,12 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *MonitoringConfig)
 			"group_interval":  "5m",
 			"repeat_interval": "4h",
 			"receiver":        "telegram-critical",
+			"routes": []map[string]interface{}{
+				{
+					"match":    map[string]string{"alertname": "Watchdog"},
+					"receiver": "null",
+				},
+			},
 		},
 		"receivers": receivers,
 	}
@@ -1048,14 +1167,12 @@ func (t *ThanosStack) cleanupExistingPrometheusRules(ctx context.Context, config
 			continue
 		}
 
-		fmt.Printf("🗑️  Deleting PrometheusRule: %s\n", ruleName)
 		if _, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "prometheusrule", ruleName, "-n", config.Namespace); err != nil {
 			fmt.Printf("⚠️  Failed to delete PrometheusRule %s: %v\n", ruleName, err)
 			// Continue with other rules even if one fails
 		}
 	}
 
-	fmt.Println("✅ PrometheusRules cleanup completed")
 	return nil
 }
 
