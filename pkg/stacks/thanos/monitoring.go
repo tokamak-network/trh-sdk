@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"gopkg.in/yaml.v3"
 )
@@ -26,36 +27,7 @@ type MonitoringConfig struct {
 	ValuesFilePath    string
 	ResourceName      string
 	// AlertManager configuration
-	AlertManager AlertManagerConfig
-}
-
-// AlertManagerConfig holds alertmanager-specific configuration
-type AlertManagerConfig struct {
-	Telegram TelegramConfig
-	Email    EmailConfig
-}
-
-// TelegramConfig holds Telegram notification configuration
-type TelegramConfig struct {
-	Enabled           bool
-	ApiToken          string
-	CriticalReceivers []TelegramReceiver
-}
-
-// TelegramReceiver represents a Telegram chat recipient
-type TelegramReceiver struct {
-	ChatId string
-}
-
-// EmailConfig holds email notification configuration
-type EmailConfig struct {
-	Enabled           bool
-	SmtpSmarthost     string
-	SmtpFrom          string
-	SmtpAuthUsername  string
-	SmtpAuthPassword  string
-	DefaultReceivers  []string
-	CriticalReceivers []string
+	AlertManager types.AlertManagerConfig
 }
 
 const (
@@ -225,6 +197,12 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 			fmt.Printf("⚠️  Warning: Failed to cleanup orphaned services: %v\n", err)
 			// Continue anyway - this is cleanup, not critical
 		}
+	}
+
+	// Clean up PrometheusRule
+	if err := t.deletePrometheusRule(ctx, monitoringNamespace); err != nil {
+		fmt.Printf("⚠️  Warning: Failed to delete PrometheusRule: %v\n", err)
+		// Continue anyway - this is cleanup, not critical
 	}
 
 	resourceName := convertChainNameToResourceName(t.deployConfig.ChainName)
@@ -397,16 +375,16 @@ func (t *ThanosStack) generateGrafanaStorageConfig(ctx context.Context, config *
 }
 
 // getDefaultAlertManagerConfig returns AlertManager configuration from charts/monitoring/values.yaml
-func (t *ThanosStack) getDefaultAlertManagerConfig() AlertManagerConfig {
-	return AlertManagerConfig{
-		Telegram: TelegramConfig{
+func (t *ThanosStack) getDefaultAlertManagerConfig() types.AlertManagerConfig {
+	return types.AlertManagerConfig{
+		Telegram: types.TelegramConfig{
 			Enabled:  true,
 			ApiToken: "7904495507:AAE54gXGoj5X7oLsQHk_xzMFdO1kkn4xME8",
-			CriticalReceivers: []TelegramReceiver{
+			CriticalReceivers: []types.TelegramReceiver{
 				{ChatId: "1266746900"},
 			},
 		},
-		Email: EmailConfig{
+		Email: types.EmailConfig{
 			Enabled:           true,
 			SmtpSmarthost:     "smtp.gmail.com:587",
 			SmtpFrom:          "theo@tokamak.network",
@@ -422,7 +400,7 @@ func (t *ThanosStack) getDefaultAlertManagerConfig() AlertManagerConfig {
 // AlertManager configuration is now handled via dynamically generated Secret
 
 // generateTelegramReceivers converts TelegramReceiver slice to map slice for YAML
-func (t *ThanosStack) generateTelegramReceivers(receivers []TelegramReceiver) []map[string]interface{} {
+func (t *ThanosStack) generateTelegramReceivers(receivers []types.TelegramReceiver) []map[string]interface{} {
 	var result []map[string]interface{}
 	for _, receiver := range receivers {
 		if receiver.ChatId != "" { // Only include non-empty chat IDs
@@ -1355,12 +1333,12 @@ func (t *ThanosStack) UpdateTelegramConfig(config *MonitoringConfig, enabled boo
 	config.AlertManager.Telegram.ApiToken = apiToken
 
 	// Convert chat IDs to TelegramReceiver slice
-	config.AlertManager.Telegram.CriticalReceivers = make([]TelegramReceiver, 0, len(chatIds))
+	config.AlertManager.Telegram.CriticalReceivers = make([]types.TelegramReceiver, 0, len(chatIds))
 	for _, chatId := range chatIds {
 		if strings.TrimSpace(chatId) != "" {
 			config.AlertManager.Telegram.CriticalReceivers = append(
 				config.AlertManager.Telegram.CriticalReceivers,
-				TelegramReceiver{ChatId: strings.TrimSpace(chatId)},
+				types.TelegramReceiver{ChatId: strings.TrimSpace(chatId)},
 			)
 		}
 	}
@@ -1373,7 +1351,7 @@ func (t *ThanosStack) UpdateTelegramConfig(config *MonitoringConfig, enabled boo
 }
 
 // UpdateEmailConfig updates Email configuration for AlertManager
-func (t *ThanosStack) UpdateEmailConfig(config *MonitoringConfig, enabled bool, smtpConfig EmailConfig) {
+func (t *ThanosStack) UpdateEmailConfig(config *MonitoringConfig, enabled bool, smtpConfig types.EmailConfig) {
 	config.AlertManager.Email.Enabled = enabled
 	if enabled {
 		config.AlertManager.Email.SmtpSmarthost = smtpConfig.SmtpSmarthost
@@ -1610,6 +1588,250 @@ func (t *ThanosStack) deleteAlertManagerSecret(ctx context.Context, namespace st
 	}
 
 	fmt.Println("✅ AlertManager configuration secret deleted successfully")
+	return nil
+}
+
+// createPrometheusRule creates PrometheusRule manually instead of using Helm template
+func (t *ThanosStack) createPrometheusRule(ctx context.Context, config *MonitoringConfig) error {
+	fmt.Println("📊 Creating PrometheusRule for Thanos Stack monitoring...")
+
+	// Generate PrometheusRule manifest
+	manifest := t.generatePrometheusRuleManifest(config)
+
+	// Apply the manifest
+	if err := t.applyPrometheusRuleManifest(ctx, manifest); err != nil {
+		return fmt.Errorf("failed to apply PrometheusRule manifest: %w", err)
+	}
+
+	fmt.Println("✅ PrometheusRule created successfully with 12 critical alert rules")
+	return nil
+}
+
+// generatePrometheusRuleManifest generates the complete PrometheusRule YAML manifest
+func (t *ThanosStack) generatePrometheusRuleManifest(config *MonitoringConfig) string {
+	thanosNamespace := t.deployConfig.K8s.Namespace
+
+	manifest := fmt.Sprintf(`apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: %s-thanos-stack-alerts
+  namespace: %s
+  labels:
+    app.kubernetes.io/name: monitoring
+    app.kubernetes.io/instance: %s
+    prometheus: kube-prometheus
+    role: alert-rules
+    release: %s
+spec:
+  groups:
+  - name: thanos-stack.critical
+    interval: 30s
+    rules:
+    # OP Stack Component Failures
+    - alert: OpNodeDown
+      expr: absent(up{job="op-node"}) or up{job="op-node"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        component: op-node
+        chain_name: "%s"
+      annotations:
+        summary: "OP Node is down"
+        description: "OP Node has been down for more than 1 minute"
+    
+    - alert: OpBatcherDown
+      expr: absent(up{job="op-batcher"})
+      for: 1m
+      labels:
+        severity: critical
+        component: op-batcher
+        chain_name: "%s"
+      annotations:
+        summary: "OP Batcher is down"
+        description: "OP Batcher has been down for more than 1 minute"
+    
+    - alert: OpProposerDown
+      expr: absent(up{job="op-proposer"})
+      for: 1m
+      labels:
+        severity: critical
+        component: op-proposer
+        chain_name: "%s"
+      annotations:
+        summary: "OP Proposer is down"
+        description: "OP Proposer has been down for more than 1 minute"
+    
+    - alert: OpGethDown
+      expr: absent(up{job="op-geth"}) or up{job="op-geth"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        component: op-geth
+        chain_name: "%s"
+      annotations:
+        summary: "OP Geth is down"
+        description: "OP Geth has been down for more than 1 minute"
+    
+    # L1 RPC Connectivity
+    - alert: L1RpcDown
+      expr: probe_success{job=~"blackbox-eth.*"} == 0
+      for: 10s
+      labels:
+        severity: critical
+        component: l1-rpc
+        chain_name: "%s"
+      annotations:
+        summary: "L1 RPC connection failed"
+        description: "L1 RPC endpoint {{ $labels.target }} is unreachable"
+    
+    # Balance Monitoring
+    - alert: OpBatcherBalanceCritical
+      expr: op_batcher_default_balance < 0.01
+      for: 10s
+      labels:
+        severity: critical
+        component: op-batcher
+        chain_name: "%s"
+      annotations:
+        summary: "OP Batcher ETH balance critically low"
+        description: "OP Batcher balance is {{ $value }} ETH, below 0.01 ETH threshold"
+    
+    - alert: OpProposerBalanceCritical
+      expr: op_proposer_default_balance < 0.01
+      for: 10s
+      labels:
+        severity: critical
+        component: op-proposer
+        chain_name: "%s"
+      annotations:
+        summary: "OP Proposer ETH balance critically low"
+        description: "OP Proposer balance is {{ $value }} ETH, below 0.01 ETH threshold"
+    
+    # Block Production Issues
+    - alert: BlockProductionStalled
+      expr: increase(geth_chain_head_block[5m]) == 0
+      for: 2m
+      labels:
+        severity: critical
+        component: op-geth
+        chain_name: "%s"
+      annotations:
+        summary: "Block production has stalled"
+        description: "No new blocks have been produced in the last 5 minutes"
+    
+    # Container Resource Issues
+    - alert: ContainerCpuUsageHigh
+      expr: (sum(rate(container_cpu_usage_seconds_total{namespace=~"%s"}[5m])) by (pod) / sum(container_spec_cpu_quota{namespace=~"%s"}/container_spec_cpu_period{namespace=~"%s"}) by (pod)) * 100 > 80
+      for: 5m
+      labels:
+        severity: critical
+        component: kubernetes
+        chain_name: "%s"
+      annotations:
+        summary: "High CPU usage in Thanos Stack pod"
+        description: "Pod {{ $labels.pod }} CPU usage is above 80%%"
+    
+    - alert: ContainerMemoryUsageHigh
+      expr: (sum(container_memory_working_set_bytes{namespace=~"%s"}) by (pod) / sum(container_spec_memory_limit_bytes{namespace=~"%s"}) by (pod)) * 100 > 80
+      for: 5m
+      labels:
+        severity: critical
+        component: kubernetes
+        chain_name: "%s"
+      annotations:
+        summary: "High memory usage in Thanos Stack pod"
+        description: "Pod {{ $labels.pod }} memory usage is above 80%%"
+    
+    # Pod Status Issues
+    - alert: PodCrashLooping
+      expr: rate(kube_pod_container_status_restarts_total{namespace=~"%s"}[5m]) > 0
+      for: 1m
+      labels:
+        severity: critical
+        component: kubernetes
+        chain_name: "%s"
+      annotations:
+        summary: "Pod is crash looping"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is restarting frequently"
+`,
+		config.HelmReleaseName,
+		config.Namespace,
+		config.HelmReleaseName,
+		config.HelmReleaseName,
+		config.ResourceName,
+		config.ResourceName,
+		config.ResourceName,
+		config.ResourceName,
+		thanosNamespace,
+		thanosNamespace,
+		thanosNamespace,
+		config.ResourceName,
+		thanosNamespace,
+		thanosNamespace,
+		config.ResourceName,
+		thanosNamespace,
+		config.ResourceName)
+
+	return manifest
+}
+
+// applyPrometheusRuleManifest applies the PrometheusRule manifest using kubectl
+func (t *ThanosStack) applyPrometheusRuleManifest(ctx context.Context, manifest string) error {
+	// Create temporary file
+	tempFile, err := os.CreateTemp("", "prometheus-rule-*.yaml")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer os.Remove(tempFile.Name())
+
+	// Write manifest to temp file
+	if _, err := tempFile.WriteString(manifest); err != nil {
+		return fmt.Errorf("failed to write manifest to temp file: %w", err)
+	}
+	tempFile.Close()
+
+	// Apply the manifest
+	if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile.Name()); err != nil {
+		return fmt.Errorf("failed to apply PrometheusRule manifest: %w", err)
+	}
+
+	return nil
+}
+
+// deletePrometheusRule deletes the PrometheusRule resource
+func (t *ThanosStack) deletePrometheusRule(ctx context.Context, namespace string) error {
+	// Get the monitoring config to construct the PrometheusRule name
+	chainName := strings.ToLower(t.deployConfig.ChainName)
+	chainName = strings.ReplaceAll(chainName, " ", "-")
+
+	// Find monitoring releases to get the proper release name
+	releases, err := utils.FilterHelmReleases(ctx, namespace, "monitoring")
+	if err != nil {
+		return fmt.Errorf("failed to get monitoring releases: %w", err)
+	}
+
+	// If no releases found, try with a pattern
+	if len(releases) == 0 {
+		fmt.Printf("No monitoring releases found in namespace %s\n", namespace)
+		return nil
+	}
+
+	// Use the first release name found
+	helmReleaseName := releases[0]
+	prometheusRuleName := fmt.Sprintf("%s-thanos-stack-alerts", helmReleaseName)
+
+	// Delete the PrometheusRule
+	deleteCmd := []string{
+		"delete", "prometheusrule", prometheusRuleName,
+		"--namespace", namespace,
+		"--ignore-not-found=true",
+	}
+
+	if _, err := utils.ExecuteCommand(ctx, "kubectl", deleteCmd...); err != nil {
+		return fmt.Errorf("failed to delete PrometheusRule %s: %w", prometheusRuleName, err)
+	}
+
+	fmt.Printf("✅ Deleted PrometheusRule: %s\n", prometheusRuleName)
 	return nil
 }
 

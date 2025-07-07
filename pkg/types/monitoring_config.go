@@ -1,5 +1,50 @@
 package types
 
+// MonitoringConfig holds all configuration needed for monitoring installation
+type MonitoringConfig struct {
+	Namespace         string
+	HelmReleaseName   string
+	AdminPassword     string
+	L1RpcUrl          string
+	ServiceNames      map[string]string
+	EnablePersistence bool
+	EFSFileSystemId   string
+	ChartsPath        string
+	ValuesFilePath    string
+	ResourceName      string
+	// AlertManager configuration
+	AlertManager AlertManagerConfig
+}
+
+// AlertManagerConfig holds alertmanager-specific configuration
+type AlertManagerConfig struct {
+	Telegram TelegramConfig
+	Email    EmailConfig
+}
+
+// TelegramConfig holds Telegram notification configuration
+type TelegramConfig struct {
+	Enabled           bool
+	ApiToken          string
+	CriticalReceivers []TelegramReceiver
+}
+
+// TelegramReceiver represents a Telegram chat recipient
+type TelegramReceiver struct {
+	ChatId string
+}
+
+// EmailConfig holds email notification configuration
+type EmailConfig struct {
+	Enabled           bool
+	SmtpSmarthost     string
+	SmtpFrom          string
+	SmtpAuthUsername  string
+	SmtpAuthPassword  string
+	DefaultReceivers  []string
+	CriticalReceivers []string
+}
+
 // ThanosStackMonitoringConfig represents the new Helm dependencies-based monitoring configuration
 type ThanosStackMonitoringConfig struct {
 	Global                     GlobalConfig              `yaml:"global"`
