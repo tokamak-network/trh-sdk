@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -170,7 +171,7 @@ func (t *ThanosStack) checkALBIngressStatus(ctx context.Context, config *Monitor
 		if err == nil && strings.TrimSpace(output) != "" {
 			albHostname := strings.TrimSpace(output)
 			if strings.HasPrefix(albHostname, "internal-") || strings.HasPrefix(albHostname, "dualstack.") {
-				return fmt.Sprintf("https://%s", albHostname)
+				return fmt.Sprintf("http://%s", albHostname)
 			}
 		}
 
@@ -190,7 +191,7 @@ func (t *ThanosStack) checkALBIngressStatus(ctx context.Context, config *Monitor
 
 		if err == nil && strings.TrimSpace(output) != "" {
 			albHostname := strings.TrimSpace(output)
-			return fmt.Sprintf("https://%s", albHostname)
+			return fmt.Sprintf("http://%s", albHostname)
 		}
 
 		time.Sleep(5 * time.Second)
@@ -222,10 +223,19 @@ func (t *ThanosStack) generateValuesFile(ctx context.Context, config *Monitoring
 			"prometheus": map[string]interface{}{
 				"prometheusSpec": t.generatePrometheusStorageSpec(config),
 			},
-			"grafana":      t.generateGrafanaStorageConfig(ctx, config),
-			"alertmanager": t.generateAlertManagerConfig(config),
+			"grafana": t.generateGrafanaStorageConfig(ctx, config),
+			"alertmanager": map[string]interface{}{
+				"enabled": true,
+				"alertmanagerSpec": map[string]interface{}{
+					"configSecret": "alertmanager-config",
+				},
+			},
 			"prometheusRule": map[string]interface{}{
 				"enabled": false, // Disable default PrometheusRules, only use thanos-stack-alerts
+			},
+			// Disable all default rules to prevent conflicts
+			"defaultRules": map[string]interface{}{
+				"enabled": false,
 			},
 		},
 	}
@@ -519,73 +529,6 @@ func (t *ThanosStack) getDefaultAlertManagerConfig() types.AlertManagerConfig {
 	}
 }
 
-// generateAlertManagerConfig creates AlertManager configuration
-func (t *ThanosStack) generateAlertManagerConfig(config *MonitoringConfig) map[string]interface{} {
-	return map[string]interface{}{
-		"enabled": true,
-		"config": map[string]interface{}{
-			"global": map[string]interface{}{
-				"smtp_smarthost":     config.AlertManager.Email.SmtpSmarthost,
-				"smtp_from":          config.AlertManager.Email.SmtpFrom,
-				"smtp_auth_username": config.AlertManager.Email.SmtpAuthUsername,
-				"smtp_auth_password": config.AlertManager.Email.SmtpAuthPassword,
-			},
-			"route": map[string]interface{}{
-				"group_by":        []string{"alertname", "cluster", "service", "severity"},
-				"group_wait":      "30s",
-				"group_interval":  "5m",
-				"repeat_interval": "4h",
-				"receiver":        "telegram-critical",
-			},
-			"receivers": t.generateAlertManagerReceivers(config),
-		},
-	}
-}
-
-// generateAlertManagerReceivers generates receiver configurations
-func (t *ThanosStack) generateAlertManagerReceivers(config *MonitoringConfig) []map[string]interface{} {
-	receivers := []map[string]interface{}{
-		{
-			"name": "telegram-critical",
-		},
-	}
-
-	// Add Telegram configurations
-	if config.AlertManager.Telegram.Enabled {
-		telegramConfigs := []map[string]interface{}{}
-		for _, receiver := range config.AlertManager.Telegram.CriticalReceivers {
-			if receiver.ChatId != "" {
-				telegramConfigs = append(telegramConfigs, map[string]interface{}{
-					"api_url":    fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", config.AlertManager.Telegram.ApiToken),
-					"chat_id":    receiver.ChatId,
-					"parse_mode": "Markdown",
-					"message":    "🚨 *Critical Alert*\n\n*Alert:* {{.GroupLabels.alertname}}\n*Description:* {{range .Alerts}}{{.Annotations.description}}{{end}}",
-				})
-			}
-		}
-		if len(telegramConfigs) > 0 {
-			receivers[0]["telegram_configs"] = telegramConfigs
-		}
-	}
-
-	// Add Email configurations
-	if config.AlertManager.Email.Enabled {
-		emailConfigs := []map[string]interface{}{}
-		for _, email := range config.AlertManager.Email.CriticalReceivers {
-			if email != "" {
-				emailConfigs = append(emailConfigs, map[string]interface{}{
-					"to": email,
-				})
-			}
-		}
-		if len(emailConfigs) > 0 {
-			receivers[0]["email_configs"] = emailConfigs
-		}
-	}
-
-	return receivers
-}
-
 // getServiceNames returns a map of component names to their Kubernetes service names
 func (t *ThanosStack) getServiceNames(ctx context.Context, namespace, chainName string) (map[string]string, error) {
 	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "services", "-n", namespace, "-o", "custom-columns=NAME:.metadata.name", "--no-headers")
@@ -656,6 +599,11 @@ func (t *ThanosStack) deployMonitoringInfrastructure(ctx context.Context, config
 		return fmt.Errorf("failed to ensure namespace exists: %w", err)
 	}
 
+	// Clean up existing monitoring PVs and PVCs
+	if err := t.cleanupExistingMonitoringStorage(ctx, config); err != nil {
+		return fmt.Errorf("failed to cleanup existing monitoring storage: %w", err)
+	}
+
 	timestamp, err := t.getTimestampFromExistingPV(ctx, config.ChainName)
 	if err != nil {
 		return fmt.Errorf("failed to get timestamp from existing PV: %w", err)
@@ -683,6 +631,87 @@ func (t *ThanosStack) deployMonitoringInfrastructure(ctx context.Context, config
 		return fmt.Errorf("failed to create Grafana PVC: %w", err)
 	}
 
+	return nil
+}
+
+// cleanupExistingMonitoringStorage removes existing monitoring PVs and PVCs
+func (t *ThanosStack) cleanupExistingMonitoringStorage(ctx context.Context, config *MonitoringConfig) error {
+	fmt.Println("🧹 Cleaning up existing monitoring PVs and PVCs...")
+
+	// Get existing monitoring PVCs
+	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", "-n", config.Namespace, "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
+	if err != nil {
+		fmt.Printf("⚠️  Warning: Failed to get existing PVCs: %v\n", err)
+	} else {
+		lines := strings.Split(strings.TrimSpace(output), "\n")
+		deletedPVCs := 0
+
+		for _, line := range lines {
+			pvcName := strings.TrimSpace(line)
+			if pvcName == "" {
+				continue
+			}
+
+			// Check if PVC is bound to a pod
+			boundOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", pvcName, "-n", config.Namespace, "-o", "jsonpath={.status.phase}")
+			if err == nil && strings.TrimSpace(boundOutput) == "Bound" {
+				// Check if any pod is using this PVC
+				podOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pods", "-n", config.Namespace, "-o", "jsonpath={.items[*].spec.volumes[*].persistentVolumeClaim.claimName}")
+				if err == nil && strings.Contains(podOutput, pvcName) {
+					fmt.Printf("⚠️  Warning: PVC %s is in use by pods, skipping deletion\n", pvcName)
+					continue
+				}
+			}
+
+			// Delete PVC
+			_, err = utils.ExecuteCommand(ctx, "kubectl", "delete", "pvc", pvcName, "-n", config.Namespace, "--ignore-not-found=true")
+			if err != nil {
+				fmt.Printf("⚠️  Warning: Failed to delete PVC %s: %v\n", pvcName, err)
+			} else {
+				deletedPVCs++
+			}
+		}
+
+		if deletedPVCs > 0 {
+			fmt.Printf("✅ Deleted %d existing PVCs\n", deletedPVCs)
+		}
+	}
+
+	// Get existing monitoring PVs
+	output, err = utils.ExecuteCommand(ctx, "kubectl", "get", "pv", "--no-headers", "-o", "custom-columns=NAME:.metadata.name,STATUS:.status.phase")
+	if err != nil {
+		fmt.Printf("⚠️  Warning: Failed to get existing PVs: %v\n", err)
+	} else {
+		lines := strings.Split(strings.TrimSpace(output), "\n")
+		deletedPVs := 0
+
+		for _, line := range lines {
+			parts := strings.Fields(line)
+			if len(parts) < 2 {
+				continue
+			}
+
+			pvName := parts[0]
+			status := parts[1]
+
+			// Only delete Released PVs (not Bound or Available)
+			if status == "Released" && (strings.Contains(pvName, "thanos-stack-grafana") || strings.Contains(pvName, "thanos-stack-prometheus")) {
+				// Remove claimRef to allow reuse
+				_, err = utils.ExecuteCommand(ctx, "kubectl", "patch", "pv", pvName, "-p", `{"spec":{"claimRef":null}}`, "--type=merge")
+				if err != nil {
+					fmt.Printf("⚠️  Warning: Failed to remove claimRef from PV %s: %v\n", pvName, err)
+				} else {
+					deletedPVs++
+				}
+			}
+		}
+
+		if deletedPVs > 0 {
+			fmt.Printf("✅ Prepared %d existing PVs for reuse\n", deletedPVs)
+		}
+	}
+
+	fmt.Println("✅ Monitoring storage cleanup completed")
 	return nil
 }
 
@@ -880,7 +909,7 @@ metadata:
     release: %s
 type: Opaque
 data:
-  alertmanager.yml: %s
+  alertmanager.yaml: %s
 `, config.Namespace, config.HelmReleaseName, alertManagerYaml)
 
 	return t.applySecretManifest(ctx, secretManifest)
@@ -888,6 +917,52 @@ data:
 
 // generateAlertManagerSecretConfig generates AlertManager configuration YAML
 func (t *ThanosStack) generateAlertManagerSecretConfig(config *MonitoringConfig) (string, error) {
+	// Generate receivers configuration
+	receivers := []map[string]interface{}{
+		{
+			"name": "telegram-critical",
+		},
+	}
+
+	// Add Telegram configurations
+	if config.AlertManager.Telegram.Enabled {
+		telegramConfigs := []map[string]interface{}{}
+		for _, receiver := range config.AlertManager.Telegram.CriticalReceivers {
+			if receiver.ChatId != "" {
+				// Convert chat_id to int64 for Prometheus Operator compatibility
+				chatIdInt, err := strconv.ParseInt(receiver.ChatId, 10, 64)
+				if err != nil {
+					return "", fmt.Errorf("invalid chat_id format: %s", receiver.ChatId)
+				}
+
+				telegramConfigs = append(telegramConfigs, map[string]interface{}{
+					"bot_token":  config.AlertManager.Telegram.ApiToken,
+					"chat_id":    chatIdInt,
+					"parse_mode": "Markdown",
+					"message":    "🚨 *Critical Alert*\n\n*Alert:* {{.GroupLabels.alertname}}\n*Description:* {{range .Alerts}}{{.Annotations.description}}{{end}}",
+				})
+			}
+		}
+		if len(telegramConfigs) > 0 {
+			receivers[0]["telegram_configs"] = telegramConfigs
+		}
+	}
+
+	// Add Email configurations
+	if config.AlertManager.Email.Enabled {
+		emailConfigs := []map[string]interface{}{}
+		for _, email := range config.AlertManager.Email.CriticalReceivers {
+			if email != "" {
+				emailConfigs = append(emailConfigs, map[string]interface{}{
+					"to": email,
+				})
+			}
+		}
+		if len(emailConfigs) > 0 {
+			receivers[0]["email_configs"] = emailConfigs
+		}
+	}
+
 	alertManagerConfig := map[string]interface{}{
 		"global": map[string]interface{}{
 			"smtp_smarthost":     config.AlertManager.Email.SmtpSmarthost,
@@ -902,7 +977,7 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *MonitoringConfig)
 			"repeat_interval": "4h",
 			"receiver":        "telegram-critical",
 		},
-		"receivers": t.generateAlertManagerReceivers(config),
+		"receivers": receivers,
 	}
 
 	yamlData, err := yaml.Marshal(alertManagerConfig)
@@ -935,8 +1010,53 @@ func (t *ThanosStack) applySecretManifest(ctx context.Context, manifest string) 
 
 // createPrometheusRule creates PrometheusRule for alerts
 func (t *ThanosStack) createPrometheusRule(ctx context.Context, config *MonitoringConfig) error {
+	// Clean up existing PrometheusRules except thanos-stack-alerts
+	if err := t.cleanupExistingPrometheusRules(ctx, config); err != nil {
+		return fmt.Errorf("failed to cleanup existing PrometheusRules: %w", err)
+	}
+
 	manifest := t.generatePrometheusRuleManifest(config)
 	return t.applyPrometheusRuleManifest(ctx, manifest)
+}
+
+// cleanupExistingPrometheusRules removes all PrometheusRules except thanos-stack-alerts
+func (t *ThanosStack) cleanupExistingPrometheusRules(ctx context.Context, config *MonitoringConfig) error {
+	fmt.Println("🧹 Cleaning up existing PrometheusRules...")
+
+	// Get all PrometheusRules in the monitoring namespace
+	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", config.Namespace, "-o", "jsonpath={.items[*].metadata.name}")
+	if err != nil {
+		// If no PrometheusRules exist, that's fine
+		return nil
+	}
+
+	if strings.TrimSpace(output) == "" {
+		fmt.Println("✅ No existing PrometheusRules found")
+		return nil
+	}
+
+	ruleNames := strings.Split(strings.TrimSpace(output), " ")
+
+	for _, ruleName := range ruleNames {
+		if ruleName == "" {
+			continue
+		}
+
+		// Skip thanos-stack-alerts
+		if strings.Contains(ruleName, "thanos-stack-alerts") {
+			fmt.Printf("⏭️  Skipping thanos-stack-alerts: %s\n", ruleName)
+			continue
+		}
+
+		fmt.Printf("🗑️  Deleting PrometheusRule: %s\n", ruleName)
+		if _, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "prometheusrule", ruleName, "-n", config.Namespace); err != nil {
+			fmt.Printf("⚠️  Failed to delete PrometheusRule %s: %v\n", ruleName, err)
+			// Continue with other rules even if one fails
+		}
+	}
+
+	fmt.Println("✅ PrometheusRules cleanup completed")
+	return nil
 }
 
 // generatePrometheusRuleManifest generates the complete PrometheusRule YAML manifest
