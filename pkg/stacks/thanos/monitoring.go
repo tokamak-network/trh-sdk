@@ -96,6 +96,9 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 		return nil, fmt.Errorf("error getting EFS filesystem ID: %w", err)
 	}
 
+	// Get AlertManager configuration from user input
+	alertManagerConfig := t.getAlertManagerConfigFromUser()
+
 	config := &MonitoringConfig{
 		Namespace:         "monitoring",
 		HelmReleaseName:   helmReleaseName,
@@ -107,7 +110,7 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 		ChartsPath:        chartsPath,
 		ValuesFilePath:    "",
 		ChainName:         chainName,
-		AlertManager:      t.getDefaultAlertManagerConfig(),
+		AlertManager:      alertManagerConfig,
 	}
 
 	return config, nil
@@ -129,17 +132,73 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 	return nil
 }
 
-// displayMonitoringInfo shows access information
+// displayMonitoringInfo shows access information and checks ALB Ingress
 func (t *ThanosStack) displayMonitoringInfo(ctx context.Context, config *MonitoringConfig) string {
 	fmt.Println("\n🎉 Monitoring Stack Installation Complete!")
-	fmt.Printf("📊 Grafana: http://localhost:3000 (port-forward)\n")
-	fmt.Printf("   Username: admin\n")
-	fmt.Printf("   Password: %s\n", config.AdminPassword)
 
-	utils.ExecuteCommand(ctx, "kubectl", "port-forward", "-n", config.Namespace,
-		fmt.Sprintf("svc/%s-grafana", config.HelmReleaseName), "3000:80")
+	// Check ALB Ingress status and get URL
+	albURL := t.checkALBIngressStatus(ctx, config)
 
-	return "http://localhost:3000"
+	if albURL != "" {
+		fmt.Printf("🌐 ALB Ingress URL: %s\n", albURL)
+		fmt.Printf("   Username: admin\n")
+		fmt.Printf("   Password: %s\n", config.AdminPassword)
+		return albURL
+	} else {
+		fmt.Printf("⚠️  ALB Ingress not ready, using port-forward as fallback\n")
+		fmt.Printf("📊 Grafana: http://localhost:3000 (port-forward)\n")
+		fmt.Printf("   Username: admin\n")
+		fmt.Printf("   Password: %s\n", config.AdminPassword)
+
+		// Start port-forward in background
+		go utils.ExecuteCommand(ctx, "kubectl", "port-forward", "-n", config.Namespace,
+			fmt.Sprintf("svc/%s-grafana", config.HelmReleaseName), "3000:80")
+
+		return "http://localhost:3000"
+	}
+}
+
+// checkALBIngressStatus checks ALB Ingress status and returns the URL
+func (t *ThanosStack) checkALBIngressStatus(ctx context.Context, config *MonitoringConfig) string {
+	// Wait for ALB Ingress to be ready (max 5 minutes)
+	maxAttempts := 60 // 60 attempts * 5 seconds = 5 minutes
+	for i := 0; i < maxAttempts; i++ {
+		// Check if ALB Ingress exists and has an address
+		output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "ingress", "-n", config.Namespace,
+			fmt.Sprintf("%s-grafana", config.HelmReleaseName), "-o", "jsonpath={.status.loadBalancer.ingress[0].hostname}", "--ignore-not-found=true")
+
+		if err == nil && strings.TrimSpace(output) != "" {
+			albHostname := strings.TrimSpace(output)
+			if strings.HasPrefix(albHostname, "internal-") || strings.HasPrefix(albHostname, "dualstack.") {
+				return fmt.Sprintf("https://%s", albHostname)
+			}
+		}
+
+		// Check if ALB Ingress is still being created
+		output, err = utils.ExecuteCommand(ctx, "kubectl", "get", "ingress", "-n", config.Namespace,
+			fmt.Sprintf("%s-grafana", config.HelmReleaseName), "-o", "jsonpath={.status.loadBalancer.ingress}", "--ignore-not-found=true")
+
+		if err != nil || strings.TrimSpace(output) == "" {
+			fmt.Printf("⏳ Waiting for ALB Ingress to be ready... (%d/%d)\n", i+1, maxAttempts)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		// Try to get the hostname again
+		output, err = utils.ExecuteCommand(ctx, "kubectl", "get", "ingress", "-n", config.Namespace,
+			fmt.Sprintf("%s-grafana", config.HelmReleaseName), "-o", "jsonpath={.status.loadBalancer.ingress[0].hostname}")
+
+		if err == nil && strings.TrimSpace(output) != "" {
+			albHostname := strings.TrimSpace(output)
+			return fmt.Sprintf("https://%s", albHostname)
+		}
+
+		time.Sleep(5 * time.Second)
+	}
+
+	// If ALB Ingress is not ready after 5 minutes, return empty string
+	fmt.Println("⚠️  ALB Ingress not ready after 5 minutes")
+	return ""
 }
 
 // generateValuesFile creates the values.yaml file
@@ -158,6 +217,7 @@ func (t *ThanosStack) generateValuesFile(ctx context.Context, config *Monitoring
 			"namespace":   t.deployConfig.K8s.Namespace,
 			"releaseName": config.ChainName,
 		},
+		"alertManager": t.generateAlertManagerValues(config),
 		"kube-prometheus-stack": map[string]interface{}{
 			"prometheus": map[string]interface{}{
 				"prometheusSpec": t.generatePrometheusStorageSpec(config),
@@ -248,6 +308,192 @@ func (t *ThanosStack) generateGrafanaStorageConfig(ctx context.Context, config *
 	return grafanaConfig
 }
 
+// generateAlertManagerValues creates AlertManager values for the chart
+func (t *ThanosStack) generateAlertManagerValues(config *MonitoringConfig) map[string]interface{} {
+	// Convert Telegram receivers to chat IDs
+	var telegramChatIds []string
+	if config.AlertManager.Telegram.Enabled {
+		for _, receiver := range config.AlertManager.Telegram.CriticalReceivers {
+			if receiver.ChatId != "" {
+				telegramChatIds = append(telegramChatIds, receiver.ChatId)
+			}
+		}
+	}
+
+	// Convert Email receivers
+	var emailReceivers []string
+	if config.AlertManager.Email.Enabled {
+		emailReceivers = append(emailReceivers, config.AlertManager.Email.CriticalReceivers...)
+	}
+
+	return map[string]interface{}{
+		"telegram": map[string]interface{}{
+			"enabled":  config.AlertManager.Telegram.Enabled,
+			"apiToken": config.AlertManager.Telegram.ApiToken,
+			"chatIds":  telegramChatIds,
+		},
+		"email": map[string]interface{}{
+			"enabled":      config.AlertManager.Email.Enabled,
+			"smtpServer":   config.AlertManager.Email.SmtpSmarthost,
+			"smtpFrom":     config.AlertManager.Email.SmtpFrom,
+			"smtpUsername": config.AlertManager.Email.SmtpAuthUsername,
+			"smtpPassword": config.AlertManager.Email.SmtpAuthPassword,
+			"receivers":    emailReceivers,
+		},
+		"routing": map[string]interface{}{
+			"defaultReceiver": "telegram-critical",
+			"groupBy":         []string{"alertname", "cluster", "service", "severity"},
+			"groupWait":       "30s",
+			"groupInterval":   "5m",
+			"repeatInterval":  "4h",
+		},
+	}
+}
+
+// getAlertManagerConfigFromUser gets AlertManager configuration from user input
+func (t *ThanosStack) getAlertManagerConfigFromUser() types.AlertManagerConfig {
+	fmt.Println("\n🔔 AlertManager Configuration")
+	fmt.Println("================================")
+
+	// Check if user wants to use default configuration
+	fmt.Print("Use default AlertManager configuration? (y/n): ")
+	var useDefault string
+	fmt.Scanln(&useDefault)
+
+	if strings.ToLower(useDefault) == "y" || strings.ToLower(useDefault) == "yes" {
+		fmt.Println("✅ Using default AlertManager configuration")
+		return t.getDefaultAlertManagerConfig()
+	}
+
+	// Telegram Configuration
+	telegramConfig := t.getTelegramConfigFromUser()
+
+	// Email Configuration
+	emailConfig := t.getEmailConfigFromUser()
+
+	// Show configuration summary
+	fmt.Println("\n📋 AlertManager Configuration Summary")
+	fmt.Println("===================================")
+	fmt.Printf("Telegram: %s\n", t.getTelegramConfigSummary(telegramConfig))
+	fmt.Printf("Email: %s\n", t.getEmailConfigSummary(emailConfig))
+
+	return types.AlertManagerConfig{
+		Telegram: telegramConfig,
+		Email:    emailConfig,
+	}
+}
+
+// getTelegramConfigFromUser gets Telegram configuration from user input
+func (t *ThanosStack) getTelegramConfigFromUser() types.TelegramConfig {
+	fmt.Println("\n📱 Telegram Configuration")
+	fmt.Println("-------------------------")
+
+	var enabled bool
+	fmt.Print("Enable Telegram alerts? (y/n): ")
+	var response string
+	fmt.Scanln(&response)
+	enabled = strings.ToLower(response) == "y" || strings.ToLower(response) == "yes"
+
+	if !enabled {
+		return types.TelegramConfig{Enabled: false}
+	}
+
+	var apiToken string
+	fmt.Print("Enter Telegram Bot API Token: ")
+	fmt.Scanln(&apiToken)
+
+	var chatIds []string
+	fmt.Print("Enter Telegram Chat IDs (comma-separated): ")
+	var chatIdsInput string
+	fmt.Scanln(&chatIdsInput)
+
+	if chatIdsInput != "" {
+		chatIds = strings.Split(chatIdsInput, ",")
+		for i, id := range chatIds {
+			chatIds[i] = strings.TrimSpace(id)
+		}
+	}
+
+	var receivers []types.TelegramReceiver
+	for _, chatId := range chatIds {
+		if chatId != "" {
+			receivers = append(receivers, types.TelegramReceiver{ChatId: chatId})
+		}
+	}
+
+	return types.TelegramConfig{
+		Enabled:           enabled,
+		ApiToken:          apiToken,
+		CriticalReceivers: receivers,
+	}
+}
+
+// getEmailConfigFromUser gets Email configuration from user input
+func (t *ThanosStack) getEmailConfigFromUser() types.EmailConfig {
+	fmt.Println("\n📧 Email Configuration")
+	fmt.Println("----------------------")
+
+	var enabled bool
+	fmt.Print("Enable Email alerts? (y/n): ")
+	var response string
+	fmt.Scanln(&response)
+	enabled = strings.ToLower(response) == "y" || strings.ToLower(response) == "yes"
+
+	if !enabled {
+		return types.EmailConfig{Enabled: false}
+	}
+
+	var smtpSmarthost string
+	fmt.Print("Enter SMTP Server (e.g., smtp.gmail.com:587): ")
+	fmt.Scanln(&smtpSmarthost)
+
+	var smtpFrom string
+	fmt.Print("Enter From Email Address: ")
+	fmt.Scanln(&smtpFrom)
+
+	var smtpAuthUsername string
+	fmt.Print("Enter SMTP Username: ")
+	fmt.Scanln(&smtpAuthUsername)
+
+	var smtpAuthPassword string
+	fmt.Print("Enter SMTP Password: ")
+	fmt.Scanln(&smtpAuthPassword)
+
+	var defaultReceiversInput string
+	fmt.Print("Enter Default Email Receivers (comma-separated): ")
+	fmt.Scanln(&defaultReceiversInput)
+
+	var criticalReceiversInput string
+	fmt.Print("Enter Critical Email Receivers (comma-separated): ")
+	fmt.Scanln(&criticalReceiversInput)
+
+	var defaultReceivers []string
+	if defaultReceiversInput != "" {
+		defaultReceivers = strings.Split(defaultReceiversInput, ",")
+		for i, email := range defaultReceivers {
+			defaultReceivers[i] = strings.TrimSpace(email)
+		}
+	}
+
+	var criticalReceivers []string
+	if criticalReceiversInput != "" {
+		criticalReceivers = strings.Split(criticalReceiversInput, ",")
+		for i, email := range criticalReceivers {
+			criticalReceivers[i] = strings.TrimSpace(email)
+		}
+	}
+
+	return types.EmailConfig{
+		Enabled:           enabled,
+		SmtpSmarthost:     smtpSmarthost,
+		SmtpFrom:          smtpFrom,
+		SmtpAuthUsername:  smtpAuthUsername,
+		SmtpAuthPassword:  smtpAuthPassword,
+		DefaultReceivers:  defaultReceivers,
+		CriticalReceivers: criticalReceivers,
+	}
+}
+
 // getDefaultAlertManagerConfig returns default AlertManager configuration
 func (t *ThanosStack) getDefaultAlertManagerConfig() types.AlertManagerConfig {
 	return types.AlertManagerConfig{
@@ -301,6 +547,7 @@ func (t *ThanosStack) generateAlertManagerReceivers(config *MonitoringConfig) []
 		},
 	}
 
+	// Add Telegram configurations
 	if config.AlertManager.Telegram.Enabled {
 		telegramConfigs := []map[string]interface{}{}
 		for _, receiver := range config.AlertManager.Telegram.CriticalReceivers {
@@ -315,6 +562,21 @@ func (t *ThanosStack) generateAlertManagerReceivers(config *MonitoringConfig) []
 		}
 		if len(telegramConfigs) > 0 {
 			receivers[0]["telegram_configs"] = telegramConfigs
+		}
+	}
+
+	// Add Email configurations
+	if config.AlertManager.Email.Enabled {
+		emailConfigs := []map[string]interface{}{}
+		for _, email := range config.AlertManager.Email.CriticalReceivers {
+			if email != "" {
+				emailConfigs = append(emailConfigs, map[string]interface{}{
+					"to": email,
+				})
+			}
+		}
+		if len(emailConfigs) > 0 {
+			receivers[0]["email_configs"] = emailConfigs
 		}
 	}
 
@@ -836,4 +1098,32 @@ func (t *ThanosStack) applyPrometheusRuleManifest(ctx context.Context, manifest 
 	}
 
 	return nil
+}
+
+// getTelegramConfigSummary returns a summary of Telegram configuration
+func (t *ThanosStack) getTelegramConfigSummary(config types.TelegramConfig) string {
+	if !config.Enabled {
+		return "Disabled"
+	}
+
+	chatCount := len(config.CriticalReceivers)
+	if chatCount == 0 {
+		return "Enabled (no chat IDs configured)"
+	}
+
+	return fmt.Sprintf("Enabled (%d chat IDs configured)", chatCount)
+}
+
+// getEmailConfigSummary returns a summary of Email configuration
+func (t *ThanosStack) getEmailConfigSummary(config types.EmailConfig) string {
+	if !config.Enabled {
+		return "Disabled"
+	}
+
+	receiverCount := len(config.CriticalReceivers)
+	if receiverCount == 0 {
+		return "Enabled (no receivers configured)"
+	}
+
+	return fmt.Sprintf("Enabled (%d receivers configured)", receiverCount)
 }
