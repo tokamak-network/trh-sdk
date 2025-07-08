@@ -34,6 +34,11 @@ type MonitoringConfig struct {
 func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *MonitoringConfig) (string, error) {
 	fmt.Println("🚀 Starting monitoring installation...")
 
+	// Ensure monitoring namespace exists
+	if err := t.ensureNamespaceExists(ctx, config.Namespace); err != nil {
+		return "", fmt.Errorf("failed to ensure monitoring namespace exists: %w", err)
+	}
+
 	// Deploy infrastructure if persistence is enabled
 	if config.EnablePersistence {
 		if err := t.deployMonitoringInfrastructure(ctx, config); err != nil {
@@ -69,15 +74,21 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *MonitoringC
 	}
 
 	// Create additional resources
-	t.createAlertManagerSecret(ctx, config)
-	t.createPrometheusRule(ctx, config)
-	t.createDashboardConfigMaps(ctx, config)
+	if err := t.createAlertManagerSecret(ctx, config); err != nil {
+		return "", fmt.Errorf("failed to create AlertManager secret: %w", err)
+	}
+	if err := t.createPrometheusRule(ctx, config); err != nil {
+		return "", fmt.Errorf("failed to create PrometheusRule: %w", err)
+	}
+	if err := t.createDashboardConfigMaps(ctx, config); err != nil {
+		return "", fmt.Errorf("failed to create dashboard configmaps: %w", err)
+	}
 
 	return t.displayMonitoringInfo(ctx, config), nil
 }
 
 // GetMonitoringConfig gathers all required configuration for monitoring
-func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword string) (*MonitoringConfig, error) {
+func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword string, alertManagerConfig types.AlertManagerConfig) (*MonitoringConfig, error) {
 	chainName := strings.ToLower(t.deployConfig.ChainName)
 	chainName = strings.ReplaceAll(chainName, " ", "-")
 	helmReleaseName := fmt.Sprintf("monitoring-%d", time.Now().Unix())
@@ -87,7 +98,7 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 		return nil, fmt.Errorf("chart directory not found: %s", chartsPath)
 	}
 
-	serviceNames, err := t.getServiceNames(ctx, t.deployConfig.K8s.Namespace, chainName)
+	serviceNames, err := t.getServiceNames(ctx, t.deployConfig.K8s.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("error getting service names: %w", err)
 	}
@@ -96,9 +107,6 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 	if err != nil {
 		return nil, fmt.Errorf("error getting EFS filesystem ID: %w", err)
 	}
-
-	// Get AlertManager configuration from user input
-	alertManagerConfig := t.getAlertManagerConfigFromUser()
 
 	config := &MonitoringConfig{
 		Namespace:         "monitoring",
@@ -117,8 +125,9 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 	return config, nil
 }
 
-// UninstallMonitoring removes monitoring stack
+// UninstallMonitoring removes monitoring plugin
 func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
+	fmt.Println("🧹 Cleaning up monitoring plugin...")
 	monitoringNamespace := "monitoring"
 	releases, err := utils.FilterHelmReleases(ctx, monitoringNamespace, "monitoring")
 	if err != nil {
@@ -135,7 +144,7 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 
 // displayMonitoringInfo shows access information and checks ALB Ingress
 func (t *ThanosStack) displayMonitoringInfo(ctx context.Context, config *MonitoringConfig) string {
-	fmt.Println("\n🎉 Monitoring Stack Installation Complete!")
+	fmt.Println("\n🎉 Monitoring Plugin Installation Complete!")
 
 	// Check ALB Ingress status and get URL
 	albURL := t.checkALBIngressStatus(ctx, config)
@@ -357,7 +366,7 @@ func (t *ThanosStack) generateAlertManagerValues(config *MonitoringConfig) map[s
 				emailConfigs = append(emailConfigs, map[string]interface{}{
 					"to": email,
 					"headers": map[string]string{
-						"subject": "🚨 Critical Alert - {{ $labels.chain_name }}",
+						"subject": "🚨 Critical Alert - {{ $labels.chain_name | default \"Thanos Stack\" }}",
 					},
 					"html": `<!DOCTYPE html>
 <html>
@@ -368,6 +377,7 @@ func (t *ThanosStack) generateAlertManagerValues(config *MonitoringConfig) map[s
         .alert { border-left: 4px solid #dc3545; padding: 10px; margin: 10px 0; background-color: #f8f9fa; }
         .header { color: #dc3545; font-weight: bold; margin-bottom: 15px; }
         .info { margin: 5px 0; }
+        .timestamp { color: #6c757d; font-size: 12px; margin-top: 10px; }
         .dashboard { margin-top: 15px; }
         a { color: #007bff; text-decoration: none; }
         a:hover { text-decoration: underline; }
@@ -375,15 +385,16 @@ func (t *ThanosStack) generateAlertManagerValues(config *MonitoringConfig) map[s
 </head>
 <body>
     <div class=\"alert\">
-        <div class=\"header\">🚨 Critical Alert - {{ $labels.chain_name }}</div>
+        <div class=\"header\">🚨 Critical Alert - {{ $labels.chain_name | default \"Thanos Stack\" }}</div>
         <div class=\"info\"><strong>Alert:</strong> {{ $labels.alertname }}</div>
         <div class=\"info\"><strong>Severity:</strong> {{ $labels.severity }}</div>
         <div class=\"info\"><strong>Component:</strong> {{ $labels.component }}</div>
-        <div class=\"info\"><strong>Namespace:</strong> {{ $labels.namespace }}</div>
+        <div class=\"info\"><strong>Namespace:</strong> {{ $labels.namespace | default \"monitoring\" }}</div>
         <div class=\"info\" style=\"margin-top: 15px;\"><strong>Description:</strong></div>
         <div class=\"info\">{{ $annotations.description }}</div>
+        <div class=\"timestamp\">⏰ Alert Time: {{ $startsAt }}</div>
         <div class=\"dashboard\">
-            <strong>Dashboard:</strong> <a href=\"https://grafana.example.com/\">View Details</a>
+            <strong>Dashboard:</strong> <a href=\"http://localhost:3000/d/thanos-stack/thanos-stack-overview?orgId=1&refresh=30s\">View Details</a>
         </div>
     </div>
 </body>
@@ -410,7 +421,7 @@ func (t *ThanosStack) generateAlertManagerValues(config *MonitoringConfig) map[s
 					"bot_token":  config.AlertManager.Telegram.ApiToken,
 					"chat_id":    chatIdInt,
 					"parse_mode": "Markdown",
-					"message":    "🚨 Critical Alert - {{ $labels.chain_name }}\n\nAlert: {{ $labels.alertname }}\nSeverity: {{ $labels.severity }}\nComponent: {{ $labels.component }}\nNamespace: {{ $labels.namespace }}\n\nDescription: {{ $annotations.description }}\n\nDashboard: [View Details](https://grafana.example.com/)",
+					"message":    "🚨 Critical Alert - {{ $labels.chain_name | default \"Thanos Stack\" }}\n\nAlert: {{ $labels.alertname }}\nSeverity: {{ $labels.severity }}\nComponent: {{ $labels.component }}\nNamespace: {{ $labels.namespace | default \"monitoring\" }}\n\nDescription: {{ $annotations.description }}\n\n⏰ Alert Time: {{ $startsAt }}\n\nDashboard: [View Details](http://localhost:3000/d/thanos-stack/thanos-stack-overview?orgId=1&refresh=30s)",
 				})
 			}
 		}
@@ -445,174 +456,8 @@ func (t *ThanosStack) generateAlertManagerValues(config *MonitoringConfig) map[s
 	return alertManagerConfig
 }
 
-// getAlertManagerConfigFromUser gets AlertManager configuration from user input
-func (t *ThanosStack) getAlertManagerConfigFromUser() types.AlertManagerConfig {
-	fmt.Println("\n🔔 AlertManager Configuration")
-	fmt.Println("================================")
-
-	// Check if user wants to use default configuration
-	fmt.Print("Use default AlertManager configuration? (y/n): ")
-	var useDefault string
-	fmt.Scanln(&useDefault)
-
-	if strings.ToLower(useDefault) == "y" || strings.ToLower(useDefault) == "yes" {
-		fmt.Println("✅ Using default AlertManager configuration")
-		return t.getDefaultAlertManagerConfig()
-	}
-
-	// Telegram Configuration
-	telegramConfig := t.getTelegramConfigFromUser()
-
-	// Email Configuration
-	emailConfig := t.getEmailConfigFromUser()
-
-	// Show configuration summary
-	fmt.Println("\n📋 AlertManager Configuration Summary")
-	fmt.Println("===================================")
-	fmt.Printf("Telegram: %s\n", t.getTelegramConfigSummary(telegramConfig))
-	fmt.Printf("Email: %s\n", t.getEmailConfigSummary(emailConfig))
-
-	return types.AlertManagerConfig{
-		Telegram: telegramConfig,
-		Email:    emailConfig,
-	}
-}
-
-// getTelegramConfigFromUser gets Telegram configuration from user input
-func (t *ThanosStack) getTelegramConfigFromUser() types.TelegramConfig {
-	fmt.Println("\n📱 Telegram Configuration")
-	fmt.Println("-------------------------")
-
-	var enabled bool
-	fmt.Print("Enable Telegram alerts? (y/n): ")
-	var response string
-	fmt.Scanln(&response)
-	enabled = strings.ToLower(response) == "y" || strings.ToLower(response) == "yes"
-
-	if !enabled {
-		return types.TelegramConfig{Enabled: false}
-	}
-
-	var apiToken string
-	fmt.Print("Enter Telegram Bot API Token: ")
-	fmt.Scanln(&apiToken)
-
-	var chatIds []string
-	fmt.Print("Enter Telegram Chat IDs (comma-separated): ")
-	var chatIdsInput string
-	fmt.Scanln(&chatIdsInput)
-
-	if chatIdsInput != "" {
-		chatIds = strings.Split(chatIdsInput, ",")
-		for i, id := range chatIds {
-			chatIds[i] = strings.TrimSpace(id)
-		}
-	}
-
-	var receivers []types.TelegramReceiver
-	for _, chatId := range chatIds {
-		if chatId != "" {
-			receivers = append(receivers, types.TelegramReceiver{ChatId: chatId})
-		}
-	}
-
-	return types.TelegramConfig{
-		Enabled:           enabled,
-		ApiToken:          apiToken,
-		CriticalReceivers: receivers,
-	}
-}
-
-// getEmailConfigFromUser gets Email configuration from user input
-func (t *ThanosStack) getEmailConfigFromUser() types.EmailConfig {
-	fmt.Println("\n📧 Email Configuration")
-	fmt.Println("----------------------")
-
-	var enabled bool
-	fmt.Print("Enable Email alerts? (y/n): ")
-	var response string
-	fmt.Scanln(&response)
-	enabled = strings.ToLower(response) == "y" || strings.ToLower(response) == "yes"
-
-	if !enabled {
-		return types.EmailConfig{Enabled: false}
-	}
-
-	var smtpSmarthost string
-	fmt.Print("Enter SMTP Server (e.g., smtp.gmail.com:587): ")
-	fmt.Scanln(&smtpSmarthost)
-
-	var smtpFrom string
-	fmt.Print("Enter From Email Address: ")
-	fmt.Scanln(&smtpFrom)
-
-	var smtpAuthUsername string
-	fmt.Print("Enter SMTP Username: ")
-	fmt.Scanln(&smtpAuthUsername)
-
-	var smtpAuthPassword string
-	fmt.Print("Enter SMTP Password: ")
-	fmt.Scanln(&smtpAuthPassword)
-
-	var defaultReceiversInput string
-	fmt.Print("Enter Default Email Receivers (comma-separated): ")
-	fmt.Scanln(&defaultReceiversInput)
-
-	var criticalReceiversInput string
-	fmt.Print("Enter Critical Email Receivers (comma-separated): ")
-	fmt.Scanln(&criticalReceiversInput)
-
-	var defaultReceivers []string
-	if defaultReceiversInput != "" {
-		defaultReceivers = strings.Split(defaultReceiversInput, ",")
-		for i, email := range defaultReceivers {
-			defaultReceivers[i] = strings.TrimSpace(email)
-		}
-	}
-
-	var criticalReceivers []string
-	if criticalReceiversInput != "" {
-		criticalReceivers = strings.Split(criticalReceiversInput, ",")
-		for i, email := range criticalReceivers {
-			criticalReceivers[i] = strings.TrimSpace(email)
-		}
-	}
-
-	return types.EmailConfig{
-		Enabled:           enabled,
-		SmtpSmarthost:     smtpSmarthost,
-		SmtpFrom:          smtpFrom,
-		SmtpAuthUsername:  smtpAuthUsername,
-		SmtpAuthPassword:  smtpAuthPassword,
-		DefaultReceivers:  defaultReceivers,
-		CriticalReceivers: criticalReceivers,
-	}
-}
-
-// getDefaultAlertManagerConfig returns default AlertManager configuration
-func (t *ThanosStack) getDefaultAlertManagerConfig() types.AlertManagerConfig {
-	return types.AlertManagerConfig{
-		Telegram: types.TelegramConfig{
-			Enabled:  true,
-			ApiToken: "7904495507:AAE54gXGoj5X7oLsQHk_xzMFdO1kkn4xME8",
-			CriticalReceivers: []types.TelegramReceiver{
-				{ChatId: "1266746900"},
-			},
-		},
-		Email: types.EmailConfig{
-			Enabled:           true,
-			SmtpSmarthost:     "smtp.gmail.com:587",
-			SmtpFrom:          "theo@tokamak.network",
-			SmtpAuthUsername:  "theo@tokamak.network",
-			SmtpAuthPassword:  "myhz wsqg iqcs hwkv",
-			DefaultReceivers:  []string{"theo@tokamak.network"},
-			CriticalReceivers: []string{"theo@tokamak.network"},
-		},
-	}
-}
-
 // getServiceNames returns a map of component names to their Kubernetes service names
-func (t *ThanosStack) getServiceNames(ctx context.Context, namespace, chainName string) (map[string]string, error) {
+func (t *ThanosStack) getServiceNames(ctx context.Context, namespace string) (map[string]string, error) {
 	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "services", "-n", namespace, "-o", "custom-columns=NAME:.metadata.name", "--no-headers")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get services in namespace %s: %w", namespace, err)
@@ -701,6 +546,7 @@ func (t *ThanosStack) deployMonitoringInfrastructure(ctx context.Context, config
 	if err := t.applyPVCManifest(ctx, "prometheus", prometheusPVC); err != nil {
 		return fmt.Errorf("failed to create Prometheus PVC: %w", err)
 	}
+	fmt.Println("✅ Created Prometheus PV and PVC")
 
 	// Create Grafana PV and PVC
 	grafanaPV := t.generateStaticPVManifest("grafana", config, "10Gi", timestamp)
@@ -712,6 +558,7 @@ func (t *ThanosStack) deployMonitoringInfrastructure(ctx context.Context, config
 	if err := t.applyPVCManifest(ctx, "grafana", grafanaPVC); err != nil {
 		return fmt.Errorf("failed to create Grafana PVC: %w", err)
 	}
+	fmt.Println("✅ Created Grafana PV and PVC")
 
 	return nil
 }
@@ -787,7 +634,7 @@ func (t *ThanosStack) cleanupExistingMonitoringStorage(ctx context.Context, conf
 		}
 
 		if deletedPVs > 0 {
-			fmt.Printf("✅ Prepared %d existing PVs for reuse\n", deletedPVs)
+			fmt.Printf("✅ Prepared %d existing PVs\n", deletedPVs)
 		}
 	}
 
@@ -822,7 +669,7 @@ func (t *ThanosStack) getTimestampFromExistingPV(ctx context.Context, chainName 
 		// Look for existing monitoring PVs (grafana or prometheus) that are Released
 		if strings.Contains(line, chainName) &&
 			(strings.Contains(line, "thanos-stack-grafana") || strings.Contains(line, "thanos-stack-prometheus")) {
-			// Extract timestamp from PV name like "theo0707-900hi-thanos-stack-grafana"
+			// Extract timestamp from PV
 			parts := strings.Split(line, "-")
 			if len(parts) >= 2 {
 				return parts[1], nil
@@ -973,7 +820,8 @@ data:
 
 // createAlertManagerSecret creates AlertManager configuration secret
 func (t *ThanosStack) createAlertManagerSecret(ctx context.Context, config *MonitoringConfig) error {
-	alertManagerYaml, err := t.generateAlertManagerSecretConfig(config)
+	grafanaURL := t.getGrafanaURL(ctx, config)
+	alertManagerYaml, err := t.generateAlertManagerSecretConfig(config, grafanaURL)
 	if err != nil {
 		return fmt.Errorf("failed to generate AlertManager configuration: %w", err)
 	}
@@ -995,7 +843,7 @@ data:
 }
 
 // generateAlertManagerSecretConfig generates AlertManager configuration YAML
-func (t *ThanosStack) generateAlertManagerSecretConfig(config *MonitoringConfig) (string, error) {
+func (t *ThanosStack) generateAlertManagerSecretConfig(config *MonitoringConfig, grafanaURL string) (string, error) {
 	// Generate receivers configuration
 	receivers := []map[string]interface{}{
 		{
@@ -1014,7 +862,7 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *MonitoringConfig)
 				emailConfigs = append(emailConfigs, map[string]interface{}{
 					"to": email,
 					"headers": map[string]string{
-						"subject": "🚨 Critical Alert - {{ $labels.chain_name }}",
+						"subject": "🚨 Critical Alert - {{ $labels.chain_name | default \"Thanos Stack\" }}",
 					},
 					"html": `<!DOCTYPE html>
 <html>
@@ -1025,6 +873,7 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *MonitoringConfig)
         .alert { border-left: 4px solid #dc3545; padding: 10px; margin: 10px 0; background-color: #f8f9fa; }
         .header { color: #dc3545; font-weight: bold; margin-bottom: 15px; }
         .info { margin: 5px 0; }
+        .timestamp { color: #6c757d; font-size: 12px; margin-top: 10px; }
         .dashboard { margin-top: 15px; }
         a { color: #007bff; text-decoration: none; }
         a:hover { text-decoration: underline; }
@@ -1032,15 +881,16 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *MonitoringConfig)
 </head>
 <body>
     <div class=\"alert\">
-        <div class=\"header\">🚨 Critical Alert - {{ $labels.chain_name }}</div>
+        <div class=\"header\">🚨 Critical Alert - {{ $labels.chain_name | default \"Thanos Stack\" }}</div>
         <div class=\"info\"><strong>Alert:</strong> {{ $labels.alertname }}</div>
         <div class=\"info\"><strong>Severity:</strong> {{ $labels.severity }}</div>
         <div class=\"info\"><strong>Component:</strong> {{ $labels.component }}</div>
-        <div class=\"info\"><strong>Namespace:</strong> {{ $labels.namespace }}</div>
+        <div class=\"info\"><strong>Namespace:</strong> {{ $labels.namespace | default \"monitoring\" }}</div>
         <div class=\"info\" style=\"margin-top: 15px;\"><strong>Description:</strong></div>
         <div class=\"info\">{{ $annotations.description }}</div>
+        <div class=\"timestamp\">⏰ Alert Time: {{ $startsAt }}</div>
         <div class=\"dashboard\">
-            <strong>Dashboard:</strong> <a href=\"https://grafana.example.com/\">View Details</a>
+            <strong>Dashboard:</strong> <a href=\"` + grafanaURL + `\">View Details</a>
         </div>
     </div>
 </body>
@@ -1067,7 +917,7 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *MonitoringConfig)
 					"bot_token":  config.AlertManager.Telegram.ApiToken,
 					"chat_id":    chatIdInt,
 					"parse_mode": "Markdown",
-					"message":    "🚨 Critical Alert - {{ $labels.chain_name }}\n\nAlert: {{ $labels.alertname }}\nSeverity: {{ $labels.severity }}\nComponent: {{ $labels.component }}\nNamespace: {{ $labels.namespace }}\n\nDescription: {{ $annotations.description }}\n\nDashboard: [View Details](https://grafana.example.com/)",
+					"message":    "🚨 Critical Alert - {{ $labels.chain_name | default \"Thanos Stack\" }}\n\nAlert: {{ $labels.alertname }}\nSeverity: {{ $labels.severity }}\nComponent: {{ $labels.component }}\nNamespace: {{ $labels.namespace | default \"monitoring\" }}\n\nDescription: {{ $annotations.description }}\n\n⏰ Alert Time: {{ $startsAt }}\n\nDashboard: [View Details](` + grafanaURL + `)",
 				})
 			}
 		}
@@ -1140,8 +990,6 @@ func (t *ThanosStack) createPrometheusRule(ctx context.Context, config *Monitori
 
 // cleanupExistingPrometheusRules removes all PrometheusRules except thanos-stack-alerts
 func (t *ThanosStack) cleanupExistingPrometheusRules(ctx context.Context, config *MonitoringConfig) error {
-	fmt.Println("🧹 Cleaning up existing PrometheusRules...")
-
 	// Get all PrometheusRules in the monitoring namespace
 	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", config.Namespace, "-o", "jsonpath={.items[*].metadata.name}")
 	if err != nil {
@@ -1150,7 +998,7 @@ func (t *ThanosStack) cleanupExistingPrometheusRules(ctx context.Context, config
 	}
 
 	if strings.TrimSpace(output) == "" {
-		fmt.Println("✅ No existing PrometheusRules found")
+		fmt.Println("✅ No existing Alerting Rules found")
 		return nil
 	}
 
@@ -1168,7 +1016,7 @@ func (t *ThanosStack) cleanupExistingPrometheusRules(ctx context.Context, config
 		}
 
 		if _, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "prometheusrule", ruleName, "-n", config.Namespace); err != nil {
-			fmt.Printf("⚠️  Failed to delete PrometheusRule %s: %v\n", ruleName, err)
+			fmt.Printf("⚠️  Failed to delete Alerting Rule %s: %v\n", ruleName, err)
 			// Continue with other rules even if one fails
 		}
 	}
@@ -1201,6 +1049,7 @@ spec:
         severity: critical
         component: op-node
         chain_name: "%s"
+        namespace: "%s"
       annotations:
         summary: "OP Node is down"
         description: "OP Node has been down for more than 1 minute"
@@ -1212,6 +1061,7 @@ spec:
         severity: critical
         component: op-batcher
         chain_name: "%s"
+        namespace: "%s"
       annotations:
         summary: "OP Batcher is down"
         description: "OP Batcher has been down for more than 1 minute"
@@ -1223,6 +1073,7 @@ spec:
         severity: critical
         component: op-proposer
         chain_name: "%s"
+        namespace: "%s"
       annotations:
         summary: "OP Proposer is down"
         description: "OP Proposer has been down for more than 1 minute"
@@ -1234,6 +1085,7 @@ spec:
         severity: critical
         component: op-geth
         chain_name: "%s"
+        namespace: "%s"
       annotations:
         summary: "OP Geth is down"
         description: "OP Geth has been down for more than 1 minute"
@@ -1245,6 +1097,7 @@ spec:
         severity: critical
         component: l1-rpc
         chain_name: "%s"
+        namespace: "%s"
       annotations:
         summary: "L1 RPC connection failed"
         description: "L1 RPC endpoint {{ $labels.target }} is unreachable"
@@ -1256,6 +1109,7 @@ spec:
         severity: critical
         component: op-batcher
         chain_name: "%s"
+        namespace: "%s"
       annotations:
         summary: "OP Batcher ETH balance critically low"
         description: "OP Batcher balance is {{ $value }} ETH, below 0.01 ETH threshold"
@@ -1267,6 +1121,7 @@ spec:
         severity: critical
         component: op-proposer
         chain_name: "%s"
+        namespace: "%s"
       annotations:
         summary: "OP Proposer ETH balance critically low"
         description: "OP Proposer balance is {{ $value }} ETH, below 0.01 ETH threshold"
@@ -1278,6 +1133,7 @@ spec:
         severity: critical
         component: op-geth
         chain_name: "%s"
+        namespace: "%s"
       annotations:
         summary: "Block production has stalled"
         description: "No new blocks have been produced in the last 5 minutes"
@@ -1289,6 +1145,7 @@ spec:
         severity: critical
         component: kubernetes
         chain_name: "%s"
+        namespace: "%s"
       annotations:
         summary: "High CPU usage in Thanos Stack pod"
         description: "Pod {{ $labels.pod }} CPU usage is above 80%%"
@@ -1300,6 +1157,7 @@ spec:
         severity: critical
         component: kubernetes
         chain_name: "%s"
+        namespace: "%s"
       annotations:
         summary: "High memory usage in Thanos Stack pod"
         description: "Pod {{ $labels.pod }} memory usage is above 80%%"
@@ -1311,6 +1169,7 @@ spec:
         severity: critical
         component: kubernetes
         chain_name: "%s"
+        namespace: "%s"
       annotations:
         summary: "Pod is crash looping"
         description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is restarting frequently"
@@ -1320,16 +1179,29 @@ spec:
 		config.HelmReleaseName,
 		config.HelmReleaseName,
 		config.ChainName,
+		config.Namespace,
 		config.ChainName,
+		config.Namespace,
 		config.ChainName,
+		config.Namespace,
 		config.ChainName,
+		config.Namespace,
 		config.ChainName,
+		config.Namespace,
 		config.ChainName,
+		config.Namespace,
 		config.ChainName,
+		config.Namespace,
 		config.ChainName,
+		config.Namespace,
 		config.ChainName,
+		config.Namespace,
 		config.ChainName,
-		config.ChainName)
+		config.Namespace,
+		config.ChainName,
+		config.Namespace,
+		config.ChainName,
+		config.Namespace)
 
 	return manifest
 }
@@ -1354,30 +1226,12 @@ func (t *ThanosStack) applyPrometheusRuleManifest(ctx context.Context, manifest 
 	return nil
 }
 
-// getTelegramConfigSummary returns a summary of Telegram configuration
-func (t *ThanosStack) getTelegramConfigSummary(config types.TelegramConfig) string {
-	if !config.Enabled {
-		return "Disabled"
+// getGrafanaURL returns the full Grafana dashboard URL using the ALB Ingress
+func (t *ThanosStack) getGrafanaURL(ctx context.Context, config *MonitoringConfig) string {
+	// Try to get the ALB Ingress hostname
+	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "ingress", "-n", config.Namespace, "-o", "jsonpath={.items[?(@.metadata.name==\"monitoring-grafana\")].status.loadBalancer.ingress[0].hostname}")
+	if err != nil || output == "" {
+		return "http://localhost:3000/d/thanos-stack/thanos-stack-overview?orgId=1&refresh=30s"
 	}
-
-	chatCount := len(config.CriticalReceivers)
-	if chatCount == 0 {
-		return "Enabled (no chat IDs configured)"
-	}
-
-	return fmt.Sprintf("Enabled (%d chat IDs configured)", chatCount)
-}
-
-// getEmailConfigSummary returns a summary of Email configuration
-func (t *ThanosStack) getEmailConfigSummary(config types.EmailConfig) string {
-	if !config.Enabled {
-		return "Disabled"
-	}
-
-	receiverCount := len(config.CriticalReceivers)
-	if receiverCount == 0 {
-		return "Enabled (no receivers configured)"
-	}
-
-	return fmt.Sprintf("Enabled (%d receivers configured)", receiverCount)
+	return "http://" + output + "/d/thanos-stack/thanos-stack-overview?orgId=1&refresh=30s"
 }

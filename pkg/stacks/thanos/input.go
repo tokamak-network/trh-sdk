@@ -107,6 +107,7 @@ type InstallBlockExplorerInput struct {
 
 type InstallMonitoringInput struct {
 	AdminPassword string
+	AlertManager  types.AlertManagerConfig
 }
 
 func (c *InstallBlockExplorerInput) Validate(ctx context.Context) error {
@@ -568,9 +569,207 @@ func InputInstallMonitoring() (*InstallMonitoringInput, error) {
 		break
 	}
 
+	// Get AlertManager configuration from user input
+	alertManagerConfig := getAlertManagerConfigFromUser()
+
 	return &InstallMonitoringInput{
 		AdminPassword: adminPassword,
+		AlertManager:  alertManagerConfig,
 	}, nil
+}
+
+// getAlertManagerConfigFromUser gets AlertManager configuration from user input
+func getAlertManagerConfigFromUser() types.AlertManagerConfig {
+	fmt.Println("\n🔔 AlertManager Configuration")
+	fmt.Println("================================")
+
+	// Check if user wants to use default configuration
+	fmt.Print("Use default AlertManager configuration? (y/n): ")
+	var useDefault string
+	fmt.Scanln(&useDefault)
+
+	if strings.ToLower(useDefault) == "y" || strings.ToLower(useDefault) == "yes" {
+		fmt.Println("✅ Using default AlertManager configuration")
+		return getDefaultAlertManagerConfig()
+	}
+
+	// Telegram Configuration
+	telegramConfig := getTelegramConfigFromUser()
+
+	// Email Configuration
+	emailConfig := getEmailConfigFromUser()
+
+	// Show configuration summary
+	fmt.Println("\n📋 AlertManager Configuration Summary")
+	fmt.Println("===================================")
+	fmt.Printf("Telegram: %s\n", getTelegramConfigSummary(telegramConfig))
+	fmt.Printf("Email: %s\n", getEmailConfigSummary(emailConfig))
+
+	return types.AlertManagerConfig{
+		Telegram: telegramConfig,
+		Email:    emailConfig,
+	}
+}
+
+// getTelegramConfigFromUser gets Telegram configuration from user input
+func getTelegramConfigFromUser() types.TelegramConfig {
+	fmt.Println("\n📱 Telegram Configuration")
+	fmt.Println("-------------------------")
+
+	var enabled bool
+	fmt.Print("Enable Telegram alerts? (y/n): ")
+	var response string
+	fmt.Scanln(&response)
+	enabled = strings.ToLower(response) == "y" || strings.ToLower(response) == "yes"
+
+	if !enabled {
+		return types.TelegramConfig{Enabled: false}
+	}
+
+	var apiToken string
+	fmt.Print("Enter Telegram Bot API Token: ")
+	fmt.Scanln(&apiToken)
+
+	var chatIds []string
+	fmt.Print("Enter Telegram Chat IDs (comma-separated): ")
+	var chatIdsInput string
+	fmt.Scanln(&chatIdsInput)
+
+	if chatIdsInput != "" {
+		chatIds = strings.Split(chatIdsInput, ",")
+		for i, id := range chatIds {
+			chatIds[i] = strings.TrimSpace(id)
+		}
+	}
+
+	var receivers []types.TelegramReceiver
+	for _, chatId := range chatIds {
+		if chatId != "" {
+			receivers = append(receivers, types.TelegramReceiver{ChatId: chatId})
+		}
+	}
+
+	return types.TelegramConfig{
+		Enabled:           enabled,
+		ApiToken:          apiToken,
+		CriticalReceivers: receivers,
+	}
+}
+
+// getEmailConfigFromUser gets Email configuration from user input
+func getEmailConfigFromUser() types.EmailConfig {
+	fmt.Println("\n📧 Email Configuration")
+	fmt.Println("----------------------")
+
+	var enabled bool
+	fmt.Print("Enable Email alerts? (y/n): ")
+	var response string
+	fmt.Scanln(&response)
+	enabled = strings.ToLower(response) == "y" || strings.ToLower(response) == "yes"
+
+	if !enabled {
+		return types.EmailConfig{Enabled: false}
+	}
+
+	var smtpSmarthost string
+	fmt.Print("Enter SMTP Server (e.g., smtp.gmail.com:587): ")
+	fmt.Scanln(&smtpSmarthost)
+
+	var smtpFrom string
+	fmt.Print("Enter From Email Address: ")
+	fmt.Scanln(&smtpFrom)
+
+	var smtpAuthUsername string
+	fmt.Print("Enter SMTP Username: ")
+	fmt.Scanln(&smtpAuthUsername)
+
+	var smtpAuthPassword string
+	fmt.Print("Enter SMTP Password: ")
+	fmt.Scanln(&smtpAuthPassword)
+
+	var defaultReceiversInput string
+	fmt.Print("Enter Default Email Receivers (comma-separated): ")
+	fmt.Scanln(&defaultReceiversInput)
+
+	var criticalReceiversInput string
+	fmt.Print("Enter Critical Email Receivers (comma-separated): ")
+	fmt.Scanln(&criticalReceiversInput)
+
+	var defaultReceivers []string
+	if defaultReceiversInput != "" {
+		defaultReceivers = strings.Split(defaultReceiversInput, ",")
+		for i, email := range defaultReceivers {
+			defaultReceivers[i] = strings.TrimSpace(email)
+		}
+	}
+
+	var criticalReceivers []string
+	if criticalReceiversInput != "" {
+		criticalReceivers = strings.Split(criticalReceiversInput, ",")
+		for i, email := range criticalReceivers {
+			criticalReceivers[i] = strings.TrimSpace(email)
+		}
+	}
+
+	return types.EmailConfig{
+		Enabled:           enabled,
+		SmtpSmarthost:     smtpSmarthost,
+		SmtpFrom:          smtpFrom,
+		SmtpAuthUsername:  smtpAuthUsername,
+		SmtpAuthPassword:  smtpAuthPassword,
+		DefaultReceivers:  defaultReceivers,
+		CriticalReceivers: criticalReceivers,
+	}
+}
+
+// getDefaultAlertManagerConfig returns default AlertManager configuration
+func getDefaultAlertManagerConfig() types.AlertManagerConfig {
+	return types.AlertManagerConfig{
+		Telegram: types.TelegramConfig{
+			Enabled:  true,
+			ApiToken: "7904495507:AAE54gXGoj5X7oLsQHk_xzMFdO1kkn4xME8",
+			CriticalReceivers: []types.TelegramReceiver{
+				{ChatId: "1266746900"},
+			},
+		},
+		Email: types.EmailConfig{
+			Enabled:           true,
+			SmtpSmarthost:     "smtp.gmail.com:587",
+			SmtpFrom:          "theo@tokamak.network",
+			SmtpAuthUsername:  "theo@tokamak.network",
+			SmtpAuthPassword:  "myhz wsqg iqcs hwkv",
+			DefaultReceivers:  []string{"theo@tokamak.network"},
+			CriticalReceivers: []string{"theo@tokamak.network"},
+		},
+	}
+}
+
+// getTelegramConfigSummary returns a summary of Telegram configuration
+func getTelegramConfigSummary(config types.TelegramConfig) string {
+	if !config.Enabled {
+		return "Disabled"
+	}
+
+	chatCount := len(config.CriticalReceivers)
+	if chatCount == 0 {
+		return "Enabled (no chat IDs configured)"
+	}
+
+	return fmt.Sprintf("Enabled (%d chat IDs configured)", chatCount)
+}
+
+// getEmailConfigSummary returns a summary of Email configuration
+func getEmailConfigSummary(config types.EmailConfig) string {
+	if !config.Enabled {
+		return "Disabled"
+	}
+
+	receiverCount := len(config.CriticalReceivers)
+	if receiverCount == 0 {
+		return "Enabled (no receivers configured)"
+	}
+
+	return fmt.Sprintf("Enabled (%d receivers configured)", receiverCount)
 }
 
 func GetUpdateNetworkInputs(ctx context.Context) (*UpdateNetworkInput, error) {
