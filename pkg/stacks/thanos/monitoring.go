@@ -330,6 +330,45 @@ func (t *ThanosStack) generateGrafanaStorageConfig(ctx context.Context, config *
 	return grafanaConfig
 }
 
+// generateAlertTemplates generates common alert templates
+func (t *ThanosStack) generateAlertTemplates(grafanaURL string) map[string]string {
+	return map[string]string{
+		"email_subject": "🚨 Critical Alert - {{ .Labels.chain_name | default \"Thanos Stack\" }}",
+		"email_html": `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset=\"UTF-8\">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .alert { border-left: 4px solid #dc3545; padding: 10px; margin: 10px 0; background-color: #f8f9fa; }
+        .header { color: #dc3545; font-weight: bold; margin-bottom: 15px; }
+        .info { margin: 5px 0; }
+        .timestamp { color: #6c757d; font-size: 12px; margin-top: 10px; }
+        .dashboard { margin-top: 15px; }
+        a { color: #007bff; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class=\"alert\">
+        <div class=\"header\">🚨 Critical Alert - {{ .Labels.chain_name | default \"Thanos Stack\" }}</div>
+        <div class=\"info\"><strong>Alert:</strong> {{ .Labels.alertname | default \"no alertname\" }}</div>
+        <div class=\"info\"><strong>Severity:</strong> {{ .Labels.severity | default \"no severity\" }}</div>
+        <div class=\"info\"><strong>Component:</strong> {{ .Labels.component | default \"no component\" }}</div>
+        <div class=\"info\"><strong>Namespace:</strong> {{ .Labels.namespace | default \"monitoring\" }}</div>
+        <div class=\"info\" style=\"margin-top: 15px;\"><strong>Description:</strong></div>
+        <div class=\"info\">{{ .Annotations.description | default \"no description\" }}</div>
+        <div class=\"timestamp\">⏰ Alert Time: {{ .StartsAt | default \"no time\" }}</div>
+        <div class=\"dashboard\">
+            <strong>Dashboard:</strong> <a href=\"` + grafanaURL + `\">View Details</a>
+        </div>
+    </div>
+</body>
+</html>`,
+		"telegram_message": "🚨 Critical Alert - {{ .Labels.chain_name | default \"Thanos Stack\" }}\n\nAlert: {{ .Labels.alertname | default \"no alertname\" }}\nSeverity: {{ .Labels.severity | default \"no severity\" }}\nComponent: {{ .Labels.component | default \"no component\" }}\nNamespace: {{ .Labels.namespace | default \"monitoring\" }}\n\nDescription: {{ .Annotations.description | default \"no description\" }}\n\n⏰ Alert Time: {{ .StartsAt | default \"no time\" }}\n\nDashboard: [View Details](" + grafanaURL + ")",
+	}
+}
+
 // generateAlertManagerValues creates AlertManager values for the chart
 func (t *ThanosStack) generateAlertManagerValues(config *MonitoringConfig) map[string]interface{} {
 	// Convert Telegram receivers to chat IDs
@@ -358,47 +397,21 @@ func (t *ThanosStack) generateAlertManagerValues(config *MonitoringConfig) map[s
 	// Add null receiver for Watchdog
 	receivers = append(receivers, map[string]interface{}{"name": "null"})
 
+	// Use default URL for Helm values (ALB not available during deployment)
+	defaultGrafanaURL := "http://localhost:3000/d/thanos-stack/thanos-stack-overview?orgId=1&refresh=30s"
+
 	// Add Email configurations
 	if config.AlertManager.Email.Enabled {
 		emailConfigs := []map[string]interface{}{}
+		templates := t.generateAlertTemplates(defaultGrafanaURL)
 		for _, email := range config.AlertManager.Email.CriticalReceivers {
 			if email != "" {
 				emailConfigs = append(emailConfigs, map[string]interface{}{
 					"to": email,
 					"headers": map[string]string{
-						"subject": "🚨 Critical Alert - {{ $labels.chain_name | default \"Thanos Stack\" }}",
+						"subject": templates["email_subject"],
 					},
-					"html": `<!DOCTYPE html>
-<html>
-<head>
-    <meta charset=\"UTF-8\">
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .alert { border-left: 4px solid #dc3545; padding: 10px; margin: 10px 0; background-color: #f8f9fa; }
-        .header { color: #dc3545; font-weight: bold; margin-bottom: 15px; }
-        .info { margin: 5px 0; }
-        .timestamp { color: #6c757d; font-size: 12px; margin-top: 10px; }
-        .dashboard { margin-top: 15px; }
-        a { color: #007bff; text-decoration: none; }
-        a:hover { text-decoration: underline; }
-    </style>
-</head>
-<body>
-    <div class=\"alert\">
-        <div class=\"header\">🚨 Critical Alert - {{ $labels.chain_name | default \"Thanos Stack\" }}</div>
-        <div class=\"info\"><strong>Alert:</strong> {{ $labels.alertname }}</div>
-        <div class=\"info\"><strong>Severity:</strong> {{ $labels.severity }}</div>
-        <div class=\"info\"><strong>Component:</strong> {{ $labels.component }}</div>
-        <div class=\"info\"><strong>Namespace:</strong> {{ $labels.namespace | default \"monitoring\" }}</div>
-        <div class=\"info\" style=\"margin-top: 15px;\"><strong>Description:</strong></div>
-        <div class=\"info\">{{ $annotations.description }}</div>
-        <div class=\"timestamp\">⏰ Alert Time: {{ $startsAt }}</div>
-        <div class=\"dashboard\">
-            <strong>Dashboard:</strong> <a href=\"http://localhost:3000/d/thanos-stack/thanos-stack-overview?orgId=1&refresh=30s\">View Details</a>
-        </div>
-    </div>
-</body>
-</html>`,
+					"html": templates["email_html"],
 				})
 			}
 		}
@@ -410,6 +423,7 @@ func (t *ThanosStack) generateAlertManagerValues(config *MonitoringConfig) map[s
 	// Add Telegram configurations
 	if config.AlertManager.Telegram.Enabled {
 		telegramConfigs := []map[string]interface{}{}
+		templates := t.generateAlertTemplates(defaultGrafanaURL)
 		for _, receiver := range config.AlertManager.Telegram.CriticalReceivers {
 			if receiver.ChatId != "" {
 				// Convert chat_id to int64 for Prometheus Operator compatibility
@@ -421,7 +435,7 @@ func (t *ThanosStack) generateAlertManagerValues(config *MonitoringConfig) map[s
 					"bot_token":  config.AlertManager.Telegram.ApiToken,
 					"chat_id":    chatIdInt,
 					"parse_mode": "Markdown",
-					"message":    "🚨 Critical Alert - {{ $labels.chain_name | default \"Thanos Stack\" }}\n\nAlert: {{ $labels.alertname }}\nSeverity: {{ $labels.severity }}\nComponent: {{ $labels.component }}\nNamespace: {{ $labels.namespace | default \"monitoring\" }}\n\nDescription: {{ $annotations.description }}\n\n⏰ Alert Time: {{ $startsAt }}\n\nDashboard: [View Details](http://localhost:3000/d/thanos-stack/thanos-stack-overview?orgId=1&refresh=30s)",
+					"message":    templates["telegram_message"],
 				})
 			}
 		}
@@ -857,44 +871,15 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *MonitoringConfig,
 	// Add Email configurations
 	if config.AlertManager.Email.Enabled {
 		emailConfigs := []map[string]interface{}{}
+		templates := t.generateAlertTemplates(grafanaURL)
 		for _, email := range config.AlertManager.Email.CriticalReceivers {
 			if email != "" {
 				emailConfigs = append(emailConfigs, map[string]interface{}{
 					"to": email,
 					"headers": map[string]string{
-						"subject": "🚨 Critical Alert - {{ $labels.chain_name | default \"Thanos Stack\" }}",
+						"subject": templates["email_subject"],
 					},
-					"html": `<!DOCTYPE html>
-<html>
-<head>
-    <meta charset=\"UTF-8\">
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .alert { border-left: 4px solid #dc3545; padding: 10px; margin: 10px 0; background-color: #f8f9fa; }
-        .header { color: #dc3545; font-weight: bold; margin-bottom: 15px; }
-        .info { margin: 5px 0; }
-        .timestamp { color: #6c757d; font-size: 12px; margin-top: 10px; }
-        .dashboard { margin-top: 15px; }
-        a { color: #007bff; text-decoration: none; }
-        a:hover { text-decoration: underline; }
-    </style>
-</head>
-<body>
-    <div class=\"alert\">
-        <div class=\"header\">🚨 Critical Alert - {{ $labels.chain_name | default \"Thanos Stack\" }}</div>
-        <div class=\"info\"><strong>Alert:</strong> {{ $labels.alertname }}</div>
-        <div class=\"info\"><strong>Severity:</strong> {{ $labels.severity }}</div>
-        <div class=\"info\"><strong>Component:</strong> {{ $labels.component }}</div>
-        <div class=\"info\"><strong>Namespace:</strong> {{ $labels.namespace | default \"monitoring\" }}</div>
-        <div class=\"info\" style=\"margin-top: 15px;\"><strong>Description:</strong></div>
-        <div class=\"info\">{{ $annotations.description }}</div>
-        <div class=\"timestamp\">⏰ Alert Time: {{ $startsAt }}</div>
-        <div class=\"dashboard\">
-            <strong>Dashboard:</strong> <a href=\"` + grafanaURL + `\">View Details</a>
-        </div>
-    </div>
-</body>
-</html>`,
+					"html": templates["email_html"],
 				})
 			}
 		}
@@ -906,6 +891,7 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *MonitoringConfig,
 	// Add Telegram configurations
 	if config.AlertManager.Telegram.Enabled {
 		telegramConfigs := []map[string]interface{}{}
+		templates := t.generateAlertTemplates(grafanaURL)
 		for _, receiver := range config.AlertManager.Telegram.CriticalReceivers {
 			if receiver.ChatId != "" {
 				// Convert chat_id to int64 for Prometheus Operator compatibility
@@ -917,7 +903,7 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *MonitoringConfig,
 					"bot_token":  config.AlertManager.Telegram.ApiToken,
 					"chat_id":    chatIdInt,
 					"parse_mode": "Markdown",
-					"message":    "🚨 Critical Alert - {{ $labels.chain_name | default \"Thanos Stack\" }}\n\nAlert: {{ $labels.alertname }}\nSeverity: {{ $labels.severity }}\nComponent: {{ $labels.component }}\nNamespace: {{ $labels.namespace | default \"monitoring\" }}\n\nDescription: {{ $annotations.description }}\n\n⏰ Alert Time: {{ $startsAt }}\n\nDashboard: [View Details](` + grafanaURL + `)",
+					"message":    templates["telegram_message"],
 				})
 			}
 		}
@@ -1200,8 +1186,7 @@ spec:
 		config.Namespace,
 		config.ChainName,
 		config.Namespace,
-		config.ChainName,
-		config.Namespace)
+	)
 
 	return manifest
 }
@@ -1228,8 +1213,9 @@ func (t *ThanosStack) applyPrometheusRuleManifest(ctx context.Context, manifest 
 
 // getGrafanaURL returns the full Grafana dashboard URL using the ALB Ingress
 func (t *ThanosStack) getGrafanaURL(ctx context.Context, config *MonitoringConfig) string {
-	// Try to get the ALB Ingress hostname
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "ingress", "-n", config.Namespace, "-o", "jsonpath={.items[?(@.metadata.name==\"monitoring-grafana\")].status.loadBalancer.ingress[0].hostname}")
+	// Try to get the ALB Ingress hostname using the actual Helm release name
+	ingressName := fmt.Sprintf("%s-grafana", config.HelmReleaseName)
+	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "ingress", "-n", config.Namespace, "-o", "jsonpath={.items[?(@.metadata.name==\""+ingressName+"\")].status.loadBalancer.ingress[0].hostname}")
 	if err != nil || output == "" {
 		return "http://localhost:3000/d/thanos-stack/thanos-stack-overview?orgId=1&refresh=30s"
 	}
