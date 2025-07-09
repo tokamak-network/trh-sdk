@@ -351,10 +351,9 @@ func (t *ThanosStack) generateAlertTemplates(grafanaURL string) map[string]strin
 <body>
     <div class="alert">
         <div class="header">🚨 Critical Alert - {{ .GroupLabels.chain_name }}</div>
-        <div class="info"><strong>Alert:</strong> {{ .GroupLabels.alertname }}</div>
+        <div class="info"><strong>Alert Name:</strong> {{ .GroupLabels.alertname }}</div>
         <div class="info"><strong>Severity:</strong> {{ .GroupLabels.severity }}</div>
         <div class="info"><strong>Component:</strong> {{ .GroupLabels.component }}</div>
-        <div class="info"><strong>Namespace:</strong> {{ .GroupLabels.namespace }}</div>
         <div class="info" style="margin-top: 15px;"><strong>Summary:</strong></div>
         <div class="info">{{ .CommonAnnotations.summary }}</div>
         <div class="info" style="margin-top: 10px;"><strong>Description:</strong></div>
@@ -366,7 +365,7 @@ func (t *ThanosStack) generateAlertTemplates(grafanaURL string) map[string]strin
     </div>
 </body>
 </html>`,
-		"telegram_message": "🚨 Critical Alert - {{ .GroupLabels.chain_name }}\n\nAlert: {{ .GroupLabels.alertname }}\nSeverity: {{ .GroupLabels.severity }}\nComponent: {{ .GroupLabels.component }}\nNamespace: {{ .GroupLabels.namespace }}\n\nSummary: {{ .CommonAnnotations.summary }}\nDescription: {{ .CommonAnnotations.description }}\n\n⏰ Alert Time: {{ range .Alerts }}{{ .StartsAt }}{{ end }}\n\nDashboard: [View Details](" + grafanaURL + ")",
+		"telegram_message": "🚨 Critical Alert - {{ .GroupLabels.chain_name }}\n\nAlert Name: {{ .GroupLabels.alertname }}\nSeverity: {{ .GroupLabels.severity }}\nComponent: {{ .GroupLabels.component }}\n\nSummary: {{ .CommonAnnotations.summary }}\nDescription: {{ .CommonAnnotations.description }}\n\n⏰ Alert Time: {{ range .Alerts }}{{ .StartsAt }}{{ end }}\n\nDashboard: [View Details](" + grafanaURL + ")",
 	}
 }
 
@@ -1123,7 +1122,7 @@ func (t *ThanosStack) getGrafanaURL(ctx context.Context, config *MonitoringConfi
 	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "ingress", "-n", config.Namespace, "-o", "jsonpath={.items[?(@.metadata.name==\""+ingressName+"\")].status.loadBalancer.ingress[0].hostname}")
 	if err != nil || output == "" {
 		// Fallback to using ExternalURL template variable for dynamic resolution
-		return "{{ .ExternalURL }}/d/thanos-stack/thanos-stack-overview?orgId=1&refresh=30s"
+		return "{{ .ExternalURL }}/d/thanos-stack-app-v9/thanos-stack-application-monitoring-dashboard?orgId=1&refresh=30s"
 	}
-	return "http://" + output + "/d/thanos-stack/thanos-stack-overview?orgId=1&refresh=30s"
+	return "http://" + output + "/d/thanos-stack-app-v9/thanos-stack-application-monitoring-dashboard?orgId=1&refresh=30s"
 }
