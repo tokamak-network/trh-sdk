@@ -815,9 +815,9 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *MonitoringConfig,
 	alertManagerConfig := map[string]interface{}{
 		"route": map[string]interface{}{
 			"group_by":        []string{"alertname", "severity", "component", "chain_name", "namespace"},
-			"group_wait":      "30s",
-			"group_interval":  "5m",
-			"repeat_interval": "4h",
+			"group_wait":      "10s",
+			"group_interval":  "1m",
+			"repeat_interval": "10m",
 			"receiver":        "telegram-critical",
 			"routes": []map[string]interface{}{
 				{
@@ -930,11 +930,11 @@ metadata:
 spec:
   groups:
   - name: thanos-stack.critical
-    interval: 30s
+    interval: 15s
     rules:
     - alert: OpNodeDown
       expr: absent(up{job="op-node"}) or up{job="op-node"} == 0
-      for: 1m
+      for: 30s
       labels:
         severity: critical
         component: op-node
@@ -942,11 +942,11 @@ spec:
         namespace: "%s"
       annotations:
         summary: "OP Node is down"
-        description: "OP Node has been down for more than 1 minute"
+        description: "OP Node has been down for more than 30 seconds"
     
     - alert: OpBatcherDown
       expr: absent(up{job="op-batcher"})
-      for: 1m
+      for: 30s
       labels:
         severity: critical
         component: op-batcher
@@ -954,11 +954,11 @@ spec:
         namespace: "%s"
       annotations:
         summary: "OP Batcher is down"
-        description: "OP Batcher has been down for more than 1 minute"
+        description: "OP Batcher has been down for more than 30 seconds"
     
     - alert: OpProposerDown
       expr: absent(up{job="op-proposer"})
-      for: 1m
+      for: 30s
       labels:
         severity: critical
         component: op-proposer
@@ -966,11 +966,11 @@ spec:
         namespace: "%s"
       annotations:
         summary: "OP Proposer is down"
-        description: "OP Proposer has been down for more than 1 minute"
+        description: "OP Proposer has been down for more than 30 seconds"
     
     - alert: OpGethDown
       expr: absent(up{job="op-geth"}) or up{job="op-geth"} == 0
-      for: 1m
+      for: 30s
       labels:
         severity: critical
         component: op-geth
@@ -978,7 +978,7 @@ spec:
         namespace: "%s"
       annotations:
         summary: "OP Geth is down"
-        description: "OP Geth has been down for more than 1 minute"
+        description: "OP Geth has been down for more than 30 seconds"
     
     - alert: L1RpcDown
       expr: probe_success{job=~"blackbox-eth.*"} == 0
@@ -1018,7 +1018,7 @@ spec:
     
     - alert: BlockProductionStalled
       expr: increase(geth_chain_head_block[5m]) == 0
-      for: 2m
+      for: 1m
       labels:
         severity: critical
         component: op-geth
@@ -1026,11 +1026,11 @@ spec:
         namespace: "%s"
       annotations:
         summary: "Block production has stalled"
-        description: "No new blocks have been produced in the last 5 minutes"
+        description: "No new blocks have been produced for more than 1 minute"
     
     - alert: ContainerCpuUsageHigh
       expr: (sum(rate(container_cpu_usage_seconds_total[5m])) by (pod) / sum(container_spec_cpu_quota/container_spec_cpu_period) by (pod)) * 100 > 80
-      for: 5m
+      for: 2m
       labels:
         severity: critical
         component: kubernetes
@@ -1038,11 +1038,11 @@ spec:
         namespace: "%s"
       annotations:
         summary: "High CPU usage in Thanos Stack pod"
-        description: "Pod {{ $labels.pod }} CPU usage is above 80%%"
+        description: "Pod {{ $labels.pod }} CPU usage has been above 80%% for more than 2 minutes"
     
     - alert: ContainerMemoryUsageHigh
       expr: (sum(container_memory_working_set_bytes) by (pod) / sum(container_spec_memory_limit_bytes) by (pod)) * 100 > 80
-      for: 5m
+      for: 2m
       labels:
         severity: critical
         component: kubernetes
@@ -1050,11 +1050,11 @@ spec:
         namespace: "%s"
       annotations:
         summary: "High memory usage in Thanos Stack pod"
-        description: "Pod {{ $labels.pod }} memory usage is above 80%%"
+        description: "Pod {{ $labels.pod }} memory usage has been above 80%% for more than 2 minutes"
     
     - alert: PodCrashLooping
       expr: rate(kube_pod_container_status_restarts_total[5m]) > 0
-      for: 1m
+      for: 2m
       labels:
         severity: critical
         component: kubernetes
@@ -1062,7 +1062,7 @@ spec:
         namespace: "%s"
       annotations:
         summary: "Pod is crash looping"
-        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is restarting frequently"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has been restarting frequently for more than 2 minutes"
 `,
 		config.HelmReleaseName,
 		config.Namespace,
