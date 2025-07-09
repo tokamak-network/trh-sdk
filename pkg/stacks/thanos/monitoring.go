@@ -127,7 +127,6 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 
 // UninstallMonitoring removes monitoring plugin
 func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
-	fmt.Println("🧹 Cleaning up monitoring plugin...")
 	monitoringNamespace := "monitoring"
 	releases, err := utils.FilterHelmReleases(ctx, monitoringNamespace, "monitoring")
 	if err != nil {
@@ -139,6 +138,7 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 	}
 
 	utils.ExecuteCommand(ctx, "kubectl", "delete", "namespace", monitoringNamespace, "--ignore-not-found=true")
+	fmt.Println("🧹 Monitoring plugin uninstalled successfully")
 	return nil
 }
 
@@ -227,7 +227,6 @@ func (t *ThanosStack) generateValuesFile(ctx context.Context, config *Monitoring
 			"namespace":   t.deployConfig.K8s.Namespace,
 			"releaseName": config.ChainName,
 		},
-		"alertManager": t.generateAlertManagerValues(config),
 		"kube-prometheus-stack": map[string]interface{}{
 			"prometheus": map[string]interface{}{
 				"prometheusSpec": t.generatePrometheusStorageSpec(config),
@@ -333,11 +332,11 @@ func (t *ThanosStack) generateGrafanaStorageConfig(ctx context.Context, config *
 // generateAlertTemplates generates common alert templates
 func (t *ThanosStack) generateAlertTemplates(grafanaURL string) map[string]string {
 	return map[string]string{
-		"email_subject": "🚨 Critical Alert - {{ .Labels.chain_name | default \"Thanos Stack\" }}",
+		"email_subject": "🚨 Critical Alert - {{ .GroupLabels.chain_name }}",
 		"email_html": `<!DOCTYPE html>
 <html>
 <head>
-    <meta charset=\"UTF-8\">
+    <meta charset="UTF-8">
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; }
         .alert { border-left: 4px solid #dc3545; padding: 10px; margin: 10px 0; background-color: #f8f9fa; }
@@ -350,124 +349,25 @@ func (t *ThanosStack) generateAlertTemplates(grafanaURL string) map[string]strin
     </style>
 </head>
 <body>
-    <div class=\"alert\">
-        <div class=\"header\">🚨 Critical Alert - {{ .Labels.chain_name | default \"Thanos Stack\" }}</div>
-        <div class=\"info\"><strong>Alert:</strong> {{ .Labels.alertname | default \"no alertname\" }}</div>
-        <div class=\"info\"><strong>Severity:</strong> {{ .Labels.severity | default \"no severity\" }}</div>
-        <div class=\"info\"><strong>Component:</strong> {{ .Labels.component | default \"no component\" }}</div>
-        <div class=\"info\"><strong>Namespace:</strong> {{ .Labels.namespace | default \"monitoring\" }}</div>
-        <div class=\"info\" style=\"margin-top: 15px;\"><strong>Description:</strong></div>
-        <div class=\"info\">{{ .Annotations.description | default \"no description\" }}</div>
-        <div class=\"timestamp\">⏰ Alert Time: {{ .StartsAt | default \"no time\" }}</div>
-        <div class=\"dashboard\">
-            <strong>Dashboard:</strong> <a href=\"` + grafanaURL + `\">View Details</a>
+    <div class="alert">
+        <div class="header">🚨 Critical Alert - {{ .GroupLabels.chain_name }}</div>
+        <div class="info"><strong>Alert:</strong> {{ .GroupLabels.alertname }}</div>
+        <div class="info"><strong>Severity:</strong> {{ .GroupLabels.severity }}</div>
+        <div class="info"><strong>Component:</strong> {{ .GroupLabels.component }}</div>
+        <div class="info"><strong>Namespace:</strong> {{ .GroupLabels.namespace }}</div>
+        <div class="info" style="margin-top: 15px;"><strong>Summary:</strong></div>
+        <div class="info">{{ .CommonAnnotations.summary }}</div>
+        <div class="info" style="margin-top: 10px;"><strong>Description:</strong></div>
+        <div class="info">{{ .CommonAnnotations.description }}</div>
+        <div class="timestamp">⏰ Alert Time: {{ range .Alerts }}{{ .StartsAt }}{{ end }}</div>
+        <div class="dashboard">
+            <strong>Dashboard:</strong> <a href="` + grafanaURL + `">View Details</a>
         </div>
     </div>
 </body>
 </html>`,
-		"telegram_message": "🚨 Critical Alert - {{ .Labels.chain_name | default \"Thanos Stack\" }}\n\nAlert: {{ .Labels.alertname | default \"no alertname\" }}\nSeverity: {{ .Labels.severity | default \"no severity\" }}\nComponent: {{ .Labels.component | default \"no component\" }}\nNamespace: {{ .Labels.namespace | default \"monitoring\" }}\n\nDescription: {{ .Annotations.description | default \"no description\" }}\n\n⏰ Alert Time: {{ .StartsAt | default \"no time\" }}\n\nDashboard: [View Details](" + grafanaURL + ")",
+		"telegram_message": "🚨 Critical Alert - {{ .GroupLabels.chain_name }}\n\nAlert: {{ .GroupLabels.alertname }}\nSeverity: {{ .GroupLabels.severity }}\nComponent: {{ .GroupLabels.component }}\nNamespace: {{ .GroupLabels.namespace }}\n\nSummary: {{ .CommonAnnotations.summary }}\nDescription: {{ .CommonAnnotations.description }}\n\n⏰ Alert Time: {{ range .Alerts }}{{ .StartsAt }}{{ end }}\n\nDashboard: [View Details](" + grafanaURL + ")",
 	}
-}
-
-// generateAlertManagerValues creates AlertManager values for the chart
-func (t *ThanosStack) generateAlertManagerValues(config *MonitoringConfig) map[string]interface{} {
-	// Convert Telegram receivers to chat IDs
-	var telegramChatIds []string
-	if config.AlertManager.Telegram.Enabled {
-		for _, receiver := range config.AlertManager.Telegram.CriticalReceivers {
-			if receiver.ChatId != "" {
-				telegramChatIds = append(telegramChatIds, receiver.ChatId)
-			}
-		}
-	}
-
-	// Convert Email receivers
-	var emailReceivers []string
-	if config.AlertManager.Email.Enabled {
-		emailReceivers = append(emailReceivers, config.AlertManager.Email.CriticalReceivers...)
-	}
-
-	// Generate receivers configuration
-	receivers := []map[string]interface{}{
-		{
-			"name": "telegram-critical",
-		},
-	}
-
-	// Add null receiver for Watchdog
-	receivers = append(receivers, map[string]interface{}{"name": "null"})
-
-	// Use default URL for Helm values (ALB not available during deployment)
-	defaultGrafanaURL := "http://localhost:3000/d/thanos-stack/thanos-stack-overview?orgId=1&refresh=30s"
-
-	// Add Email configurations
-	if config.AlertManager.Email.Enabled {
-		emailConfigs := []map[string]interface{}{}
-		templates := t.generateAlertTemplates(defaultGrafanaURL)
-		for _, email := range config.AlertManager.Email.CriticalReceivers {
-			if email != "" {
-				emailConfigs = append(emailConfigs, map[string]interface{}{
-					"to": email,
-					"headers": map[string]string{
-						"subject": templates["email_subject"],
-					},
-					"html": templates["email_html"],
-				})
-			}
-		}
-		if len(emailConfigs) > 0 {
-			receivers[0]["email_configs"] = emailConfigs
-		}
-	}
-
-	// Add Telegram configurations
-	if config.AlertManager.Telegram.Enabled {
-		telegramConfigs := []map[string]interface{}{}
-		templates := t.generateAlertTemplates(defaultGrafanaURL)
-		for _, receiver := range config.AlertManager.Telegram.CriticalReceivers {
-			if receiver.ChatId != "" {
-				// Convert chat_id to int64 for Prometheus Operator compatibility
-				chatIdInt, err := strconv.ParseInt(receiver.ChatId, 10, 64)
-				if err != nil {
-					return map[string]interface{}{}
-				}
-				telegramConfigs = append(telegramConfigs, map[string]interface{}{
-					"bot_token":  config.AlertManager.Telegram.ApiToken,
-					"chat_id":    chatIdInt,
-					"parse_mode": "Markdown",
-					"message":    templates["telegram_message"],
-				})
-			}
-		}
-		if len(telegramConfigs) > 0 {
-			receivers[0]["telegram_configs"] = telegramConfigs
-		}
-	}
-
-	alertManagerConfig := map[string]interface{}{
-		"global": map[string]interface{}{
-			"smtp_smarthost":     config.AlertManager.Email.SmtpSmarthost,
-			"smtp_from":          config.AlertManager.Email.SmtpFrom,
-			"smtp_auth_username": config.AlertManager.Email.SmtpAuthUsername,
-			"smtp_auth_password": config.AlertManager.Email.SmtpAuthPassword,
-		},
-		"route": map[string]interface{}{
-			"group_by":        []string{"alertname", "cluster", "service", "severity"},
-			"group_wait":      "30s",
-			"group_interval":  "5m",
-			"repeat_interval": "4h",
-			"receiver":        "telegram-critical",
-			"routes": []map[string]interface{}{
-				{
-					"match":    map[string]string{"alertname": "Watchdog"},
-					"receiver": "null",
-				},
-			},
-		},
-		"receivers": receivers,
-	}
-
-	return alertManagerConfig
 }
 
 // getServiceNames returns a map of component names to their Kubernetes service names
@@ -912,15 +812,10 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *MonitoringConfig,
 		}
 	}
 
+	// Only add global SMTP config if email is enabled
 	alertManagerConfig := map[string]interface{}{
-		"global": map[string]interface{}{
-			"smtp_smarthost":     config.AlertManager.Email.SmtpSmarthost,
-			"smtp_from":          config.AlertManager.Email.SmtpFrom,
-			"smtp_auth_username": config.AlertManager.Email.SmtpAuthUsername,
-			"smtp_auth_password": config.AlertManager.Email.SmtpAuthPassword,
-		},
 		"route": map[string]interface{}{
-			"group_by":        []string{"alertname", "cluster", "service", "severity"},
+			"group_by":        []string{"alertname", "severity", "component", "chain_name", "namespace"},
 			"group_wait":      "30s",
 			"group_interval":  "5m",
 			"repeat_interval": "4h",
@@ -933,6 +828,16 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *MonitoringConfig,
 			},
 		},
 		"receivers": receivers,
+	}
+
+	// Add global SMTP config only if email is enabled
+	if config.AlertManager.Email.Enabled {
+		alertManagerConfig["global"] = map[string]interface{}{
+			"smtp_smarthost":     config.AlertManager.Email.SmtpSmarthost,
+			"smtp_from":          config.AlertManager.Email.SmtpFrom,
+			"smtp_auth_username": config.AlertManager.Email.SmtpAuthUsername,
+			"smtp_auth_password": config.AlertManager.Email.SmtpAuthPassword,
+		}
 	}
 
 	yamlData, err := yaml.Marshal(alertManagerConfig)
@@ -1217,7 +1122,8 @@ func (t *ThanosStack) getGrafanaURL(ctx context.Context, config *MonitoringConfi
 	ingressName := fmt.Sprintf("%s-grafana", config.HelmReleaseName)
 	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "ingress", "-n", config.Namespace, "-o", "jsonpath={.items[?(@.metadata.name==\""+ingressName+"\")].status.loadBalancer.ingress[0].hostname}")
 	if err != nil || output == "" {
-		return "http://localhost:3000/d/thanos-stack/thanos-stack-overview?orgId=1&refresh=30s"
+		// Fallback to using ExternalURL template variable for dynamic resolution
+		return "{{ .ExternalURL }}/d/thanos-stack/thanos-stack-overview?orgId=1&refresh=30s"
 	}
 	return "http://" + output + "/d/thanos-stack/thanos-stack-overview?orgId=1&refresh=30s"
 }
