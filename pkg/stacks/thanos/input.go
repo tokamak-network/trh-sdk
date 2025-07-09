@@ -28,6 +28,8 @@ var (
 	chainNameRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9 ]{0,15}$`)
 )
 
+var reader = bufio.NewReader(os.Stdin)
+
 type DeployContractsInput struct {
 	L1RPCurl           string
 	ChainConfiguration *types.ChainConfiguration
@@ -566,6 +568,11 @@ func InputInstallMonitoring() (*InstallMonitoringInput, error) {
 			fmt.Println("Admin password cannot be empty")
 			continue
 		}
+
+		// Remove special whitespace characters (NBSP, etc.)
+		adminPassword = strings.ReplaceAll(adminPassword, "\u00A0", " ") // Replace NBSP with regular space
+		adminPassword = strings.TrimSpace(adminPassword)                 // Trim again after replacement
+
 		break
 	}
 
@@ -618,9 +625,8 @@ func getTelegramConfigFromUser() types.TelegramConfig {
 
 	var enabled bool
 	fmt.Print("Enable Telegram alerts? (y/n): ")
-	var response string
-	fmt.Scanln(&response)
-	enabled = strings.ToLower(response) == "y" || strings.ToLower(response) == "yes"
+	response, _ := reader.ReadString('\n')
+	enabled = strings.ToLower(strings.TrimSpace(response)) == "y" || strings.ToLower(strings.TrimSpace(response)) == "yes"
 
 	if !enabled {
 		return types.TelegramConfig{Enabled: false}
@@ -628,12 +634,13 @@ func getTelegramConfigFromUser() types.TelegramConfig {
 
 	var apiToken string
 	fmt.Print("Enter Telegram Bot API Token: ")
-	fmt.Scanln(&apiToken)
+	apiToken, _ = reader.ReadString('\n')
+	apiToken = strings.TrimSpace(apiToken)
 
 	var chatIds []string
 	fmt.Print("Enter Telegram Chat IDs (comma-separated): ")
-	var chatIdsInput string
-	fmt.Scanln(&chatIdsInput)
+	chatIdsInput, _ := reader.ReadString('\n')
+	chatIdsInput = strings.TrimSpace(chatIdsInput)
 
 	if chatIdsInput != "" {
 		chatIds = strings.Split(chatIdsInput, ",")
@@ -663,51 +670,85 @@ func getEmailConfigFromUser() types.EmailConfig {
 
 	var enabled bool
 	fmt.Print("Enable Email alerts? (y/n): ")
-	var response string
-	fmt.Scanln(&response)
-	enabled = strings.ToLower(response) == "y" || strings.ToLower(response) == "yes"
+	response, _ := reader.ReadString('\n')
+	enabled = strings.ToLower(strings.TrimSpace(response)) == "y" || strings.ToLower(strings.TrimSpace(response)) == "yes"
 
 	if !enabled {
 		return types.EmailConfig{Enabled: false}
 	}
 
+	// Check if user wants to use Gmail
+	fmt.Print("Use Gmail SMTP? (y/n): ")
+	useGmail, _ := reader.ReadString('\n')
+	useGmail = strings.ToLower(strings.TrimSpace(useGmail))
+
 	var smtpSmarthost string
-	fmt.Print("Enter SMTP Server (e.g., smtp.gmail.com:587): ")
-	fmt.Scanln(&smtpSmarthost)
-
 	var smtpFrom string
-	fmt.Print("Enter From Email Address: ")
-	fmt.Scanln(&smtpFrom)
-
 	var smtpAuthUsername string
-	fmt.Print("Enter SMTP Username: ")
-	fmt.Scanln(&smtpAuthUsername)
 
-	var smtpAuthPassword string
-	fmt.Print("Enter SMTP Password: ")
-	fmt.Scanln(&smtpAuthPassword)
+	if useGmail == "y" || useGmail == "yes" {
+		smtpSmarthost = "smtp.gmail.com:587"
+		fmt.Printf("✅ Using Gmail SMTP: %s\n", smtpSmarthost)
 
-	var defaultReceiversInput string
-	fmt.Print("Enter Default Email Receivers (comma-separated): ")
-	fmt.Scanln(&defaultReceiversInput)
+		// For Gmail, get username and set from address automatically
+		fmt.Print("Enter Gmail Address: ")
+		smtpAuthUsername, _ = reader.ReadString('\n')
+		smtpAuthUsername = strings.TrimSpace(smtpAuthUsername)
+		smtpFrom = smtpAuthUsername
+		fmt.Printf("✅ From Email Address: %s\n", smtpFrom)
+	} else {
+		fmt.Print("Enter SMTP Server (e.g., smtp.gmail.com:587): ")
+		smtpSmarthost, _ = reader.ReadString('\n')
+		smtpSmarthost = strings.TrimSpace(smtpSmarthost)
 
-	var criticalReceiversInput string
-	fmt.Print("Enter Critical Email Receivers (comma-separated): ")
-	fmt.Scanln(&criticalReceiversInput)
+		fmt.Print("Enter From Email Address: ")
+		smtpFrom, _ = reader.ReadString('\n')
+		smtpFrom = strings.TrimSpace(smtpFrom)
 
-	var defaultReceivers []string
-	if defaultReceiversInput != "" {
-		defaultReceivers = strings.Split(defaultReceiversInput, ",")
-		for i, email := range defaultReceivers {
-			defaultReceivers[i] = strings.TrimSpace(email)
-		}
+		fmt.Print("Enter SMTP Username: ")
+		smtpAuthUsername, _ = reader.ReadString('\n')
+		smtpAuthUsername = strings.TrimSpace(smtpAuthUsername)
 	}
 
-	var criticalReceivers []string
-	if criticalReceiversInput != "" {
-		criticalReceivers = strings.Split(criticalReceiversInput, ",")
-		for i, email := range criticalReceivers {
-			criticalReceivers[i] = strings.TrimSpace(email)
+	fmt.Print("Enter SMTP Password: ")
+	smtpAuthPassword, _ := reader.ReadString('\n')
+	smtpAuthPassword = strings.TrimSpace(smtpAuthPassword)
+
+	// Remove special whitespace characters (NBSP, etc.)
+	smtpAuthPassword = strings.ReplaceAll(smtpAuthPassword, "\u00A0", " ") // Replace NBSP with regular space
+	smtpAuthPassword = strings.TrimSpace(smtpAuthPassword)                 // Trim again after replacement
+
+	// Get receivers with validation (only critical severity exists)
+	var receivers []string
+	for {
+		fmt.Print("Enter Email Receivers (comma-separated, e.g., admin@gmail.com,ops@company.com): ")
+		receiversInput, _ := reader.ReadString('\n')
+		receiversInput = strings.TrimSpace(receiversInput)
+
+		if receiversInput != "" {
+			receivers = strings.Split(receiversInput, ",")
+			for i, email := range receivers {
+				receivers[i] = strings.TrimSpace(email)
+			}
+			// Remove empty entries
+			var validReceivers []string
+			for _, email := range receivers {
+				if email != "" {
+					validReceivers = append(validReceivers, email)
+				}
+			}
+			receivers = validReceivers
+
+			if len(receivers) > 0 {
+				fmt.Printf("✅ Email Receivers: %s\n", strings.Join(receivers, ", "))
+				break
+			} else {
+				fmt.Println("❌ Please enter at least one valid email address")
+				continue
+			}
+		} else {
+			fmt.Println("❌ Please enter at least one email address")
+			continue
 		}
 	}
 
@@ -717,8 +758,8 @@ func getEmailConfigFromUser() types.EmailConfig {
 		SmtpFrom:          smtpFrom,
 		SmtpAuthUsername:  smtpAuthUsername,
 		SmtpAuthPassword:  smtpAuthPassword,
-		DefaultReceivers:  defaultReceivers,
-		CriticalReceivers: criticalReceivers,
+		DefaultReceivers:  receivers,
+		CriticalReceivers: receivers,
 	}
 }
 
@@ -737,7 +778,7 @@ func getDefaultAlertManagerConfig() types.AlertManagerConfig {
 			SmtpSmarthost:     "smtp.gmail.com:587",
 			SmtpFrom:          "theo@tokamak.network",
 			SmtpAuthUsername:  "theo@tokamak.network",
-			SmtpAuthPassword:  "myhz wsqg iqcs hwkv",
+			SmtpAuthPassword:  "myhz wsqg iqcs hwkv", // Regular spaces, no NBSP
 			DefaultReceivers:  []string{"theo@tokamak.network"},
 			CriticalReceivers: []string{"theo@tokamak.network"},
 		},
