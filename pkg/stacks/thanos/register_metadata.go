@@ -1,16 +1,20 @@
 package thanos
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
@@ -151,6 +155,345 @@ type Metadata struct {
 	SignedBy  string `json:"signedBy"`
 }
 
+// GitHubPR represents the structure for creating a GitHub PR
+type GitHubPR struct {
+	Title string `json:"title"`
+	Head  string `json:"head"`
+	Base  string `json:"base"`
+}
+
+// GitHubCredentials holds GitHub authentication details
+type GitHubCredentials struct {
+	Username string
+	Token    string
+}
+
+// executeGitPushWithCredentials handles git push with authentication
+func executeGitPushWithCredentials(workingDir, branchName string, creds *GitHubCredentials) error {
+	if creds == nil {
+		// Use regular git push for SSH
+		fmt.Printf("Executing: git push origin %s\n", branchName)
+		cmd := exec.Command("git", "push", "origin", branchName)
+		cmd.Dir = workingDir
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Env = os.Environ()
+
+		return cmd.Run()
+	}
+
+	// Use authenticated URL for HTTPS
+	authenticatedURL := fmt.Sprintf("https://%s:%s@github.com/tokamak-network/tokamak-rollup-metadata-repository.git",
+		creds.Username, creds.Token)
+
+	fmt.Printf("Executing: git push %s %s\n", "[authenticated-url]", branchName)
+	fmt.Println("🔐 Using provided GitHub credentials for authentication")
+
+	cmd := exec.Command("git", "push", authenticatedURL, branchName)
+	cmd.Dir = workingDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = os.Environ()
+
+	return cmd.Run()
+}
+
+// getGitHubCredentials prompts user for GitHub username and personal access token
+func getGitHubCredentials() (*GitHubCredentials, error) {
+	fmt.Println("\n🔑 GitHub Authentication Required")
+	fmt.Println("   You'll need a Personal Access Token to push changes")
+	fmt.Println("   Create one at: https://github.com/settings/tokens/new")
+	fmt.Println("   Required scopes: repo (or public_repo for public repos)")
+
+	var username, token string
+	var err error
+
+	// Get username
+	for {
+		fmt.Print("\nEnter your GitHub username: ")
+		username, err = scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error reading username: %s\n", err)
+			continue
+		}
+		if strings.TrimSpace(username) == "" {
+			fmt.Println("Username cannot be empty. Please try again.")
+			continue
+		}
+		break
+	}
+
+	// Get personal access token
+	for {
+		fmt.Print("Enter your GitHub Personal Access Token: ")
+		token, err = scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error reading token: %s\n", err)
+			continue
+		}
+		if strings.TrimSpace(token) == "" {
+			fmt.Println("Token cannot be empty. Please try again.")
+			continue
+		}
+		// Basic token validation (GitHub tokens start with specific prefixes)
+		trimmedToken := strings.TrimSpace(token)
+		if !strings.HasPrefix(trimmedToken, "ghp_") && !strings.HasPrefix(trimmedToken, "github_pat_") {
+			fmt.Println("⚠️  Warning: Token doesn't look like a valid GitHub token, but continuing...")
+		}
+		break
+	}
+
+	return &GitHubCredentials{
+		Username: strings.TrimSpace(username),
+		Token:    strings.TrimSpace(token),
+	}, nil
+}
+
+// pushChangesInteractive attempts to push changes with proper user interaction
+func pushChangesInteractive(repoPath, branchName string) error {
+	fmt.Println("\n🚀 Preparing to push changes...")
+
+	// Check git remote and auth setup, get credentials if needed
+	creds, err := getGitHubCredentials()
+	if err != nil {
+		return err
+	}
+
+	// Ask user to confirm push
+	fmt.Print("\n📤 Ready to push changes. Continue? (Y/n): ")
+	confirmation, err := scanner.ScanBool(true)
+	if err != nil {
+		return fmt.Errorf("error reading confirmation: %w", err)
+	}
+
+	if !confirmation {
+		return fmt.Errorf("push cancelled by user")
+	}
+
+	// Perform the push with interactive capability
+	fmt.Println("\n🔄 Pushing changes...")
+	if creds == nil {
+		fmt.Println("(Using SSH authentication)")
+	} else {
+		fmt.Printf("(Using HTTPS authentication for user: %s)\n", creds.Username)
+	}
+
+	// Try to push, with option to retry credentials if authentication fails
+	var pushAttempts int
+	maxAttempts := 2
+
+	for pushAttempts < maxAttempts {
+		err = executeGitPushWithCredentials(repoPath, branchName, creds)
+
+		if err == nil {
+			break // Success!
+		}
+
+		// Check if it's an authentication error and we have credentials to retry
+		errStr := err.Error()
+		isAuthError := strings.Contains(errStr, "403") || strings.Contains(errStr, "401") ||
+			strings.Contains(errStr, "authentication failed") || strings.Contains(errStr, "invalid username or password")
+
+		if isAuthError && creds != nil && pushAttempts < maxAttempts-1 {
+			fmt.Println("\n🔑 Authentication failed. Let's try entering credentials again...")
+
+			fmt.Print("Would you like to re-enter your GitHub credentials? (Y/n): ")
+			retry, retryErr := scanner.ScanBool(true)
+			if retryErr != nil || !retry {
+				break
+			}
+
+			// Get new credentials
+			newCreds, credErr := getGitHubCredentials()
+			if credErr != nil {
+				fmt.Printf("Error getting credentials: %v\n", credErr)
+				break
+			}
+
+			creds = newCreds
+			fmt.Printf("🔄 Retrying push with new credentials for user: %s\n", creds.Username)
+		} else {
+			break // Not an auth error or no more attempts
+		}
+
+		pushAttempts++
+	}
+	if err != nil {
+		fmt.Println("\n❌ Push failed!")
+		return fmt.Errorf("failed to push changes: %w", err)
+	}
+
+	fmt.Println("✅ Changes pushed successfully!")
+	return nil
+}
+
+// setupGitConfig ensures git config is set for the repository
+func setupGitConfig(repoPath string) error {
+	// Check if git config is already set (either globally or locally)
+	userName, err := utils.ExecuteCommand("git", "-C", repoPath, "config", "user.name")
+	if err == nil && strings.TrimSpace(userName) != "" {
+		fmt.Printf("✅ Git user.name already configured: %s\n", strings.TrimSpace(userName))
+
+		userEmail, err := utils.ExecuteCommand("git", "-C", repoPath, "config", "user.email")
+		if err == nil && strings.TrimSpace(userEmail) != "" {
+			fmt.Printf("✅ Git user.email already configured: %s\n", strings.TrimSpace(userEmail))
+			return nil
+		}
+	}
+
+	fmt.Println("🔧 Git config not set. Please provide your git credentials for this repository:")
+
+	// Prompt for username
+	var gitUserName string
+	for {
+		fmt.Print("Enter your git username: ")
+		gitUserName, err = scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error reading username: %s\n", err)
+			continue
+		}
+		if strings.TrimSpace(gitUserName) == "" {
+			fmt.Println("Username cannot be empty. Please try again.")
+			continue
+		}
+		break
+	}
+
+	// Prompt for email
+	var gitUserEmail string
+	for {
+		fmt.Print("Enter your git email: ")
+		gitUserEmail, err = scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error reading email: %s\n", err)
+			continue
+		}
+		if strings.TrimSpace(gitUserEmail) == "" {
+			fmt.Println("Email cannot be empty. Please try again.")
+			continue
+		}
+		// Basic email validation
+		if !strings.Contains(gitUserEmail, "@") || !strings.Contains(gitUserEmail, ".") {
+			fmt.Println("Please enter a valid email address.")
+			continue
+		}
+		break
+	}
+
+	// Set local git config for this repository
+	fmt.Println("Setting git config for this repository...")
+
+	err = utils.ExecuteCommandStream("git", "-C", repoPath, "config", "user.name", gitUserName)
+	if err != nil {
+		return fmt.Errorf("failed to set git user.name: %w", err)
+	}
+
+	err = utils.ExecuteCommandStream("git", "-C", repoPath, "config", "user.email", gitUserEmail)
+	if err != nil {
+		return fmt.Errorf("failed to set git user.email: %w", err)
+	}
+
+	fmt.Printf("✅ Git config set successfully!\n")
+	fmt.Printf("   - user.name: %s\n", gitUserName)
+	fmt.Printf("   - user.email: %s\n", gitUserEmail)
+
+	return nil
+}
+
+// createGitHubPR creates a pull request using GitHub API
+func createGitHubPR(systemConfigAddress, chainName, branchName string) error {
+	fmt.Println("\n🔗 Creating Pull Request...")
+
+	// Ask user for GitHub token
+	var githubToken string
+	fmt.Println("\n📝 To create a PR automatically, we need a GitHub Personal Access Token.")
+	fmt.Println("   Create one at: https://github.com/settings/tokens/new")
+	fmt.Println("   Required scopes: repo (or public_repo for public repos)")
+	fmt.Print("\nEnter your GitHub token (or press Enter to skip PR creation): ")
+
+	token, err := scanner.ScanString()
+	if err != nil {
+		return fmt.Errorf("error reading GitHub token: %w", err)
+	}
+
+	githubToken = strings.TrimSpace(token)
+	if githubToken == "" {
+		fmt.Println("\n⏭️  Skipping automatic PR creation.")
+		fmt.Printf("\n📋 To create the PR manually:\n")
+		fmt.Printf("   1. Go to: https://github.com/tokamak-network/tokamak-rollup-metadata-repository\n")
+		fmt.Printf("   2. Click 'Compare & pull request' for branch: %s\n", branchName)
+		fmt.Printf("   3. Use this title: [Rollup] sepolia %s - %s\n", systemConfigAddress, chainName)
+		fmt.Printf("   4. Add description and create the PR\n\n")
+		return nil
+	}
+
+	// Create PR using GitHub API
+	prTitle := fmt.Sprintf("[Rollup] sepolia %s - %s", systemConfigAddress, chainName)
+
+	prData := GitHubPR{
+		Title: prTitle,
+		Head:  branchName,
+		Base:  "main",
+	}
+
+	jsonData, err := json.Marshal(prData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal PR data: %w", err)
+	}
+
+	// Create HTTP request
+	url := "https://api.github.com/repos/tokamak-network/tokamak-rollup-metadata-repository/pulls"
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "token "+githubToken)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	// Send request
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check response
+	if resp.StatusCode == 201 {
+		// Successfully created
+		var result map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err == nil {
+			if prURL, ok := result["html_url"].(string); ok {
+				fmt.Printf("✅ Pull Request created successfully!\n")
+				fmt.Printf("🔗 PR URL: %s\n", prURL)
+				return nil
+			}
+		}
+		fmt.Println("✅ Pull Request created successfully!")
+		return nil
+	} else if resp.StatusCode == 401 {
+		return fmt.Errorf("authentication failed - please check your GitHub token has the correct permissions")
+	} else if resp.StatusCode == 422 {
+		// Parse error details
+		var errorResp map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&errorResp); err == nil {
+			if errors, ok := errorResp["errors"].([]interface{}); ok && len(errors) > 0 {
+				if firstError, ok := errors[0].(map[string]interface{}); ok {
+					if message, ok := firstError["message"].(string); ok {
+						return fmt.Errorf("PR creation failed: %s", message)
+					}
+				}
+			}
+		}
+		return fmt.Errorf("PR creation failed - possibly branch already has a PR or validation error")
+	} else {
+		return fmt.Errorf("PR creation failed with status %d", resp.StatusCode)
+	}
+}
+
 func (t *ThanosStack) RegisterMetadata(ctx context.Context) error {
 	fmt.Println("🔄 Generating rollup metadata and submitting PR...")
 
@@ -263,6 +606,9 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context) error {
 	metadata.CreatedAt = timestamp.Format(time.RFC3339)
 	metadata.LastUpdated = timestamp.Format(time.RFC3339)
 
+	metadata.RpcUrl = t.deployConfig.L1RPCURL
+	metadata.WsUrl = strings.Replace(t.deployConfig.L1RPCURL, "https://", "wss://", 1)
+
 	metadata.L1Contracts = L1Contracts{
 		L1CrossDomainMessenger: contracts.L1CrossDomainMessengerProxy,
 		L1StandardBridge:       contracts.L1StandardBridgeProxy,
@@ -351,7 +697,13 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context) error {
 	}
 	fmt.Println("✅ Metadata file validated successfully!")
 
-	// STEP 5. Commit changes, push to remote and create PR
+	// STEP 5. Setup git config and commit changes
+	fmt.Println("Setting up git configuration...")
+	err = setupGitConfig(repoPath)
+	if err != nil {
+		return fmt.Errorf("failed to setup git config: %w", err)
+	}
+
 	fmt.Println("Committing changes...")
 	err = utils.ExecuteCommandStream("git", "-C", repoPath, "add", ".")
 	if err != nil {
@@ -364,5 +716,23 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context) error {
 	}
 	fmt.Println("✅ Changes committed successfully!")
 
+	// STEP 6. Push changes and create PR
+	err = pushChangesInteractive(repoPath, branchName)
+	if err != nil {
+		return fmt.Errorf("failed to push changes: %w", err)
+	}
+
+	// STEP 7. Create Pull Request
+	err = createGitHubPR(systemConfigAddress, t.deployConfig.ChainName, branchName)
+	if err != nil {
+		fmt.Printf("⚠️  Warning: Failed to create PR automatically: %v\n", err)
+		fmt.Printf("\n📋 You can create the PR manually:\n")
+		fmt.Printf("   1. Go to: https://github.com/tokamak-network/tokamak-rollup-metadata-repository\n")
+		fmt.Printf("   2. Click 'Compare & pull request' for branch: %s\n", branchName)
+		fmt.Printf("   3. Use this title: [Rollup] sepolia %s - %s\n", systemConfigAddress, t.deployConfig.ChainName)
+		fmt.Printf("   4. Add description and create the PR\n")
+	}
+
+	fmt.Println("\n🎉 Metadata registration process completed!")
 	return nil
 }
