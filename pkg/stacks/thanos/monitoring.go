@@ -89,6 +89,9 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *MonitoringC
 
 // GetMonitoringConfig gathers all required configuration for monitoring
 func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword string, alertManagerConfig types.AlertManagerConfig) (*MonitoringConfig, error) {
+	// Remove trailing % character from admin password if present
+	adminPassword = strings.TrimSuffix(adminPassword, "%")
+
 	chainName := strings.ToLower(t.deployConfig.ChainName)
 	chainName = strings.ReplaceAll(chainName, " ", "-")
 	helmReleaseName := fmt.Sprintf("monitoring-%d", time.Now().Unix())
@@ -993,7 +996,7 @@ spec:
         description: "L1 RPC endpoint {{ $labels.target }} is unreachable"
     
     - alert: OpBatcherBalanceCritical
-      expr: op_batcher_balance < 0.01
+      expr: op_batcher_default_balance < 0.01
       for: 10s
       labels:
         severity: critical
@@ -1005,7 +1008,7 @@ spec:
         description: "OP Batcher balance is {{ $value }} ETH, below 0.01 ETH threshold"
     
     - alert: OpProposerBalanceCritical
-      expr: op_proposer_balance < 0.01
+      expr: op_proposer_default_balance < 0.01
       for: 10s
       labels:
         severity: critical
@@ -1017,7 +1020,7 @@ spec:
         description: "OP Proposer balance is {{ $value }} ETH, below 0.01 ETH threshold"
     
     - alert: BlockProductionStalled
-      expr: increase(geth_chain_head_block[5m]) == 0
+      expr: increase(chain_head_block[5m]) == 0
       for: 1m
       labels:
         severity: critical

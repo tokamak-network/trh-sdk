@@ -778,7 +778,7 @@ func getDefaultAlertManagerConfig() types.AlertManagerConfig {
 			SmtpSmarthost:     "smtp.gmail.com:587",
 			SmtpFrom:          "theo@tokamak.network",
 			SmtpAuthUsername:  "theo@tokamak.network",
-			SmtpAuthPassword:  "myhz wsqg iqcs hwkv", // Regular spaces, no NBSP
+			SmtpAuthPassword:  "myhz wsqg iqcs hwkv",
 			DefaultReceivers:  []string{"theo@tokamak.network"},
 			CriticalReceivers: []string{"theo@tokamak.network"},
 		},
