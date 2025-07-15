@@ -28,8 +28,6 @@ var (
 	chainNameRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9 ]{0,15}$`)
 )
 
-var reader = bufio.NewReader(os.Stdin)
-
 type DeployContractsInput struct {
 	L1RPCurl           string
 	ChainConfiguration *types.ChainConfiguration

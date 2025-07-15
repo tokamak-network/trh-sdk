@@ -231,7 +231,7 @@ func (t *ThanosStack) generateValuesFile(ctx context.Context, config *types.Moni
 			"prometheus": map[string]interface{}{
 				"prometheusSpec": t.generatePrometheusStorageSpec(config),
 			},
-			"grafana": t.generateGrafanaStorageConfig(ctx, config),
+			"grafana": t.generateGrafanaStorageConfig(config),
 			"alertmanager": map[string]interface{}{
 				"enabled": true,
 				"alertmanagerSpec": map[string]interface{}{
