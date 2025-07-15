@@ -299,3 +299,14 @@ type PodSecurityContext struct {
 	RunAsGroup   *int64 `yaml:"runAsGroup,omitempty"`
 	FSGroup      *int64 `yaml:"fsGroup,omitempty"`
 }
+
+// MonitoringInfo holds information about the installed monitoring stack
+type MonitoringInfo struct {
+	GrafanaURL   string             `json:"grafanaUrl"`
+	Username     string             `json:"username"`
+	Password     string             `json:"password"`
+	Namespace    string             `json:"namespace"`
+	ReleaseName  string             `json:"releaseName"`
+	ChainName    string             `json:"chainName"`
+	AlertManager AlertManagerConfig `json:"alertManager"`
+}

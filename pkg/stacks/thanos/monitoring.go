@@ -31,29 +31,29 @@ type MonitoringConfig struct {
 }
 
 // InstallMonitoring installs monitoring stack using Helm
-func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *MonitoringConfig) (string, error) {
+func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *MonitoringConfig) (*types.MonitoringInfo, error) {
 	fmt.Println("🚀 Starting monitoring installation...")
 
 	// Ensure monitoring namespace exists
 	if err := t.ensureNamespaceExists(ctx, config.Namespace); err != nil {
-		return "", fmt.Errorf("failed to ensure monitoring namespace exists: %w", err)
+		return nil, fmt.Errorf("failed to ensure monitoring namespace exists: %w", err)
 	}
 
 	// Deploy infrastructure if persistence is enabled
 	if config.EnablePersistence {
 		if err := t.deployMonitoringInfrastructure(ctx, config); err != nil {
-			return "", fmt.Errorf("failed to deploy monitoring infrastructure: %w", err)
+			return nil, fmt.Errorf("failed to deploy monitoring infrastructure: %w", err)
 		}
 	}
 
 	// Generate values file
 	if err := t.generateValuesFile(ctx, config); err != nil {
-		return "", fmt.Errorf("failed to generate values file: %w", err)
+		return nil, fmt.Errorf("failed to generate values file: %w", err)
 	}
 
 	// Update chart dependencies
 	if _, err := utils.ExecuteCommand(ctx, "helm", "dependency", "update", config.ChartsPath); err != nil {
-		return "", fmt.Errorf("failed to update chart dependencies: %w", err)
+		return nil, fmt.Errorf("failed to update chart dependencies: %w", err)
 	}
 
 	// Install monitoring stack
@@ -70,21 +70,26 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *MonitoringC
 	}
 
 	if _, err := utils.ExecuteCommand(ctx, "helm", installCmd...); err != nil {
-		return "", fmt.Errorf("failed to install monitoring stack: %w", err)
+		return nil, fmt.Errorf("failed to install monitoring stack: %w", err)
 	}
 
 	// Create additional resources
 	if err := t.createAlertManagerSecret(ctx, config); err != nil {
-		return "", fmt.Errorf("failed to create AlertManager secret: %w", err)
+		return nil, fmt.Errorf("failed to create AlertManager secret: %w", err)
 	}
 	if err := t.createPrometheusRule(ctx, config); err != nil {
-		return "", fmt.Errorf("failed to create PrometheusRule: %w", err)
+		return nil, fmt.Errorf("failed to create PrometheusRule: %w", err)
 	}
 	if err := t.createDashboardConfigMaps(ctx, config); err != nil {
-		return "", fmt.Errorf("failed to create dashboard configmaps: %w", err)
+		return nil, fmt.Errorf("failed to create dashboard configmaps: %w", err)
 	}
 
-	return t.displayMonitoringInfo(ctx, config), nil
+	monitoringInfo := t.createMonitoringInfo(ctx, config)
+	if monitoringInfo == nil {
+		return nil, fmt.Errorf("ALB Ingress is not ready after installation")
+	}
+
+	return monitoringInfo, nil
 }
 
 // GetMonitoringConfig gathers all required configuration for monitoring
@@ -145,29 +150,36 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 	return nil
 }
 
-// displayMonitoringInfo shows access information and checks ALB Ingress
-func (t *ThanosStack) displayMonitoringInfo(ctx context.Context, config *MonitoringConfig) string {
-	fmt.Println("\n🎉 Monitoring Plugin Installation Complete!")
+// DisplayMonitoringInfo displays monitoring information
+func (t *ThanosStack) DisplayMonitoringInfo(monitoringInfo *types.MonitoringInfo) {
+	fmt.Printf("\n🎉 Monitoring Installation Complete!\n")
+	fmt.Printf("🌐 Grafana URL: %s\n", monitoringInfo.GrafanaURL)
+	fmt.Printf("👤 Username: %s\n", monitoringInfo.Username)
+	fmt.Printf("🔑 Password: %s\n", monitoringInfo.Password)
+	fmt.Printf("📁 Namespace: %s\n", monitoringInfo.Namespace)
+	fmt.Printf("🔗 Release Name: %s\n", monitoringInfo.ReleaseName)
+	fmt.Printf("⛓️  Chain Name: %s\n", monitoringInfo.ChainName)
+}
 
+// createMonitoringInfo creates MonitoringInfo by checking ALB Ingress status
+func (t *ThanosStack) createMonitoringInfo(ctx context.Context, config *MonitoringConfig) *types.MonitoringInfo {
 	// Check ALB Ingress status and get URL
 	albURL := t.checkALBIngressStatus(ctx, config)
+	monitoringInfo := &types.MonitoringInfo{
+		Username:     "admin",
+		Password:     config.AdminPassword,
+		Namespace:    config.Namespace,
+		ReleaseName:  config.HelmReleaseName,
+		ChainName:    config.ChainName,
+		AlertManager: config.AlertManager,
+	}
 
 	if albURL != "" {
-		fmt.Printf("🌐 ALB Ingress URL: %s\n", albURL)
-		fmt.Printf("   Username: admin\n")
-		fmt.Printf("   Password: %s\n", config.AdminPassword)
-		return albURL
+		monitoringInfo.GrafanaURL = albURL
+		return monitoringInfo
 	} else {
-		fmt.Printf("⚠️  ALB Ingress not ready, using port-forward as fallback\n")
-		fmt.Printf("📊 Grafana: http://localhost:3000 (port-forward)\n")
-		fmt.Printf("   Username: admin\n")
-		fmt.Printf("   Password: %s\n", config.AdminPassword)
-
-		// Start port-forward in background
-		go utils.ExecuteCommand(ctx, "kubectl", "port-forward", "-n", config.Namespace,
-			fmt.Sprintf("svc/%s-grafana", config.HelmReleaseName), "3000:80")
-
-		return "http://localhost:3000"
+		// ALB Ingress is not ready, return error
+		return nil
 	}
 }
 
