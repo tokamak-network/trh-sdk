@@ -91,6 +91,11 @@ func Run() {
 						Usage: "Tech stack",
 						Value: "",
 					},
+					&cli.StringFlag{
+						Name:  "type",
+						Usage: "Optional type of the plugin",
+						Value: "",
+					},
 				},
 				Action: commands.ActionInstallationPlugins(),
 			},
