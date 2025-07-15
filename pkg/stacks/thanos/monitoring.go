@@ -15,23 +15,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// MonitoringConfig holds all configuration needed for monitoring installation
-type MonitoringConfig struct {
-	Namespace         string
-	HelmReleaseName   string
-	AdminPassword     string
-	L1RpcUrl          string
-	ServiceNames      map[string]string
-	EnablePersistence bool
-	EFSFileSystemId   string
-	ChartsPath        string
-	ValuesFilePath    string
-	ChainName         string
-	AlertManager      types.AlertManagerConfig
-}
-
 // InstallMonitoring installs monitoring stack using Helm
-func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *MonitoringConfig) (*types.MonitoringInfo, error) {
+func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *types.MonitoringConfig) (*types.MonitoringInfo, error) {
 	fmt.Println("🚀 Starting monitoring installation...")
 
 	// Ensure monitoring namespace exists
@@ -93,7 +78,7 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *MonitoringC
 }
 
 // GetMonitoringConfig gathers all required configuration for monitoring
-func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword string, alertManagerConfig types.AlertManagerConfig) (*MonitoringConfig, error) {
+func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword string, alertManagerConfig types.AlertManagerConfig) (*types.MonitoringConfig, error) {
 	// Remove trailing % character from admin password if present
 	adminPassword = strings.TrimSuffix(adminPassword, "%")
 
@@ -116,7 +101,7 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 		return nil, fmt.Errorf("error getting EFS filesystem ID: %w", err)
 	}
 
-	config := &MonitoringConfig{
+	config := &types.MonitoringConfig{
 		Namespace:         "monitoring",
 		HelmReleaseName:   helmReleaseName,
 		AdminPassword:     adminPassword,
@@ -162,7 +147,7 @@ func (t *ThanosStack) DisplayMonitoringInfo(monitoringInfo *types.MonitoringInfo
 }
 
 // createMonitoringInfo creates MonitoringInfo by checking ALB Ingress status
-func (t *ThanosStack) createMonitoringInfo(ctx context.Context, config *MonitoringConfig) *types.MonitoringInfo {
+func (t *ThanosStack) createMonitoringInfo(ctx context.Context, config *types.MonitoringConfig) *types.MonitoringInfo {
 	// Check ALB Ingress status and get URL
 	albURL := t.checkALBIngressStatus(ctx, config)
 	monitoringInfo := &types.MonitoringInfo{
@@ -184,7 +169,7 @@ func (t *ThanosStack) createMonitoringInfo(ctx context.Context, config *Monitori
 }
 
 // checkALBIngressStatus checks ALB Ingress status and returns the URL
-func (t *ThanosStack) checkALBIngressStatus(ctx context.Context, config *MonitoringConfig) string {
+func (t *ThanosStack) checkALBIngressStatus(ctx context.Context, config *types.MonitoringConfig) string {
 	// Wait for ALB Ingress to be ready (max 5 minutes)
 	maxAttempts := 60 // 60 attempts * 5 seconds = 5 minutes
 	for i := 0; i < maxAttempts; i++ {
@@ -227,7 +212,7 @@ func (t *ThanosStack) checkALBIngressStatus(ctx context.Context, config *Monitor
 }
 
 // generateValuesFile creates the values.yaml file
-func (t *ThanosStack) generateValuesFile(ctx context.Context, config *MonitoringConfig) error {
+func (t *ThanosStack) generateValuesFile(ctx context.Context, config *types.MonitoringConfig) error {
 	valuesConfig := map[string]interface{}{
 		"global": map[string]interface{}{
 			"l1RpcUrl": config.L1RpcUrl,
@@ -283,7 +268,7 @@ func (t *ThanosStack) generateValuesFile(ctx context.Context, config *Monitoring
 }
 
 // generatePrometheusStorageSpec creates Prometheus storage specification
-func (t *ThanosStack) generatePrometheusStorageSpec(config *MonitoringConfig) map[string]interface{} {
+func (t *ThanosStack) generatePrometheusStorageSpec(config *types.MonitoringConfig) map[string]interface{} {
 	if !config.EnablePersistence {
 		return map[string]interface{}{}
 	}
@@ -321,7 +306,7 @@ func (t *ThanosStack) generatePrometheusStorageSpec(config *MonitoringConfig) ma
 }
 
 // generateGrafanaStorageConfig creates Grafana storage configuration
-func (t *ThanosStack) generateGrafanaStorageConfig(ctx context.Context, config *MonitoringConfig) map[string]interface{} {
+func (t *ThanosStack) generateGrafanaStorageConfig(config *types.MonitoringConfig) map[string]interface{} {
 	grafanaConfig := map[string]interface{}{
 		"adminPassword": config.AdminPassword,
 	}
@@ -449,7 +434,7 @@ func (t *ThanosStack) getEFSFileSystemId(ctx context.Context, chainName string) 
 }
 
 // deployMonitoringInfrastructure creates PVs for Static Provisioning
-func (t *ThanosStack) deployMonitoringInfrastructure(ctx context.Context, config *MonitoringConfig) error {
+func (t *ThanosStack) deployMonitoringInfrastructure(ctx context.Context, config *types.MonitoringConfig) error {
 	if err := t.ensureNamespaceExists(ctx, config.Namespace); err != nil {
 		return fmt.Errorf("failed to ensure namespace exists: %w", err)
 	}
@@ -492,7 +477,7 @@ func (t *ThanosStack) deployMonitoringInfrastructure(ctx context.Context, config
 }
 
 // cleanupExistingMonitoringStorage removes existing monitoring PVs and PVCs
-func (t *ThanosStack) cleanupExistingMonitoringStorage(ctx context.Context, config *MonitoringConfig) error {
+func (t *ThanosStack) cleanupExistingMonitoringStorage(ctx context.Context, config *types.MonitoringConfig) error {
 	// Get existing monitoring PVCs
 	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", "-n", config.Namespace, "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
 	if err != nil {
@@ -619,7 +604,7 @@ func (t *ThanosStack) getTimestampFromExistingPV(ctx context.Context, chainName 
 }
 
 // generateStaticPVManifest generates PV manifest
-func (t *ThanosStack) generateStaticPVManifest(component string, config *MonitoringConfig, size string, timestamp string) string {
+func (t *ThanosStack) generateStaticPVManifest(component string, config *types.MonitoringConfig, size string, timestamp string) string {
 	pvName := fmt.Sprintf("%s-%s-thanos-stack-%s", config.ChainName, timestamp, component)
 	volumeHandle := config.EFSFileSystemId
 
@@ -659,7 +644,7 @@ func (t *ThanosStack) applyPVManifest(ctx context.Context, component string, man
 }
 
 // generateStaticPVCManifest generates PVC manifest
-func (t *ThanosStack) generateStaticPVCManifest(component string, config *MonitoringConfig, size string, timestamp string) string {
+func (t *ThanosStack) generateStaticPVCManifest(component string, config *types.MonitoringConfig, size string, timestamp string) string {
 	pvcName := fmt.Sprintf("%s-%s", config.HelmReleaseName, component)
 	pvName := fmt.Sprintf("%s-%s-thanos-stack-%s", config.ChainName, timestamp, component)
 
@@ -699,7 +684,7 @@ func (t *ThanosStack) applyPVCManifest(ctx context.Context, component string, ma
 }
 
 // createDashboardConfigMaps creates ConfigMaps for Grafana dashboards
-func (t *ThanosStack) createDashboardConfigMaps(ctx context.Context, config *MonitoringConfig) error {
+func (t *ThanosStack) createDashboardConfigMaps(ctx context.Context, config *types.MonitoringConfig) error {
 	dashboardsPath := filepath.Join(config.ChartsPath, "dashboards")
 	if _, err := os.Stat(dashboardsPath); os.IsNotExist(err) {
 		return nil
@@ -747,7 +732,7 @@ data:
 }
 
 // createAlertManagerSecret creates AlertManager configuration secret
-func (t *ThanosStack) createAlertManagerSecret(ctx context.Context, config *MonitoringConfig) error {
+func (t *ThanosStack) createAlertManagerSecret(ctx context.Context, config *types.MonitoringConfig) error {
 	grafanaURL := t.getGrafanaURL(ctx, config)
 	alertManagerYaml, err := t.generateAlertManagerSecretConfig(config, grafanaURL)
 	if err != nil {
@@ -771,7 +756,7 @@ data:
 }
 
 // generateAlertManagerSecretConfig generates AlertManager configuration YAML
-func (t *ThanosStack) generateAlertManagerSecretConfig(config *MonitoringConfig, grafanaURL string) (string, error) {
+func (t *ThanosStack) generateAlertManagerSecretConfig(config *types.MonitoringConfig, grafanaURL string) (string, error) {
 	// Generate receivers configuration
 	receivers := []map[string]interface{}{
 		{
@@ -823,6 +808,31 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *MonitoringConfig,
 		}
 		if len(telegramConfigs) > 0 {
 			receivers[0]["telegram_configs"] = telegramConfigs
+		}
+	}
+
+	// Add Webhook configurations
+	if config.AlertManager.Webhook.Enabled {
+		webhookConfigs := []map[string]interface{}{}
+		for _, receiver := range config.AlertManager.Webhook.CriticalReceivers {
+			if receiver != "" {
+				webhookConfig := map[string]interface{}{
+					"url":     config.AlertManager.Webhook.URL,
+					"timeout": config.AlertManager.Webhook.Timeout,
+				}
+
+				// Add custom headers if provided
+				if len(config.AlertManager.Webhook.Headers) > 0 {
+					webhookConfig["http_config"] = map[string]interface{}{
+						"headers": config.AlertManager.Webhook.Headers,
+					}
+				}
+
+				webhookConfigs = append(webhookConfigs, webhookConfig)
+			}
+		}
+		if len(webhookConfigs) > 0 {
+			receivers[0]["webhook_configs"] = webhookConfigs
 		}
 	}
 
@@ -883,7 +893,7 @@ func (t *ThanosStack) applySecretManifest(ctx context.Context, manifest string) 
 }
 
 // createPrometheusRule creates PrometheusRule for alerts
-func (t *ThanosStack) createPrometheusRule(ctx context.Context, config *MonitoringConfig) error {
+func (t *ThanosStack) createPrometheusRule(ctx context.Context, config *types.MonitoringConfig) error {
 	// Clean up existing PrometheusRules except thanos-stack-alerts
 	if err := t.cleanupExistingPrometheusRules(ctx, config); err != nil {
 		return fmt.Errorf("failed to cleanup existing PrometheusRules: %w", err)
@@ -894,7 +904,7 @@ func (t *ThanosStack) createPrometheusRule(ctx context.Context, config *Monitori
 }
 
 // cleanupExistingPrometheusRules removes all PrometheusRules except thanos-stack-alerts
-func (t *ThanosStack) cleanupExistingPrometheusRules(ctx context.Context, config *MonitoringConfig) error {
+func (t *ThanosStack) cleanupExistingPrometheusRules(ctx context.Context, config *types.MonitoringConfig) error {
 	// Get all PrometheusRules in the monitoring namespace
 	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", config.Namespace, "-o", "jsonpath={.items[*].metadata.name}")
 	if err != nil {
@@ -930,7 +940,7 @@ func (t *ThanosStack) cleanupExistingPrometheusRules(ctx context.Context, config
 }
 
 // generatePrometheusRuleManifest generates the complete PrometheusRule YAML manifest
-func (t *ThanosStack) generatePrometheusRuleManifest(config *MonitoringConfig) string {
+func (t *ThanosStack) generatePrometheusRuleManifest(config *types.MonitoringConfig) string {
 	manifest := fmt.Sprintf(`apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -1131,7 +1141,7 @@ func (t *ThanosStack) applyPrometheusRuleManifest(ctx context.Context, manifest 
 }
 
 // getGrafanaURL returns the full Grafana dashboard URL using the ALB Ingress
-func (t *ThanosStack) getGrafanaURL(ctx context.Context, config *MonitoringConfig) string {
+func (t *ThanosStack) getGrafanaURL(ctx context.Context, config *types.MonitoringConfig) string {
 	// Try to get the ALB Ingress hostname using the actual Helm release name
 	ingressName := fmt.Sprintf("%s-grafana", config.HelmReleaseName)
 	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "ingress", "-n", config.Namespace, "-o", "jsonpath={.items[?(@.metadata.name==\""+ingressName+"\")].status.loadBalancer.ingress[0].hostname}")
