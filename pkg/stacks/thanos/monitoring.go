@@ -811,31 +811,6 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *types.MonitoringC
 		}
 	}
 
-	// Add Webhook configurations
-	if config.AlertManager.Webhook.Enabled {
-		webhookConfigs := []map[string]interface{}{}
-		for _, receiver := range config.AlertManager.Webhook.CriticalReceivers {
-			if receiver != "" {
-				webhookConfig := map[string]interface{}{
-					"url":     config.AlertManager.Webhook.URL,
-					"timeout": config.AlertManager.Webhook.Timeout,
-				}
-
-				// Add custom headers if provided
-				if len(config.AlertManager.Webhook.Headers) > 0 {
-					webhookConfig["http_config"] = map[string]interface{}{
-						"headers": config.AlertManager.Webhook.Headers,
-					}
-				}
-
-				webhookConfigs = append(webhookConfigs, webhookConfig)
-			}
-		}
-		if len(webhookConfigs) > 0 {
-			receivers[0]["webhook_configs"] = webhookConfigs
-		}
-	}
-
 	// Only add global SMTP config if email is enabled
 	alertManagerConfig := map[string]interface{}{
 		"route": map[string]interface{}{

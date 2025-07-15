@@ -21,7 +21,6 @@ type MonitoringConfig struct {
 type AlertManagerConfig struct {
 	Telegram TelegramConfig
 	Email    EmailConfig
-	Webhook  WebhookConfig
 }
 
 // TelegramConfig holds Telegram notification configuration
@@ -43,16 +42,6 @@ type EmailConfig struct {
 	SmtpFrom          string
 	SmtpAuthUsername  string
 	SmtpAuthPassword  string
-	DefaultReceivers  []string
-	CriticalReceivers []string
-}
-
-// WebhookConfig holds webhook notification configuration
-type WebhookConfig struct {
-	Enabled           bool
-	URL               string
-	Headers           map[string]string
-	Timeout           string
 	DefaultReceivers  []string
 	CriticalReceivers []string
 }
