@@ -86,6 +86,42 @@ func (t *ThanosStack) checkAdminBalance(ctx context.Context, adminAddress ethCom
 	return nil
 }
 
+// waitForAllowanceWithTimeout waits for allowance to be set with a context timeout
+func waitForAllowanceWithTimeout(ctx context.Context, tonContract *abis.TON, adminAddress, l2ManagerAddress ethCommon.Address, requiredAmount *big.Int, timeout time.Duration) error {
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	currentDelay := 2 * time.Second
+	const maxDelay = 60 * time.Second
+
+	fmt.Printf("Waiting for allowance to propagate with incremental backoff (timeout: %v)...\n", timeout)
+
+	for {
+		allowance, err := tonContract.Allowance(&bind.CallOpts{Context: timeoutCtx}, adminAddress, l2ManagerAddress)
+		if err != nil {
+			if timeoutCtx.Err() == nil {
+				fmt.Printf("Error checking allowance: %v\n", err)
+			}
+		} else {
+			if allowance.Cmp(requiredAmount) >= 0 {
+				fmt.Printf("✅ Allowance verified: %s TON\n", new(big.Float).Quo(new(big.Float).SetInt(allowance), big.NewFloat(1e18)).String())
+				return nil
+			}
+			fmt.Printf("Allowance: %s/%s (retrying in %v...)\n", allowance.String(), requiredAmount.String(), currentDelay)
+		}
+
+		select {
+		case <-timeoutCtx.Done():
+			return fmt.Errorf("timeout waiting for allowance propagation after %v", timeout)
+		case <-time.After(currentDelay):
+			currentDelay *= 2
+			if currentDelay > maxDelay {
+				currentDelay = maxDelay
+			}
+		}
+	}
+}
+
 // fromDeployContract flag would be true if the function would be called from the deploy contract function
 func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCandidate *RegisterCandidateInput) error {
 	if err := registerCandidate.Validate(ctx); err != nil {
@@ -260,6 +296,14 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 
 	fmt.Printf("Transaction confirmed in block %d\n", receiptApprove.BlockNumber.Uint64())
 
+	adminAddress, err := utils.GetAddressFromPrivateKey(t.deployConfig.AdminPrivateKey)
+	if err != nil {
+		return err
+	}
+
+	// Verify the allowance was set correctly
+	waitForAllowanceWithTimeout(ctx, tonContract, adminAddress, l2ManagerAddress, amountBigInt, 60*time.Second)
+
 	// Create contract instance
 	l2ManagerContract, err := abis.NewLayer2ManagerV1(l2ManagerAddress, l1Client)
 	if err != nil {
@@ -267,6 +311,17 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 	}
 
 	fmt.Println("Initiating transaction to register DAO candidate...")
+
+	// Final balance check before transfer
+	currentBalance, err := tonContract.BalanceOf(&bind.CallOpts{Context: ctx}, adminAddress)
+	if err != nil {
+		return fmt.Errorf("failed to get current balance: %v", err)
+	}
+
+	if currentBalance.Cmp(amountBigInt) < 0 {
+		return fmt.Errorf("insufficient balance at transfer time: have %s, required %s",
+			currentBalance.String(), amountBigInt.String())
+	}
 
 	// Call registerCandidateAddOn
 	txRegisterCandidate, err := l2ManagerContract.RegisterCandidateAddOn(
