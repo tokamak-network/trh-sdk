@@ -92,28 +92,33 @@ func waitForAllowanceWithTimeout(ctx context.Context, tonContract *abis.TON, adm
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
+	currentDelay := 2 * time.Second
+	const maxDelay = 60 * time.Second
 
-	fmt.Printf("Waiting for allowance to propagate (timeout: %v)...\n", timeout)
+	fmt.Printf("Waiting for allowance to propagate with incremental backoff (timeout: %v)...\n", timeout)
 
 	for {
-		select {
-		case <-timeoutCtx.Done():
-			return fmt.Errorf("timeout waiting for allowance propagation after %v", timeout)
-		case <-ticker.C:
-			allowance, err := tonContract.Allowance(&bind.CallOpts{Context: timeoutCtx}, adminAddress, l2ManagerAddress)
-			if err != nil {
+		allowance, err := tonContract.Allowance(&bind.CallOpts{Context: timeoutCtx}, adminAddress, l2ManagerAddress)
+		if err != nil {
+			if timeoutCtx.Err() == nil {
 				fmt.Printf("Error checking allowance: %v\n", err)
-				continue
 			}
-
+		} else {
 			if allowance.Cmp(requiredAmount) >= 0 {
 				fmt.Printf("✅ Allowance verified: %s TON\n", new(big.Float).Quo(new(big.Float).SetInt(allowance), big.NewFloat(1e18)).String())
 				return nil
 			}
+			fmt.Printf("Allowance: %s/%s (retrying in %v...)\n", allowance.String(), requiredAmount.String(), currentDelay)
+		}
 
-			fmt.Printf("Allowance: %s/%s (waiting...)\n", allowance.String(), requiredAmount.String())
+		select {
+		case <-timeoutCtx.Done():
+			return fmt.Errorf("timeout waiting for allowance propagation after %v", timeout)
+		case <-time.After(currentDelay):
+			currentDelay *= 2
+			if currentDelay > maxDelay {
+				currentDelay = maxDelay
+			}
 		}
 	}
 }
