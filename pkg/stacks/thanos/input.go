@@ -26,6 +26,10 @@ import (
 var (
 	// Chain name must be 10 characters or less, and can only contain letters, numbers, and spaces
 	chainNameRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9 ]{0,15}$`)
+	// Pre-compiled regex patterns for validation
+	telegramTokenRegex = regexp.MustCompile(`^\d+:[A-Za-z0-9_-]+$`)
+	chatIdRegex        = regexp.MustCompile(`^-?\d+$`)
+	emailRegex         = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 )
 
 type DeployContractsInput struct {
@@ -107,6 +111,88 @@ type InstallBlockExplorerInput struct {
 
 type InstallMonitoringInput struct {
 	AdminPassword string
+	AlertManager  types.AlertManagerConfig
+}
+
+// Validate validates the InstallMonitoringInput
+func (i *InstallMonitoringInput) Validate() error {
+	// Validate admin password
+	if i.AdminPassword == "" {
+		return errors.New("admin password is required")
+	}
+
+	// Validate AlertManager configuration
+	if i.AlertManager.Telegram.Enabled {
+		if i.AlertManager.Telegram.ApiToken == "" {
+			return errors.New("telegram API token is required when Telegram is enabled")
+		}
+
+		if len(i.AlertManager.Telegram.CriticalReceivers) == 0 {
+			return errors.New("at least one Telegram receiver is required when Telegram is enabled")
+		}
+
+		// Validate Telegram Bot API Token format
+		if !telegramTokenRegex.MatchString(i.AlertManager.Telegram.ApiToken) {
+			return errors.New("invalid Telegram Bot API token format")
+		}
+
+		// Validate Chat IDs
+		for _, receiver := range i.AlertManager.Telegram.CriticalReceivers {
+			if !chatIdRegex.MatchString(receiver.ChatId) {
+				return fmt.Errorf("invalid Chat ID format: %s", receiver.ChatId)
+			}
+		}
+	}
+
+	if i.AlertManager.Email.Enabled {
+		if i.AlertManager.Email.SmtpSmarthost == "" {
+			return errors.New("SMTP server is required when Email is enabled")
+		}
+
+		if i.AlertManager.Email.SmtpFrom == "" {
+			return errors.New("from email address is required when Email is enabled")
+		}
+
+		if i.AlertManager.Email.SmtpAuthUsername == "" {
+			return errors.New("SMTP username is required when Email is enabled")
+		}
+
+		if i.AlertManager.Email.SmtpAuthPassword == "" {
+			return errors.New("SMTP password is required when Email is enabled")
+		}
+
+		if len(i.AlertManager.Email.CriticalReceivers) == 0 {
+			return errors.New("at least one email receiver is required when Email is enabled")
+		}
+
+		// Validate from email
+		if !emailRegex.MatchString(i.AlertManager.Email.SmtpFrom) {
+			return fmt.Errorf("invalid from email address format: %s", i.AlertManager.Email.SmtpFrom)
+		}
+
+		// Validate receiver emails
+		for _, receiver := range i.AlertManager.Email.CriticalReceivers {
+			if !emailRegex.MatchString(receiver) {
+				return fmt.Errorf("invalid email receiver format: %s", receiver)
+			}
+		}
+
+		// Validate SMTP server format (host:port)
+		if !strings.Contains(i.AlertManager.Email.SmtpSmarthost, ":") {
+			return errors.New("SMTP server must include port (e.g., smtp.gmail.com:587)")
+		}
+
+		parts := strings.Split(i.AlertManager.Email.SmtpSmarthost, ":")
+		if len(parts) != 2 {
+			return errors.New("invalid SMTP server format. Expected: hostname:port")
+		}
+
+		if port, err := strconv.Atoi(parts[1]); err != nil || port < 1 || port > 65535 {
+			return errors.New("invalid SMTP port number. Must be between 1 and 65535")
+		}
+	}
+
+	return nil
 }
 
 func (c *InstallBlockExplorerInput) Validate(ctx context.Context) error {
@@ -561,16 +647,419 @@ func InputInstallMonitoring() (*InstallMonitoringInput, error) {
 			fmt.Printf("Error while reading admin password: %s", err)
 			continue
 		}
+
+		// Remove special whitespace characters (NBSP, etc.)
+		adminPassword = strings.ReplaceAll(adminPassword, "\u00A0", " ") // Replace NBSP with regular space
+		adminPassword = strings.TrimSpace(adminPassword)                 // Trim again after replacement
+
+		// Validate admin password
 		if adminPassword == "" {
-			fmt.Println("Admin password cannot be empty")
+			fmt.Println("❌ Admin password cannot be empty")
 			continue
 		}
 		break
 	}
 
+	// Get AlertManager configuration from user input
+	alertManagerConfig := getAlertManagerConfigFromUser()
+
 	return &InstallMonitoringInput{
 		AdminPassword: adminPassword,
+		AlertManager:  alertManagerConfig,
 	}, nil
+}
+
+// getAlertManagerConfigFromUser gets AlertManager configuration from user input
+func getAlertManagerConfigFromUser() types.AlertManagerConfig {
+	fmt.Println("\n🔔 AlertManager Configuration")
+	fmt.Println("================================")
+
+	// Telegram Configuration
+	telegramConfig := getTelegramConfigFromUser()
+
+	// Email Configuration
+	emailConfig := getEmailConfigFromUser()
+
+	// Show configuration summary
+	fmt.Println("\n📋 AlertManager Configuration Summary")
+	fmt.Println("===================================")
+	fmt.Printf("Telegram: %s\n", getTelegramConfigSummary(telegramConfig))
+	fmt.Printf("Email: %s\n", getEmailConfigSummary(emailConfig))
+
+	return types.AlertManagerConfig{
+		Telegram: telegramConfig,
+		Email:    emailConfig,
+	}
+}
+
+// getTelegramConfigFromUser gets Telegram configuration from user input
+func getTelegramConfigFromUser() types.TelegramConfig {
+	fmt.Println("\n📱 Telegram Configuration")
+	fmt.Println("-------------------------")
+
+	fmt.Print("Enable Telegram alerts? (y/n): ")
+	enabled, err := scanner.ScanBool(false)
+	if err != nil {
+		fmt.Printf("Error while reading Telegram alerts choice: %s\n", err)
+		return types.TelegramConfig{Enabled: false}
+	}
+
+	if !enabled {
+		return types.TelegramConfig{Enabled: false}
+	}
+
+	var apiToken string
+	for {
+		fmt.Print("Enter Telegram Bot API Token: ")
+		apiToken, err = scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error while reading Telegram Bot API Token: %s\n", err)
+			return types.TelegramConfig{Enabled: false}
+		}
+
+		// Validate Telegram Bot API Token format
+		if apiToken == "" {
+			fmt.Println("❌ Telegram Bot API Token cannot be empty")
+			continue
+		}
+
+		// Telegram Bot API Token format: numeric:alphanumeric (e.g., 123456789:ABCdefGHIjklMNOpqrsTUVwxyz)
+		if !telegramTokenRegex.MatchString(apiToken) {
+			fmt.Println("❌ Invalid Telegram Bot API Token format")
+			fmt.Println("   Expected format: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
+			fmt.Println("   Get your token from @BotFather on Telegram")
+			continue
+		}
+
+		fmt.Printf("✅ Valid Telegram Bot API Token format\n")
+		break
+	}
+
+	var chatIds []string
+	fmt.Println("\n💡 Chat ID Help:")
+	fmt.Println("   • Personal chat: Positive number (e.g., 123456789)")
+	fmt.Println("   • Group chat: Negative number (e.g., -987654321)")
+	fmt.Println("   • Supergroup/Channel: Negative number starting with -100 (e.g., -1001234567890)")
+	fmt.Println("   • How to find Chat ID: Use @userinfobot or @chatid_echo_bot")
+
+	for {
+		fmt.Print("Enter Telegram Chat IDs (comma-separated): ")
+		chatIdsInput, err := scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error while reading Telegram Chat IDs: %s\n", err)
+			return types.TelegramConfig{Enabled: false}
+		}
+
+		if chatIdsInput == "" {
+			fmt.Println("❌ At least one Chat ID is required")
+			continue
+		}
+
+		chatIds = strings.Split(chatIdsInput, ",")
+		for i, id := range chatIds {
+			chatIds[i] = strings.TrimSpace(id)
+		}
+
+		// Validate Chat IDs format
+		validChatIds := []string{}
+		hasValidId := false
+		for _, chatId := range chatIds {
+			if chatId != "" {
+				// Check if it's a valid Chat ID format (numeric, can be negative)
+				if chatIdRegex.MatchString(chatId) {
+					// Additional validation for Chat ID range
+					if chatIdInt, err := strconv.ParseInt(chatId, 10, 64); err == nil {
+						// Valid Chat ID ranges (approximate)
+						if chatIdInt > 0 || (chatIdInt < 0 && chatIdInt > -2000000000000) {
+							validChatIds = append(validChatIds, chatId)
+							fmt.Printf("✅ Valid Chat ID: %s\n", chatId)
+							hasValidId = true
+						} else {
+							fmt.Printf("❌ Chat ID out of valid range: %s\n", chatId)
+						}
+					} else {
+						fmt.Printf("❌ Invalid Chat ID format: %s (must be numeric)\n", chatId)
+					}
+				} else {
+					fmt.Printf("❌ Invalid Chat ID format: %s (must be numeric)\n", chatId)
+				}
+			}
+		}
+
+		if !hasValidId {
+			fmt.Println("❌ At least one valid Chat ID is required")
+			continue
+		}
+
+		chatIds = validChatIds
+		break
+	}
+
+	var receivers []types.TelegramReceiver
+	for _, chatId := range chatIds {
+		if chatId != "" {
+			receivers = append(receivers, types.TelegramReceiver{ChatId: chatId})
+		}
+	}
+
+	return types.TelegramConfig{
+		Enabled:           enabled,
+		ApiToken:          apiToken,
+		CriticalReceivers: receivers,
+	}
+}
+
+// getEmailConfigFromUser gets Email configuration from user input
+func getEmailConfigFromUser() types.EmailConfig {
+	fmt.Println("\n📧 Email Configuration")
+	fmt.Println("----------------------")
+
+	fmt.Print("Enable Email alerts? (y/n): ")
+	enabled, err := scanner.ScanBool(false)
+	if err != nil {
+		fmt.Printf("Error while reading Email alerts choice: %s\n", err)
+		return types.EmailConfig{Enabled: false}
+	}
+
+	if !enabled {
+		return types.EmailConfig{Enabled: false}
+	}
+
+	// Check if user wants to use Gmail
+	fmt.Print("Use Gmail SMTP? (y/n): ")
+	useGmail, err := scanner.ScanBool(false)
+	if err != nil {
+		fmt.Printf("Error while reading Gmail SMTP choice: %s\n", err)
+		return types.EmailConfig{Enabled: false}
+	}
+
+	var smtpSmarthost string
+	var smtpFrom string
+	var smtpAuthUsername string
+
+	if useGmail {
+		smtpSmarthost = "smtp.gmail.com:587"
+		fmt.Printf("✅ Using Gmail SMTP: %s\n", smtpSmarthost)
+
+		// For Gmail, get username and set from address automatically
+		for {
+			fmt.Print("Enter Gmail Address: ")
+			smtpAuthUsername, err = scanner.ScanString()
+			if err != nil {
+				fmt.Printf("Error while reading Gmail Address: %s\n", err)
+				return types.EmailConfig{Enabled: false}
+			}
+
+			// Validate Gmail address format
+			if smtpAuthUsername == "" {
+				fmt.Println("❌ Gmail address cannot be empty")
+				continue
+			}
+
+			// Basic email validation
+			if !emailRegex.MatchString(smtpAuthUsername) {
+				fmt.Println("❌ Invalid email address format")
+				continue
+			}
+			break
+		}
+		smtpFrom = smtpAuthUsername
+		fmt.Printf("✅ From Email Address: %s\n", smtpFrom)
+	} else {
+		// Custom SMTP server configuration
+		for {
+			fmt.Print("Enter SMTP Server (e.g., smtp.gmail.com:587): ")
+			smtpSmarthost, err = scanner.ScanString()
+			if err != nil {
+				fmt.Printf("Error while reading SMTP Server: %s\n", err)
+				return types.EmailConfig{Enabled: false}
+			}
+
+			// Validate SMTP server format
+			if smtpSmarthost == "" {
+				fmt.Println("❌ SMTP server cannot be empty")
+				continue
+			}
+
+			// Check if it includes port
+			if !strings.Contains(smtpSmarthost, ":") {
+				fmt.Println("❌ SMTP server must include port (e.g., smtp.gmail.com:587)")
+				continue
+			}
+
+			// Validate host:port format
+			parts := strings.Split(smtpSmarthost, ":")
+			if len(parts) != 2 {
+				fmt.Println("❌ Invalid SMTP server format. Expected: hostname:port")
+				continue
+			}
+
+			// Validate port number
+			if port, err := strconv.Atoi(parts[1]); err != nil || port < 1 || port > 65535 {
+				fmt.Println("❌ Invalid port number. Must be between 1 and 65535")
+				continue
+			}
+
+			fmt.Printf("✅ Valid SMTP server: %s\n", smtpSmarthost)
+			break
+		}
+
+		for {
+			fmt.Print("Enter From Email Address: ")
+			smtpFrom, err = scanner.ScanString()
+			if err != nil {
+				fmt.Printf("Error while reading From Email Address: %s\n", err)
+				return types.EmailConfig{Enabled: false}
+			}
+
+			// Validate from email address
+			if smtpFrom == "" {
+				fmt.Println("❌ From email address cannot be empty")
+				continue
+			}
+
+			// Basic email validation
+			if !emailRegex.MatchString(smtpFrom) {
+				fmt.Println("❌ Invalid email address format")
+				continue
+			}
+
+			fmt.Printf("✅ Valid from email address: %s\n", smtpFrom)
+			break
+		}
+
+		for {
+			fmt.Print("Enter SMTP Username: ")
+			smtpAuthUsername, err = scanner.ScanString()
+			if err != nil {
+				fmt.Printf("Error while reading SMTP Username: %s\n", err)
+				return types.EmailConfig{Enabled: false}
+			}
+
+			// Validate SMTP username
+			if smtpAuthUsername == "" {
+				fmt.Println("❌ SMTP username cannot be empty")
+				continue
+			}
+
+			fmt.Printf("✅ SMTP username: %s\n", smtpAuthUsername)
+			break
+		}
+	}
+
+	var smtpAuthPassword string
+	for {
+		fmt.Print("Enter SMTP Password: ")
+		smtpAuthPassword, err = scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error while reading SMTP Password: %s\n", err)
+			return types.EmailConfig{Enabled: false}
+		}
+
+		// Remove special whitespace characters (NBSP, etc.)
+		smtpAuthPassword = strings.ReplaceAll(smtpAuthPassword, "\u00A0", " ") // Replace NBSP with regular space
+		smtpAuthPassword = strings.TrimSpace(smtpAuthPassword)                 // Trim again after replacement
+
+		// Validate SMTP password
+		if smtpAuthPassword == "" {
+			fmt.Println("❌ SMTP password cannot be empty")
+			continue
+		}
+
+		// For Gmail, warn about app passwords
+		if useGmail {
+			fmt.Println("💡 For Gmail, use an App Password instead of your regular password")
+			fmt.Println("   Generate at: https://myaccount.google.com/apppasswords")
+		}
+
+		fmt.Printf("✅ SMTP password configured\n")
+		break
+	}
+
+	// Get receivers with validation (only critical severity exists)
+	var receivers []string
+	for {
+		fmt.Print("Enter Email Receivers (comma-separated, e.g., admin@gmail.com,ops@company.com): ")
+		receiversInput, err := scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error while reading Email Receivers: %s\n", err)
+			continue
+		}
+
+		if receiversInput == "" {
+			fmt.Println("❌ At least one email address is required")
+			continue
+		}
+
+		receivers = strings.Split(receiversInput, ",")
+		for i, email := range receivers {
+			receivers[i] = strings.TrimSpace(email)
+		}
+
+		// Validate each email address
+		var validReceivers []string
+		hasValidEmail := false
+
+		for _, email := range receivers {
+			if email != "" {
+				// Validate email format
+				if emailRegex.MatchString(email) {
+					validReceivers = append(validReceivers, email)
+					fmt.Printf("✅ Valid email receiver: %s\n", email)
+					hasValidEmail = true
+				} else {
+					fmt.Printf("❌ Invalid email format: %s\n", email)
+				}
+			}
+		}
+
+		if !hasValidEmail {
+			fmt.Println("❌ At least one valid email address is required")
+			continue
+		}
+
+		receivers = validReceivers
+		fmt.Printf("✅ Total valid email receivers: %d\n", len(receivers))
+		break
+	}
+
+	return types.EmailConfig{
+		Enabled:           enabled,
+		SmtpSmarthost:     smtpSmarthost,
+		SmtpFrom:          smtpFrom,
+		SmtpAuthUsername:  smtpAuthUsername,
+		SmtpAuthPassword:  smtpAuthPassword,
+		DefaultReceivers:  receivers,
+		CriticalReceivers: receivers,
+	}
+}
+
+// getTelegramConfigSummary returns a summary of Telegram configuration
+func getTelegramConfigSummary(config types.TelegramConfig) string {
+	if !config.Enabled {
+		return "Disabled"
+	}
+
+	chatCount := len(config.CriticalReceivers)
+	if chatCount == 0 {
+		return "Enabled (no chat IDs configured)"
+	}
+
+	return fmt.Sprintf("Enabled (%d chat IDs configured)", chatCount)
+}
+
+// getEmailConfigSummary returns a summary of Email configuration
+func getEmailConfigSummary(config types.EmailConfig) string {
+	if !config.Enabled {
+		return "Disabled"
+	}
+
+	receiverCount := len(config.CriticalReceivers)
+	if receiverCount == 0 {
+		return "Enabled (no receivers configured)"
+	}
+
+	return fmt.Sprintf("Enabled (%d receivers configured)", receiverCount)
 }
 
 func GetUpdateNetworkInputs(ctx context.Context) (*UpdateNetworkInput, error) {
