@@ -156,6 +156,78 @@ func Run() {
 				Usage:  "Verify and Register Candidate",
 				Action: commands.ActionVerifyRegisterCandidates(),
 			},
+			{
+				Name:  "alert-config",
+				Usage: "Customize alert notifications and rules",
+				Description: `Examples:
+  # Check alert status
+  trh-sdk alert-config --status
+
+  # List all alert rules
+  trh-sdk alert-config --rules
+
+  # Configure email channel
+  trh-sdk alert-config --channels --type email --operation configure
+
+  # Configure telegram channel
+  trh-sdk alert-config --channels --type telegram --operation configure
+
+  # Reset all alert rules to default values
+  trh-sdk alert-config --reset`,
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:     "status",
+						Aliases:  []string{"s"},
+						Required: false,
+						Usage:    "Show current alert status",
+					},
+					&cli.BoolFlag{
+						Name:     "channels",
+						Aliases:  []string{"c"},
+						Required: false,
+						Usage:    "Configure notification channels (email, telegram)",
+					},
+					&cli.BoolFlag{
+						Name:     "rules",
+						Aliases:  []string{"r"},
+						Required: false,
+						Usage:    "List all alert rules",
+					},
+					&cli.BoolFlag{
+						Name:     "reset",
+						Required: false,
+						Usage:    "Reset all alert rules to default values",
+					},
+					&cli.StringFlag{
+						Name:     "type",
+						Aliases:  []string{"t"},
+						Required: false,
+						Usage:    "Channel type (email, telegram) or rule type (list, modify)",
+						Value:    "",
+					},
+					&cli.StringFlag{
+						Name:     "operation",
+						Aliases:  []string{"op"},
+						Required: false,
+						Usage:    "Operation (enable, disable, configure)",
+						Value:    "",
+					},
+					&cli.StringFlag{
+						Name:     "rule",
+						Required: false,
+						Usage:    "Rule name to modify",
+						Value:    "",
+					},
+					&cli.StringFlag{
+						Name:     "value",
+						Aliases:  []string{"v"},
+						Required: false,
+						Usage:    "New value for the rule",
+						Value:    "",
+					},
+				},
+				Action: commands.ActionAlertConfig(),
+			},
 		},
 	}
 
