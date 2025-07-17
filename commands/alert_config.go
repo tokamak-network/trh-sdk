@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"github.com/urfave/cli/v3"
+	"gopkg.in/yaml.v3"
 )
 
 // ActionAlertConfig handles alert configuration commands
@@ -24,8 +26,8 @@ func ActionAlertConfig() cli.ActionFunc {
 		rule := cmd.String("rule")
 		value := cmd.String("value")
 
-		// Check if alert plugin is installed
-		if err := checkAlertPluginInstalled(ctx); err != nil {
+		// Check if monitoring plugin is installed
+		if err := checkMonitoringPluginInstalled(ctx); err != nil {
 			return err
 		}
 
@@ -51,43 +53,43 @@ func ActionAlertConfig() cli.ActionFunc {
 	}
 }
 
-// checkAlertPluginInstalled checks if alert plugin is installed
-func checkAlertPluginInstalled(ctx context.Context) error {
-	fmt.Println("🔍 Checking alert plugin installation...")
+// checkMonitoringPluginInstalled checks if monitoring plugin is installed
+func checkMonitoringPluginInstalled(ctx context.Context) error {
+	fmt.Println("🔍 Checking monitoring plugin installation...")
 
 	// Check if alert namespace exists
 	namespaceExists, err := checkNamespaceExists(ctx, "monitoring")
 	if err != nil {
-		return fmt.Errorf("failed to check alert namespace: %w", err)
+		return fmt.Errorf("failed to check monitoring namespace: %w", err)
 	}
 
 	if !namespaceExists {
-		fmt.Println("❌ Alert plugin is not installed!")
+		fmt.Println("❌ Monitoring plugin is not installed!")
 		fmt.Println()
-		fmt.Println("To install alert plugin, run:")
+		fmt.Println("To install monitoring plugin, run:")
 		fmt.Println("  trh-sdk install monitoring")
 		fmt.Println()
 		fmt.Println("After installation, you can customize alert settings.")
-		return fmt.Errorf("alert plugin not installed")
+		return fmt.Errorf("monitoring plugin not installed")
 	}
 
 	// Check if alert Helm release exists
 	releaseExists, err := checkAlertReleaseExists(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to check alert release: %w", err)
+		return fmt.Errorf("failed to check monitoring release: %w", err)
 	}
 
 	if !releaseExists {
-		fmt.Println("❌ Alert plugin is not properly installed!")
+		fmt.Println("❌ Monitoring plugin is not properly installed!")
 		fmt.Println()
-		fmt.Println("To install alert plugin, run:")
+		fmt.Println("To install monitoring plugin, run:")
 		fmt.Println("  trh-sdk install monitoring")
 		fmt.Println()
 		fmt.Println("After installation, you can customize alert settings.")
-		return fmt.Errorf("alert plugin not properly installed")
+		return fmt.Errorf("monitoring plugin not properly installed")
 	}
 
-	fmt.Println("✅ Alert plugin is installed and ready")
+	fmt.Println("✅ Monitoring plugin is installed and ready")
 	return nil
 }
 
@@ -131,28 +133,6 @@ func showAlertConfigHelp() error {
 	fmt.Println("  trh-sdk alert-config --rules --type modify --rule proposer-balance --value 0.1")
 	fmt.Println("  trh-sdk alert-config --reset")
 	return nil
-}
-
-// handleChannelsCustomization manages notification channels
-func handleChannelsCustomization(ctx context.Context, cmd *cli.Command, args []string) error {
-	if len(args) < 2 {
-		fmt.Println("❌ Usage: trh-sdk monitoring channels [email|telegram] [enable|disable|configure]")
-		return nil
-	}
-
-	channelType := args[0]
-	action := args[1]
-
-	switch channelType {
-	case "email":
-		return handleEmailChannel(ctx, cmd, action, args[2:])
-	case "telegram":
-		return handleTelegramChannel(ctx, cmd, action, args[2:])
-	default:
-		fmt.Printf("❌ Unknown channel type: %s\n", channelType)
-		fmt.Println("Supported channels: email, telegram")
-		return nil
-	}
 }
 
 // handleChannelsCustomizationWithFlags manages notification channels using flags
@@ -262,225 +242,106 @@ func handleRulesCustomizationWithFlags(ctx context.Context, cmd *cli.Command, ac
 
 // handleAlertStatus shows current alert configuration
 func handleAlertStatus(ctx context.Context, cmd *cli.Command, args []string) error {
-	fmt.Println("📊 Current Alert Configuration")
-	fmt.Println("==============================")
-
-	// Check alert namespace
-	fmt.Println("🔍 Checking alert namespace...")
-	namespaceExists, err := checkNamespaceExists(ctx, "monitoring")
+	// Check monitoring namespace
+	_, err := checkNamespaceExists(ctx, "monitoring")
 	if err != nil {
 		return fmt.Errorf("failed to check alert namespace: %w", err)
 	}
 
-	if !namespaceExists {
-		fmt.Println("❌ Alert namespace not found")
-		return nil
-	}
-	fmt.Println("✅ Alert namespace: monitoring")
+	// Get the information
+	alertRules, _ := getPrometheusRules(ctx)
 
-	// Check AlertManager pods
-	fmt.Println("🔍 Checking AlertManager pods...")
-	alertManagerPods, err := getAlertManagerPods(ctx)
-	if err != nil {
-		fmt.Printf("⚠️  Failed to check AlertManager pods: %v\n", err)
-	} else {
-		fmt.Printf("✅ AlertManager pods: %d running\n", alertManagerPods)
-	}
-
-	// Check Prometheus pods
-	fmt.Println("🔍 Checking Prometheus pods...")
-	prometheusPods, err := getPrometheusPods(ctx)
-	if err != nil {
-		fmt.Printf("⚠️  Failed to check Prometheus pods: %v\n", err)
-	} else {
-		fmt.Printf("✅ Prometheus pods: %d running\n", prometheusPods)
-	}
-
-	// Check Grafana pods
-	fmt.Println("🔍 Checking Grafana pods...")
-	grafanaPods, err := getGrafanaPods(ctx)
-	if err != nil {
-		fmt.Printf("⚠️  Failed to check Grafana pods: %v\n", err)
-	} else {
-		fmt.Printf("✅ Grafana pods: %d running\n", grafanaPods)
-	}
-
-	// Check AlertManager configuration
-	fmt.Println("🔍 Checking AlertManager configuration...")
+	// Get AlertManager configuration
 	alertManagerConfig, err := getAlertManagerConfig(ctx)
 	if err != nil {
-		fmt.Printf("⚠️  Failed to get AlertManager config: %v\n", err)
-	} else {
-		fmt.Println("✅ AlertManager configuration loaded")
-		fmt.Printf("   📧 Email channel: %s\n", getEmailChannelStatus(alertManagerConfig))
-		fmt.Printf("   📱 Telegram channel: %s\n", getTelegramChannelStatus(alertManagerConfig))
+		alertManagerConfig = ""
 	}
 
-	// Check PrometheusRules
-	fmt.Println("🔍 Checking PrometheusRules...")
-	alertRules, err := getPrometheusRules(ctx)
-	if err != nil {
-		fmt.Printf("⚠️  Failed to get PrometheusRules: %v\n", err)
-	} else {
-		fmt.Printf("✅ Active alert rules: %d\n", alertRules)
-	}
-
-	// Check Helm releases
-	fmt.Println("🔍 Checking Helm releases...")
-	releases, err := getAlertReleases(ctx)
-	if err != nil {
-		fmt.Printf("⚠️  Failed to get Helm releases: %v\n", err)
-	} else {
-		fmt.Printf("✅ Alert releases: %s\n", releases)
-	}
-
-	fmt.Println()
 	fmt.Println("📊 Alert Status Summary:")
 	fmt.Println("========================")
-	fmt.Printf("   🏷️  Namespace: %s\n", getNamespaceStatus(namespaceExists))
-	fmt.Printf("   📊 AlertManager: %s\n", getPodStatus(alertManagerPods))
-	fmt.Printf("   📈 Prometheus: %s\n", getPodStatus(prometheusPods))
-	fmt.Printf("   📊 Grafana: %s\n", getPodStatus(grafanaPods))
+	fmt.Printf("   📧 Email channel: %s\n", getEmailChannelStatus(alertManagerConfig))
+	fmt.Printf("   📱 Telegram channel: %s\n", getTelegramChannelStatus(alertManagerConfig))
 	fmt.Printf("   📋 Alert Rules: %d active\n", alertRules)
-	fmt.Printf("   🚀 Helm Releases: %s\n", releases)
 
 	return nil
 }
 
-// Helper functions for status checking
-func getAlertManagerPods(ctx context.Context) (int, error) {
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pods", "-n", "monitoring", "-l", "app=alertmanager", "--no-headers", "--field-selector=status.phase=Running")
-	if err != nil {
-		return 0, err
-	}
-
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	count := 0
-	for _, line := range lines {
-		if strings.TrimSpace(line) != "" {
-			count++
-		}
-	}
-	return count, nil
-}
-
-func getPrometheusPods(ctx context.Context) (int, error) {
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pods", "-n", "monitoring", "-l", "app=prometheus", "--no-headers", "--field-selector=status.phase=Running")
-	if err != nil {
-		return 0, err
-	}
-
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	count := 0
-	for _, line := range lines {
-		if strings.TrimSpace(line) != "" {
-			count++
-		}
-	}
-	return count, nil
-}
-
-func getGrafanaPods(ctx context.Context) (int, error) {
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pods", "-n", "monitoring", "-l", "app=grafana", "--no-headers", "--field-selector=status.phase=Running")
-	if err != nil {
-		return 0, err
-	}
-
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	count := 0
-	for _, line := range lines {
-		if strings.TrimSpace(line) != "" {
-			count++
-		}
-	}
-	return count, nil
-}
-
 func getAlertManagerConfig(ctx context.Context) (string, error) {
-	// First, find the actual AlertManager secret name
-	secretList, err := utils.ExecuteCommand(ctx, "kubectl", "get", "secrets", "-n", "monitoring", "-o", "jsonpath={.items[*].metadata.name}")
-	if err != nil {
-		return "", fmt.Errorf("failed to get secrets list: %w", err)
-	}
-
-	secrets := strings.Split(strings.TrimSpace(secretList), " ")
-	var alertManagerSecret string
-	for _, secret := range secrets {
-		if strings.Contains(secret, "alertmanager") && strings.Contains(secret, "kube-alertmanager") && !strings.Contains(secret, "generated") && !strings.Contains(secret, "tls") && !strings.Contains(secret, "web-config") {
-			alertManagerSecret = secret
-			break
+	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "secret", "-n", "monitoring", "alertmanager-config", "-o", "jsonpath={.data.alertmanager\\.yaml}")
+	if err == nil {
+		// Remove single quotes and spaces
+		output = strings.Trim(output, "' \n\t\r")
+		decodedBytes, err := base64.StdEncoding.DecodeString(output)
+		if err != nil {
+			return "", fmt.Errorf("failed to decode AlertManager config: %w", err)
 		}
+		return string(decodedBytes), nil
 	}
-
-	if alertManagerSecret == "" {
-		return "", fmt.Errorf("AlertManager secret not found")
-	}
-
-	// Get the AlertManager configuration
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "secret", "-n", "monitoring", alertManagerSecret, "-o", "jsonpath={.data.alertmanager\\.yaml}")
-	if err != nil {
-		return "", fmt.Errorf("failed to get AlertManager config from secret %s: %w", alertManagerSecret, err)
-	}
-
-	// Decode base64
-	decoded, err := utils.ExecuteCommand(ctx, "echo", output, "|", "base64", "-d")
-	if err != nil {
-		return "", fmt.Errorf("failed to decode AlertManager config: %w", err)
-	}
-
-	return decoded, nil
+	return "", nil
 }
 
 func getEmailChannelStatus(config string) string {
-	if strings.Contains(config, "smtp_smarthost") {
-		return "Enabled"
+	var amConfig map[string]interface{}
+	if err := yaml.Unmarshal([]byte(config), &amConfig); err != nil {
+		return "Unknown"
+	}
+
+	receivers, ok := amConfig["receivers"].([]interface{})
+	if !ok {
+		return "Disabled"
+	}
+
+	for _, r := range receivers {
+		receiver, ok := r.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if _, exists := receiver["email_configs"]; exists {
+			return "Enabled"
+		}
 	}
 	return "Disabled"
 }
 
 func getTelegramChannelStatus(config string) string {
-	if strings.Contains(config, "telegram_configs") {
-		return "Enabled"
+	var amConfig map[string]interface{}
+	if err := yaml.Unmarshal([]byte(config), &amConfig); err != nil {
+		return "Unknown"
+	}
+
+	receivers, ok := amConfig["receivers"].([]interface{})
+	if !ok {
+		return "Disabled"
+	}
+
+	for _, r := range receivers {
+		receiver, ok := r.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if _, exists := receiver["telegram_configs"]; exists {
+			return "Enabled"
+		}
 	}
 	return "Disabled"
 }
 
 func getPrometheusRules(ctx context.Context) (int, error) {
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrules", "-n", "monitoring", "--no-headers")
+	// Get all PrometheusRules in the monitoring namespace
+	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrules", "-n", "monitoring", "-o", "jsonpath={.items[*].spec.groups[*].rules[*].alert}")
 	if err != nil {
 		return 0, err
 	}
 
-	lines := strings.Split(strings.TrimSpace(output), "\n")
+	// Split by space to count individual alert rules
+	alerts := strings.Split(strings.TrimSpace(output), " ")
 	count := 0
-	for _, line := range lines {
-		if strings.TrimSpace(line) != "" {
+	for _, alert := range alerts {
+		if strings.TrimSpace(alert) != "" {
 			count++
 		}
 	}
 	return count, nil
-}
-
-func getAlertReleases(ctx context.Context) (string, error) {
-	output, err := utils.ExecuteCommand(ctx, "helm", "list", "-n", "monitoring", "--output", "json")
-	if err != nil {
-		return "", err
-	}
-	return output, nil
-}
-
-func getNamespaceStatus(exists bool) string {
-	if exists {
-		return "✅ monitoring"
-	}
-	return "❌ Not found"
-}
-
-func getPodStatus(count int) string {
-	if count > 0 {
-		return fmt.Sprintf("✅ %d running", count)
-	}
-	return "❌ No pods running"
 }
 
 // Configuration update functions
