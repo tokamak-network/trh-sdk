@@ -263,6 +263,30 @@ func handleAlertStatus(ctx context.Context, cmd *cli.Command, args []string) err
 	fmt.Printf("   📱 Telegram channel: %s\n", getTelegramChannelStatus(alertManagerConfig))
 	fmt.Printf("   📋 Alert Rules: %d active\n", alertRules)
 
+	// Display configuration details
+	if alertManagerConfig != "" {
+		fmt.Println()
+		fmt.Println("📋 Channel Configuration Details:")
+		fmt.Println("================================")
+
+		// Email configuration
+		emailConfig := getEmailConfiguration(alertManagerConfig)
+		if emailConfig.Enabled {
+			fmt.Printf("   📧 Email Configuration:\n")
+			fmt.Printf("      SMTP URL: %s\n", emailConfig.SMTPURL)
+			fmt.Printf("      From: %s\n", emailConfig.From)
+			fmt.Printf("      To: %s\n", emailConfig.To)
+		}
+
+		// Telegram configuration
+		telegramConfig := getTelegramConfiguration(alertManagerConfig)
+		if telegramConfig.Enabled {
+			fmt.Printf("   📱 Telegram Configuration:\n")
+			fmt.Printf("      Bot Token: %s\n", telegramConfig.BotToken)
+			fmt.Printf("      Chat ID: %s\n", telegramConfig.ChatID)
+		}
+	}
+
 	return nil
 }
 
@@ -1076,4 +1100,127 @@ func resetAlertRules(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	return nil
+}
+
+// EmailConfiguration holds email channel configuration details
+type EmailConfiguration struct {
+	Enabled bool
+	SMTPURL string
+	From    string
+	To      string
+}
+
+// TelegramConfiguration holds telegram channel configuration details
+type TelegramConfiguration struct {
+	Enabled  bool
+	BotToken string
+	ChatID   string
+}
+
+func getEmailConfiguration(config string) EmailConfiguration {
+	var amConfig map[string]interface{}
+	if err := yaml.Unmarshal([]byte(config), &amConfig); err != nil {
+		return EmailConfiguration{Enabled: false}
+	}
+
+	// Get global SMTP settings
+	global, ok := amConfig["global"].(map[string]interface{})
+	if !ok {
+		return EmailConfiguration{Enabled: false}
+	}
+
+	smtpURL := ""
+	if smtpHost, exists := global["smtp_smarthost"]; exists {
+		smtpURL = fmt.Sprintf("%v", smtpHost)
+	}
+
+	from := ""
+	if smtpFrom, exists := global["smtp_from"]; exists {
+		from = fmt.Sprintf("%v", smtpFrom)
+	}
+
+	// Get receivers
+	receivers, ok := amConfig["receivers"].([]interface{})
+	if !ok {
+		return EmailConfiguration{Enabled: false}
+	}
+
+	var toAddresses []string
+	for _, r := range receivers {
+		receiver, ok := r.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		if emailConfigs, exists := receiver["email_configs"]; exists {
+			if emailConfigList, ok := emailConfigs.([]interface{}); ok {
+				for _, emailConfig := range emailConfigList {
+					if emailConfig, ok := emailConfig.(map[string]interface{}); ok {
+						if toAddr, exists := emailConfig["to"]; exists {
+							toAddresses = append(toAddresses, fmt.Sprintf("%v", toAddr))
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if len(toAddresses) > 0 {
+		return EmailConfiguration{
+			Enabled: true,
+			SMTPURL: smtpURL,
+			From:    from,
+			To:      strings.Join(toAddresses, ", "),
+		}
+	}
+
+	return EmailConfiguration{Enabled: false}
+}
+
+func getTelegramConfiguration(config string) TelegramConfiguration {
+	var amConfig map[string]interface{}
+	if err := yaml.Unmarshal([]byte(config), &amConfig); err != nil {
+		return TelegramConfiguration{Enabled: false}
+	}
+
+	receivers, ok := amConfig["receivers"].([]interface{})
+	if !ok {
+		return TelegramConfiguration{Enabled: false}
+	}
+
+	var botTokens []string
+	var chatIDs []string
+
+	for _, r := range receivers {
+		receiver, ok := r.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		if telegramConfigs, exists := receiver["telegram_configs"]; exists {
+			if telegramConfigList, ok := telegramConfigs.([]interface{}); ok {
+				for _, telegramConfig := range telegramConfigList {
+					if telegramConfig, ok := telegramConfig.(map[string]interface{}); ok {
+						if token, exists := telegramConfig["bot_token"]; exists {
+							botTokens = append(botTokens, fmt.Sprintf("%v", token))
+						}
+
+						if chat, exists := telegramConfig["chat_id"]; exists {
+							chatIDs = append(chatIDs, fmt.Sprintf("%v", chat))
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if len(botTokens) > 0 || len(chatIDs) > 0 {
+		return TelegramConfiguration{
+			Enabled:  true,
+			BotToken: strings.Join(botTokens, ", "),
+			ChatID:   strings.Join(chatIDs, ", "),
+		}
+	}
+
+	return TelegramConfiguration{Enabled: false}
 }
