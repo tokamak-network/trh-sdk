@@ -956,9 +956,8 @@ func getEmailConfigFromUser() types.EmailConfig {
 			return types.EmailConfig{Enabled: false}
 		}
 
-		// Remove special whitespace characters (NBSP, etc.)
-		smtpAuthPassword = strings.ReplaceAll(smtpAuthPassword, "\u00A0", " ") // Replace NBSP with regular space
-		smtpAuthPassword = strings.TrimSpace(smtpAuthPassword)                 // Trim again after replacement
+		// Clean up the password input
+		smtpAuthPassword = utils.CleanPasswordInput(smtpAuthPassword)
 
 		// Validate SMTP password
 		if smtpAuthPassword == "" {

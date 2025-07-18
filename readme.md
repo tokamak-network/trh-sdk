@@ -153,23 +153,23 @@ trh-sdk destroy
 Same as the deploy infra command, this command looks the config files located at the current directory to choose the network and stack
 
 ### Install the plugin
-1. Install the bridge
 ```bash
+# Install bridge (Installed by default when deploying L2)
 trh-sdk install bridge
-```
-2. Install the block expalorer
-```bash
+# Install block explorer
 trh-sdk install block-explorer
+# Install monitoring plugin
+trh-sdk install monitoring
 ```
 
 ### Uninstall the plugin
-1. Uninstall the bridge
 ```bash
+# Uninstall bridge
 trh-sdk uninstall bridge
-```
-2. Uninstalll the block expalorer
-```bash
+# Uninstall block explorer
 trh-sdk uninstall block-explorer
+# Uninstall monitoring plugin
+trh-sdk uninstall monitoring
 ```
 
 ### Get the chain information
@@ -177,3 +177,31 @@ After deploying the chain successfully, we can get the chain information by:
 ```bash
 trh-sdk info
 ```
+
+### Alert Configuration
+
+The SDK provides comprehensive alert configuration capabilities for monitoring your Thanos Stack deployment.
+
+#### Quick Start
+```bash
+# Check current alert status
+trh-sdk alert-config --status
+
+# Configure email alerts
+trh-sdk alert-config --channel email --configure
+
+# Configure telegram alerts  
+trh-sdk alert-config --channel telegram --configure
+
+# Configure alert rules interactively
+trh-sdk alert-config --rule set
+
+# Reset all rules to default values
+trh-sdk alert-config --rule reset
+```
+
+#### Features
+- **Email & Telegram Notifications**: Set up multiple notification channels
+- **Configurable Alert Rules**: Adjust thresholds for balance, CPU, memory, and more
+- **Interactive Configuration**: User-friendly command-line interface
+- **Status Monitoring**: Real-time alert status and configuration details

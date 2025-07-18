@@ -15,6 +15,8 @@ type MonitoringConfig struct {
 	ChainName         string
 	// AlertManager configuration
 	AlertManager AlertManagerConfig
+	// Alert rules configuration
+	AlertRules map[string]AlertRule
 }
 
 // AlertManagerConfig holds alertmanager-specific configuration
@@ -55,4 +57,24 @@ type MonitoringInfo struct {
 	ReleaseName  string             `json:"releaseName"`
 	ChainName    string             `json:"chainName"`
 	AlertManager AlertManagerConfig `json:"alertManager"`
+}
+
+// MonitoringStatus holds current monitoring status information
+type MonitoringStatus struct {
+	NamespaceExists     bool `json:"namespaceExists"`
+	AlertManagerRunning bool `json:"alertManagerRunning"`
+	PrometheusRunning   bool `json:"prometheusRunning"`
+	EmailEnabled        bool `json:"emailEnabled"`
+	TelegramEnabled     bool `json:"telegramEnabled"`
+}
+
+// AlertRule represents a single alert rule configuration
+type AlertRule struct {
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Severity    string            `json:"severity"`
+	Threshold   string            `json:"threshold"`
+	Enabled     bool              `json:"enabled"`
+	Labels      map[string]string `json:"labels"`
+	Annotations map[string]string `json:"annotations"`
 }

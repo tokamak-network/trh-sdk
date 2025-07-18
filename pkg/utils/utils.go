@@ -22,6 +22,25 @@ import (
 	ethCommon "github.com/ethereum/go-ethereum/common"
 )
 
+// CleanPasswordInput cleans up password input by removing unwanted characters
+func CleanPasswordInput(password string) string {
+	// Remove special whitespace characters (NBSP, etc.)
+	password = strings.ReplaceAll(password, "\u00A0", " ") // Replace NBSP with regular space
+	password = strings.ReplaceAll(password, "\u200B", "")  // Remove zero-width space
+	password = strings.ReplaceAll(password, "\uFEFF", "")  // Remove byte order mark
+	password = strings.TrimSpace(password)                 // Trim whitespace
+
+	// Remove any control characters that might cause issues
+	var cleaned strings.Builder
+	for _, r := range password {
+		if r >= 32 && r != 127 { // Printable ASCII characters except DEL
+			cleaned.WriteRune(r)
+		}
+	}
+
+	return cleaned.String()
+}
+
 func WeiToEther(wei *big.Int) *big.Float {
 	ether := new(big.Float).SetInt(wei)
 	weiToEtherFactor := new(big.Float).SetInt(big.NewInt(params.Ether))
