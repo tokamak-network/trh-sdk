@@ -160,11 +160,11 @@ func Run() {
 				Name:  "alert-config",
 				Usage: "Customize alert notifications and rules",
 				Description: `Examples:
-  # Check alert status
+  # Check alert status and rules
   trh-sdk alert-config --status
 
-  # List all alert rules
-  trh-sdk alert-config --rules
+  # Interactive rule configuration
+  trh-sdk alert-config --rule set
 
   # Disable email channel
   trh-sdk alert-config --channel email --disable
@@ -204,42 +204,16 @@ func Run() {
 						Required: false,
 						Usage:    "Configure the specified channel",
 					},
-					&cli.BoolFlag{
-						Name:     "rules",
-						Aliases:  []string{"r"},
-						Required: false,
-						Usage:    "List all alert rules",
-					},
+
 					&cli.BoolFlag{
 						Name:     "reset",
 						Required: false,
 						Usage:    "Reset all alert rules to default values",
 					},
 					&cli.StringFlag{
-						Name:     "type",
-						Aliases:  []string{"t"},
-						Required: false,
-						Usage:    "Rule type (list, modify)",
-						Value:    "",
-					},
-					&cli.StringFlag{
-						Name:     "operation",
-						Aliases:  []string{"op"},
-						Required: false,
-						Usage:    "Operation (enable, disable, configure)",
-						Value:    "",
-					},
-					&cli.StringFlag{
 						Name:     "rule",
 						Required: false,
-						Usage:    "Rule name to modify",
-						Value:    "",
-					},
-					&cli.StringFlag{
-						Name:     "value",
-						Aliases:  []string{"v"},
-						Required: false,
-						Usage:    "New value for the rule",
+						Usage:    "Rule action (reset, set)",
 						Value:    "",
 					},
 				},
