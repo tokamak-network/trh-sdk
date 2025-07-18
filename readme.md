@@ -165,11 +165,11 @@ trh-sdk install monitoring
 ### Uninstall the plugin
 ```bash
 # Uninstall bridge
-trh-sdk install bridge
+trh-sdk uninstall bridge
 # Uninstall block explorer
-trh-sdk install block-explorer
+trh-sdk uninstall block-explorer
 # Uninstall monitoring plugin
-trh-sdk install monitoring
+trh-sdk uninstall monitoring
 ```
 
 ### Get the chain information
