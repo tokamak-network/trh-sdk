@@ -31,7 +31,6 @@ func ActionAlertConfig() cli.ActionFunc {
 		channel := cmd.String("channel")
 		disable := cmd.Bool("disable")
 		configure := cmd.Bool("configure")
-		reset := cmd.Bool("reset")
 		rule := cmd.String("rule")
 
 		// Handle status command
@@ -55,11 +54,6 @@ func ActionAlertConfig() cli.ActionFunc {
 		// Handle rule command
 		if rule != "" {
 			return handleRuleCommand(ctx, cmd, rule)
-		}
-
-		// Handle reset command
-		if reset {
-			return resetPrometheusRules(ctx)
 		}
 
 		// Show help if no valid command
@@ -152,14 +146,13 @@ func showAlertConfigHelp() error {
 	fmt.Println("🔧 Alert Configuration Commands")
 	fmt.Println()
 	fmt.Println("Usage:")
-	fmt.Println("  trh-sdk alert-config [--status|--channel|--rule|--reset] [options]")
+	fmt.Println("  trh-sdk alert-config [--status|--channel|--rule] [options]")
 	fmt.Println()
 	fmt.Println("Commands:")
 	fmt.Println("  --status                    - Show current alert status and rules")
 	fmt.Println("  --channel <type> --disable  - Disable notification channel (email/telegram)")
 	fmt.Println("  --channel <type> --configure- Configure notification channel (email/telegram)")
 	fmt.Println("  --rule <action>             - Manage alert rules (reset/set)")
-	fmt.Println("  --reset                     - Reset alert rules to default values")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  # Check alert status")
@@ -180,8 +173,7 @@ func showAlertConfigHelp() error {
 	fmt.Println("  # Interactive rule configuration")
 	fmt.Println("  trh-sdk alert-config --rule set")
 	fmt.Println()
-	fmt.Println("  # Reset alert rules")
-	fmt.Println("  trh-sdk alert-config --reset")
+
 	fmt.Println()
 	fmt.Println("💡 Use 'trh-sdk alert-config --status' to see detailed rule status")
 	fmt.Println("💡 Use 'trh-sdk alert-config --rule set' for interactive rule management")
@@ -250,46 +242,54 @@ func handleAlertStatus(ctx context.Context, cmd *cli.Command, args []string) err
 		return nil
 	}
 
-	// Navigate to rules
+	// Navigate to rules - process all PrometheusRule items
 	items, ok := ruleList["items"].([]interface{})
 	if !ok || len(items) == 0 {
 		fmt.Println("⚠️  No PrometheusRule items found")
 		return nil
 	}
 
-	ruleItem, ok := items[0].(map[string]interface{})
-	if !ok {
-		fmt.Println("⚠️  Failed to parse PrometheusRule item")
-		return nil
+	// Collect all rules from all PrometheusRule items
+	var allRules []interface{}
+	for _, item := range items {
+		ruleItem, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		spec, ok := ruleItem["spec"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		groups, ok := spec["groups"].([]interface{})
+		if !ok || len(groups) == 0 {
+			continue
+		}
+
+		for _, group := range groups {
+			groupMap, ok := group.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			rules, ok := groupMap["rules"].([]interface{})
+			if !ok {
+				continue
+			}
+
+			allRules = append(allRules, rules...)
+		}
 	}
 
-	spec, ok := ruleItem["spec"].(map[string]interface{})
-	if !ok {
-		fmt.Println("⚠️  Failed to find spec in PrometheusRule")
-		return nil
-	}
-
-	groups, ok := spec["groups"].([]interface{})
-	if !ok || len(groups) == 0 {
-		fmt.Println("⚠️  No groups found in PrometheusRule")
-		return nil
-	}
-
-	group, ok := groups[0].(map[string]interface{})
-	if !ok {
-		fmt.Println("⚠️  Failed to parse group")
-		return nil
-	}
-
-	rules, ok := group["rules"].([]interface{})
-	if !ok {
-		fmt.Println("⚠️  No rules found in group")
+	if len(allRules) == 0 {
+		fmt.Println("⚠️  No rules found in any PrometheusRule")
 		return nil
 	}
 
 	// Count active rules
 	activeRuleCount := 0
-	for _, rule := range rules {
+	for _, rule := range allRules {
 		if ruleMap, ok := rule.(map[string]interface{}); ok {
 			if _, exists := ruleMap["alert"]; exists {
 				activeRuleCount++
@@ -300,7 +300,7 @@ func handleAlertStatus(ctx context.Context, cmd *cli.Command, args []string) err
 	fmt.Printf("   📋 Alert Rules: %d active\n", activeRuleCount)
 
 	// Define all rules with their categories
-	allRules := map[string]map[string]string{
+	expectedRules := map[string]map[string]string{
 		"Core System Alerts": {
 			"OpNodeDown":     "OP Node down detection",
 			"OpBatcherDown":  "OP Batcher down detection",
@@ -319,7 +319,7 @@ func handleAlertStatus(ctx context.Context, cmd *cli.Command, args []string) err
 	}
 
 	// Check each rule category
-	for category, ruleMap := range allRules {
+	for category, ruleMap := range expectedRules {
 		fmt.Printf("\n%s:\n", category)
 		fmt.Println(strings.Repeat("-", len(category)+1))
 
@@ -328,7 +328,7 @@ func handleAlertStatus(ctx context.Context, cmd *cli.Command, args []string) err
 			var currentValue string
 			var severity string
 
-			for _, rule := range rules {
+			for _, rule := range allRules {
 				ruleMap, ok := rule.(map[string]interface{})
 				if !ok {
 					continue
@@ -358,6 +358,19 @@ func handleAlertStatus(ctx context.Context, cmd *cli.Command, args []string) err
 			fmt.Printf("   %s: %s", ruleName, status)
 			if found && currentValue != "" {
 				fmt.Printf(" (Current: %s)", currentValue)
+			} else if !found && category == "Configurable Alerts" {
+				// Show default value for disabled configurable rules
+				defaultValues := map[string]string{
+					"OpBatcherBalanceCritical":  "0.01",
+					"OpProposerBalanceCritical": "0.01",
+					"BlockProductionStalled":    "1m",
+					"ContainerCpuUsageHigh":     "80",
+					"ContainerMemoryUsageHigh":  "80",
+					"PodCrashLooping":           "2m",
+				}
+				if defaultValue, exists := defaultValues[ruleName]; exists {
+					fmt.Printf(" (Default: %s)", defaultValue)
+				}
 			}
 			if severity != "" {
 				fmt.Printf(" [%s]", severity)
@@ -1493,11 +1506,17 @@ func extractValueFromExpression(ruleName, expr string) string {
 			}
 		}
 	case "ContainerCpuUsageHigh", "ContainerMemoryUsageHigh":
-		// Extract percentage from "> 80"
+		// Extract percentage from complex expression like "(sum(rate(container_cpu_usage_seconds_total[5m])) by (pod) / sum(container_spec_cpu_quota/container_spec_cpu_period) by (pod)) * 100 > 80"
 		if strings.Contains(expr, ">") {
-			parts := strings.Split(expr, ">")
-			if len(parts) == 2 {
-				return strings.TrimSpace(parts[1])
+			// Find the last ">" which should be the threshold comparison
+			lastGreaterIndex := strings.LastIndex(expr, ">")
+			if lastGreaterIndex != -1 {
+				thresholdPart := strings.TrimSpace(expr[lastGreaterIndex+1:])
+				// Remove any trailing parts that might be after the number
+				if strings.Contains(thresholdPart, " ") {
+					thresholdPart = strings.Split(thresholdPart, " ")[0]
+				}
+				return thresholdPart
 			}
 		}
 	case "PodCrashLooping":
@@ -1623,36 +1642,51 @@ func resetPrometheusRules(ctx context.Context) error {
 		return fmt.Errorf("failed to parse PrometheusRule YAML: %w", err)
 	}
 
-	// Find the first PrometheusRule item
+	// Process all PrometheusRule items
 	items, ok := ruleList["items"].([]interface{})
 	if !ok || len(items) == 0 {
 		return fmt.Errorf("no PrometheusRule items found")
 	}
 
-	ruleItem, ok := items[0].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to parse PrometheusRule item")
+	// Collect all rules from all PrometheusRule items
+	var allRules []interface{}
+	var allRuleItems []map[string]interface{}
+
+	for _, item := range items {
+		ruleItem, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		spec, ok := ruleItem["spec"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		groups, ok := spec["groups"].([]interface{})
+		if !ok || len(groups) == 0 {
+			continue
+		}
+
+		for _, group := range groups {
+			groupMap, ok := group.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			rules, ok := groupMap["rules"].([]interface{})
+			if !ok {
+				continue
+			}
+
+			allRules = append(allRules, rules...)
+			// Store the rule item for later update
+			allRuleItems = append(allRuleItems, ruleItem)
+		}
 	}
 
-	// Navigate to the rules section
-	spec, ok := ruleItem["spec"].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to find spec in PrometheusRule")
-	}
-
-	groups, ok := spec["groups"].([]interface{})
-	if !ok || len(groups) == 0 {
-		return fmt.Errorf("no groups found in PrometheusRule")
-	}
-
-	group, ok := groups[0].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to parse group")
-	}
-
-	rules, ok := group["rules"].([]interface{})
-	if !ok {
-		return fmt.Errorf("no rules found in group")
+	if len(allRules) == 0 {
+		return fmt.Errorf("no rules found in any PrometheusRule")
 	}
 
 	// Default values for configurable rules
@@ -1665,9 +1699,35 @@ func resetPrometheusRules(ctx context.Context) error {
 		"PodCrashLooping":           "2m",
 	}
 
-	// Reset configurable rules to default values
+	// Track which configurable rules exist and which are missing
+	existingRules := make(map[string]bool)
+	missingRules := make([]string, 0)
+
+	// Check which configurable rules exist
+	for _, rule := range allRules {
+		ruleMap, ok := rule.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		if alertName, exists := ruleMap["alert"]; exists {
+			ruleName := alertName.(string)
+			if _, isConfigurable := defaultValues[ruleName]; isConfigurable {
+				existingRules[ruleName] = true
+			}
+		}
+	}
+
+	// Find missing configurable rules
+	for ruleName := range defaultValues {
+		if !existingRules[ruleName] {
+			missingRules = append(missingRules, ruleName)
+		}
+	}
+
+	// Reset existing configurable rules to default values
 	rulesReset := 0
-	for _, rule := range rules {
+	for _, rule := range allRules {
 		ruleMap, ok := rule.(map[string]interface{})
 		if !ok {
 			continue
@@ -1690,6 +1750,35 @@ func resetPrometheusRules(ctx context.Context) error {
 
 				fmt.Printf("✅ Reset rule '%s' to default value '%s'\n", ruleName, defaultValue)
 				rulesReset++
+			}
+		}
+	}
+
+	// Re-enable missing configurable rules
+	for _, ruleName := range missingRules {
+		defaultValue := defaultValues[ruleName]
+		fmt.Printf("🔄 Re-enabling disabled rule '%s' with default value '%s'\n", ruleName, defaultValue)
+
+		// Find the first PrometheusRule to add the rule back
+		if len(allRuleItems) > 0 {
+			ruleItem := allRuleItems[0]
+			spec, ok := ruleItem["spec"].(map[string]interface{})
+			if ok {
+				groups, ok := spec["groups"].([]interface{})
+				if ok && len(groups) > 0 {
+					group, ok := groups[0].(map[string]interface{})
+					if ok {
+						rules, ok := group["rules"].([]interface{})
+						if ok {
+							// Create new rule with default value
+							newRule := createRuleWithDefaultValue(ruleName, defaultValue)
+							rules = append(rules, newRule)
+							group["rules"] = rules
+							rulesReset++
+							fmt.Printf("✅ Re-enabled rule '%s' with default value '%s'\n", ruleName, defaultValue)
+						}
+					}
+				}
 			}
 		}
 	}

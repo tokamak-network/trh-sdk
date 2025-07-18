@@ -179,7 +179,7 @@ func Run() {
   trh-sdk alert-config --channel telegram --configure
 
   # Reset all alert rules to default values
-  trh-sdk alert-config --reset`,
+  trh-sdk alert-config --rule reset`,
 				Flags: []cli.Flag{
 					&cli.BoolFlag{
 						Name:     "status",
@@ -205,11 +205,6 @@ func Run() {
 						Usage:    "Configure the specified channel",
 					},
 
-					&cli.BoolFlag{
-						Name:     "reset",
-						Required: false,
-						Usage:    "Reset all alert rules to default values",
-					},
 					&cli.StringFlag{
 						Name:     "rule",
 						Required: false,
