@@ -1,21 +1,14 @@
 package commands
 
 import (
-	"bytes"
-	"compress/gzip"
 	"context"
-	"encoding/base64"
 	"fmt"
-	"io"
-	"os"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
+	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"github.com/urfave/cli/v3"
-	"gopkg.in/yaml.v3"
 )
 
 // ActionAlertConfig handles alert configuration commands
@@ -35,16 +28,16 @@ func ActionAlertConfig() cli.ActionFunc {
 
 		// Handle status command
 		if status {
-			return handleAlertStatus(ctx, cmd, cmd.Args().Slice())
+			return handleAlertStatus(ctx)
 		}
 
 		// Handle channel commands
 		if channel != "" {
 			if disable {
-				return handleChannelDisable(ctx, cmd, channel)
+				return handleChannelDisable(ctx, channel)
 			}
 			if configure {
-				return handleChannelConfigure(ctx, cmd, channel)
+				return handleChannelConfigure(ctx, channel)
 			}
 			// If no operation specified, show help
 			fmt.Println("❌ Please specify an operation: --disable or --configure")
@@ -53,7 +46,7 @@ func ActionAlertConfig() cli.ActionFunc {
 
 		// Handle rule command
 		if rule != "" {
-			return handleRuleCommand(ctx, cmd, rule)
+			return handleRuleCommand(ctx, rule)
 		}
 
 		// Show help if no valid command
@@ -62,24 +55,28 @@ func ActionAlertConfig() cli.ActionFunc {
 }
 
 // handleChannelDisable disables the specified channel
-func handleChannelDisable(ctx context.Context, cmd *cli.Command, channelType string) error {
+func handleChannelDisable(ctx context.Context, channelType string) error {
+	ac := &thanos.AlertCustomization{}
+
 	switch channelType {
 	case "email":
-		return disableEmailChannel(ctx, cmd)
+		return disableEmailChannel(ctx, ac)
 	case "telegram":
-		return disableTelegramChannel(ctx, cmd)
+		return disableTelegramChannel(ctx, ac)
 	default:
 		return fmt.Errorf("unknown channel type: %s (must be 'email' or 'telegram')", channelType)
 	}
 }
 
 // handleChannelConfigure configures the specified channel
-func handleChannelConfigure(ctx context.Context, cmd *cli.Command, channelType string) error {
+func handleChannelConfigure(ctx context.Context, channelType string) error {
+	ac := &thanos.AlertCustomization{}
+
 	switch channelType {
 	case "email":
-		return configureEmailChannel(ctx, cmd)
+		return configureEmailChannel(ctx, ac)
 	case "telegram":
-		return configureTelegramChannel(ctx, cmd)
+		return configureTelegramChannel(ctx, ac)
 	default:
 		return fmt.Errorf("unknown channel type: %s (must be 'email' or 'telegram')", channelType)
 	}
@@ -181,7 +178,9 @@ func showAlertConfigHelp() error {
 }
 
 // handleAlertStatus shows current alert configuration
-func handleAlertStatus(ctx context.Context, cmd *cli.Command, args []string) error {
+func handleAlertStatus(ctx context.Context) error {
+	ac := &thanos.AlertCustomization{}
+
 	// Check monitoring namespace
 	_, err := checkNamespaceExists(ctx, "monitoring")
 	if err != nil {
@@ -189,15 +188,15 @@ func handleAlertStatus(ctx context.Context, cmd *cli.Command, args []string) err
 	}
 
 	// Get AlertManager configuration
-	alertManagerConfig, err := getAlertManagerConfig(ctx)
+	alertManagerConfig, err := ac.GetAlertManagerConfig(ctx)
 	if err != nil {
 		alertManagerConfig = ""
 	}
 
 	fmt.Println("📊 Alert Status Summary:")
 	fmt.Println("========================")
-	fmt.Printf("   📧 Email channel: %s\n", getEmailChannelStatus(alertManagerConfig))
-	fmt.Printf("   📱 Telegram channel: %s\n", getTelegramChannelStatus(alertManagerConfig))
+	fmt.Printf("   📧 Email channel: %s\n", ac.GetChannelStatus(alertManagerConfig, "email"))
+	fmt.Printf("   📱 Telegram channel: %s\n", ac.GetChannelStatus(alertManagerConfig, "telegram"))
 
 	// Display configuration details
 	if alertManagerConfig != "" {
@@ -206,20 +205,20 @@ func handleAlertStatus(ctx context.Context, cmd *cli.Command, args []string) err
 		fmt.Println("================================")
 
 		// Email configuration
-		emailConfig := getEmailConfiguration(alertManagerConfig)
-		if emailConfig.Enabled {
+		emailConfig := ac.GetEmailConfiguration(alertManagerConfig)
+		if enabled, ok := emailConfig["enabled"].(bool); ok && enabled {
 			fmt.Printf("   📧 Email Configuration:\n")
-			fmt.Printf("      SMTP URL: %s\n", emailConfig.SMTPURL)
-			fmt.Printf("      From: %s\n", emailConfig.From)
-			fmt.Printf("      To: %s\n", emailConfig.To)
+			fmt.Printf("      SMTP URL: %s\n", emailConfig["smtp_url"])
+			fmt.Printf("      From: %s\n", emailConfig["from"])
+			fmt.Printf("      To: %s\n", emailConfig["to"])
 		}
 
 		// Telegram configuration
-		telegramConfig := getTelegramConfiguration(alertManagerConfig)
-		if telegramConfig.Enabled {
+		telegramConfig := ac.GetTelegramConfiguration(alertManagerConfig)
+		if enabled, ok := telegramConfig["enabled"].(bool); ok && enabled {
 			fmt.Printf("   📱 Telegram Configuration:\n")
-			fmt.Printf("      Bot Token: %s\n", telegramConfig.BotToken)
-			fmt.Printf("      Chat ID: %s\n", telegramConfig.ChatID)
+			fmt.Printf("      Bot Token: %s\n", telegramConfig["bot_token"])
+			fmt.Printf("      Chat ID: %s\n", telegramConfig["chat_id"])
 		}
 	}
 
@@ -229,57 +228,10 @@ func handleAlertStatus(ctx context.Context, cmd *cli.Command, args []string) err
 	fmt.Println("======================")
 
 	// Get current PrometheusRule
-	ruleOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", "monitoring", "-o", "yaml")
+	allRules, err := ac.GetPrometheusRules(ctx)
 	if err != nil {
 		fmt.Println("⚠️  Could not get current PrometheusRules")
 		return nil
-	}
-
-	// Parse the YAML
-	var ruleList map[string]interface{}
-	if err := yaml.Unmarshal([]byte(ruleOutput), &ruleList); err != nil {
-		fmt.Println("⚠️  Could not parse PrometheusRule YAML")
-		return nil
-	}
-
-	// Navigate to rules - process all PrometheusRule items
-	items, ok := ruleList["items"].([]interface{})
-	if !ok || len(items) == 0 {
-		fmt.Println("⚠️  No PrometheusRule items found")
-		return nil
-	}
-
-	// Collect all rules from all PrometheusRule items
-	var allRules []interface{}
-	for _, item := range items {
-		ruleItem, ok := item.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		spec, ok := ruleItem["spec"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		groups, ok := spec["groups"].([]interface{})
-		if !ok || len(groups) == 0 {
-			continue
-		}
-
-		for _, group := range groups {
-			groupMap, ok := group.(map[string]interface{})
-			if !ok {
-				continue
-			}
-
-			rules, ok := groupMap["rules"].([]interface{})
-			if !ok {
-				continue
-			}
-
-			allRules = append(allRules, rules...)
-		}
 	}
 
 	if len(allRules) == 0 {
@@ -290,10 +242,8 @@ func handleAlertStatus(ctx context.Context, cmd *cli.Command, args []string) err
 	// Count active rules
 	activeRuleCount := 0
 	for _, rule := range allRules {
-		if ruleMap, ok := rule.(map[string]interface{}); ok {
-			if _, exists := ruleMap["alert"]; exists {
-				activeRuleCount++
-			}
+		if _, exists := rule["alert"]; exists {
+			activeRuleCount++
 		}
 	}
 
@@ -329,19 +279,14 @@ func handleAlertStatus(ctx context.Context, cmd *cli.Command, args []string) err
 			var severity string
 
 			for _, rule := range allRules {
-				ruleMap, ok := rule.(map[string]interface{})
-				if !ok {
-					continue
-				}
-
-				if alertName, exists := ruleMap["alert"]; exists && alertName == ruleName {
+				if alertName, exists := rule["alert"]; exists && alertName == ruleName {
 					found = true
 					// Extract current value from expression
-					if expr, ok := ruleMap["expr"].(string); ok {
-						currentValue = extractValueFromExpression(ruleName, expr)
+					if expr, ok := rule["expr"].(string); ok {
+						currentValue = ac.ExtractValueFromExpression(ruleName, expr)
 					}
 					// Extract severity
-					if labels, ok := ruleMap["labels"].(map[string]interface{}); ok {
+					if labels, ok := rule["labels"].(map[string]interface{}); ok {
 						if sev, exists := labels["severity"]; exists {
 							severity = fmt.Sprintf("%v", sev)
 						}
@@ -388,19 +333,21 @@ func handleAlertStatus(ctx context.Context, cmd *cli.Command, args []string) err
 }
 
 // handleRuleCommand handles rule-related commands
-func handleRuleCommand(ctx context.Context, cmd *cli.Command, ruleAction string) error {
+func handleRuleCommand(ctx context.Context, ruleAction string) error {
+	ac := &thanos.AlertCustomization{}
+
 	switch ruleAction {
 	case "reset":
-		return resetAlertRules(ctx, cmd)
+		return resetAlertRules(ctx, ac)
 	case "set":
-		return configureAlertRules(ctx, cmd)
+		return configureAlertRules(ctx, ac)
 	default:
 		return fmt.Errorf("unknown rule action: %s (must be 'reset' or 'set')", ruleAction)
 	}
 }
 
 // configureAlertRules allows users to configure alert rules interactively
-func configureAlertRules(ctx context.Context, cmd *cli.Command) error {
+func configureAlertRules(ctx context.Context, ac *thanos.AlertCustomization) error {
 	fmt.Println("🔧 Alert Rules Configuration")
 	fmt.Println("============================")
 
@@ -456,7 +403,7 @@ func configureAlertRules(ctx context.Context, cmd *cli.Command) error {
 			fmt.Printf("❌ Invalid rule number: %s\n", parts[1])
 			return nil
 		}
-		return enableRule(ctx, ruleName)
+		return enableRule(ctx, ac, ruleName)
 	}
 
 	if strings.HasPrefix(ruleInput, "disable ") {
@@ -470,7 +417,7 @@ func configureAlertRules(ctx context.Context, cmd *cli.Command) error {
 			fmt.Printf("❌ Invalid rule number: %s\n", parts[1])
 			return nil
 		}
-		return disableRule(ctx, ruleName)
+		return disableRule(ctx, ac, ruleName)
 	}
 
 	// Get rule name from number for configuration
@@ -484,21 +431,29 @@ func configureAlertRules(ctx context.Context, cmd *cli.Command) error {
 	// Configure based on rule type
 	switch ruleName {
 	case "OpBatcherBalanceCritical", "OpProposerBalanceCritical":
-		return configureBalanceThreshold(ctx, ruleName)
+		return configureBalanceThreshold(ctx, ac, ruleName)
 	case "BlockProductionStalled":
-		return configureBlockProductionStall(ctx)
+		return configureBlockProductionStall(ctx, ac)
 	case "ContainerCpuUsageHigh", "ContainerMemoryUsageHigh":
-		return configureUsageThreshold(ctx, ruleName)
+		return configureUsageThreshold(ctx, ac, ruleName)
 	case "PodCrashLooping":
-		return configurePodCrashLoop(ctx)
+		return configurePodCrashLoop(ctx, ac)
 	default:
 		fmt.Printf("❌ Unknown rule: %s\n", ruleName)
 		return nil
 	}
 }
 
+// validateRuleInput validates common rule input parameters
+func validateRuleInput(input, inputType string) error {
+	if input == "" {
+		return fmt.Errorf("%s cannot be empty", inputType)
+	}
+	return nil
+}
+
 // configureBalanceThreshold configures balance threshold for batcher/proposer
-func configureBalanceThreshold(ctx context.Context, ruleName string) error {
+func configureBalanceThreshold(ctx context.Context, ac *thanos.AlertCustomization, ruleName string) error {
 	fmt.Printf("💰 Configuring %s balance threshold\n", ruleName)
 	fmt.Println("Enter the minimum ETH balance threshold (e.g., 0.01, 0.1, 1.0):")
 
@@ -509,12 +464,12 @@ func configureBalanceThreshold(ctx context.Context, ruleName string) error {
 	}
 
 	// Validate input
-	if threshold == "" {
-		return fmt.Errorf("balance threshold cannot be empty")
+	if err := validateRuleInput(threshold, "balance threshold"); err != nil {
+		return err
 	}
 
 	fmt.Printf("🔧 Configuring %s with balance threshold '%s' ETH...\n", ruleName, threshold)
-	if err := updatePrometheusRule(ctx, ruleName, threshold); err != nil {
+	if err := ac.UpdatePrometheusRule(ctx, ruleName, threshold); err != nil {
 		return fmt.Errorf("failed to update rule: %w", err)
 	}
 
@@ -523,7 +478,7 @@ func configureBalanceThreshold(ctx context.Context, ruleName string) error {
 }
 
 // configureBlockProductionStall configures block production stall detection
-func configureBlockProductionStall(ctx context.Context) error {
+func configureBlockProductionStall(ctx context.Context, ac *thanos.AlertCustomization) error {
 	fmt.Println("⏱️  Configuring BlockProductionStalled detection time")
 	fmt.Println("Enter the time duration for block production stall detection:")
 	fmt.Println("Examples: 30s, 1m, 2m, 5m")
@@ -535,12 +490,12 @@ func configureBlockProductionStall(ctx context.Context) error {
 	}
 
 	// Validate input
-	if stallTime == "" {
-		return fmt.Errorf("stall detection time cannot be empty")
+	if err := validateRuleInput(stallTime, "stall detection time"); err != nil {
+		return err
 	}
 
 	fmt.Printf("🔧 Configuring BlockProductionStalled with detection time '%s'...\n", stallTime)
-	if err := updatePrometheusRule(ctx, "BlockProductionStalled", stallTime); err != nil {
+	if err := ac.UpdatePrometheusRule(ctx, "BlockProductionStalled", stallTime); err != nil {
 		return fmt.Errorf("failed to update rule: %w", err)
 	}
 
@@ -549,7 +504,7 @@ func configureBlockProductionStall(ctx context.Context) error {
 }
 
 // configureUsageThreshold configures CPU/Memory usage threshold
-func configureUsageThreshold(ctx context.Context, ruleName string) error {
+func configureUsageThreshold(ctx context.Context, ac *thanos.AlertCustomization, ruleName string) error {
 	var resourceType string
 	if ruleName == "ContainerCpuUsageHigh" {
 		resourceType = "CPU"
@@ -567,12 +522,12 @@ func configureUsageThreshold(ctx context.Context, ruleName string) error {
 	}
 
 	// Validate input
-	if threshold == "" {
-		return fmt.Errorf("usage threshold cannot be empty")
+	if err := validateRuleInput(threshold, "usage threshold"); err != nil {
+		return err
 	}
 
 	fmt.Printf("🔧 Configuring %s with usage threshold '%s%%'...\n", ruleName, threshold)
-	if err := updatePrometheusRule(ctx, ruleName, threshold); err != nil {
+	if err := ac.UpdatePrometheusRule(ctx, ruleName, threshold); err != nil {
 		return fmt.Errorf("failed to update rule: %w", err)
 	}
 
@@ -581,7 +536,7 @@ func configureUsageThreshold(ctx context.Context, ruleName string) error {
 }
 
 // configurePodCrashLoop configures pod crash loop detection time
-func configurePodCrashLoop(ctx context.Context) error {
+func configurePodCrashLoop(ctx context.Context, ac *thanos.AlertCustomization) error {
 	fmt.Println("🔄 Configuring PodCrashLooping detection time")
 	fmt.Println("Enter the time duration for pod crash loop detection:")
 	fmt.Println("Examples: 1m, 2m, 5m, 10m")
@@ -593,12 +548,12 @@ func configurePodCrashLoop(ctx context.Context) error {
 	}
 
 	// Validate input
-	if detectionTime == "" {
-		return fmt.Errorf("detection time cannot be empty")
+	if err := validateRuleInput(detectionTime, "detection time"); err != nil {
+		return err
 	}
 
 	fmt.Printf("🔧 Configuring PodCrashLooping with detection time '%s'...\n", detectionTime)
-	if err := updatePrometheusRule(ctx, "PodCrashLooping", detectionTime); err != nil {
+	if err := ac.UpdatePrometheusRule(ctx, "PodCrashLooping", detectionTime); err != nil {
 		return fmt.Errorf("failed to update rule: %w", err)
 	}
 
@@ -606,1242 +561,25 @@ func configurePodCrashLoop(ctx context.Context) error {
 	return nil
 }
 
-func getAlertManagerConfig(ctx context.Context) (string, error) {
-	// Get AlertManager Pod to find the actual secret being used
-	podOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pods", "-n", "monitoring", "-l", "app.kubernetes.io/name=alertmanager", "-o", "jsonpath={.items[0].spec.volumes[?(@.name=='config-volume')].secret.secretName}")
-	if err != nil {
-		return "", fmt.Errorf("failed to get AlertManager pod secret name: %w", err)
-	}
-
-	secretName := strings.TrimSpace(podOutput)
-	if secretName == "" {
-		return "", fmt.Errorf("could not find AlertManager config secret")
-	}
-
-	// Get the compressed config from the actual secret
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "secret", "-n", "monitoring", secretName, "-o", "jsonpath={.data.alertmanager\\.yaml\\.gz}")
-	if err != nil {
-		return "", fmt.Errorf("failed to get AlertManager config from secret %s: %w", secretName, err)
-	}
-
-	// Remove single quotes and spaces
-	output = strings.Trim(output, "' \n\t\r")
-	decodedBytes, err := base64.StdEncoding.DecodeString(output)
-	if err != nil {
-		return "", fmt.Errorf("failed to decode AlertManager config: %w", err)
-	}
-
-	// Decompress using gzip
-	reader := bytes.NewReader(decodedBytes)
-	gzReader, err := gzip.NewReader(reader)
-	if err != nil {
-		return "", fmt.Errorf("failed to create gzip reader: %w", err)
-	}
-	defer gzReader.Close()
-
-	configBytes, err := io.ReadAll(gzReader)
-	if err != nil {
-		return "", fmt.Errorf("failed to read decompressed config: %w", err)
-	}
-
-	return string(configBytes), nil
-}
-
-func getEmailChannelStatus(config string) string {
-	var amConfig map[string]interface{}
-	if err := yaml.Unmarshal([]byte(config), &amConfig); err != nil {
-		return "Unknown"
-	}
-
-	receivers, ok := amConfig["receivers"].([]interface{})
-	if !ok {
-		return "Disabled"
-	}
-
-	for _, r := range receivers {
-		receiver, ok := r.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if _, exists := receiver["email_configs"]; exists {
-			return "Enabled"
-		}
-	}
-	return "Disabled"
-}
-
-func getTelegramChannelStatus(config string) string {
-	var amConfig map[string]interface{}
-	if err := yaml.Unmarshal([]byte(config), &amConfig); err != nil {
-		return "Unknown"
-	}
-
-	receivers, ok := amConfig["receivers"].([]interface{})
-	if !ok {
-		return "Disabled"
-	}
-
-	for _, r := range receivers {
-		receiver, ok := r.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if _, exists := receiver["telegram_configs"]; exists {
-			return "Enabled"
-		}
-	}
-	return "Disabled"
-}
-
-// Configuration update functions
-func updateAlertManagerEmailConfig(ctx context.Context, smtpServer, smtpFrom, smtpUsername, smtpPassword string, receivers []string) error {
-	// Get current configuration to preserve existing settings
-	currentConfig, err := getAlertManagerConfig(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get current AlertManager config: %w", err)
-	}
-
-	// Parse current YAML
-	var config map[string]interface{}
-	if err := yaml.Unmarshal([]byte(currentConfig), &config); err != nil {
-		return fmt.Errorf("failed to parse current AlertManager config: %w", err)
-	}
-
-	// Update global SMTP settings
-	global, ok := config["global"].(map[string]interface{})
-	if !ok {
-		global = make(map[string]interface{})
-		config["global"] = global
-	}
-	global["smtp_smarthost"] = smtpServer
-	global["smtp_from"] = smtpFrom
-	global["smtp_auth_username"] = smtpUsername
-	global["smtp_auth_password"] = smtpPassword
-
-	// Find or create the main receiver
-	receiversList, ok := config["receivers"].([]interface{})
-	if !ok {
-		receiversList = []interface{}{}
-	}
-
-	// Find the telegram-critical receiver or create it
-	var mainReceiver map[string]interface{}
-	for _, r := range receiversList {
-		receiver, ok := r.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if name, exists := receiver["name"]; exists && name == "telegram-critical" {
-			mainReceiver = receiver
-			break
-		}
-	}
-
-	if mainReceiver == nil {
-		mainReceiver = map[string]interface{}{
-			"name": "telegram-critical",
-		}
-		receiversList = append(receiversList, mainReceiver)
-	}
-
-	// Add email_configs to the receiver
-	emailConfigs := []interface{}{}
-	for _, receiver := range receivers {
-		emailConfig := map[string]interface{}{
-			"to": receiver,
-			"headers": map[string]interface{}{
-				"subject": "🚨 Critical Alert - {{ .GroupLabels.chain_name }}",
-			},
-			"html": `<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .alert { border-left: 4px solid #dc3545; padding: 10px; margin: 10px 0; background-color: #f8f9fa; }
-        .header { color: #dc3545; font-weight: bold; margin-bottom: 15px; }
-        .info { margin: 5px 0; }
-        .timestamp { color: #6c757d; font-size: 12px; margin-top: 10px; }
-        .dashboard { margin-top: 15px; }
-        a { color: #007bff; text-decoration: none; }
-        a:hover { text-decoration: underline; }
-    </style>
-</head>
-<body>
-    <div class="alert">
-        <div class="header">🚨 Critical Alert - {{ .GroupLabels.chain_name }}</div>
-        <div class="info"><strong>Alert Name:</strong> {{ .GroupLabels.alertname }}</div>
-        <div class="info"><strong>Severity:</strong> {{ .GroupLabels.severity }}</div>
-        <div class="info"><strong>Component:</strong> {{ .GroupLabels.component }}</div>
-        <div class="info" style="margin-top: 15px;"><strong>Summary:</strong></div>
-        <div class="info">{{ .CommonAnnotations.summary }}</div>
-        <div class="info" style="margin-top: 10px;"><strong>Description:</strong></div>
-        <div class="info">{{ .CommonAnnotations.description }}</div>
-        <div class="timestamp">⏰ Alert Time: {{ range .Alerts }}{{ .StartsAt }}{{ end }}</div>
-        <div class="dashboard">
-            <strong>Dashboard:</strong> <a href="http://k8s-thanosmonitoring-b253b70d4a-1790924322.ap-northeast-2.elb.amazonaws.com/d/thanos-stack-app-v9/thanos-stack-application-monitoring-dashboard?orgId=1&refresh=30s">View Details</a>
-        </div>
-    </div>
-</body>
-</html>`,
-		}
-		emailConfigs = append(emailConfigs, emailConfig)
-	}
-
-	mainReceiver["email_configs"] = emailConfigs
-	config["receivers"] = receiversList
-
-	// Convert back to YAML
-	newConfigBytes, err := yaml.Marshal(config)
-	if err != nil {
-		return fmt.Errorf("failed to marshal updated config: %w", err)
-	}
-
-	// Get the actual secret name that AlertManager Pod uses
-	podOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pods", "-n", "monitoring", "-l", "app.kubernetes.io/name=alertmanager", "-o", "jsonpath={.items[0].spec.volumes[?(@.name=='config-volume')].secret.secretName}")
-	if err != nil {
-		return fmt.Errorf("failed to get AlertManager pod secret name: %w", err)
-	}
-
-	secretName := strings.TrimSpace(podOutput)
-	if secretName == "" {
-		return fmt.Errorf("could not find AlertManager config secret")
-	}
-
-	fmt.Printf("🔧 Updating secret: %s\n", secretName)
-
-	// Compress the new configuration
-	var buf bytes.Buffer
-	gzWriter := gzip.NewWriter(&buf)
-	if _, err := gzWriter.Write(newConfigBytes); err != nil {
-		return fmt.Errorf("failed to compress config: %w", err)
-	}
-	gzWriter.Close()
-
-	// Base64 encode the compressed config
-	compressedConfig := base64.StdEncoding.EncodeToString(buf.Bytes())
-
-	// Patch the secret with the new compressed configuration
-	patchData := fmt.Sprintf(`{"data":{"alertmanager.yaml.gz":"%s"}}`, compressedConfig)
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "patch", "secret", secretName, "-n", "monitoring", "--type=merge", "-p", patchData); err != nil {
-		return fmt.Errorf("failed to patch AlertManager secret: %w", err)
-	}
-
-	// AlertManager should automatically reload configuration when secret is updated
-	fmt.Println("✅ AlertManager configuration updated successfully")
-	fmt.Println("💡 AlertManager will automatically reload the configuration")
-
-	// Optional: Wait a moment for configuration to be applied
-	fmt.Println("⏳ Waiting for configuration to be applied...")
-	time.Sleep(5 * time.Second)
-
-	return nil
-}
-
-// Configuration removal functions
-func removeEmailConfigFromAlertManager(ctx context.Context) error {
-	// Get current configuration from the actual AlertManager secret
-	currentConfig, err := getAlertManagerConfig(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get current AlertManager config: %w", err)
-	}
-
-	// Parse YAML to remove email_configs
-	var config map[string]interface{}
-	if err := yaml.Unmarshal([]byte(currentConfig), &config); err != nil {
-		return fmt.Errorf("failed to parse AlertManager config: %w", err)
-	}
-
-	// Find and remove email_configs from receivers
-	receivers, ok := config["receivers"].([]interface{})
-	if !ok {
-		return fmt.Errorf("receivers not found in config")
-	}
-
-	for i, receiver := range receivers {
-		receiverMap, ok := receiver.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		// Remove email_configs from this receiver
-		if _, exists := receiverMap["email_configs"]; exists {
-			delete(receiverMap, "email_configs")
-			receivers[i] = receiverMap
-			fmt.Println("✅ Removed email_configs from receiver")
-		}
-	}
-
-	// Convert back to YAML
-	newConfigBytes, err := yaml.Marshal(config)
-	if err != nil {
-		return fmt.Errorf("failed to marshal updated config: %w", err)
-	}
-
-	// Get the actual secret name that AlertManager Pod uses
-	podOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pods", "-n", "monitoring", "-l", "app.kubernetes.io/name=alertmanager", "-o", "jsonpath={.items[0].spec.volumes[?(@.name=='config-volume')].secret.secretName}")
-	if err != nil {
-		return fmt.Errorf("failed to get AlertManager pod secret name: %w", err)
-	}
-
-	secretName := strings.TrimSpace(podOutput)
-	if secretName == "" {
-		return fmt.Errorf("could not find AlertManager config secret")
-	}
-
-	fmt.Printf("🔧 Updating secret: %s\n", secretName)
-
-	// Compress the new configuration
-	var buf bytes.Buffer
-	gzWriter := gzip.NewWriter(&buf)
-	if _, err := gzWriter.Write(newConfigBytes); err != nil {
-		return fmt.Errorf("failed to compress config: %w", err)
-	}
-	gzWriter.Close()
-
-	// Base64 encode the compressed config
-	compressedConfig := base64.StdEncoding.EncodeToString(buf.Bytes())
-
-	// Patch the secret with the new compressed configuration
-	patchData := fmt.Sprintf(`{"data":{"alertmanager.yaml.gz":"%s"}}`, compressedConfig)
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "patch", "secret", secretName, "-n", "monitoring", "--type=merge", "-p", patchData); err != nil {
-		return fmt.Errorf("failed to patch AlertManager secret: %w", err)
-	}
-
-	// AlertManager should automatically reload configuration when secret is updated
-	fmt.Println("✅ AlertManager configuration updated successfully")
-	fmt.Println("💡 AlertManager will automatically reload the configuration")
-
-	// Optional: Wait a moment for configuration to be applied
-	fmt.Println("⏳ Waiting for configuration to be applied...")
-	time.Sleep(5 * time.Second)
-
-	return nil
-}
-
-func removeTelegramConfigFromAlertManager(ctx context.Context) error {
-	// Get current configuration from the actual AlertManager secret
-	currentConfig, err := getAlertManagerConfig(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get current AlertManager config: %w", err)
-	}
-
-	// Parse YAML to remove telegram_configs
-	var config map[string]interface{}
-	if err := yaml.Unmarshal([]byte(currentConfig), &config); err != nil {
-		return fmt.Errorf("failed to parse AlertManager config: %w", err)
-	}
-
-	// Find and remove telegram_configs from receivers
-	receivers, ok := config["receivers"].([]interface{})
-	if !ok {
-		return fmt.Errorf("receivers not found in config")
-	}
-
-	for i, receiver := range receivers {
-		receiverMap, ok := receiver.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		// Remove telegram_configs from this receiver
-		if _, exists := receiverMap["telegram_configs"]; exists {
-			delete(receiverMap, "telegram_configs")
-			receivers[i] = receiverMap
-			fmt.Println("✅ Removed telegram_configs from receiver")
-		}
-	}
-
-	// Convert back to YAML
-	newConfigBytes, err := yaml.Marshal(config)
-	if err != nil {
-		return fmt.Errorf("failed to marshal updated config: %w", err)
-	}
-
-	// Get the actual secret name that AlertManager Pod uses
-	podOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pods", "-n", "monitoring", "-l", "app.kubernetes.io/name=alertmanager", "-o", "jsonpath={.items[0].spec.volumes[?(@.name=='config-volume')].secret.secretName}")
-	if err != nil {
-		return fmt.Errorf("failed to get AlertManager pod secret name: %w", err)
-	}
-
-	secretName := strings.TrimSpace(podOutput)
-	if secretName == "" {
-		return fmt.Errorf("could not find AlertManager config secret")
-	}
-
-	fmt.Printf("🔧 Updating secret: %s\n", secretName)
-
-	// Compress the new configuration
-	var buf bytes.Buffer
-	gzWriter := gzip.NewWriter(&buf)
-	if _, err := gzWriter.Write(newConfigBytes); err != nil {
-		return fmt.Errorf("failed to compress config: %w", err)
-	}
-	gzWriter.Close()
-
-	// Base64 encode the compressed config
-	compressedConfig := base64.StdEncoding.EncodeToString(buf.Bytes())
-
-	// Patch the secret with the new compressed configuration
-	patchData := fmt.Sprintf(`{"data":{"alertmanager.yaml.gz":"%s"}}`, compressedConfig)
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "patch", "secret", secretName, "-n", "monitoring", "--type=merge", "-p", patchData); err != nil {
-		return fmt.Errorf("failed to patch AlertManager secret: %w", err)
-	}
-
-	// AlertManager should automatically reload configuration when secret is updated
-	fmt.Println("✅ AlertManager configuration updated successfully")
-	fmt.Println("💡 AlertManager will automatically reload the configuration")
-
-	// Optional: Wait a moment for configuration to be applied
-	fmt.Println("⏳ Waiting for configuration to be applied...")
-	time.Sleep(5 * time.Second)
-
-	return nil
-}
-
-func updateAlertManagerTelegramConfig(ctx context.Context, botToken, chatID string) error {
-	// Get current configuration to preserve existing settings
-	currentConfig, err := getAlertManagerConfig(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get current AlertManager config: %w", err)
-	}
-
-	// Parse current YAML
-	var config map[string]interface{}
-	if err := yaml.Unmarshal([]byte(currentConfig), &config); err != nil {
-		return fmt.Errorf("failed to parse current AlertManager config: %w", err)
-	}
-
-	// Find or create the main receiver
-	receiversList, ok := config["receivers"].([]interface{})
-	if !ok {
-		receiversList = []interface{}{}
-	}
-
-	// Find the telegram-critical receiver or create it
-	var mainReceiver map[string]interface{}
-	for _, r := range receiversList {
-		receiver, ok := r.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if name, exists := receiver["name"]; exists && name == "telegram-critical" {
-			mainReceiver = receiver
-			break
-		}
-	}
-
-	if mainReceiver == nil {
-		mainReceiver = map[string]interface{}{
-			"name": "telegram-critical",
-		}
-		receiversList = append(receiversList, mainReceiver)
-	}
-
-	// Add telegram_configs to the receiver
-	// Convert chat_id to int64 for Prometheus Operator compatibility
-	chatIdInt, err := strconv.ParseInt(chatID, 10, 64)
-	if err != nil {
-		return fmt.Errorf("invalid chat_id format: %s", chatID)
-	}
-
-	telegramConfigs := []interface{}{
-		map[string]interface{}{
-			"bot_token":  botToken,
-			"chat_id":    chatIdInt,
-			"parse_mode": "Markdown",
-			"message": `🚨 *Critical Alert - {{ .GroupLabels.chain_name }}*
-
-**Alert Name:** {{ .GroupLabels.alertname }}
-**Severity:** {{ .GroupLabels.severity }}
-**Component:** {{ .GroupLabels.component }}
-
-**Summary:** {{ .CommonAnnotations.summary }}
-**Description:** {{ .CommonAnnotations.description }}
-
-⏰ Alert Time: {{ range .Alerts }}{{ .StartsAt }}{{ end }}`,
-		},
-	}
-
-	mainReceiver["telegram_configs"] = telegramConfigs
-	config["receivers"] = receiversList
-
-	// Convert back to YAML
-	newConfigBytes, err := yaml.Marshal(config)
-	if err != nil {
-		return fmt.Errorf("failed to marshal updated config: %w", err)
-	}
-
-	// Get the actual secret name that AlertManager Pod uses
-	podOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pods", "-n", "monitoring", "-l", "app.kubernetes.io/name=alertmanager", "-o", "jsonpath={.items[0].spec.volumes[?(@.name=='config-volume')].secret.secretName}")
-	if err != nil {
-		return fmt.Errorf("failed to get AlertManager pod secret name: %w", err)
-	}
-
-	secretName := strings.TrimSpace(podOutput)
-	if secretName == "" {
-		return fmt.Errorf("could not find AlertManager config secret")
-	}
-
-	fmt.Printf("🔧 Updating secret: %s\n", secretName)
-
-	// Compress the new configuration
-	var buf bytes.Buffer
-	gzWriter := gzip.NewWriter(&buf)
-	if _, err := gzWriter.Write(newConfigBytes); err != nil {
-		return fmt.Errorf("failed to compress config: %w", err)
-	}
-	gzWriter.Close()
-
-	// Base64 encode the compressed config
-	compressedConfig := base64.StdEncoding.EncodeToString(buf.Bytes())
-
-	// Patch the secret with the new compressed configuration
-	patchData := fmt.Sprintf(`{"data":{"alertmanager.yaml.gz":"%s"}}`, compressedConfig)
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "patch", "secret", secretName, "-n", "monitoring", "--type=merge", "-p", patchData); err != nil {
-		return fmt.Errorf("failed to patch AlertManager secret: %w", err)
-	}
-
-	// AlertManager should automatically reload configuration when secret is updated
-	fmt.Println("✅ AlertManager configuration updated successfully")
-	fmt.Println("💡 AlertManager will automatically reload the configuration")
-
-	// Optional: Wait a moment for configuration to be applied
-	fmt.Println("⏳ Waiting for configuration to be applied...")
-	time.Sleep(5 * time.Second)
-
-	return nil
-}
-
-func updatePrometheusRule(ctx context.Context, ruleName, newValue string) error {
-	// Validate rule name (only configurable rules)
-	validRules := map[string]string{
-		"OpBatcherBalanceCritical":  "OP Batcher balance threshold",
-		"OpProposerBalanceCritical": "OP Proposer balance threshold",
-		"BlockProductionStalled":    "Block production stall detection",
-		"ContainerCpuUsageHigh":     "Container CPU usage threshold",
-		"ContainerMemoryUsageHigh":  "Container memory usage threshold",
-		"PodCrashLooping":           "Pod crash loop detection",
-	}
-
-	if _, valid := validRules[ruleName]; !valid {
-		return fmt.Errorf("unknown rule: %s (valid rules: %v)", ruleName, getKeys(validRules))
-	}
-
-	fmt.Printf("🔧 Updating rule '%s' to value '%s'\n", ruleName, newValue)
-	fmt.Printf("📋 Rule description: %s\n", validRules[ruleName])
-
-	// Get current PrometheusRule
-	ruleOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", "monitoring", "-o", "yaml")
-	if err != nil {
-		return fmt.Errorf("failed to get PrometheusRules: %w", err)
-	}
-
-	// Parse the YAML
-	var ruleList map[string]interface{}
-	if err := yaml.Unmarshal([]byte(ruleOutput), &ruleList); err != nil {
-		return fmt.Errorf("failed to parse PrometheusRule YAML: %w", err)
-	}
-
-	// Find the first PrometheusRule item
-	items, ok := ruleList["items"].([]interface{})
-	if !ok || len(items) == 0 {
-		return fmt.Errorf("no PrometheusRule items found")
-	}
-
-	ruleItem, ok := items[0].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to parse PrometheusRule item")
-	}
-
-	// Navigate to the rules section
-	spec, ok := ruleItem["spec"].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to find spec in PrometheusRule")
-	}
-
-	groups, ok := spec["groups"].([]interface{})
-	if !ok || len(groups) == 0 {
-		return fmt.Errorf("no groups found in PrometheusRule")
-	}
-
-	group, ok := groups[0].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to parse group")
-	}
-
-	rules, ok := group["rules"].([]interface{})
-	if !ok {
-		return fmt.Errorf("no rules found in group")
-	}
-
-	// Find and update the specific rule
-	ruleFound := false
-	for i, rule := range rules {
-		ruleMap, ok := rule.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		if alertName, exists := ruleMap["alert"]; exists && alertName == ruleName {
-			// Update the rule based on its type
-			if err := updateRuleExpression(ruleMap, ruleName, newValue); err != nil {
-				return fmt.Errorf("failed to update rule expression: %w", err)
-			}
-
-			// Update annotations if needed
-			if err := updateRuleAnnotations(ruleMap, ruleName, newValue); err != nil {
-				return fmt.Errorf("failed to update rule annotations: %w", err)
-			}
-
-			ruleFound = true
-			fmt.Printf("✅ Found and updated rule '%s' at index %d\n", ruleName, i)
-			break
-		}
-	}
-
-	if !ruleFound {
-		return fmt.Errorf("rule '%s' not found in PrometheusRule", ruleName)
-	}
-
-	// Convert back to YAML
-	updatedYAML, err := yaml.Marshal(ruleList)
-	if err != nil {
-		return fmt.Errorf("failed to marshal updated YAML: %w", err)
-	}
-
-	// Write updated YAML to temporary file
-	tempFile := fmt.Sprintf("/tmp/prometheusrule-updated-%d.yaml", time.Now().Unix())
-	if err := os.WriteFile(tempFile, updatedYAML, 0644); err != nil {
-		return fmt.Errorf("failed to write temporary file: %w", err)
-	}
-	defer os.Remove(tempFile)
-
-	// Apply the updated PrometheusRule
-	fmt.Println("📝 Applying updated PrometheusRule...")
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile); err != nil {
-		return fmt.Errorf("failed to apply updated PrometheusRule: %w", err)
-	}
-
-	fmt.Printf("✅ Rule '%s' successfully updated to value '%s'\n", ruleName, newValue)
-	return nil
-}
-
-// updateRuleExpression updates the expression of a specific rule
-func updateRuleExpression(ruleMap map[string]interface{}, ruleName, newValue string) error {
-	_, ok := ruleMap["expr"].(string)
-	if !ok {
-		return fmt.Errorf("failed to get expression for rule %s", ruleName)
-	}
-
-	// Update expression based on rule type
-	switch ruleName {
-	case "OpBatcherBalanceCritical":
-		// Update the threshold in the expression
-		ruleMap["expr"] = fmt.Sprintf("op_batcher_default_balance < %s", newValue)
-	case "OpProposerBalanceCritical":
-		// Update the threshold in the expression
-		ruleMap["expr"] = fmt.Sprintf("op_proposer_default_balance < %s", newValue)
-	case "BlockProductionStalled":
-		// Update the time duration in the expression
-		ruleMap["expr"] = fmt.Sprintf("increase(chain_head_block[%s]) == 0", newValue)
-	case "ContainerCpuUsageHigh":
-		// Update the CPU usage threshold
-		ruleMap["expr"] = fmt.Sprintf("(sum(rate(container_cpu_usage_seconds_total[5m])) by (pod) / sum(container_spec_cpu_quota/container_spec_cpu_period) by (pod)) * 100 > %s", newValue)
-	case "ContainerMemoryUsageHigh":
-		// Update the memory usage threshold
-		ruleMap["expr"] = fmt.Sprintf("(sum(container_memory_working_set_bytes) by (pod) / sum(container_spec_memory_limit_bytes) by (pod)) * 100 > %s", newValue)
-	case "PodCrashLooping":
-		// Update the restart detection time
-		ruleMap["expr"] = fmt.Sprintf("rate(kube_pod_container_status_restarts_total[%s]) > 0", newValue)
-	default:
-		return fmt.Errorf("unsupported rule type: %s", ruleName)
-	}
-
-	return nil
-}
-
-// updateRuleAnnotations updates the annotations of a specific rule
-func updateRuleAnnotations(ruleMap map[string]interface{}, ruleName, newValue string) error {
-	annotations, ok := ruleMap["annotations"].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to get annotations for rule %s", ruleName)
-	}
-
-	// Update description based on rule type
-	switch ruleName {
-	case "OpBatcherBalanceCritical":
-		annotations["description"] = fmt.Sprintf("OP Batcher balance is {{ $value }} ETH, below %s ETH threshold", newValue)
-	case "OpProposerBalanceCritical":
-		annotations["description"] = fmt.Sprintf("OP Proposer balance is {{ $value }} ETH, below %s ETH threshold", newValue)
-	case "BlockProductionStalled":
-		annotations["description"] = fmt.Sprintf("No new blocks have been produced for more than %s", newValue)
-	case "ContainerCpuUsageHigh":
-		annotations["description"] = fmt.Sprintf("Pod {{ $labels.pod }} CPU usage has been above %s%% for more than 2 minutes", newValue)
-	case "ContainerMemoryUsageHigh":
-		annotations["description"] = fmt.Sprintf("Pod {{ $labels.pod }} memory usage has been above %s%% for more than 2 minutes", newValue)
-	case "PodCrashLooping":
-		annotations["description"] = fmt.Sprintf("Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has been restarting frequently for more than %s", newValue)
-	}
-
-	return nil
-}
-
-// enableRule enables a specific rule by adding it back to PrometheusRule
-func enableRule(ctx context.Context, ruleName string) error {
-	fmt.Printf("🟢 Enabling rule '%s'...\n", ruleName)
-
-	// Get current PrometheusRule
-	ruleOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", "monitoring", "-o", "yaml")
-	if err != nil {
-		return fmt.Errorf("failed to get PrometheusRules: %w", err)
-	}
-
-	// Parse the YAML
-	var ruleList map[string]interface{}
-	if err := yaml.Unmarshal([]byte(ruleOutput), &ruleList); err != nil {
-		return fmt.Errorf("failed to parse PrometheusRule YAML: %w", err)
-	}
-
-	// Navigate to rules
-	items, ok := ruleList["items"].([]interface{})
-	if !ok || len(items) == 0 {
-		return fmt.Errorf("no PrometheusRule items found")
-	}
-
-	ruleItem, ok := items[0].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to parse PrometheusRule item")
-	}
-
-	spec, ok := ruleItem["spec"].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to find spec in PrometheusRule")
-	}
-
-	groups, ok := spec["groups"].([]interface{})
-	if !ok || len(groups) == 0 {
-		return fmt.Errorf("no groups found in PrometheusRule")
-	}
-
-	group, ok := groups[0].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to parse group")
-	}
-
-	rules, ok := group["rules"].([]interface{})
-	if !ok {
-		return fmt.Errorf("no rules found in group")
-	}
-
-	// Check if rule already exists
-	for _, rule := range rules {
-		ruleMap, ok := rule.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		if alertName, exists := ruleMap["alert"]; exists && alertName == ruleName {
-			fmt.Printf("ℹ️  Rule '%s' is already enabled\n", ruleName)
-			return nil
-		}
-	}
-
-	// Default values for rules
-	defaultValues := map[string]string{
-		"OpBatcherBalanceCritical":  "0.01",
-		"OpProposerBalanceCritical": "0.01",
-		"BlockProductionStalled":    "1m",
-		"ContainerCpuUsageHigh":     "80",
-		"ContainerMemoryUsageHigh":  "80",
-		"PodCrashLooping":           "2m",
-	}
-
-	// Create new rule with default value
-	defaultValue := defaultValues[ruleName]
-	newRule := createRuleWithDefaultValue(ruleName, defaultValue)
-
-	// Add the rule to the rules list
-	rules = append(rules, newRule)
-	group["rules"] = rules
-
-	// Convert back to YAML
-	updatedYAML, err := yaml.Marshal(ruleList)
-	if err != nil {
-		return fmt.Errorf("failed to marshal updated YAML: %w", err)
-	}
-
-	// Write updated YAML to temporary file
-	tempFile := fmt.Sprintf("/tmp/prometheusrule-enable-%d.yaml", time.Now().Unix())
-	if err := os.WriteFile(tempFile, updatedYAML, 0644); err != nil {
-		return fmt.Errorf("failed to write temporary file: %w", err)
-	}
-	defer os.Remove(tempFile)
-
-	// Apply the updated PrometheusRule
-	fmt.Println("📝 Applying updated PrometheusRule...")
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile); err != nil {
-		return fmt.Errorf("failed to apply updated PrometheusRule: %w", err)
-	}
-
-	fmt.Printf("✅ Rule '%s' enabled successfully with default value '%s'\n", ruleName, defaultValue)
-	return nil
-}
-
-// disableRule disables a specific rule by removing it from PrometheusRule
-func disableRule(ctx context.Context, ruleName string) error {
-	fmt.Printf("🔴 Disabling rule '%s'...\n", ruleName)
-
-	// Get current PrometheusRule
-	ruleOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", "monitoring", "-o", "yaml")
-	if err != nil {
-		return fmt.Errorf("failed to get PrometheusRules: %w", err)
-	}
-
-	// Parse the YAML
-	var ruleList map[string]interface{}
-	if err := yaml.Unmarshal([]byte(ruleOutput), &ruleList); err != nil {
-		return fmt.Errorf("failed to parse PrometheusRule YAML: %w", err)
-	}
-
-	// Navigate to rules
-	items, ok := ruleList["items"].([]interface{})
-	if !ok || len(items) == 0 {
-		return fmt.Errorf("no PrometheusRule items found")
-	}
-
-	ruleItem, ok := items[0].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to parse PrometheusRule item")
-	}
-
-	spec, ok := ruleItem["spec"].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to find spec in PrometheusRule")
-	}
-
-	groups, ok := spec["groups"].([]interface{})
-	if !ok || len(groups) == 0 {
-		return fmt.Errorf("no groups found in PrometheusRule")
-	}
-
-	group, ok := groups[0].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to parse group")
-	}
-
-	rules, ok := group["rules"].([]interface{})
-	if !ok {
-		return fmt.Errorf("no rules found in group")
-	}
-
-	// Find and remove the rule
-	ruleFound := false
-	var updatedRules []interface{}
-
-	for _, rule := range rules {
-		ruleMap, ok := rule.(map[string]interface{})
-		if !ok {
-			updatedRules = append(updatedRules, rule)
-			continue
-		}
-
-		if alertName, exists := ruleMap["alert"]; exists && alertName == ruleName {
-			ruleFound = true
-			fmt.Printf("✅ Found and removing rule '%s'\n", ruleName)
-		} else {
-			updatedRules = append(updatedRules, rule)
-		}
-	}
-
-	if !ruleFound {
-		fmt.Printf("ℹ️  Rule '%s' is already disabled or not found\n", ruleName)
-		return nil
-	}
-
-	// Update the rules list
-	group["rules"] = updatedRules
-
-	// Convert back to YAML
-	updatedYAML, err := yaml.Marshal(ruleList)
-	if err != nil {
-		return fmt.Errorf("failed to marshal updated YAML: %w", err)
-	}
-
-	// Write updated YAML to temporary file
-	tempFile := fmt.Sprintf("/tmp/prometheusrule-disable-%d.yaml", time.Now().Unix())
-	if err := os.WriteFile(tempFile, updatedYAML, 0644); err != nil {
-		return fmt.Errorf("failed to write temporary file: %w", err)
-	}
-	defer os.Remove(tempFile)
-
-	// Apply the updated PrometheusRule
-	fmt.Println("📝 Applying updated PrometheusRule...")
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile); err != nil {
-		return fmt.Errorf("failed to apply updated PrometheusRule: %w", err)
-	}
-
-	fmt.Printf("✅ Rule '%s' disabled successfully\n", ruleName)
-	return nil
-}
-
-// extractValueFromExpression extracts the current value from a rule expression
-func extractValueFromExpression(ruleName, expr string) string {
-	switch ruleName {
-	case "OpBatcherBalanceCritical", "OpProposerBalanceCritical":
-		// Extract value from "op_batcher_default_balance < 0.01" or "op_proposer_default_balance < 0.01"
-		if strings.Contains(expr, "<") {
-			parts := strings.Split(expr, "<")
-			if len(parts) == 2 {
-				return strings.TrimSpace(parts[1])
-			}
-		}
-	case "BlockProductionStalled":
-		// Extract time from "increase(chain_head_block[1m]) == 0"
-		if strings.Contains(expr, "[") && strings.Contains(expr, "]") {
-			start := strings.Index(expr, "[") + 1
-			end := strings.Index(expr, "]")
-			if start > 0 && end > start {
-				return expr[start:end]
-			}
-		}
-	case "ContainerCpuUsageHigh", "ContainerMemoryUsageHigh":
-		// Extract percentage from complex expression like "(sum(rate(container_cpu_usage_seconds_total[5m])) by (pod) / sum(container_spec_cpu_quota/container_spec_cpu_period) by (pod)) * 100 > 80"
-		if strings.Contains(expr, ">") {
-			// Find the last ">" which should be the threshold comparison
-			lastGreaterIndex := strings.LastIndex(expr, ">")
-			if lastGreaterIndex != -1 {
-				thresholdPart := strings.TrimSpace(expr[lastGreaterIndex+1:])
-				// Remove any trailing parts that might be after the number
-				if strings.Contains(thresholdPart, " ") {
-					thresholdPart = strings.Split(thresholdPart, " ")[0]
-				}
-				return thresholdPart
-			}
-		}
-	case "PodCrashLooping":
-		// Extract time from "rate(kube_pod_container_status_restarts_total[2m]) > 0"
-		if strings.Contains(expr, "[") && strings.Contains(expr, "]") {
-			start := strings.Index(expr, "[") + 1
-			end := strings.Index(expr, "]")
-			if start > 0 && end > start {
-				return expr[start:end]
-			}
-		}
-	}
-	return ""
-}
-
-// createRuleWithDefaultValue creates a new rule with default value
-func createRuleWithDefaultValue(ruleName, defaultValue string) map[string]interface{} {
-	rule := map[string]interface{}{
-		"alert": ruleName,
-		"for":   "10s",
-		"labels": map[string]interface{}{
-			"chain_name": "theo0715",
-			"component":  getComponentForRule(ruleName),
-			"namespace":  "monitoring",
-			"severity":   "critical",
-		},
-	}
-
-	// Set expression and annotations based on rule type
-	switch ruleName {
-	case "OpBatcherBalanceCritical":
-		rule["expr"] = fmt.Sprintf("op_batcher_default_balance < %s", defaultValue)
-		rule["annotations"] = map[string]interface{}{
-			"description": fmt.Sprintf("OP Batcher balance is {{ $value }} ETH, below %s ETH threshold", defaultValue),
-			"summary":     "OP Batcher ETH balance critically low",
-		}
-	case "OpProposerBalanceCritical":
-		rule["expr"] = fmt.Sprintf("op_proposer_default_balance < %s", defaultValue)
-		rule["annotations"] = map[string]interface{}{
-			"description": fmt.Sprintf("OP Proposer balance is {{ $value }} ETH, below %s ETH threshold", defaultValue),
-			"summary":     "OP Proposer ETH balance critically low",
-		}
-	case "BlockProductionStalled":
-		rule["expr"] = fmt.Sprintf("increase(chain_head_block[%s]) == 0", defaultValue)
-		rule["annotations"] = map[string]interface{}{
-			"description": fmt.Sprintf("No new blocks have been produced for more than %s", defaultValue),
-			"summary":     "Block production has stalled",
-		}
-		rule["for"] = "1m"
-	case "ContainerCpuUsageHigh":
-		rule["expr"] = fmt.Sprintf("(sum(rate(container_cpu_usage_seconds_total[5m])) by (pod) / sum(container_spec_cpu_quota/container_spec_cpu_period) by (pod)) * 100 > %s", defaultValue)
-		rule["annotations"] = map[string]interface{}{
-			"description": fmt.Sprintf("Pod {{ $labels.pod }} CPU usage has been above %s%% for more than 2 minutes", defaultValue),
-			"summary":     "High CPU usage in Thanos Stack pod",
-		}
-		rule["for"] = "2m"
-	case "ContainerMemoryUsageHigh":
-		rule["expr"] = fmt.Sprintf("(sum(container_memory_working_set_bytes) by (pod) / sum(container_spec_memory_limit_bytes) by (pod)) * 100 > %s", defaultValue)
-		rule["annotations"] = map[string]interface{}{
-			"description": fmt.Sprintf("Pod {{ $labels.pod }} memory usage has been above %s%% for more than 2 minutes", defaultValue),
-			"summary":     "High memory usage in Thanos Stack pod",
-		}
-		rule["for"] = "2m"
-	case "PodCrashLooping":
-		rule["expr"] = fmt.Sprintf("rate(kube_pod_container_status_restarts_total[%s]) > 0", defaultValue)
-		rule["annotations"] = map[string]interface{}{
-			"description": fmt.Sprintf("Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has been restarting frequently for more than %s", defaultValue),
-			"summary":     "Pod is crash looping",
-		}
-		rule["for"] = "2m"
-	}
-
-	return rule
-}
-
-// getComponentForRule returns the component name for a rule
-func getComponentForRule(ruleName string) string {
-	switch ruleName {
-	case "OpBatcherBalanceCritical", "OpProposerBalanceCritical":
-		return "op-batcher"
-	case "BlockProductionStalled":
-		return "op-geth"
-	case "ContainerCpuUsageHigh", "ContainerMemoryUsageHigh", "PodCrashLooping":
-		return "kubernetes"
-	default:
-		return "unknown"
-	}
-}
-
-// getKeys returns the keys of a map as a slice
-func getKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
-}
-
-func resetPrometheusRules(ctx context.Context) error {
-	fmt.Println("🔧 Resetting PrometheusRules to default configuration...")
-
-	// Get current rules first
-	currentRules, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", "monitoring", "-o", "jsonpath={.items[*].metadata.name}")
-	if err == nil && strings.TrimSpace(currentRules) != "" {
-		ruleNames := strings.Split(strings.TrimSpace(currentRules), " ")
-		fmt.Printf("Found %d PrometheusRule(s) to reset:\n", len(ruleNames))
-		for _, ruleName := range ruleNames {
-			if ruleName != "" {
-				fmt.Printf("  - %s\n", ruleName)
-			}
-		}
-	}
-
-	// Get current PrometheusRule
-	ruleOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", "monitoring", "-o", "yaml")
-	if err != nil {
-		return fmt.Errorf("failed to get PrometheusRules: %w", err)
-	}
-
-	// Parse the YAML
-	var ruleList map[string]interface{}
-	if err := yaml.Unmarshal([]byte(ruleOutput), &ruleList); err != nil {
-		return fmt.Errorf("failed to parse PrometheusRule YAML: %w", err)
-	}
-
-	// Process all PrometheusRule items
-	items, ok := ruleList["items"].([]interface{})
-	if !ok || len(items) == 0 {
-		return fmt.Errorf("no PrometheusRule items found")
-	}
-
-	// Collect all rules from all PrometheusRule items
-	var allRules []interface{}
-	var allRuleItems []map[string]interface{}
-
-	for _, item := range items {
-		ruleItem, ok := item.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		spec, ok := ruleItem["spec"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		groups, ok := spec["groups"].([]interface{})
-		if !ok || len(groups) == 0 {
-			continue
-		}
-
-		for _, group := range groups {
-			groupMap, ok := group.(map[string]interface{})
-			if !ok {
-				continue
-			}
-
-			rules, ok := groupMap["rules"].([]interface{})
-			if !ok {
-				continue
-			}
-
-			allRules = append(allRules, rules...)
-			// Store the rule item for later update
-			allRuleItems = append(allRuleItems, ruleItem)
-		}
-	}
-
-	if len(allRules) == 0 {
-		return fmt.Errorf("no rules found in any PrometheusRule")
-	}
-
-	// Default values for configurable rules
-	defaultValues := map[string]string{
-		"OpBatcherBalanceCritical":  "0.01",
-		"OpProposerBalanceCritical": "0.01",
-		"BlockProductionStalled":    "1m",
-		"ContainerCpuUsageHigh":     "80",
-		"ContainerMemoryUsageHigh":  "80",
-		"PodCrashLooping":           "2m",
-	}
-
-	// Track which configurable rules exist and which are missing
-	existingRules := make(map[string]bool)
-	missingRules := make([]string, 0)
-
-	// Check which configurable rules exist
-	for _, rule := range allRules {
-		ruleMap, ok := rule.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		if alertName, exists := ruleMap["alert"]; exists {
-			ruleName := alertName.(string)
-			if _, isConfigurable := defaultValues[ruleName]; isConfigurable {
-				existingRules[ruleName] = true
-			}
-		}
-	}
-
-	// Find missing configurable rules
-	for ruleName := range defaultValues {
-		if !existingRules[ruleName] {
-			missingRules = append(missingRules, ruleName)
-		}
-	}
-
-	// Reset existing configurable rules to default values
-	rulesReset := 0
-	for _, rule := range allRules {
-		ruleMap, ok := rule.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		if alertName, exists := ruleMap["alert"]; exists {
-			ruleName := alertName.(string)
-			if defaultValue, shouldReset := defaultValues[ruleName]; shouldReset {
-				// Update the rule to default value
-				if err := updateRuleExpression(ruleMap, ruleName, defaultValue); err != nil {
-					fmt.Printf("⚠️  Failed to reset rule '%s': %v\n", ruleName, err)
-					continue
-				}
-
-				// Update annotations
-				if err := updateRuleAnnotations(ruleMap, ruleName, defaultValue); err != nil {
-					fmt.Printf("⚠️  Failed to reset annotations for rule '%s': %v\n", ruleName, err)
-					continue
-				}
-
-				fmt.Printf("✅ Reset rule '%s' to default value '%s'\n", ruleName, defaultValue)
-				rulesReset++
-			}
-		}
-	}
-
-	// Re-enable missing configurable rules
-	for _, ruleName := range missingRules {
-		defaultValue := defaultValues[ruleName]
-		fmt.Printf("🔄 Re-enabling disabled rule '%s' with default value '%s'\n", ruleName, defaultValue)
-
-		// Find the first PrometheusRule to add the rule back
-		if len(allRuleItems) > 0 {
-			ruleItem := allRuleItems[0]
-			spec, ok := ruleItem["spec"].(map[string]interface{})
-			if ok {
-				groups, ok := spec["groups"].([]interface{})
-				if ok && len(groups) > 0 {
-					group, ok := groups[0].(map[string]interface{})
-					if ok {
-						rules, ok := group["rules"].([]interface{})
-						if ok {
-							// Create new rule with default value
-							newRule := createRuleWithDefaultValue(ruleName, defaultValue)
-							rules = append(rules, newRule)
-							group["rules"] = rules
-							rulesReset++
-							fmt.Printf("✅ Re-enabled rule '%s' with default value '%s'\n", ruleName, defaultValue)
-						}
-					}
-				}
-			}
-		}
-	}
-
-	if rulesReset == 0 {
-		fmt.Println("ℹ️  No configurable rules found to reset")
-		return nil
-	}
-
-	// Convert back to YAML
-	updatedYAML, err := yaml.Marshal(ruleList)
-	if err != nil {
-		return fmt.Errorf("failed to marshal updated YAML: %w", err)
-	}
-
-	// Write updated YAML to temporary file
-	tempFile := fmt.Sprintf("/tmp/prometheusrule-reset-%d.yaml", time.Now().Unix())
-	if err := os.WriteFile(tempFile, updatedYAML, 0644); err != nil {
-		return fmt.Errorf("failed to write temporary file: %w", err)
-	}
-	defer os.Remove(tempFile)
-
-	// Apply the updated PrometheusRule
-	fmt.Println("📝 Applying reset PrometheusRule...")
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile); err != nil {
-		return fmt.Errorf("failed to apply reset PrometheusRule: %w", err)
-	}
-
-	fmt.Printf("✅ Successfully reset %d rules to default values\n", rulesReset)
-	fmt.Println()
-	fmt.Println("📋 Default values applied:")
-	fmt.Println("   - OpBatcherBalanceCritical: 0.01 ETH threshold")
-	fmt.Println("   - OpProposerBalanceCritical: 0.01 ETH threshold")
-	fmt.Println("   - BlockProductionStalled: 1m stall detection")
-	fmt.Println("   - ContainerCpuUsageHigh: 80% threshold")
-	fmt.Println("   - ContainerMemoryUsageHigh: 80% threshold")
-	fmt.Println("   - PodCrashLooping: 2m restart detection")
-	fmt.Println()
-	fmt.Println("⚠️  Note: Core system alerts (OpNodeDown, OpBatcherDown, OpProposerDown, OpGethDown, L1RpcDown)")
-	fmt.Println("    remain unchanged to ensure system stability.")
-
-	return nil
-}
-
 // Email channel management functions
-func disableEmailChannel(ctx context.Context, cmd *cli.Command) error {
+func disableEmailChannel(ctx context.Context, ac *thanos.AlertCustomization) error {
 	fmt.Println("📧 Disabling Email Channel...")
 
 	// Get current AlertManager configuration
-	config, err := getAlertManagerConfig(ctx)
+	config, err := ac.GetAlertManagerConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get AlertManager config: %w", err)
 	}
 
 	// Check if email is already disabled
-	if getEmailChannelStatus(config) == "Disabled" {
+	if ac.GetChannelStatus(config, "email") == "Disabled" {
 		fmt.Println("ℹ️  Email channel is already disabled")
 		return nil
 	}
 
 	// Remove email configuration from AlertManager
 	fmt.Println("🔧 Removing email configuration from AlertManager...")
-	if err := removeEmailConfigFromAlertManager(ctx); err != nil {
+	if err := ac.RemoveEmailConfig(ctx); err != nil {
 		return fmt.Errorf("failed to disable email channel: %w", err)
 	}
 
@@ -1849,7 +587,7 @@ func disableEmailChannel(ctx context.Context, cmd *cli.Command) error {
 	return nil
 }
 
-func configureEmailChannel(ctx context.Context, cmd *cli.Command) error {
+func configureEmailChannel(ctx context.Context, ac *thanos.AlertCustomization) error {
 	fmt.Println("📧 Configuring Email Channel...")
 
 	// Get new email configuration from user
@@ -1880,6 +618,11 @@ func configureEmailChannel(ctx context.Context, cmd *cli.Command) error {
 	// Clean up the password input
 	smtpPassword = utils.CleanPasswordInput(smtpPassword)
 
+	// Validate input
+	if err := validateEmailInput(smtpServer, smtpFrom, smtpPassword); err != nil {
+		return err
+	}
+
 	fmt.Print("Default Receivers (comma-separated): ")
 	receiversInput, err := scanner.ScanString()
 	if err != nil {
@@ -1903,7 +646,7 @@ func configureEmailChannel(ctx context.Context, cmd *cli.Command) error {
 
 	// Apply configuration to AlertManager
 	fmt.Println("🔧 Applying email configuration to AlertManager...")
-	if err := updateAlertManagerEmailConfig(ctx, smtpServer, smtpFrom, smtpUsername, smtpPassword, receivers); err != nil {
+	if err := ac.UpdateEmailConfig(ctx, smtpServer, smtpFrom, smtpUsername, smtpPassword, receivers); err != nil {
 		return fmt.Errorf("failed to update AlertManager configuration: %w", err)
 	}
 
@@ -1912,24 +655,24 @@ func configureEmailChannel(ctx context.Context, cmd *cli.Command) error {
 }
 
 // Telegram channel management functions
-func disableTelegramChannel(ctx context.Context, cmd *cli.Command) error {
+func disableTelegramChannel(ctx context.Context, ac *thanos.AlertCustomization) error {
 	fmt.Println("📱 Disabling Telegram Channel...")
 
 	// Get current AlertManager configuration
-	config, err := getAlertManagerConfig(ctx)
+	config, err := ac.GetAlertManagerConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get AlertManager config: %w", err)
 	}
 
 	// Check if telegram is already disabled
-	if getTelegramChannelStatus(config) == "Disabled" {
+	if ac.GetChannelStatus(config, "telegram") == "Disabled" {
 		fmt.Println("ℹ️  Telegram channel is already disabled")
 		return nil
 	}
 
 	// Remove telegram configuration from AlertManager
 	fmt.Println("🔧 Removing telegram configuration from AlertManager...")
-	if err := removeTelegramConfigFromAlertManager(ctx); err != nil {
+	if err := ac.RemoveTelegramConfig(ctx); err != nil {
 		return fmt.Errorf("failed to disable telegram channel: %w", err)
 	}
 
@@ -1937,7 +680,7 @@ func disableTelegramChannel(ctx context.Context, cmd *cli.Command) error {
 	return nil
 }
 
-func configureTelegramChannel(ctx context.Context, cmd *cli.Command) error {
+func configureTelegramChannel(ctx context.Context, ac *thanos.AlertCustomization) error {
 	fmt.Println("📱 Configuring Telegram Channel...")
 
 	// Get new telegram configuration from user
@@ -1949,22 +692,16 @@ func configureTelegramChannel(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("failed to read bot token: %w", err)
 	}
 
-	// Validate bot token format (basic check)
-	if !strings.Contains(botToken, ":") {
-		fmt.Println("❌ Invalid bot token format. Expected format: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-		return fmt.Errorf("invalid bot token format")
-	}
-
 	fmt.Print("Chat ID: ")
 	chatID, err := scanner.ScanString()
 	if err != nil {
 		return fmt.Errorf("failed to read chat ID: %w", err)
 	}
 
-	// Validate chat ID format (basic check)
-	if !strings.HasPrefix(chatID, "-") && !strings.HasPrefix(chatID, "1") {
-		fmt.Println("❌ Invalid chat ID format. Expected format: -123456789 or 123456789")
-		return fmt.Errorf("invalid chat ID format")
+	// Validate input
+	if err := validateTelegramInput(botToken, chatID); err != nil {
+		fmt.Printf("❌ %s\n", err.Error())
+		return err
 	}
 
 	fmt.Printf("📱 Telegram Configuration Summary:\n")
@@ -1973,7 +710,7 @@ func configureTelegramChannel(ctx context.Context, cmd *cli.Command) error {
 
 	// Apply configuration to AlertManager
 	fmt.Println("🔧 Applying telegram configuration to AlertManager...")
-	if err := updateAlertManagerTelegramConfig(ctx, botToken, chatID); err != nil {
+	if err := ac.UpdateTelegramConfig(ctx, botToken, chatID); err != nil {
 		return fmt.Errorf("failed to update AlertManager configuration: %w", err)
 	}
 
@@ -1989,8 +726,7 @@ func min(a, b int) int {
 }
 
 // Alert rules management functions
-
-func resetAlertRules(ctx context.Context, cmd *cli.Command) error {
+func resetAlertRules(ctx context.Context, ac *thanos.AlertCustomization) error {
 	fmt.Println("🔄 Resetting Alert Rules to Default...")
 	fmt.Println("⚠️  This will reset all alert rules to their default values.")
 	fmt.Print("Are you sure you want to reset all alert rules? (y/N): ")
@@ -2015,7 +751,7 @@ func resetAlertRules(ctx context.Context, cmd *cli.Command) error {
 			}
 		}
 
-		if err := resetPrometheusRules(ctx); err != nil {
+		if err := ac.ResetPrometheusRules(ctx); err != nil {
 			return fmt.Errorf("failed to reset alert rules: %w", err)
 		}
 
@@ -2028,125 +764,67 @@ func resetAlertRules(ctx context.Context, cmd *cli.Command) error {
 	return nil
 }
 
-// EmailConfiguration holds email channel configuration details
-type EmailConfiguration struct {
-	Enabled bool
-	SMTPURL string
-	From    string
-	To      string
+// Validation functions
+func validateChannelInput(input, inputType string) error {
+	if input == "" {
+		return fmt.Errorf("%s cannot be empty", inputType)
+	}
+	return nil
 }
 
-// TelegramConfiguration holds telegram channel configuration details
-type TelegramConfiguration struct {
-	Enabled  bool
-	BotToken string
-	ChatID   string
+func validateEmailInput(smtpServer, smtpFrom, smtpPassword string) error {
+	if err := validateChannelInput(smtpServer, "SMTP server"); err != nil {
+		return err
+	}
+	if err := validateChannelInput(smtpFrom, "From email address"); err != nil {
+		return err
+	}
+	if err := validateChannelInput(smtpPassword, "SMTP password"); err != nil {
+		return err
+	}
+	return nil
 }
 
-func getEmailConfiguration(config string) EmailConfiguration {
-	var amConfig map[string]interface{}
-	if err := yaml.Unmarshal([]byte(config), &amConfig); err != nil {
-		return EmailConfiguration{Enabled: false}
+func validateTelegramInput(botToken, chatID string) error {
+	if err := validateChannelInput(botToken, "Bot token"); err != nil {
+		return err
+	}
+	if err := validateChannelInput(chatID, "Chat ID"); err != nil {
+		return err
 	}
 
-	// Get global SMTP settings
-	global, ok := amConfig["global"].(map[string]interface{})
-	if !ok {
-		return EmailConfiguration{Enabled: false}
+	// Validate bot token format (basic check)
+	if !strings.Contains(botToken, ":") {
+		return fmt.Errorf("invalid bot token format. Expected format: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 	}
 
-	smtpURL := ""
-	if smtpHost, exists := global["smtp_smarthost"]; exists {
-		smtpURL = fmt.Sprintf("%v", smtpHost)
+	// Validate chat ID format (basic check)
+	if !strings.HasPrefix(chatID, "-") && !strings.HasPrefix(chatID, "1") {
+		return fmt.Errorf("invalid chat ID format. Expected format: -123456789 or 123456789")
 	}
 
-	from := ""
-	if smtpFrom, exists := global["smtp_from"]; exists {
-		from = fmt.Sprintf("%v", smtpFrom)
-	}
-
-	// Get receivers
-	receivers, ok := amConfig["receivers"].([]interface{})
-	if !ok {
-		return EmailConfiguration{Enabled: false}
-	}
-
-	var toAddresses []string
-	for _, r := range receivers {
-		receiver, ok := r.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		if emailConfigs, exists := receiver["email_configs"]; exists {
-			if emailConfigList, ok := emailConfigs.([]interface{}); ok {
-				for _, emailConfig := range emailConfigList {
-					if emailConfig, ok := emailConfig.(map[string]interface{}); ok {
-						if toAddr, exists := emailConfig["to"]; exists {
-							toAddresses = append(toAddresses, fmt.Sprintf("%v", toAddr))
-						}
-					}
-				}
-			}
-		}
-	}
-
-	if len(toAddresses) > 0 {
-		return EmailConfiguration{
-			Enabled: true,
-			SMTPURL: smtpURL,
-			From:    from,
-			To:      strings.Join(toAddresses, ", "),
-		}
-	}
-
-	return EmailConfiguration{Enabled: false}
+	return nil
 }
 
-func getTelegramConfiguration(config string) TelegramConfiguration {
-	var amConfig map[string]interface{}
-	if err := yaml.Unmarshal([]byte(config), &amConfig); err != nil {
-		return TelegramConfiguration{Enabled: false}
+// Helper functions for rule management
+func enableRule(ctx context.Context, ac *thanos.AlertCustomization, ruleName string) error {
+	fmt.Printf("🟢 Enabling rule '%s'...\n", ruleName)
+
+	if err := ac.EnableRule(ctx, ruleName); err != nil {
+		return fmt.Errorf("failed to enable rule: %w", err)
 	}
 
-	receivers, ok := amConfig["receivers"].([]interface{})
-	if !ok {
-		return TelegramConfiguration{Enabled: false}
+	fmt.Printf("✅ Rule '%s' enabled successfully\n", ruleName)
+	return nil
+}
+
+func disableRule(ctx context.Context, ac *thanos.AlertCustomization, ruleName string) error {
+	fmt.Printf("🔴 Disabling rule '%s'...\n", ruleName)
+
+	if err := ac.DisableRule(ctx, ruleName); err != nil {
+		return fmt.Errorf("failed to disable rule: %w", err)
 	}
 
-	var botTokens []string
-	var chatIDs []string
-
-	for _, r := range receivers {
-		receiver, ok := r.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		if telegramConfigs, exists := receiver["telegram_configs"]; exists {
-			if telegramConfigList, ok := telegramConfigs.([]interface{}); ok {
-				for _, telegramConfig := range telegramConfigList {
-					if telegramConfig, ok := telegramConfig.(map[string]interface{}); ok {
-						if token, exists := telegramConfig["bot_token"]; exists {
-							botTokens = append(botTokens, fmt.Sprintf("%v", token))
-						}
-
-						if chat, exists := telegramConfig["chat_id"]; exists {
-							chatIDs = append(chatIDs, fmt.Sprintf("%v", chat))
-						}
-					}
-				}
-			}
-		}
-	}
-
-	if len(botTokens) > 0 || len(chatIDs) > 0 {
-		return TelegramConfiguration{
-			Enabled:  true,
-			BotToken: strings.Join(botTokens, ", "),
-			ChatID:   strings.Join(chatIDs, ", "),
-		}
-	}
-
-	return TelegramConfiguration{Enabled: false}
+	fmt.Printf("✅ Rule '%s' disabled successfully\n", ruleName)
+	return nil
 }
