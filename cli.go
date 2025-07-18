@@ -166,11 +166,17 @@ func Run() {
   # List all alert rules
   trh-sdk alert-config --rules
 
+  # Disable email channel
+  trh-sdk alert-config --channel email --disable
+
   # Configure email channel
-  trh-sdk alert-config --channels --type email --operation configure
+  trh-sdk alert-config --channel email --configure
+
+  # Disable telegram channel
+  trh-sdk alert-config --channel telegram --disable
 
   # Configure telegram channel
-  trh-sdk alert-config --channels --type telegram --operation configure
+  trh-sdk alert-config --channel telegram --configure
 
   # Reset all alert rules to default values
   trh-sdk alert-config --reset`,
@@ -181,11 +187,22 @@ func Run() {
 						Required: false,
 						Usage:    "Show current alert status",
 					},
-					&cli.BoolFlag{
-						Name:     "channels",
+					&cli.StringFlag{
+						Name:     "channel",
 						Aliases:  []string{"c"},
 						Required: false,
-						Usage:    "Configure notification channels (email, telegram)",
+						Usage:    "Channel type (email, telegram)",
+						Value:    "",
+					},
+					&cli.BoolFlag{
+						Name:     "disable",
+						Required: false,
+						Usage:    "Disable the specified channel",
+					},
+					&cli.BoolFlag{
+						Name:     "configure",
+						Required: false,
+						Usage:    "Configure the specified channel",
 					},
 					&cli.BoolFlag{
 						Name:     "rules",
@@ -202,7 +219,7 @@ func Run() {
 						Name:     "type",
 						Aliases:  []string{"t"},
 						Required: false,
-						Usage:    "Channel type (email, telegram) or rule type (list, modify)",
+						Usage:    "Rule type (list, modify)",
 						Value:    "",
 					},
 					&cli.StringFlag{

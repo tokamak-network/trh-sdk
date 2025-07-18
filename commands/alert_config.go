@@ -1,11 +1,15 @@
 package commands
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"fmt"
-	"os"
+	"io"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -13,43 +17,95 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// cleanPasswordInput cleans up password input by removing unwanted characters
+func cleanPasswordInput(password string) string {
+	// Remove special whitespace characters (NBSP, etc.)
+	password = strings.ReplaceAll(password, "\u00A0", " ") // Replace NBSP with regular space
+	password = strings.ReplaceAll(password, "\u200B", "")  // Remove zero-width space
+	password = strings.ReplaceAll(password, "\uFEFF", "")  // Remove byte order mark
+	password = strings.TrimSpace(password)                 // Trim whitespace
+
+	// Remove any control characters that might cause issues
+	var cleaned strings.Builder
+	for _, r := range password {
+		if r >= 32 && r != 127 { // Printable ASCII characters except DEL
+			cleaned.WriteRune(r)
+		}
+	}
+
+	return cleaned.String()
+}
+
 // ActionAlertConfig handles alert configuration commands
 func ActionAlertConfig() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
-		// Get flags
-		status := cmd.Bool("status")
-		channels := cmd.Bool("channels")
-		rules := cmd.Bool("rules")
-		reset := cmd.Bool("reset")
-		actionType := cmd.String("type")
-		operation := cmd.String("operation")
-		rule := cmd.String("rule")
-		value := cmd.String("value")
-
 		// Check if monitoring plugin is installed
 		if err := checkMonitoringPluginInstalled(ctx); err != nil {
 			return err
 		}
 
-		// Handle different subcommands
+		// Get flags
+		status := cmd.Bool("status")
+		channel := cmd.String("channel")
+		disable := cmd.Bool("disable")
+		configure := cmd.Bool("configure")
+		rules := cmd.Bool("rules")
+		reset := cmd.Bool("reset")
+
+		// Handle status command
 		if status {
-			return handleAlertStatus(ctx, cmd, []string{})
+			return handleAlertStatus(ctx, cmd, cmd.Args().Slice())
 		}
 
-		if channels {
-			return handleChannelsCustomizationWithFlags(ctx, cmd, actionType, operation)
+		// Handle channel commands
+		if channel != "" {
+			if disable {
+				return handleChannelDisable(ctx, cmd, channel)
+			}
+			if configure {
+				return handleChannelConfigure(ctx, cmd, channel)
+			}
+			// If no operation specified, show help
+			fmt.Println("❌ Please specify an operation: --disable or --configure")
+			return nil
 		}
 
+		// Handle rules command
 		if rules {
-			return handleRulesCustomizationWithFlags(ctx, cmd, actionType, operation, rule, value)
+			return handleRulesCustomization(ctx, cmd, cmd.Args().Slice())
 		}
 
+		// Handle reset command
 		if reset {
-			return resetAlertRules(ctx, cmd)
+			return resetPrometheusRules(ctx)
 		}
 
-		// If no subcommand is specified, show help
+		// Show help if no valid command
 		return showAlertConfigHelp()
+	}
+}
+
+// handleChannelDisable disables the specified channel
+func handleChannelDisable(ctx context.Context, cmd *cli.Command, channelType string) error {
+	switch channelType {
+	case "email":
+		return disableEmailChannel(ctx, cmd)
+	case "telegram":
+		return disableTelegramChannel(ctx, cmd)
+	default:
+		return fmt.Errorf("unknown channel type: %s (must be 'email' or 'telegram')", channelType)
+	}
+}
+
+// handleChannelConfigure configures the specified channel
+func handleChannelConfigure(ctx context.Context, cmd *cli.Command, channelType string) error {
+	switch channelType {
+	case "email":
+		return configureEmailChannel(ctx, cmd)
+	case "telegram":
+		return configureTelegramChannel(ctx, cmd)
+	default:
+		return fmt.Errorf("unknown channel type: %s (must be 'email' or 'telegram')", channelType)
 	}
 }
 
@@ -135,42 +191,16 @@ func showAlertConfigHelp() error {
 	return nil
 }
 
-// handleChannelsCustomizationWithFlags manages notification channels using flags
-func handleChannelsCustomizationWithFlags(ctx context.Context, cmd *cli.Command, actionType, operation string) error {
-	if actionType == "" {
-		fmt.Println("❌ Usage: trh-sdk alert-config --channels --type [email|telegram] --operation [enable|disable|configure]")
-		return nil
-	}
-
-	if operation == "" {
-		fmt.Println("❌ Usage: trh-sdk alert-config --channels --type [email|telegram] --operation [enable|disable|configure]")
-		return nil
-	}
-
-	switch actionType {
-	case "email":
-		return handleEmailChannel(ctx, cmd, operation, []string{})
-	case "telegram":
-		return handleTelegramChannel(ctx, cmd, operation, []string{})
-	default:
-		fmt.Printf("❌ Unknown channel type: %s\n", actionType)
-		fmt.Println("Supported channels: email, telegram")
-		return nil
-	}
-}
-
 // handleEmailChannel manages email channel configuration
 func handleEmailChannel(ctx context.Context, cmd *cli.Command, action string, args []string) error {
 	switch action {
-	case "enable":
-		return enableEmailChannel(ctx, cmd)
 	case "disable":
 		return disableEmailChannel(ctx, cmd)
 	case "configure":
 		return configureEmailChannel(ctx, cmd)
 	default:
 		fmt.Printf("❌ Unknown action: %s\n", action)
-		fmt.Println("Supported actions: enable, disable, configure")
+		fmt.Println("Supported actions: disable, configure")
 		return nil
 	}
 }
@@ -178,15 +208,13 @@ func handleEmailChannel(ctx context.Context, cmd *cli.Command, action string, ar
 // handleTelegramChannel manages telegram channel configuration
 func handleTelegramChannel(ctx context.Context, cmd *cli.Command, action string, args []string) error {
 	switch action {
-	case "enable":
-		return enableTelegramChannel(ctx, cmd)
 	case "disable":
 		return disableTelegramChannel(ctx, cmd)
 	case "configure":
 		return configureTelegramChannel(ctx, cmd)
 	default:
 		fmt.Printf("❌ Unknown action: %s\n", action)
-		fmt.Println("Supported actions: enable, disable, configure")
+		fmt.Println("Supported actions: disable, configure")
 		return nil
 	}
 }
@@ -291,17 +319,44 @@ func handleAlertStatus(ctx context.Context, cmd *cli.Command, args []string) err
 }
 
 func getAlertManagerConfig(ctx context.Context) (string, error) {
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "secret", "-n", "monitoring", "alertmanager-config", "-o", "jsonpath={.data.alertmanager\\.yaml}")
-	if err == nil {
-		// Remove single quotes and spaces
-		output = strings.Trim(output, "' \n\t\r")
-		decodedBytes, err := base64.StdEncoding.DecodeString(output)
-		if err != nil {
-			return "", fmt.Errorf("failed to decode AlertManager config: %w", err)
-		}
-		return string(decodedBytes), nil
+	// Get AlertManager Pod to find the actual secret being used
+	podOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pods", "-n", "monitoring", "-l", "app.kubernetes.io/name=alertmanager", "-o", "jsonpath={.items[0].spec.volumes[?(@.name=='config-volume')].secret.secretName}")
+	if err != nil {
+		return "", fmt.Errorf("failed to get AlertManager pod secret name: %w", err)
 	}
-	return "", nil
+
+	secretName := strings.TrimSpace(podOutput)
+	if secretName == "" {
+		return "", fmt.Errorf("could not find AlertManager config secret")
+	}
+
+	// Get the compressed config from the actual secret
+	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "secret", "-n", "monitoring", secretName, "-o", "jsonpath={.data.alertmanager\\.yaml\\.gz}")
+	if err != nil {
+		return "", fmt.Errorf("failed to get AlertManager config from secret %s: %w", secretName, err)
+	}
+
+	// Remove single quotes and spaces
+	output = strings.Trim(output, "' \n\t\r")
+	decodedBytes, err := base64.StdEncoding.DecodeString(output)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode AlertManager config: %w", err)
+	}
+
+	// Decompress using gzip
+	reader := bytes.NewReader(decodedBytes)
+	gzReader, err := gzip.NewReader(reader)
+	if err != nil {
+		return "", fmt.Errorf("failed to create gzip reader: %w", err)
+	}
+	defer gzReader.Close()
+
+	configBytes, err := io.ReadAll(gzReader)
+	if err != nil {
+		return "", fmt.Errorf("failed to read decompressed config: %w", err)
+	}
+
+	return string(configBytes), nil
 }
 
 func getEmailChannelStatus(config string) string {
@@ -370,400 +425,420 @@ func getPrometheusRules(ctx context.Context) (int, error) {
 
 // Configuration update functions
 func updateAlertManagerEmailConfig(ctx context.Context, smtpServer, smtpFrom, smtpUsername, smtpPassword string, receivers []string) error {
-	// Find the actual AlertManager secret name
-	secretList, err := utils.ExecuteCommand(ctx, "kubectl", "get", "secrets", "-n", "monitoring", "-o", "jsonpath={.items[*].metadata.name}")
+	// Get current configuration to preserve existing settings
+	currentConfig, err := getAlertManagerConfig(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get secrets list: %w", err)
+		return fmt.Errorf("failed to get current AlertManager config: %w", err)
 	}
 
-	secrets := strings.Split(strings.TrimSpace(secretList), " ")
-	var alertManagerSecret string
-	for _, secret := range secrets {
-		if strings.Contains(secret, "alertmanager") && strings.Contains(secret, "kube-alertmanager") && !strings.Contains(secret, "generated") && !strings.Contains(secret, "tls") && !strings.Contains(secret, "web-config") {
-			alertManagerSecret = secret
+	// Parse current YAML
+	var config map[string]interface{}
+	if err := yaml.Unmarshal([]byte(currentConfig), &config); err != nil {
+		return fmt.Errorf("failed to parse current AlertManager config: %w", err)
+	}
+
+	// Update global SMTP settings
+	global, ok := config["global"].(map[string]interface{})
+	if !ok {
+		global = make(map[string]interface{})
+		config["global"] = global
+	}
+	global["smtp_smarthost"] = smtpServer
+	global["smtp_from"] = smtpFrom
+	global["smtp_auth_username"] = smtpUsername
+	global["smtp_auth_password"] = smtpPassword
+
+	// Find or create the main receiver
+	receiversList, ok := config["receivers"].([]interface{})
+	if !ok {
+		receiversList = []interface{}{}
+	}
+
+	// Find the telegram-critical receiver or create it
+	var mainReceiver map[string]interface{}
+	for _, r := range receiversList {
+		receiver, ok := r.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if name, exists := receiver["name"]; exists && name == "telegram-critical" {
+			mainReceiver = receiver
 			break
 		}
 	}
 
-	if alertManagerSecret == "" {
-		return fmt.Errorf("AlertManager secret not found")
+	if mainReceiver == nil {
+		mainReceiver = map[string]interface{}{
+			"name": "telegram-critical",
+		}
+		receiversList = append(receiversList, mainReceiver)
 	}
 
-	// Check if AlertManager secret exists
-	_, err = utils.ExecuteCommand(ctx, "kubectl", "get", "secret", "-n", "monitoring", alertManagerSecret)
-	if err != nil {
-		return fmt.Errorf("failed to get current AlertManager secret: %w", err)
-	}
-
-	// Create updated AlertManager configuration
-	config := fmt.Sprintf(`global:
-  smtp_smarthost: %s
-  smtp_from: %s
-  smtp_auth_username: %s
-  smtp_auth_password: %s
-
-route:
-  group_by: ['alertname', 'severity', 'component', 'chain_name', 'namespace']
-  group_wait: 10s
-  group_interval: 1m
-  repeat_interval: 10m
-  receiver: 'email-critical'
-
-receivers:
-- name: 'email-critical'
-  email_configs:
-`, smtpServer, smtpFrom, smtpUsername, smtpPassword)
-
-	// Add email receivers
+	// Add email_configs to the receiver
+	emailConfigs := []interface{}{}
 	for _, receiver := range receivers {
-		config += fmt.Sprintf(`  - to: %s
-    headers:
-      subject: "🚨 Critical Alert - {{ .GroupLabels.chain_name }}"
-    html: |
-      <!DOCTYPE html>
-      <html>
-      <head>
-          <meta charset="UTF-8">
-          <style>
-              body { font-family: Arial, sans-serif; margin: 20px; }
-              .alert { border-left: 4px solid #dc3545; padding: 10px; margin: 10px 0; background-color: #f8f9fa; }
-              .header { color: #dc3545; font-weight: bold; margin-bottom: 15px; }
-              .info { margin: 5px 0; }
-              .timestamp { color: #6c757d; font-size: 12px; margin-top: 10px; }
-          </style>
-      </head>
-      <body>
-          <div class="alert">
-              <div class="header">🚨 Critical Alert - {{ .GroupLabels.chain_name }}</div>
-              <div class="info"><strong>Alert Name:</strong> {{ .GroupLabels.alertname }}</div>
-              <div class="info"><strong>Severity:</strong> {{ .GroupLabels.severity }}</div>
-              <div class="info"><strong>Component:</strong> {{ .GroupLabels.component }}</div>
-              <div class="info" style="margin-top: 15px;"><strong>Summary:</strong></div>
-              <div class="info">{{ .CommonAnnotations.summary }}</div>
-              <div class="info" style="margin-top: 10px;"><strong>Description:</strong></div>
-              <div class="info">{{ .CommonAnnotations.description }}</div>
-              <div class="timestamp">⏰ Alert Time: {{ range .Alerts }}{{ .StartsAt }}{{ end }}</div>
-          </div>
-      </body>
-      </html>
-`, receiver)
+		emailConfig := map[string]interface{}{
+			"to": receiver,
+			"headers": map[string]interface{}{
+				"subject": "🚨 Critical Alert - {{ .GroupLabels.chain_name }}",
+			},
+			"html": `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .alert { border-left: 4px solid #dc3545; padding: 10px; margin: 10px 0; background-color: #f8f9fa; }
+        .header { color: #dc3545; font-weight: bold; margin-bottom: 15px; }
+        .info { margin: 5px 0; }
+        .timestamp { color: #6c757d; font-size: 12px; margin-top: 10px; }
+        .dashboard { margin-top: 15px; }
+        a { color: #007bff; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="alert">
+        <div class="header">🚨 Critical Alert - {{ .GroupLabels.chain_name }}</div>
+        <div class="info"><strong>Alert Name:</strong> {{ .GroupLabels.alertname }}</div>
+        <div class="info"><strong>Severity:</strong> {{ .GroupLabels.severity }}</div>
+        <div class="info"><strong>Component:</strong> {{ .GroupLabels.component }}</div>
+        <div class="info" style="margin-top: 15px;"><strong>Summary:</strong></div>
+        <div class="info">{{ .CommonAnnotations.summary }}</div>
+        <div class="info" style="margin-top: 10px;"><strong>Description:</strong></div>
+        <div class="info">{{ .CommonAnnotations.description }}</div>
+        <div class="timestamp">⏰ Alert Time: {{ range .Alerts }}{{ .StartsAt }}{{ end }}</div>
+        <div class="dashboard">
+            <strong>Dashboard:</strong> <a href="http://k8s-thanosmonitoring-b253b70d4a-1790924322.ap-northeast-2.elb.amazonaws.com/d/thanos-stack-app-v9/thanos-stack-application-monitoring-dashboard?orgId=1&refresh=30s">View Details</a>
+        </div>
+    </div>
+</body>
+</html>`,
+		}
+		emailConfigs = append(emailConfigs, emailConfig)
 	}
 
-	// Create temporary file for the configuration
-	tempFile, err := os.CreateTemp("", "alertmanager-config-*.yaml")
+	mainReceiver["email_configs"] = emailConfigs
+	config["receivers"] = receiversList
+
+	// Convert back to YAML
+	newConfigBytes, err := yaml.Marshal(config)
 	if err != nil {
-		return fmt.Errorf("failed to create temporary file: %w", err)
-	}
-	defer os.Remove(tempFile.Name())
-
-	if _, err := tempFile.WriteString(config); err != nil {
-		return fmt.Errorf("failed to write configuration to file: %w", err)
-	}
-	tempFile.Close()
-
-	// Update AlertManager secret
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "create", "secret", "generic", alertManagerSecret, "-n", "monitoring", "--from-file=alertmanager.yaml="+tempFile.Name(), "--dry-run=client", "-o", "yaml"); err != nil {
-		return fmt.Errorf("failed to create AlertManager secret: %w", err)
+		return fmt.Errorf("failed to marshal updated config: %w", err)
 	}
 
-	// Apply the secret
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", "-"); err != nil {
-		return fmt.Errorf("failed to apply AlertManager secret: %w", err)
+	// Get the actual secret name that AlertManager Pod uses
+	podOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pods", "-n", "monitoring", "-l", "app.kubernetes.io/name=alertmanager", "-o", "jsonpath={.items[0].spec.volumes[?(@.name=='config-volume')].secret.secretName}")
+	if err != nil {
+		return fmt.Errorf("failed to get AlertManager pod secret name: %w", err)
 	}
 
-	// Restart AlertManager pods to apply configuration
-	fmt.Println("🔄 Restarting AlertManager pods to apply configuration...")
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "pods", "-n", "monitoring", "-l", "app=alertmanager"); err != nil {
-		return fmt.Errorf("failed to restart AlertManager pods: %w", err)
+	secretName := strings.TrimSpace(podOutput)
+	if secretName == "" {
+		return fmt.Errorf("could not find AlertManager config secret")
 	}
+
+	fmt.Printf("🔧 Updating secret: %s\n", secretName)
+
+	// Compress the new configuration
+	var buf bytes.Buffer
+	gzWriter := gzip.NewWriter(&buf)
+	if _, err := gzWriter.Write(newConfigBytes); err != nil {
+		return fmt.Errorf("failed to compress config: %w", err)
+	}
+	gzWriter.Close()
+
+	// Base64 encode the compressed config
+	compressedConfig := base64.StdEncoding.EncodeToString(buf.Bytes())
+
+	// Patch the secret with the new compressed configuration
+	patchData := fmt.Sprintf(`{"data":{"alertmanager.yaml.gz":"%s"}}`, compressedConfig)
+	if _, err := utils.ExecuteCommand(ctx, "kubectl", "patch", "secret", secretName, "-n", "monitoring", "--type=merge", "-p", patchData); err != nil {
+		return fmt.Errorf("failed to patch AlertManager secret: %w", err)
+	}
+
+	// AlertManager should automatically reload configuration when secret is updated
+	fmt.Println("✅ AlertManager configuration updated successfully")
+	fmt.Println("💡 AlertManager will automatically reload the configuration")
+
+	// Optional: Wait a moment for configuration to be applied
+	fmt.Println("⏳ Waiting for configuration to be applied...")
+	time.Sleep(5 * time.Second)
 
 	return nil
 }
 
 // Configuration removal functions
 func removeEmailConfigFromAlertManager(ctx context.Context) error {
-	// Find the actual AlertManager secret name
-	secretList, err := utils.ExecuteCommand(ctx, "kubectl", "get", "secrets", "-n", "monitoring", "-o", "jsonpath={.items[*].metadata.name}")
-	if err != nil {
-		return fmt.Errorf("failed to get secrets list: %w", err)
-	}
-
-	secrets := strings.Split(strings.TrimSpace(secretList), " ")
-	var alertManagerSecret string
-	for _, secret := range secrets {
-		if strings.Contains(secret, "alertmanager") && strings.Contains(secret, "kube-alertmanager") && !strings.Contains(secret, "generated") && !strings.Contains(secret, "tls") && !strings.Contains(secret, "web-config") {
-			alertManagerSecret = secret
-			break
-		}
-	}
-
-	if alertManagerSecret == "" {
-		return fmt.Errorf("AlertManager secret not found")
-	}
-
-	// Create AlertManager configuration without email settings
-	config := `global:
-  resolve_timeout: 5m
-inhibit_rules:
-- equal:
-  - namespace
-  - alertname
-  source_matchers:
-  - severity = critical
-  target_matchers:
-  - severity =~ warning|info
-- equal:
-  - namespace
-  - alertname
-  source_matchers:
-  - severity = warning
-  target_matchers:
-  - severity = info
-- equal:
-  - namespace
-  source_matchers:
-  - alertname = InfoInhibitor
-  target_matchers:
-  - severity = info
-- target_matchers:
-  - alertname = InfoInhibitor
-receivers:
-- name: "null"
-route:
-  group_by:
-  - namespace
-  group_interval: 5m
-  group_wait: 30s
-  receiver: "null"
-  repeat_interval: 12h
-  routes:
-  - matchers:
-    - alertname = "Watchdog"
-    receiver: "null"
-templates:
-- /etc/alertmanager/config/*.tmpl`
-
-	// Create temporary file for the configuration
-	tempFile, err := os.CreateTemp("", "alertmanager-config-*.yaml")
-	if err != nil {
-		return fmt.Errorf("failed to create temporary file: %w", err)
-	}
-	defer os.Remove(tempFile.Name())
-
-	if _, err := tempFile.WriteString(config); err != nil {
-		return fmt.Errorf("failed to write configuration to file: %w", err)
-	}
-	tempFile.Close()
-
-	// Update AlertManager secret
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "create", "secret", "generic", alertManagerSecret, "-n", "monitoring", "--from-file=alertmanager.yaml="+tempFile.Name(), "--dry-run=client", "-o", "yaml"); err != nil {
-		return fmt.Errorf("failed to create AlertManager secret: %w", err)
-	}
-
-	// Apply the secret
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", "-"); err != nil {
-		return fmt.Errorf("failed to apply AlertManager secret: %w", err)
-	}
-
-	// Restart AlertManager pods to apply configuration
-	fmt.Println("🔄 Restarting AlertManager pods to apply configuration...")
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "pods", "-n", "monitoring", "-l", "app=alertmanager"); err != nil {
-		return fmt.Errorf("failed to restart AlertManager pods: %w", err)
-	}
-
-	return nil
-}
-
-func removeTelegramConfigFromAlertManager(ctx context.Context) error {
-	// Find the actual AlertManager secret name
-	secretList, err := utils.ExecuteCommand(ctx, "kubectl", "get", "secrets", "-n", "monitoring", "-o", "jsonpath={.items[*].metadata.name}")
-	if err != nil {
-		return fmt.Errorf("failed to get secrets list: %w", err)
-	}
-
-	secrets := strings.Split(strings.TrimSpace(secretList), " ")
-	var alertManagerSecret string
-	for _, secret := range secrets {
-		if strings.Contains(secret, "alertmanager") && strings.Contains(secret, "kube-alertmanager") && !strings.Contains(secret, "generated") && !strings.Contains(secret, "tls") && !strings.Contains(secret, "web-config") {
-			alertManagerSecret = secret
-			break
-		}
-	}
-
-	if alertManagerSecret == "" {
-		return fmt.Errorf("AlertManager secret not found")
-	}
-
-	// Get current configuration and remove telegram configs
+	// Get current configuration from the actual AlertManager secret
 	currentConfig, err := getAlertManagerConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get current AlertManager config: %w", err)
 	}
 
-	// Remove telegram_configs from the configuration
-	lines := strings.Split(currentConfig, "\n")
-	var newLines []string
-	inTelegramConfig := false
-	for _, line := range lines {
-		if strings.Contains(line, "telegram_configs:") {
-			inTelegramConfig = true
+	// Parse YAML to remove email_configs
+	var config map[string]interface{}
+	if err := yaml.Unmarshal([]byte(currentConfig), &config); err != nil {
+		return fmt.Errorf("failed to parse AlertManager config: %w", err)
+	}
+
+	// Find and remove email_configs from receivers
+	receivers, ok := config["receivers"].([]interface{})
+	if !ok {
+		return fmt.Errorf("receivers not found in config")
+	}
+
+	for i, receiver := range receivers {
+		receiverMap, ok := receiver.(map[string]interface{})
+		if !ok {
 			continue
 		}
-		if inTelegramConfig && (strings.HasPrefix(line, "  ") || strings.HasPrefix(line, "-")) {
-			continue
-		}
-		if inTelegramConfig && !strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "-") {
-			inTelegramConfig = false
-		}
-		if !inTelegramConfig {
-			newLines = append(newLines, line)
+
+		// Remove email_configs from this receiver
+		if _, exists := receiverMap["email_configs"]; exists {
+			delete(receiverMap, "email_configs")
+			receivers[i] = receiverMap
+			fmt.Println("✅ Removed email_configs from receiver")
 		}
 	}
 
-	newConfig := strings.Join(newLines, "\n")
-
-	// Create temporary file for the configuration
-	tempFile, err := os.CreateTemp("", "alertmanager-config-*.yaml")
+	// Convert back to YAML
+	newConfigBytes, err := yaml.Marshal(config)
 	if err != nil {
-		return fmt.Errorf("failed to create temporary file: %w", err)
-	}
-	defer os.Remove(tempFile.Name())
-
-	if _, err := tempFile.WriteString(newConfig); err != nil {
-		return fmt.Errorf("failed to write configuration to file: %w", err)
-	}
-	tempFile.Close()
-
-	// Update AlertManager secret
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "create", "secret", "generic", alertManagerSecret, "-n", "monitoring", "--from-file=alertmanager.yaml="+tempFile.Name(), "--dry-run=client", "-o", "yaml"); err != nil {
-		return fmt.Errorf("failed to create AlertManager secret: %w", err)
+		return fmt.Errorf("failed to marshal updated config: %w", err)
 	}
 
-	// Apply the secret
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", "-"); err != nil {
-		return fmt.Errorf("failed to apply AlertManager secret: %w", err)
+	// Get the actual secret name that AlertManager Pod uses
+	podOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pods", "-n", "monitoring", "-l", "app.kubernetes.io/name=alertmanager", "-o", "jsonpath={.items[0].spec.volumes[?(@.name=='config-volume')].secret.secretName}")
+	if err != nil {
+		return fmt.Errorf("failed to get AlertManager pod secret name: %w", err)
 	}
 
-	// Restart AlertManager pods to apply configuration
-	fmt.Println("🔄 Restarting AlertManager pods to apply configuration...")
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "pods", "-n", "monitoring", "-l", "app=alertmanager"); err != nil {
-		return fmt.Errorf("failed to restart AlertManager pods: %w", err)
+	secretName := strings.TrimSpace(podOutput)
+	if secretName == "" {
+		return fmt.Errorf("could not find AlertManager config secret")
 	}
+
+	fmt.Printf("🔧 Updating secret: %s\n", secretName)
+
+	// Compress the new configuration
+	var buf bytes.Buffer
+	gzWriter := gzip.NewWriter(&buf)
+	if _, err := gzWriter.Write(newConfigBytes); err != nil {
+		return fmt.Errorf("failed to compress config: %w", err)
+	}
+	gzWriter.Close()
+
+	// Base64 encode the compressed config
+	compressedConfig := base64.StdEncoding.EncodeToString(buf.Bytes())
+
+	// Patch the secret with the new compressed configuration
+	patchData := fmt.Sprintf(`{"data":{"alertmanager.yaml.gz":"%s"}}`, compressedConfig)
+	if _, err := utils.ExecuteCommand(ctx, "kubectl", "patch", "secret", secretName, "-n", "monitoring", "--type=merge", "-p", patchData); err != nil {
+		return fmt.Errorf("failed to patch AlertManager secret: %w", err)
+	}
+
+	// AlertManager should automatically reload configuration when secret is updated
+	fmt.Println("✅ AlertManager configuration updated successfully")
+	fmt.Println("💡 AlertManager will automatically reload the configuration")
+
+	// Optional: Wait a moment for configuration to be applied
+	fmt.Println("⏳ Waiting for configuration to be applied...")
+	time.Sleep(5 * time.Second)
+
+	return nil
+}
+
+func removeTelegramConfigFromAlertManager(ctx context.Context) error {
+	// Get current configuration from the actual AlertManager secret
+	currentConfig, err := getAlertManagerConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get current AlertManager config: %w", err)
+	}
+
+	// Parse YAML to remove telegram_configs
+	var config map[string]interface{}
+	if err := yaml.Unmarshal([]byte(currentConfig), &config); err != nil {
+		return fmt.Errorf("failed to parse AlertManager config: %w", err)
+	}
+
+	// Find and remove telegram_configs from receivers
+	receivers, ok := config["receivers"].([]interface{})
+	if !ok {
+		return fmt.Errorf("receivers not found in config")
+	}
+
+	for i, receiver := range receivers {
+		receiverMap, ok := receiver.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Remove telegram_configs from this receiver
+		if _, exists := receiverMap["telegram_configs"]; exists {
+			delete(receiverMap, "telegram_configs")
+			receivers[i] = receiverMap
+			fmt.Println("✅ Removed telegram_configs from receiver")
+		}
+	}
+
+	// Convert back to YAML
+	newConfigBytes, err := yaml.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal updated config: %w", err)
+	}
+
+	// Get the actual secret name that AlertManager Pod uses
+	podOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pods", "-n", "monitoring", "-l", "app.kubernetes.io/name=alertmanager", "-o", "jsonpath={.items[0].spec.volumes[?(@.name=='config-volume')].secret.secretName}")
+	if err != nil {
+		return fmt.Errorf("failed to get AlertManager pod secret name: %w", err)
+	}
+
+	secretName := strings.TrimSpace(podOutput)
+	if secretName == "" {
+		return fmt.Errorf("could not find AlertManager config secret")
+	}
+
+	fmt.Printf("🔧 Updating secret: %s\n", secretName)
+
+	// Compress the new configuration
+	var buf bytes.Buffer
+	gzWriter := gzip.NewWriter(&buf)
+	if _, err := gzWriter.Write(newConfigBytes); err != nil {
+		return fmt.Errorf("failed to compress config: %w", err)
+	}
+	gzWriter.Close()
+
+	// Base64 encode the compressed config
+	compressedConfig := base64.StdEncoding.EncodeToString(buf.Bytes())
+
+	// Patch the secret with the new compressed configuration
+	patchData := fmt.Sprintf(`{"data":{"alertmanager.yaml.gz":"%s"}}`, compressedConfig)
+	if _, err := utils.ExecuteCommand(ctx, "kubectl", "patch", "secret", secretName, "-n", "monitoring", "--type=merge", "-p", patchData); err != nil {
+		return fmt.Errorf("failed to patch AlertManager secret: %w", err)
+	}
+
+	// AlertManager should automatically reload configuration when secret is updated
+	fmt.Println("✅ AlertManager configuration updated successfully")
+	fmt.Println("💡 AlertManager will automatically reload the configuration")
+
+	// Optional: Wait a moment for configuration to be applied
+	fmt.Println("⏳ Waiting for configuration to be applied...")
+	time.Sleep(5 * time.Second)
 
 	return nil
 }
 
 func updateAlertManagerTelegramConfig(ctx context.Context, botToken, chatID string) error {
-	// Find the actual AlertManager secret name
-	secretList, err := utils.ExecuteCommand(ctx, "kubectl", "get", "secrets", "-n", "monitoring", "-o", "jsonpath={.items[*].metadata.name}")
+	// Get current configuration to preserve existing settings
+	currentConfig, err := getAlertManagerConfig(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get secrets list: %w", err)
+		return fmt.Errorf("failed to get current AlertManager config: %w", err)
 	}
 
-	secrets := strings.Split(strings.TrimSpace(secretList), " ")
-	var alertManagerSecret string
-	for _, secret := range secrets {
-		if strings.Contains(secret, "alertmanager") && strings.Contains(secret, "kube-alertmanager") && !strings.Contains(secret, "generated") && !strings.Contains(secret, "tls") && !strings.Contains(secret, "web-config") {
-			alertManagerSecret = secret
+	// Parse current YAML
+	var config map[string]interface{}
+	if err := yaml.Unmarshal([]byte(currentConfig), &config); err != nil {
+		return fmt.Errorf("failed to parse current AlertManager config: %w", err)
+	}
+
+	// Find or create the main receiver
+	receiversList, ok := config["receivers"].([]interface{})
+	if !ok {
+		receiversList = []interface{}{}
+	}
+
+	// Find the telegram-critical receiver or create it
+	var mainReceiver map[string]interface{}
+	for _, r := range receiversList {
+		receiver, ok := r.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if name, exists := receiver["name"]; exists && name == "telegram-critical" {
+			mainReceiver = receiver
 			break
 		}
 	}
 
-	if alertManagerSecret == "" {
-		return fmt.Errorf("AlertManager secret not found")
+	if mainReceiver == nil {
+		mainReceiver = map[string]interface{}{
+			"name": "telegram-critical",
+		}
+		receiversList = append(receiversList, mainReceiver)
 	}
 
-	// Check if AlertManager secret exists
-	_, err = utils.ExecuteCommand(ctx, "kubectl", "get", "secret", "-n", "monitoring", alertManagerSecret)
+	// Add telegram_configs to the receiver
+	// Convert chat_id to int64 for Prometheus Operator compatibility
+	chatIdInt, err := strconv.ParseInt(chatID, 10, 64)
 	if err != nil {
-		return fmt.Errorf("failed to get current AlertManager secret: %w", err)
+		return fmt.Errorf("invalid chat_id format: %s", chatID)
 	}
 
-	// Create updated configuration with telegram
-	config := fmt.Sprintf(`global:
-  resolve_timeout: 5m
-inhibit_rules:
-- equal:
-  - namespace
-  - alertname
-  source_matchers:
-  - severity = critical
-  target_matchers:
-  - severity =~ warning|info
-- equal:
-  - namespace
-  - alertname
-  source_matchers:
-  - severity = warning
-  target_matchers:
-  - severity = info
-- equal:
-  - namespace
-  source_matchers:
-  - alertname = InfoInhibitor
-  target_matchers:
-  - severity = info
-- target_matchers:
-  - alertname = InfoInhibitor
-receivers:
-- name: "telegram-critical"
-  telegram_configs:
-  - bot_token: %s
-    chat_id: %s
-    parse_mode: Markdown
-    message: |
-      🚨 *Critical Alert - {{ .GroupLabels.chain_name }}*
-      
-      **Alert Name:** {{ .GroupLabels.alertname }}
-      **Severity:** {{ .GroupLabels.severity }}
-      **Component:** {{ .GroupLabels.component }}
-      
-      **Summary:** {{ .CommonAnnotations.summary }}
-      **Description:** {{ .CommonAnnotations.description }}
-      
-      ⏰ Alert Time: {{ range .Alerts }}{{ .StartsAt }}{{ end }}
-- name: "null"
-route:
-  group_by:
-  - namespace
-  group_interval: 5m
-  group_wait: 30s
-  receiver: "telegram-critical"
-  repeat_interval: 12h
-  routes:
-  - matchers:
-    - alertname = "Watchdog"
-    receiver: "null"
-templates:
-- /etc/alertmanager/config/*.tmpl`, botToken, chatID)
+	telegramConfigs := []interface{}{
+		map[string]interface{}{
+			"bot_token":  botToken,
+			"chat_id":    chatIdInt,
+			"parse_mode": "Markdown",
+			"message": `🚨 *Critical Alert - {{ .GroupLabels.chain_name }}*
 
-	// Create temporary file for the configuration
-	tempFile, err := os.CreateTemp("", "alertmanager-config-*.yaml")
+**Alert Name:** {{ .GroupLabels.alertname }}
+**Severity:** {{ .GroupLabels.severity }}
+**Component:** {{ .GroupLabels.component }}
+
+**Summary:** {{ .CommonAnnotations.summary }}
+**Description:** {{ .CommonAnnotations.description }}
+
+⏰ Alert Time: {{ range .Alerts }}{{ .StartsAt }}{{ end }}`,
+		},
+	}
+
+	mainReceiver["telegram_configs"] = telegramConfigs
+	config["receivers"] = receiversList
+
+	// Convert back to YAML
+	newConfigBytes, err := yaml.Marshal(config)
 	if err != nil {
-		return fmt.Errorf("failed to create temporary file: %w", err)
-	}
-	defer os.Remove(tempFile.Name())
-
-	if _, err := tempFile.WriteString(config); err != nil {
-		return fmt.Errorf("failed to write configuration to file: %w", err)
-	}
-	tempFile.Close()
-
-	// Update AlertManager secret
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "create", "secret", "generic", alertManagerSecret, "-n", "monitoring", "--from-file=alertmanager.yaml="+tempFile.Name(), "--dry-run=client", "-o", "yaml"); err != nil {
-		return fmt.Errorf("failed to create AlertManager secret: %w", err)
+		return fmt.Errorf("failed to marshal updated config: %w", err)
 	}
 
-	// Apply the secret
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", "-"); err != nil {
-		return fmt.Errorf("failed to apply AlertManager secret: %w", err)
+	// Get the actual secret name that AlertManager Pod uses
+	podOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pods", "-n", "monitoring", "-l", "app.kubernetes.io/name=alertmanager", "-o", "jsonpath={.items[0].spec.volumes[?(@.name=='config-volume')].secret.secretName}")
+	if err != nil {
+		return fmt.Errorf("failed to get AlertManager pod secret name: %w", err)
 	}
 
-	// Restart AlertManager pods to apply configuration
-	fmt.Println("🔄 Restarting AlertManager pods to apply configuration...")
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "pods", "-n", "monitoring", "-l", "app=alertmanager"); err != nil {
-		return fmt.Errorf("failed to restart AlertManager pods: %w", err)
+	secretName := strings.TrimSpace(podOutput)
+	if secretName == "" {
+		return fmt.Errorf("could not find AlertManager config secret")
 	}
+
+	fmt.Printf("🔧 Updating secret: %s\n", secretName)
+
+	// Compress the new configuration
+	var buf bytes.Buffer
+	gzWriter := gzip.NewWriter(&buf)
+	if _, err := gzWriter.Write(newConfigBytes); err != nil {
+		return fmt.Errorf("failed to compress config: %w", err)
+	}
+	gzWriter.Close()
+
+	// Base64 encode the compressed config
+	compressedConfig := base64.StdEncoding.EncodeToString(buf.Bytes())
+
+	// Patch the secret with the new compressed configuration
+	patchData := fmt.Sprintf(`{"data":{"alertmanager.yaml.gz":"%s"}}`, compressedConfig)
+	if _, err := utils.ExecuteCommand(ctx, "kubectl", "patch", "secret", secretName, "-n", "monitoring", "--type=merge", "-p", patchData); err != nil {
+		return fmt.Errorf("failed to patch AlertManager secret: %w", err)
+	}
+
+	// AlertManager should automatically reload configuration when secret is updated
+	fmt.Println("✅ AlertManager configuration updated successfully")
+	fmt.Println("💡 AlertManager will automatically reload the configuration")
+
+	// Optional: Wait a moment for configuration to be applied
+	fmt.Println("⏳ Waiting for configuration to be applied...")
+	time.Sleep(5 * time.Second)
 
 	return nil
 }
@@ -796,29 +871,6 @@ func resetPrometheusRules(ctx context.Context) error {
 }
 
 // Email channel management functions
-func enableEmailChannel(ctx context.Context, cmd *cli.Command) error {
-	fmt.Println("📧 Enabling Email Channel...")
-
-	// Get current AlertManager configuration
-	config, err := getAlertManagerConfig(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get AlertManager config: %w", err)
-	}
-
-	// Check if email is already enabled
-	if getEmailChannelStatus(config) == "Enabled" {
-		fmt.Println("ℹ️  Email channel is already enabled")
-		return nil
-	}
-
-	// Prompt user for email configuration
-	fmt.Println("📧 Email channel is currently disabled. Please configure it first:")
-	fmt.Println("   Use: trh-sdk alert-config --config channels --type email --operation configure")
-	fmt.Println("   This will prompt you for SMTP settings and email addresses")
-
-	return nil
-}
-
 func disableEmailChannel(ctx context.Context, cmd *cli.Command) error {
 	fmt.Println("📧 Disabling Email Channel...")
 
@@ -841,7 +893,6 @@ func disableEmailChannel(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	fmt.Println("✅ Email channel disabled successfully")
-	fmt.Println("💡 Note: AlertManager will restart automatically to apply changes")
 	return nil
 }
 
@@ -873,6 +924,9 @@ func configureEmailChannel(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("failed to read SMTP password: %w", err)
 	}
 
+	// Clean up the password input
+	smtpPassword = cleanPasswordInput(smtpPassword)
+
 	fmt.Print("Default Receivers (comma-separated): ")
 	receiversInput, err := scanner.ScanString()
 	if err != nil {
@@ -901,34 +955,10 @@ func configureEmailChannel(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	fmt.Println("✅ Email channel configured successfully")
-	fmt.Println("💡 Note: AlertManager will restart automatically to apply changes")
 	return nil
 }
 
 // Telegram channel management functions
-func enableTelegramChannel(ctx context.Context, cmd *cli.Command) error {
-	fmt.Println("📱 Enabling Telegram Channel...")
-
-	// Get current AlertManager configuration
-	config, err := getAlertManagerConfig(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get AlertManager config: %w", err)
-	}
-
-	// Check if telegram is already enabled
-	if getTelegramChannelStatus(config) == "Enabled" {
-		fmt.Println("ℹ️  Telegram channel is already enabled")
-		return nil
-	}
-
-	// Prompt user for telegram configuration
-	fmt.Println("📱 Telegram channel is currently disabled. Please configure it first:")
-	fmt.Println("   Use: trh-sdk alert-config --config channels --type telegram --operation configure")
-	fmt.Println("   This will prompt you for Bot Token and Chat ID")
-
-	return nil
-}
-
 func disableTelegramChannel(ctx context.Context, cmd *cli.Command) error {
 	fmt.Println("📱 Disabling Telegram Channel...")
 
@@ -951,7 +981,6 @@ func disableTelegramChannel(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	fmt.Println("✅ Telegram channel disabled successfully")
-	fmt.Println("💡 Note: AlertManager will restart automatically to apply changes")
 	return nil
 }
 
@@ -996,7 +1025,6 @@ func configureTelegramChannel(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	fmt.Println("✅ Telegram channel configured successfully")
-	fmt.Println("💡 Note: AlertManager will restart automatically to apply changes")
 	return nil
 }
 
