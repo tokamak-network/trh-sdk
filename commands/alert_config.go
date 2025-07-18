@@ -18,25 +18,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// cleanPasswordInput cleans up password input by removing unwanted characters
-func cleanPasswordInput(password string) string {
-	// Remove special whitespace characters (NBSP, etc.)
-	password = strings.ReplaceAll(password, "\u00A0", " ") // Replace NBSP with regular space
-	password = strings.ReplaceAll(password, "\u200B", "")  // Remove zero-width space
-	password = strings.ReplaceAll(password, "\uFEFF", "")  // Remove byte order mark
-	password = strings.TrimSpace(password)                 // Trim whitespace
-
-	// Remove any control characters that might cause issues
-	var cleaned strings.Builder
-	for _, r := range password {
-		if r >= 32 && r != 127 { // Printable ASCII characters except DEL
-			cleaned.WriteRune(r)
-		}
-	}
-
-	return cleaned.String()
-}
-
 // ActionAlertConfig handles alert configuration commands
 func ActionAlertConfig() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
@@ -1808,7 +1789,7 @@ func configureEmailChannel(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Clean up the password input
-	smtpPassword = cleanPasswordInput(smtpPassword)
+	smtpPassword = utils.CleanPasswordInput(smtpPassword)
 
 	fmt.Print("Default Receivers (comma-separated): ")
 	receiversInput, err := scanner.ScanString()
