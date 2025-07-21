@@ -12,36 +12,51 @@ import (
 
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
+	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 )
 
 // InstallMonitoring installs monitoring stack using Helm
 func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *types.MonitoringConfig) (*types.MonitoringInfo, error) {
-	fmt.Println("🚀 Starting monitoring installation...")
+	logger := t.l
+	// fallback to zap.NewExample().Sugar() if logger is nil
+	if logger == nil {
+		logger = zap.NewExample().Sugar()
+	}
+
+	logger.Info("🚀 Starting monitoring installation...")
 
 	// Ensure monitoring namespace exists
 	if err := t.ensureNamespaceExists(ctx, config.Namespace); err != nil {
+		logger.Errorw("Failed to ensure monitoring namespace exists", "err", err)
 		return nil, fmt.Errorf("failed to ensure monitoring namespace exists: %w", err)
 	}
 
 	// Deploy infrastructure if persistence is enabled
 	if config.EnablePersistence {
+		logger.Info("Deploying monitoring infrastructure (persistence enabled)")
 		if err := t.deployMonitoringInfrastructure(ctx, config); err != nil {
+			logger.Errorw("Failed to deploy monitoring infrastructure", "err", err)
 			return nil, fmt.Errorf("failed to deploy monitoring infrastructure: %w", err)
 		}
 	}
 
 	// Generate values file
+	logger.Info("Generating values file for monitoring stack")
 	if err := t.generateValuesFile(ctx, config); err != nil {
+		logger.Errorw("Failed to generate values file", "err", err)
 		return nil, fmt.Errorf("failed to generate values file: %w", err)
 	}
 
 	// Update chart dependencies
-	if _, err := utils.ExecuteCommand(ctx, "helm", "dependency", "update", config.ChartsPath); err != nil {
-		return nil, fmt.Errorf("failed to update chart dependencies: %w", err)
+	logger.Info("Updating Helm chart dependencies")
+	out, err := utils.ExecuteCommand(ctx, "helm", "dependency", "update", config.ChartsPath)
+	if err != nil {
+		logger.Errorw("Failed to update chart dependencies", "err", err, "output", out)
 	}
 
 	// Install monitoring stack
+	logger.Infow("Installing monitoring stack via Helm", "release", config.HelmReleaseName)
 	installCmd := []string{
 		"upgrade", "--install",
 		config.HelmReleaseName,
@@ -53,27 +68,34 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *types.Monit
 		"--wait",
 		"--wait-for-jobs",
 	}
-
-	if _, err := utils.ExecuteCommand(ctx, "helm", installCmd...); err != nil {
-		return nil, fmt.Errorf("failed to install monitoring stack: %w", err)
+	out, err = utils.ExecuteCommand(ctx, "helm", installCmd...)
+	if err != nil {
+		logger.Errorw("Failed to install monitoring stack", "err", err, "output", out)
 	}
 
 	// Create additional resources
+	logger.Info("Creating AlertManager secret")
 	if err := t.createAlertManagerSecret(ctx, config); err != nil {
+		logger.Errorw("Failed to create AlertManager secret", "err", err)
 		return nil, fmt.Errorf("failed to create AlertManager secret: %w", err)
 	}
 	if err := t.createPrometheusRule(ctx, config); err != nil {
+		logger.Errorw("Failed to create PrometheusRule", "err", err)
 		return nil, fmt.Errorf("failed to create PrometheusRule: %w", err)
 	}
+	logger.Info("Creating dashboard configmaps")
 	if err := t.createDashboardConfigMaps(ctx, config); err != nil {
+		logger.Errorw("Failed to create dashboard configmaps", "err", err)
 		return nil, fmt.Errorf("failed to create dashboard configmaps: %w", err)
 	}
 
 	monitoringInfo := t.createMonitoringInfo(ctx, config)
 	if monitoringInfo == nil {
+		logger.Error("ALB Ingress is not ready after installation")
 		return nil, fmt.Errorf("ALB Ingress is not ready after installation")
 	}
 
+	logger.Info("Monitoring installation completed successfully")
 	return monitoringInfo, nil
 }
 
@@ -120,23 +142,45 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 
 // UninstallMonitoring removes monitoring plugin
 func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
+	logger := t.l
+	if logger == nil {
+		logger = zap.NewExample().Sugar()
+	}
+	logger.Info("Starting monitoring uninstallation...")
 	monitoringNamespace := "monitoring"
 	releases, err := utils.FilterHelmReleases(ctx, monitoringNamespace, "monitoring")
 	if err != nil {
+		logger.Errorw("Failed to filter Helm releases", "err", err)
 		return err
 	}
 
 	for _, release := range releases {
-		utils.ExecuteCommand(ctx, "helm", "uninstall", release, "--namespace", monitoringNamespace)
+		logger.Infow("Uninstalling Helm release", "release", release, "namespace", monitoringNamespace)
+		out, err := utils.ExecuteCommand(ctx, "helm", "uninstall", release, "--namespace", monitoringNamespace)
+		logger.Infow("Helm uninstall output", "output", out, "release", release, "namespace", monitoringNamespace)
+		if err != nil {
+			logger.Errorw("Failed to uninstall Helm release", "err", err, "release", release, "namespace", monitoringNamespace)
+			return err
+		}
 	}
 
-	utils.ExecuteCommand(ctx, "kubectl", "delete", "namespace", monitoringNamespace, "--ignore-not-found=true")
-	fmt.Println("🧹 Monitoring plugin uninstalled successfully")
+	logger.Infow("Deleting monitoring namespace", "namespace", monitoringNamespace)
+	_, err = utils.ExecuteCommand(ctx, "kubectl", "delete", "namespace", monitoringNamespace, "--ignore-not-found=true")
+	if err != nil {
+		logger.Errorw("Failed to delete namespace", "err", err, "namespace", monitoringNamespace)
+		return err
+	}
+	logger.Info("🧹 Monitoring plugin uninstalled successfully")
 	return nil
 }
 
 // DisplayMonitoringInfo displays monitoring information
 func (t *ThanosStack) DisplayMonitoringInfo(monitoringInfo *types.MonitoringInfo) {
+	logger := t.l
+	if logger == nil {
+		logger = zap.NewExample().Sugar()
+	}
+	logger.Infow("Monitoring Info", "info", monitoringInfo)
 	fmt.Printf("\n🎉 Monitoring Installation Complete!\n")
 	fmt.Printf("🌐 Grafana URL: %s\n", monitoringInfo.GrafanaURL)
 	fmt.Printf("👤 Username: %s\n", monitoringInfo.Username)
@@ -636,7 +680,8 @@ func (t *ThanosStack) applyPVManifest(ctx context.Context, component string, man
 	}
 	defer os.Remove(tempFile)
 
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile); err != nil {
+	_, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile)
+	if err != nil {
 		return fmt.Errorf("failed to apply PV manifest: %w", err)
 	}
 
@@ -676,7 +721,8 @@ func (t *ThanosStack) applyPVCManifest(ctx context.Context, component string, ma
 	}
 	defer os.Remove(tempFile)
 
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile); err != nil {
+	_, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile)
+	if err != nil {
 		return fmt.Errorf("failed to apply PVC manifest: %w", err)
 	}
 
@@ -725,7 +771,10 @@ data:
 			continue
 		}
 
-		utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile)
+		_, err = utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile)
+		if err != nil {
+			continue
+		}
 		os.Remove(tempFile)
 	}
 	return nil
@@ -860,7 +909,8 @@ func (t *ThanosStack) applySecretManifest(ctx context.Context, manifest string) 
 	}
 	tempFile.Close()
 
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile.Name()); err != nil {
+	_, err = utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile.Name())
+	if err != nil {
 		return fmt.Errorf("failed to apply secret manifest: %w", err)
 	}
 
@@ -905,7 +955,8 @@ func (t *ThanosStack) cleanupExistingPrometheusRules(ctx context.Context, config
 			continue
 		}
 
-		if _, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "prometheusrule", ruleName, "-n", config.Namespace); err != nil {
+		_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "prometheusrule", ruleName, "-n", config.Namespace)
+		if err != nil {
 			fmt.Printf("⚠️  Failed to delete Alerting Rule %s: %v\n", ruleName, err)
 			// Continue with other rules even if one fails
 		}
@@ -1108,7 +1159,8 @@ func (t *ThanosStack) applyPrometheusRuleManifest(ctx context.Context, manifest 
 	}
 	tempFile.Close()
 
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile.Name()); err != nil {
+	_, err = utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile.Name())
+	if err != nil {
 		return fmt.Errorf("failed to apply PrometheusRule manifest: %w", err)
 	}
 
