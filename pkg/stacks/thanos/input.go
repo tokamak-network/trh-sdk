@@ -145,20 +145,16 @@ func (i *InstallMonitoringInput) Validate() error {
 	}
 
 	if i.AlertManager.Email.Enabled {
-		if i.AlertManager.Email.SmtpSmarthost == "" {
-			return errors.New("SMTP server is required when Email is enabled")
-		}
-
 		if i.AlertManager.Email.SmtpFrom == "" {
 			return errors.New("from email address is required when Email is enabled")
 		}
 
 		if i.AlertManager.Email.SmtpAuthUsername == "" {
-			return errors.New("SMTP username is required when Email is enabled")
+			return errors.New("Gmail address is required when Email is enabled")
 		}
 
 		if i.AlertManager.Email.SmtpAuthPassword == "" {
-			return errors.New("SMTP password is required when Email is enabled")
+			return errors.New("Gmail app password is required when Email is enabled")
 		}
 
 		if len(i.AlertManager.Email.CriticalReceivers) == 0 {
@@ -177,18 +173,9 @@ func (i *InstallMonitoringInput) Validate() error {
 			}
 		}
 
-		// Validate SMTP server format (host:port)
-		if !strings.Contains(i.AlertManager.Email.SmtpSmarthost, ":") {
-			return errors.New("SMTP server must include port (e.g., smtp.gmail.com:587)")
-		}
-
-		parts := strings.Split(i.AlertManager.Email.SmtpSmarthost, ":")
-		if len(parts) != 2 {
-			return errors.New("invalid SMTP server format. Expected: hostname:port")
-		}
-
-		if port, err := strconv.Atoi(parts[1]); err != nil || port < 1 || port > 65535 {
-			return errors.New("invalid SMTP port number. Must be between 1 and 65535")
+		// Validate Gmail SMTP server (should be hardcoded to smtp.gmail.com:587)
+		if i.AlertManager.Email.SmtpSmarthost != "smtp.gmail.com:587" {
+			return errors.New("only Gmail SMTP is supported (smtp.gmail.com:587)")
 		}
 	}
 
@@ -825,127 +812,37 @@ func getEmailConfigFromUser() types.EmailConfig {
 		return types.EmailConfig{Enabled: false}
 	}
 
-	// Check if user wants to use Gmail
-	fmt.Print("Use Gmail SMTP? (y/n): ")
-	useGmail, err := scanner.ScanBool(false)
-	if err != nil {
-		fmt.Printf("Error while reading Gmail SMTP choice: %s\n", err)
-		return types.EmailConfig{Enabled: false}
-	}
+	// Gmail SMTP configuration (hardcoded)
+	smtpSmarthost := "smtp.gmail.com:587"
+	fmt.Printf("✅ Using Gmail SMTP: %s\n", smtpSmarthost)
 
-	var smtpSmarthost string
-	var smtpFrom string
+	// Get Gmail address
 	var smtpAuthUsername string
-
-	if useGmail {
-		smtpSmarthost = "smtp.gmail.com:587"
-		fmt.Printf("✅ Using Gmail SMTP: %s\n", smtpSmarthost)
-
-		// For Gmail, get username and set from address automatically
-		for {
-			fmt.Print("Enter Gmail Address: ")
-			smtpAuthUsername, err = scanner.ScanString()
-			if err != nil {
-				fmt.Printf("Error while reading Gmail Address: %s\n", err)
-				return types.EmailConfig{Enabled: false}
-			}
-
-			// Validate Gmail address format
-			if smtpAuthUsername == "" {
-				fmt.Println("❌ Gmail address cannot be empty")
-				continue
-			}
-
-			// Basic email validation
-			if !emailRegex.MatchString(smtpAuthUsername) {
-				fmt.Println("❌ Invalid email address format")
-				continue
-			}
-			break
-		}
-		smtpFrom = smtpAuthUsername
-		fmt.Printf("✅ From Email Address: %s\n", smtpFrom)
-	} else {
-		// Custom SMTP server configuration
-		for {
-			fmt.Print("Enter SMTP Server (e.g., smtp.gmail.com:587): ")
-			smtpSmarthost, err = scanner.ScanString()
-			if err != nil {
-				fmt.Printf("Error while reading SMTP Server: %s\n", err)
-				return types.EmailConfig{Enabled: false}
-			}
-
-			// Validate SMTP server format
-			if smtpSmarthost == "" {
-				fmt.Println("❌ SMTP server cannot be empty")
-				continue
-			}
-
-			// Check if it includes port
-			if !strings.Contains(smtpSmarthost, ":") {
-				fmt.Println("❌ SMTP server must include port (e.g., smtp.gmail.com:587)")
-				continue
-			}
-
-			// Validate host:port format
-			parts := strings.Split(smtpSmarthost, ":")
-			if len(parts) != 2 {
-				fmt.Println("❌ Invalid SMTP server format. Expected: hostname:port")
-				continue
-			}
-
-			// Validate port number
-			if port, err := strconv.Atoi(parts[1]); err != nil || port < 1 || port > 65535 {
-				fmt.Println("❌ Invalid port number. Must be between 1 and 65535")
-				continue
-			}
-
-			fmt.Printf("✅ Valid SMTP server: %s\n", smtpSmarthost)
-			break
+	for {
+		fmt.Print("Enter Gmail Address: ")
+		smtpAuthUsername, err = scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error while reading Gmail Address: %s\n", err)
+			return types.EmailConfig{Enabled: false}
 		}
 
-		for {
-			fmt.Print("Enter From Email Address: ")
-			smtpFrom, err = scanner.ScanString()
-			if err != nil {
-				fmt.Printf("Error while reading From Email Address: %s\n", err)
-				return types.EmailConfig{Enabled: false}
-			}
-
-			// Validate from email address
-			if smtpFrom == "" {
-				fmt.Println("❌ From email address cannot be empty")
-				continue
-			}
-
-			// Basic email validation
-			if !emailRegex.MatchString(smtpFrom) {
-				fmt.Println("❌ Invalid email address format")
-				continue
-			}
-
-			fmt.Printf("✅ Valid from email address: %s\n", smtpFrom)
-			break
+		// Validate Gmail address format
+		if smtpAuthUsername == "" {
+			fmt.Println("❌ Gmail address cannot be empty")
+			continue
 		}
 
-		for {
-			fmt.Print("Enter SMTP Username: ")
-			smtpAuthUsername, err = scanner.ScanString()
-			if err != nil {
-				fmt.Printf("Error while reading SMTP Username: %s\n", err)
-				return types.EmailConfig{Enabled: false}
-			}
-
-			// Validate SMTP username
-			if smtpAuthUsername == "" {
-				fmt.Println("❌ SMTP username cannot be empty")
-				continue
-			}
-
-			fmt.Printf("✅ SMTP username: %s\n", smtpAuthUsername)
-			break
+		// Basic email validation
+		if !emailRegex.MatchString(smtpAuthUsername) {
+			fmt.Println("❌ Invalid email address format")
+			continue
 		}
+		break
 	}
+
+	// Set from address same as Gmail address
+	smtpFrom := smtpAuthUsername
+	fmt.Printf("✅ From Email Address: %s\n", smtpFrom)
 
 	var smtpAuthPassword string
 	for {
@@ -965,11 +862,9 @@ func getEmailConfigFromUser() types.EmailConfig {
 			continue
 		}
 
-		// For Gmail, warn about app passwords
-		if useGmail {
-			fmt.Println("💡 For Gmail, use an App Password instead of your regular password")
-			fmt.Println("   Generate at: https://myaccount.google.com/apppasswords")
-		}
+		// Warn about Gmail app passwords
+		fmt.Println("💡 For Gmail, use an App Password instead of your regular password")
+		fmt.Println("   Generate at: https://myaccount.google.com/apppasswords")
 
 		fmt.Printf("✅ SMTP password configured\n")
 		break
