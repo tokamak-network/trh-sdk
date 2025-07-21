@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
+	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"gopkg.in/yaml.v3"
 )
@@ -54,80 +56,51 @@ func (a *AlertCustomization) GetAlertManagerConfig(ctx context.Context) (string,
 
 // GetChannelStatus checks if a specific channel type is enabled in the configuration
 func (a *AlertCustomization) GetChannelStatus(config string, channelType string) string {
-	var amConfig map[string]interface{}
+	var amConfig types.AlertManagerParsedConfig
 	if err := yaml.Unmarshal([]byte(config), &amConfig); err != nil {
 		return "Unknown"
 	}
-	receivers, ok := amConfig["receivers"].([]interface{})
-	if !ok {
-		return "Disabled"
-	}
-	for _, r := range receivers {
-		receiver, ok := r.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		var configKey string
+
+	for _, receiver := range amConfig.Receivers {
 		switch channelType {
-		case "email":
-			configKey = "email_configs"
-		case "telegram":
-			configKey = "telegram_configs"
+		case constants.ChannelEmail:
+			if len(receiver.EmailConfigs) > 0 {
+				return "Enabled"
+			}
+		case constants.ChannelTelegram:
+			if len(receiver.TelegramConfigs) > 0 {
+				return "Enabled"
+			}
 		default:
 			continue
-		}
-		if _, exists := receiver[configKey]; exists {
-			return "Enabled"
 		}
 	}
 	return "Disabled"
 }
 
 // GetPrometheusRules retrieves all PrometheusRule items in the monitoring namespace
-func (a *AlertCustomization) GetPrometheusRules(ctx context.Context) ([]map[string]interface{}, error) {
+func (a *AlertCustomization) GetPrometheusRules(ctx context.Context) ([]types.AlertRule, error) {
 	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", "monitoring", "-o", "yaml")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get PrometheusRules: %w", err)
 	}
-	var ruleList map[string]interface{}
+
+	var ruleList types.PrometheusRuleList
 	if err := yaml.Unmarshal([]byte(output), &ruleList); err != nil {
 		return nil, fmt.Errorf("failed to parse PrometheusRule YAML: %w", err)
 	}
-	items, ok := ruleList["items"].([]interface{})
-	if !ok || len(items) == 0 {
+
+	if len(ruleList.Items) == 0 {
 		return nil, fmt.Errorf("no PrometheusRule items found")
 	}
-	var allRules []map[string]interface{}
-	for _, item := range items {
-		ruleItem, ok := item.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		spec, ok := ruleItem["spec"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-		groups, ok := spec["groups"].([]interface{})
-		if !ok || len(groups) == 0 {
-			continue
-		}
-		for _, group := range groups {
-			groupMap, ok := group.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			rules, ok := groupMap["rules"].([]interface{})
-			if !ok {
-				continue
-			}
-			for _, rule := range rules {
-				ruleMap, ok := rule.(map[string]interface{})
-				if ok {
-					allRules = append(allRules, ruleMap)
-				}
-			}
+
+	var allRules []types.AlertRule
+	for _, prometheusRule := range ruleList.Items {
+		for _, group := range prometheusRule.Spec.Groups {
+			allRules = append(allRules, group.Rules...)
 		}
 	}
+
 	return allRules, nil
 }
 
@@ -140,62 +113,40 @@ func (a *AlertCustomization) EnableRule(ctx context.Context, ruleName string) er
 	}
 
 	// Parse the YAML
-	var ruleList map[string]interface{}
+	var ruleList types.PrometheusRuleList
 	if err := yaml.Unmarshal([]byte(ruleOutput), &ruleList); err != nil {
 		return fmt.Errorf("failed to parse PrometheusRule YAML: %w", err)
 	}
 
-	// Navigate to rules
-	items, ok := ruleList["items"].([]interface{})
-	if !ok || len(items) == 0 {
+	if len(ruleList.Items) == 0 {
 		return fmt.Errorf("no PrometheusRule items found")
 	}
 
-	ruleItem, ok := items[0].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to parse PrometheusRule item")
-	}
+	// Get the first PrometheusRule
+	rule := ruleList.Items[0]
 
-	spec, ok := ruleItem["spec"].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to find spec in PrometheusRule")
-	}
-
-	groups, ok := spec["groups"].([]interface{})
-	if !ok || len(groups) == 0 {
+	if len(rule.Spec.Groups) == 0 {
 		return fmt.Errorf("no groups found in PrometheusRule")
 	}
 
-	group, ok := groups[0].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to parse group")
-	}
-
-	rules, ok := group["rules"].([]interface{})
-	if !ok {
-		return fmt.Errorf("no rules found in group")
-	}
+	// Get the first group
+	group := &rule.Spec.Groups[0]
 
 	// Check if rule already exists
-	for _, rule := range rules {
-		ruleMap, ok := rule.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		if alertName, exists := ruleMap["alert"]; exists && alertName == ruleName {
+	for _, existingRule := range group.Rules {
+		if existingRule.Alert == ruleName {
 			return nil // Rule already enabled
 		}
 	}
 
 	// Default values for rules
 	defaultValues := map[string]string{
-		"OpBatcherBalanceCritical":  "0.01",
-		"OpProposerBalanceCritical": "0.01",
-		"BlockProductionStalled":    "1m",
-		"ContainerCpuUsageHigh":     "80",
-		"ContainerMemoryUsageHigh":  "80",
-		"PodCrashLooping":           "2m",
+		constants.AlertOpBatcherBalanceCritical:  "0.01",
+		constants.AlertOpProposerBalanceCritical: "0.01",
+		constants.AlertBlockProductionStalled:    "1m",
+		constants.AlertContainerCpuUsageHigh:     "80",
+		constants.AlertContainerMemoryUsageHigh:  "80",
+		constants.AlertPodCrashLooping:           "2m",
 	}
 
 	// Create new rule with default value
@@ -203,8 +154,7 @@ func (a *AlertCustomization) EnableRule(ctx context.Context, ruleName string) er
 	newRule := a.createRuleWithDefaultValue(ruleName, defaultValue)
 
 	// Add the rule to the rules list
-	rules = append(rules, newRule)
-	group["rules"] = rules
+	group.Rules = append(group.Rules, newRule)
 
 	// Convert back to YAML
 	updatedYAML, err := yaml.Marshal(ruleList)
@@ -236,61 +186,35 @@ func (a *AlertCustomization) DisableRule(ctx context.Context, ruleName string) e
 	}
 
 	// Parse the YAML
-	var ruleList map[string]interface{}
+	var ruleList types.PrometheusRuleList
 	if err := yaml.Unmarshal([]byte(ruleOutput), &ruleList); err != nil {
 		return fmt.Errorf("failed to parse PrometheusRule YAML: %w", err)
 	}
 
-	// Navigate to rules
-	items, ok := ruleList["items"].([]interface{})
-	if !ok || len(items) == 0 {
+	if len(ruleList.Items) == 0 {
 		return fmt.Errorf("no PrometheusRule items found")
 	}
 
-	ruleItem, ok := items[0].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to parse PrometheusRule item")
-	}
+	// Get the first PrometheusRule
+	rule := ruleList.Items[0]
 
-	spec, ok := ruleItem["spec"].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to find spec in PrometheusRule")
-	}
-
-	groups, ok := spec["groups"].([]interface{})
-	if !ok || len(groups) == 0 {
+	if len(rule.Spec.Groups) == 0 {
 		return fmt.Errorf("no groups found in PrometheusRule")
 	}
 
-	group, ok := groups[0].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to parse group")
-	}
-
-	rules, ok := group["rules"].([]interface{})
-	if !ok {
-		return fmt.Errorf("no rules found in group")
-	}
+	// Get the first group
+	group := &rule.Spec.Groups[0]
 
 	// Find and remove the rule
-	var updatedRules []interface{}
-
-	for _, rule := range rules {
-		ruleMap, ok := rule.(map[string]interface{})
-		if !ok {
-			updatedRules = append(updatedRules, rule)
-			continue
-		}
-
-		if alertName, exists := ruleMap["alert"]; exists && alertName == ruleName {
-			// Skip this rule (remove it)
-		} else {
-			updatedRules = append(updatedRules, rule)
+	var updatedRules []types.AlertRule
+	for _, existingRule := range group.Rules {
+		if existingRule.Alert != ruleName {
+			updatedRules = append(updatedRules, existingRule)
 		}
 	}
 
 	// Update the rules list
-	group["rules"] = updatedRules
+	group.Rules = updatedRules
 
 	// Convert back to YAML
 	updatedYAML, err := yaml.Marshal(ruleList)
@@ -322,71 +246,53 @@ func (a *AlertCustomization) ResetPrometheusRules(ctx context.Context) error {
 	}
 
 	// Parse the YAML
-	var ruleList map[string]interface{}
+	var ruleList types.PrometheusRuleList
 	if err := yaml.Unmarshal([]byte(ruleOutput), &ruleList); err != nil {
 		return fmt.Errorf("failed to parse PrometheusRule YAML: %w", err)
 	}
 
-	// Navigate to rules
-	items, ok := ruleList["items"].([]interface{})
-	if !ok || len(items) == 0 {
+	if len(ruleList.Items) == 0 {
 		return fmt.Errorf("no PrometheusRule items found")
 	}
 
-	ruleItem, ok := items[0].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to parse PrometheusRule item")
-	}
+	// Get the first PrometheusRule
+	rule := ruleList.Items[0]
 
-	spec, ok := ruleItem["spec"].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to find spec in PrometheusRule")
-	}
-
-	groups, ok := spec["groups"].([]interface{})
-	if !ok || len(groups) == 0 {
+	if len(rule.Spec.Groups) == 0 {
 		return fmt.Errorf("no groups found in PrometheusRule")
 	}
 
-	group, ok := groups[0].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to parse group")
-	}
-
-	rules, ok := group["rules"].([]interface{})
-	if !ok {
-		return fmt.Errorf("no rules found in group")
-	}
+	// Get the first group
+	group := &rule.Spec.Groups[0]
 
 	// Default values for configurable rules
 	defaultValues := map[string]string{
-		"OpBatcherBalanceCritical":  "0.01",
-		"OpProposerBalanceCritical": "0.01",
-		"BlockProductionStalled":    "1m",
-		"ContainerCpuUsageHigh":     "80",
-		"ContainerMemoryUsageHigh":  "80",
-		"PodCrashLooping":           "2m",
+		constants.AlertOpBatcherBalanceCritical:  "0.01",
+		constants.AlertOpProposerBalanceCritical: "0.01",
+		constants.AlertBlockProductionStalled:    "1m",
+		constants.AlertContainerCpuUsageHigh:     "80",
+		constants.AlertContainerMemoryUsageHigh:  "80",
+		constants.AlertPodCrashLooping:           "2m",
 	}
 
 	// Reset configurable rules to default values
 	rulesReset := 0
 	for ruleName, defaultValue := range defaultValues {
 		// Find and update the rule
-		for _, rule := range rules {
-			ruleMap, ok := rule.(map[string]interface{})
-			if !ok {
-				continue
-			}
-
-			if alertName, exists := ruleMap["alert"]; exists && alertName == ruleName {
+		for i, existingRule := range group.Rules {
+			if existingRule.Alert == ruleName {
 				// Update the rule expression with default value
-				if err := a.updateRuleExpression(ruleMap, ruleName, defaultValue); err != nil {
+				if err := a.updateRuleExpression(&group.Rules[i], ruleName, defaultValue); err != nil {
 					return fmt.Errorf("failed to update rule %s: %w", ruleName, err)
 				}
 				rulesReset++
 				break
 			}
 		}
+	}
+
+	if rulesReset == 0 {
+		return fmt.Errorf("no configurable rules found to reset")
 	}
 
 	// Convert back to YAML
@@ -404,13 +310,13 @@ func (a *AlertCustomization) ResetPrometheusRules(ctx context.Context) error {
 
 	// Apply the updated PrometheusRule
 	if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile); err != nil {
-		return fmt.Errorf("failed to apply reset PrometheusRule: %w", err)
+		return fmt.Errorf("failed to apply updated PrometheusRule: %w", err)
 	}
 
 	return nil
 }
 
-// UpdatePrometheusRule updates a specific rule with a new value
+// UpdatePrometheusRule updates a specific alert rule with a new value
 func (a *AlertCustomization) UpdatePrometheusRule(ctx context.Context, ruleName, newValue string) error {
 	// Get current PrometheusRule
 	ruleOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", "monitoring", "-o", "yaml")
@@ -419,58 +325,36 @@ func (a *AlertCustomization) UpdatePrometheusRule(ctx context.Context, ruleName,
 	}
 
 	// Parse the YAML
-	var ruleList map[string]interface{}
+	var ruleList types.PrometheusRuleList
 	if err := yaml.Unmarshal([]byte(ruleOutput), &ruleList); err != nil {
 		return fmt.Errorf("failed to parse PrometheusRule YAML: %w", err)
 	}
 
-	// Navigate to rules
-	items, ok := ruleList["items"].([]interface{})
-	if !ok || len(items) == 0 {
+	if len(ruleList.Items) == 0 {
 		return fmt.Errorf("no PrometheusRule items found")
 	}
 
-	ruleItem, ok := items[0].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to parse PrometheusRule item")
-	}
+	// Get the first PrometheusRule
+	rule := ruleList.Items[0]
 
-	spec, ok := ruleItem["spec"].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to find spec in PrometheusRule")
-	}
-
-	groups, ok := spec["groups"].([]interface{})
-	if !ok || len(groups) == 0 {
+	if len(rule.Spec.Groups) == 0 {
 		return fmt.Errorf("no groups found in PrometheusRule")
 	}
 
-	group, ok := groups[0].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("failed to parse group")
-	}
-
-	rules, ok := group["rules"].([]interface{})
-	if !ok {
-		return fmt.Errorf("no rules found in group")
-	}
+	// Get the first group
+	group := &rule.Spec.Groups[0]
 
 	// Find and update the rule
 	ruleFound := false
-	for _, rule := range rules {
-		ruleMap, ok := rule.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		if alertName, exists := ruleMap["alert"]; exists && alertName == ruleName {
+	for i, existingRule := range group.Rules {
+		if existingRule.Alert == ruleName {
 			// Update the rule expression
-			if err := a.updateRuleExpression(ruleMap, ruleName, newValue); err != nil {
+			if err := a.updateRuleExpression(&group.Rules[i], ruleName, newValue); err != nil {
 				return fmt.Errorf("failed to update rule expression: %w", err)
 			}
 
 			// Update annotations if needed
-			if err := a.updateRuleAnnotations(ruleMap, ruleName, newValue); err != nil {
+			if err := a.updateRuleAnnotations(&group.Rules[i], ruleName, newValue); err != nil {
 				return fmt.Errorf("failed to update rule annotations: %w", err)
 			}
 
@@ -505,20 +389,20 @@ func (a *AlertCustomization) UpdatePrometheusRule(ctx context.Context, ruleName,
 }
 
 // Helper methods
-func (a *AlertCustomization) updateRuleExpression(ruleMap map[string]interface{}, ruleName, newValue string) error {
+func (a *AlertCustomization) updateRuleExpression(rule *types.AlertRule, ruleName, newValue string) error {
 	switch ruleName {
-	case "OpBatcherBalanceCritical":
-		ruleMap["expr"] = fmt.Sprintf("op_batcher_default_balance < %s", newValue)
-	case "OpProposerBalanceCritical":
-		ruleMap["expr"] = fmt.Sprintf("op_proposer_default_balance < %s", newValue)
-	case "BlockProductionStalled":
-		ruleMap["expr"] = fmt.Sprintf("increase(op_node_blocks_produced_total[%s]) == 0", newValue)
-	case "ContainerCpuUsageHigh":
-		ruleMap["expr"] = fmt.Sprintf("(rate(container_cpu_usage_seconds_total{container!=\"\"}[5m]) * 100) > %s", newValue)
-	case "ContainerMemoryUsageHigh":
-		ruleMap["expr"] = fmt.Sprintf("(container_memory_usage_bytes{container!=\"\"} / container_spec_memory_limit_bytes{container!=\"\"} * 100) > %s", newValue)
-	case "PodCrashLooping":
-		ruleMap["expr"] = fmt.Sprintf("increase(kube_pod_container_status_restarts_total[%s]) > 0", newValue)
+	case constants.AlertOpBatcherBalanceCritical:
+		rule.Expr = fmt.Sprintf("op_batcher_default_balance < %s", newValue)
+	case constants.AlertOpProposerBalanceCritical:
+		rule.Expr = fmt.Sprintf("op_proposer_default_balance < %s", newValue)
+	case constants.AlertBlockProductionStalled:
+		rule.Expr = fmt.Sprintf("increase(op_node_blocks_produced_total[%s]) == 0", newValue)
+	case constants.AlertContainerCpuUsageHigh:
+		rule.Expr = fmt.Sprintf("(rate(container_cpu_usage_seconds_total{container!=\"\"}[5m]) * 100) > %s", newValue)
+	case constants.AlertContainerMemoryUsageHigh:
+		rule.Expr = fmt.Sprintf("(container_memory_usage_bytes{container!=\"\"} / container_spec_memory_limit_bytes{container!=\"\"} * 100) > %s", newValue)
+	case constants.AlertPodCrashLooping:
+		rule.Expr = fmt.Sprintf("increase(kube_pod_container_status_restarts_total[%s]) > 0", newValue)
 	default:
 		return fmt.Errorf("unknown rule: %s", ruleName)
 	}
@@ -526,101 +410,107 @@ func (a *AlertCustomization) updateRuleExpression(ruleMap map[string]interface{}
 	return nil
 }
 
-func (a *AlertCustomization) updateRuleAnnotations(ruleMap map[string]interface{}, ruleName, newValue string) error {
-	annotations, ok := ruleMap["annotations"].(map[string]interface{})
-	if !ok {
-		annotations = make(map[string]interface{})
-		ruleMap["annotations"] = annotations
-	}
-
+func (a *AlertCustomization) updateRuleAnnotations(rule *types.AlertRule, ruleName, newValue string) error {
 	switch ruleName {
-	case "OpBatcherBalanceCritical", "OpProposerBalanceCritical":
-		annotations["current_value"] = fmt.Sprintf("%s ETH", newValue)
-	case "BlockProductionStalled":
-		annotations["current_value"] = fmt.Sprintf("%s stall detection", newValue)
-	case "ContainerCpuUsageHigh", "ContainerMemoryUsageHigh":
-		annotations["current_value"] = fmt.Sprintf("%s%% threshold", newValue)
-	case "PodCrashLooping":
-		annotations["current_value"] = fmt.Sprintf("%s restart detection", newValue)
+	case constants.AlertOpBatcherBalanceCritical, constants.AlertOpProposerBalanceCritical:
+		rule.Annotations["current_value"] = fmt.Sprintf("%s ETH", newValue)
+	case constants.AlertBlockProductionStalled:
+		rule.Annotations["current_value"] = fmt.Sprintf("%s stall detection", newValue)
+	case constants.AlertContainerCpuUsageHigh, constants.AlertContainerMemoryUsageHigh:
+		rule.Annotations["current_value"] = fmt.Sprintf("%s%% threshold", newValue)
+	case constants.AlertPodCrashLooping:
+		rule.Annotations["current_value"] = fmt.Sprintf("%s restart detection", newValue)
 	}
 
 	return nil
 }
 
-func (a *AlertCustomization) createRuleWithDefaultValue(ruleName, defaultValue string) map[string]interface{} {
-	rule := map[string]interface{}{
-		"alert": ruleName,
-		"expr":  "",
-		"for":   "1m",
-		"labels": map[string]interface{}{
-			"severity": "warning",
+// createRuleWithDefaultValue creates a rule with default value
+func (a *AlertCustomization) createRuleWithDefaultValue(ruleName, defaultValue string) types.AlertRule {
+	rule := types.AlertRule{
+		Alert:       ruleName,
+		Name:        ruleName,
+		Description: fmt.Sprintf("Alert rule for %s", ruleName),
+		Severity:    "critical",
+		Threshold:   defaultValue,
+		Enabled:     true,
+		For:         "1m",
+		Labels: map[string]string{
+			"severity":   "critical",
+			"component":  "thanos-stack",
+			"chain_name": "thanos-stack",
+			"namespace":  "monitoring",
 		},
-		"annotations": map[string]interface{}{
-			"summary":     fmt.Sprintf("%s alert", ruleName),
-			"description": fmt.Sprintf("%s condition detected", ruleName),
+		Annotations: map[string]string{
+			"summary":     fmt.Sprintf("Alert for %s", ruleName),
+			"description": fmt.Sprintf("This alert is triggered when %s condition is met", ruleName),
 		},
 	}
 
 	// Set expression based on rule type
 	switch ruleName {
-	case "OpBatcherBalanceCritical":
-		rule["expr"] = fmt.Sprintf("op_batcher_default_balance < %s", defaultValue)
-		rule["annotations"].(map[string]interface{})["current_value"] = fmt.Sprintf("%s ETH", defaultValue)
-	case "OpProposerBalanceCritical":
-		rule["expr"] = fmt.Sprintf("op_proposer_default_balance < %s", defaultValue)
-		rule["annotations"].(map[string]interface{})["current_value"] = fmt.Sprintf("%s ETH", defaultValue)
-	case "BlockProductionStalled":
-		rule["expr"] = fmt.Sprintf("increase(op_node_blocks_produced_total[%s]) == 0", defaultValue)
-		rule["annotations"].(map[string]interface{})["current_value"] = fmt.Sprintf("%s stall detection", defaultValue)
-	case "ContainerCpuUsageHigh":
-		rule["expr"] = fmt.Sprintf("(rate(container_cpu_usage_seconds_total{container!=\"\"}[5m]) * 100) > %s", defaultValue)
-		rule["annotations"].(map[string]interface{})["current_value"] = fmt.Sprintf("%s%% threshold", defaultValue)
-	case "ContainerMemoryUsageHigh":
-		rule["expr"] = fmt.Sprintf("(container_memory_usage_bytes{container!=\"\"} / container_spec_memory_limit_bytes{container!=\"\"} * 100) > %s", defaultValue)
-		rule["annotations"].(map[string]interface{})["current_value"] = fmt.Sprintf("%s%% threshold", defaultValue)
-	case "PodCrashLooping":
-		rule["expr"] = fmt.Sprintf("increase(kube_pod_container_status_restarts_total[%s]) > 0", defaultValue)
-		rule["annotations"].(map[string]interface{})["current_value"] = fmt.Sprintf("%s restart detection", defaultValue)
+	case constants.AlertOpBatcherBalanceCritical:
+		rule.Expr = fmt.Sprintf("op_batcher_default_balance < %s", defaultValue)
+		rule.Annotations["current_value"] = fmt.Sprintf("%s ETH", defaultValue)
+	case constants.AlertOpProposerBalanceCritical:
+		rule.Expr = fmt.Sprintf("op_proposer_default_balance < %s", defaultValue)
+		rule.Annotations["current_value"] = fmt.Sprintf("%s ETH", defaultValue)
+	case constants.AlertBlockProductionStalled:
+		rule.Expr = fmt.Sprintf("increase(op_node_blocks_produced_total[%s]) == 0", defaultValue)
+		rule.Annotations["current_value"] = fmt.Sprintf("%s stall detection", defaultValue)
+	case constants.AlertContainerCpuUsageHigh:
+		rule.Expr = fmt.Sprintf("(rate(container_cpu_usage_seconds_total{container!=\"\"}[5m]) * 100) > %s", defaultValue)
+		rule.Annotations["current_value"] = fmt.Sprintf("%s%% threshold", defaultValue)
+	case constants.AlertContainerMemoryUsageHigh:
+		rule.Expr = fmt.Sprintf("(container_memory_usage_bytes{container!=\"\"} / container_spec_memory_limit_bytes{container!=\"\"} * 100) > %s", defaultValue)
+		rule.Annotations["current_value"] = fmt.Sprintf("%s%% threshold", defaultValue)
+	case constants.AlertPodCrashLooping:
+		rule.Expr = fmt.Sprintf("increase(kube_pod_container_status_restarts_total[%s]) > 0", defaultValue)
+		rule.Annotations["current_value"] = fmt.Sprintf("%s restart detection", defaultValue)
 	}
 
 	return rule
 }
 
-// ExtractValueFromExpression extracts the current value from a rule expression
+// ExtractValueFromExpression extracts the threshold value from a Prometheus expression
 func (a *AlertCustomization) ExtractValueFromExpression(ruleName, expr string) string {
 	switch ruleName {
-	case "OpBatcherBalanceCritical", "OpProposerBalanceCritical":
+	case constants.AlertOpBatcherBalanceCritical, constants.AlertOpProposerBalanceCritical:
 		// Extract value from "op_batcher_default_balance < 0.01" or "op_proposer_default_balance < 0.01"
 		if strings.Contains(expr, "<") {
 			parts := strings.Split(expr, "<")
 			if len(parts) == 2 {
-				return strings.TrimSpace(parts[1])
+				value := strings.TrimSpace(parts[1])
+				return value
 			}
 		}
-	case "BlockProductionStalled":
+	case constants.AlertBlockProductionStalled:
 		// Extract value from "increase(op_node_blocks_produced_total[1m]) == 0"
 		if strings.Contains(expr, "[") && strings.Contains(expr, "]") {
 			start := strings.Index(expr, "[")
 			end := strings.Index(expr, "]")
-			if start != -1 && end != -1 && start < end {
-				return expr[start+1 : end]
+			if start != -1 && end != -1 && end > start {
+				value := expr[start+1 : end]
+				return value
 			}
 		}
-	case "ContainerCpuUsageHigh", "ContainerMemoryUsageHigh":
+	case constants.AlertContainerCpuUsageHigh, constants.AlertContainerMemoryUsageHigh:
 		// Extract value from "> 80"
 		if strings.Contains(expr, ">") {
 			parts := strings.Split(expr, ">")
 			if len(parts) == 2 {
-				return strings.TrimSpace(parts[1])
+				value := strings.TrimSpace(parts[1])
+				return value
 			}
 		}
-	case "PodCrashLooping":
+	case constants.AlertPodCrashLooping:
 		// Extract value from "increase(kube_pod_container_status_restarts_total[2m]) > 0"
 		if strings.Contains(expr, "[") && strings.Contains(expr, "]") {
 			start := strings.Index(expr, "[")
 			end := strings.Index(expr, "]")
-			if start != -1 && end != -1 && start < end {
-				return expr[start+1 : end]
+			if start != -1 && end != -1 && end > start {
+				value := expr[start+1 : end]
+				return value
 			}
 		}
 	}
@@ -917,111 +807,63 @@ func (a *AlertCustomization) applyAlertManagerConfig(ctx context.Context, config
 }
 
 // GetEmailConfiguration extracts email configuration from AlertManager config
-func (a *AlertCustomization) GetEmailConfiguration(config string) map[string]interface{} {
-	var amConfig map[string]interface{}
+func (a *AlertCustomization) GetEmailConfiguration(config string) types.EmailConfiguration {
+	var amConfig types.AlertManagerParsedConfig
+
 	if err := yaml.Unmarshal([]byte(config), &amConfig); err != nil {
-		return map[string]interface{}{"enabled": false}
-	}
-
-	// Get global SMTP settings
-	global, ok := amConfig["global"].(map[string]interface{})
-	if !ok {
-		return map[string]interface{}{"enabled": false}
-	}
-
-	smtpURL := ""
-	if smtpHost, exists := global["smtp_smarthost"]; exists {
-		smtpURL = fmt.Sprintf("%v", smtpHost)
-	}
-
-	from := ""
-	if smtpFrom, exists := global["smtp_from"]; exists {
-		from = fmt.Sprintf("%v", smtpFrom)
-	}
-
-	// Get receivers
-	receivers, ok := amConfig["receivers"].([]interface{})
-	if !ok {
-		return map[string]interface{}{"enabled": false}
+		return types.EmailConfiguration{Enabled: false}
 	}
 
 	var toAddresses []string
-	for _, r := range receivers {
-		receiver, ok := r.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		if emailConfigs, exists := receiver["email_configs"]; exists {
-			if emailConfigList, ok := emailConfigs.([]interface{}); ok {
-				for _, emailConfig := range emailConfigList {
-					if emailConfig, ok := emailConfig.(map[string]interface{}); ok {
-						if toAddr, exists := emailConfig["to"]; exists {
-							toAddresses = append(toAddresses, fmt.Sprintf("%v", toAddr))
-						}
-					}
-				}
+	for _, receiver := range amConfig.Receivers {
+		for _, emailConfig := range receiver.EmailConfigs {
+			if emailConfig.To != "" {
+				toAddresses = append(toAddresses, emailConfig.To)
 			}
 		}
 	}
 
 	if len(toAddresses) > 0 {
-		return map[string]interface{}{
-			"enabled":  true,
-			"smtp_url": smtpURL,
-			"from":     from,
-			"to":       strings.Join(toAddresses, ", "),
+		return types.EmailConfiguration{
+			Enabled: true,
+			SmtpURL: amConfig.Global.SmtpSmarthost,
+			From:    amConfig.Global.SmtpFrom,
+			To:      strings.Join(toAddresses, ", "),
 		}
 	}
 
-	return map[string]interface{}{"enabled": false}
+	return types.EmailConfiguration{Enabled: false}
 }
 
 // GetTelegramConfiguration extracts telegram configuration from AlertManager config
-func (a *AlertCustomization) GetTelegramConfiguration(config string) map[string]interface{} {
-	var amConfig map[string]interface{}
-	if err := yaml.Unmarshal([]byte(config), &amConfig); err != nil {
-		return map[string]interface{}{"enabled": false}
-	}
+func (a *AlertCustomization) GetTelegramConfiguration(config string) types.TelegramConfiguration {
+	var amConfig types.AlertManagerParsedConfig
 
-	receivers, ok := amConfig["receivers"].([]interface{})
-	if !ok {
-		return map[string]interface{}{"enabled": false}
+	if err := yaml.Unmarshal([]byte(config), &amConfig); err != nil {
+		return types.TelegramConfiguration{Enabled: false}
 	}
 
 	var botTokens []string
 	var chatIDs []string
 
-	for _, r := range receivers {
-		receiver, ok := r.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		if telegramConfigs, exists := receiver["telegram_configs"]; exists {
-			if telegramConfigList, ok := telegramConfigs.([]interface{}); ok {
-				for _, telegramConfig := range telegramConfigList {
-					if telegramConfig, ok := telegramConfig.(map[string]interface{}); ok {
-						if token, exists := telegramConfig["bot_token"]; exists {
-							botTokens = append(botTokens, fmt.Sprintf("%v", token))
-						}
-
-						if chat, exists := telegramConfig["chat_id"]; exists {
-							chatIDs = append(chatIDs, fmt.Sprintf("%v", chat))
-						}
-					}
-				}
+	for _, receiver := range amConfig.Receivers {
+		for _, telegramConfig := range receiver.TelegramConfigs {
+			if telegramConfig.BotToken != "" {
+				botTokens = append(botTokens, telegramConfig.BotToken)
+			}
+			if telegramConfig.ChatID != "" {
+				chatIDs = append(chatIDs, telegramConfig.ChatID)
 			}
 		}
 	}
 
 	if len(botTokens) > 0 || len(chatIDs) > 0 {
-		return map[string]interface{}{
-			"enabled":   true,
-			"bot_token": strings.Join(botTokens, ", "),
-			"chat_id":   strings.Join(chatIDs, ", "),
+		return types.TelegramConfiguration{
+			Enabled:  true,
+			BotToken: strings.Join(botTokens, ", "),
+			ChatID:   strings.Join(chatIDs, ", "),
 		}
 	}
 
-	return map[string]interface{}{"enabled": false}
+	return types.TelegramConfiguration{Enabled: false}
 }

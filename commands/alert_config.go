@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -56,29 +57,43 @@ func ActionAlertConfig() cli.ActionFunc {
 
 // handleChannelDisable disables the specified channel
 func handleChannelDisable(ctx context.Context, channelType string) error {
+	// Validate channel type
+	if !constants.IsValidChannelType(channelType) {
+		return fmt.Errorf("invalid channel type: %s (valid types: %v)",
+			channelType, constants.GetValidChannelTypes())
+	}
+
 	ac := &thanos.AlertCustomization{}
 
 	switch channelType {
-	case "email":
+	case constants.ChannelEmail:
 		return disableEmailChannel(ctx, ac)
-	case "telegram":
+	case constants.ChannelTelegram:
 		return disableTelegramChannel(ctx, ac)
 	default:
-		return fmt.Errorf("unknown channel type: %s (must be 'email' or 'telegram')", channelType)
+		return fmt.Errorf("unknown channel type: %s (must be '%s' or '%s')",
+			channelType, constants.ChannelEmail, constants.ChannelTelegram)
 	}
 }
 
 // handleChannelConfigure configures the specified channel
 func handleChannelConfigure(ctx context.Context, channelType string) error {
+	// Validate channel type
+	if !constants.IsValidChannelType(channelType) {
+		return fmt.Errorf("invalid channel type: %s (valid types: %v)",
+			channelType, constants.GetValidChannelTypes())
+	}
+
 	ac := &thanos.AlertCustomization{}
 
 	switch channelType {
-	case "email":
+	case constants.ChannelEmail:
 		return configureEmailChannel(ctx, ac)
-	case "telegram":
+	case constants.ChannelTelegram:
 		return configureTelegramChannel(ctx, ac)
 	default:
-		return fmt.Errorf("unknown channel type: %s (must be 'email' or 'telegram')", channelType)
+		return fmt.Errorf("unknown channel type: %s (must be '%s' or '%s')",
+			channelType, constants.ChannelEmail, constants.ChannelTelegram)
 	}
 }
 
@@ -146,26 +161,26 @@ func showAlertConfigHelp() error {
 	fmt.Println("  trh-sdk alert-config [--status|--channel|--rule] [options]")
 	fmt.Println()
 	fmt.Println("Commands:")
-	fmt.Println("  --status                    - Show current alert status and rules")
-	fmt.Println("  --channel <type> --disable  - Disable notification channel (email/telegram)")
-	fmt.Println("  --channel <type> --configure- Configure notification channel (email/telegram)")
+	fmt.Printf("  --status                    - Show current alert status and rules\n")
+	fmt.Printf("  --channel <type> --disable  - Disable notification channel (%s/%s)\n", constants.ChannelEmail, constants.ChannelTelegram)
+	fmt.Printf("  --channel <type> --configure- Configure notification channel (%s/%s)\n", constants.ChannelEmail, constants.ChannelTelegram)
 	fmt.Println("  --rule <action>             - Manage alert rules (reset/set)")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  # Check alert status")
 	fmt.Println("  trh-sdk alert-config --status")
 	fmt.Println()
-	fmt.Println("  # Disable email channel")
-	fmt.Println("  trh-sdk alert-config --channel email --disable")
+	fmt.Printf("  # Disable %s channel\n", constants.ChannelEmail)
+	fmt.Printf("  trh-sdk alert-config --channel %s --disable\n", constants.ChannelEmail)
 	fmt.Println()
-	fmt.Println("  # Configure email channel")
-	fmt.Println("  trh-sdk alert-config --channel email --configure")
+	fmt.Printf("  # Configure %s channel\n", constants.ChannelEmail)
+	fmt.Printf("  trh-sdk alert-config --channel %s --configure\n", constants.ChannelEmail)
 	fmt.Println()
-	fmt.Println("  # Disable telegram channel")
-	fmt.Println("  trh-sdk alert-config --channel telegram --disable")
+	fmt.Printf("  # Disable %s channel\n", constants.ChannelTelegram)
+	fmt.Printf("  trh-sdk alert-config --channel %s --disable\n", constants.ChannelTelegram)
 	fmt.Println()
-	fmt.Println("  # Configure telegram channel")
-	fmt.Println("  trh-sdk alert-config --channel telegram --configure")
+	fmt.Printf("  # Configure %s channel\n", constants.ChannelTelegram)
+	fmt.Printf("  trh-sdk alert-config --channel %s --configure\n", constants.ChannelTelegram)
 	fmt.Println()
 	fmt.Println("  # Interactive rule configuration")
 	fmt.Println("  trh-sdk alert-config --rule set")
@@ -195,8 +210,8 @@ func handleAlertStatus(ctx context.Context) error {
 
 	fmt.Println("📊 Alert Status Summary:")
 	fmt.Println("========================")
-	fmt.Printf("   📧 Email channel: %s\n", ac.GetChannelStatus(alertManagerConfig, "email"))
-	fmt.Printf("   📱 Telegram channel: %s\n", ac.GetChannelStatus(alertManagerConfig, "telegram"))
+	fmt.Printf("   📧 Email channel: %s\n", ac.GetChannelStatus(alertManagerConfig, constants.ChannelEmail))
+	fmt.Printf("   📱 Telegram channel: %s\n", ac.GetChannelStatus(alertManagerConfig, constants.ChannelTelegram))
 
 	// Display configuration details
 	if alertManagerConfig != "" {
@@ -206,19 +221,19 @@ func handleAlertStatus(ctx context.Context) error {
 
 		// Email configuration
 		emailConfig := ac.GetEmailConfiguration(alertManagerConfig)
-		if enabled, ok := emailConfig["enabled"].(bool); ok && enabled {
+		if emailConfig.Enabled {
 			fmt.Printf("   📧 Email Configuration:\n")
-			fmt.Printf("      SMTP URL: %s\n", emailConfig["smtp_url"])
-			fmt.Printf("      From: %s\n", emailConfig["from"])
-			fmt.Printf("      To: %s\n", emailConfig["to"])
+			fmt.Printf("      SMTP URL: %s\n", emailConfig.SmtpURL)
+			fmt.Printf("      From: %s\n", emailConfig.From)
+			fmt.Printf("      To: %s\n", emailConfig.To)
 		}
 
 		// Telegram configuration
 		telegramConfig := ac.GetTelegramConfiguration(alertManagerConfig)
-		if enabled, ok := telegramConfig["enabled"].(bool); ok && enabled {
+		if telegramConfig.Enabled {
 			fmt.Printf("   📱 Telegram Configuration:\n")
-			fmt.Printf("      Bot Token: %s\n", telegramConfig["bot_token"])
-			fmt.Printf("      Chat ID: %s\n", telegramConfig["chat_id"])
+			fmt.Printf("      Bot Token: %s\n", telegramConfig.BotToken)
+			fmt.Printf("      Chat ID: %s\n", telegramConfig.ChatID)
 		}
 	}
 
@@ -242,7 +257,7 @@ func handleAlertStatus(ctx context.Context) error {
 	// Count active rules
 	activeRuleCount := 0
 	for _, rule := range allRules {
-		if _, exists := rule["alert"]; exists {
+		if rule.Alert != "" {
 			activeRuleCount++
 		}
 	}
@@ -279,17 +294,15 @@ func handleAlertStatus(ctx context.Context) error {
 			var severity string
 
 			for _, rule := range allRules {
-				if alertName, exists := rule["alert"]; exists && alertName == ruleName {
+				if rule.Alert == ruleName {
 					found = true
 					// Extract current value from expression
-					if expr, ok := rule["expr"].(string); ok {
-						currentValue = ac.ExtractValueFromExpression(ruleName, expr)
+					if rule.Expr != "" {
+						currentValue = ac.ExtractValueFromExpression(ruleName, rule.Expr)
 					}
 					// Extract severity
-					if labels, ok := rule["labels"].(map[string]interface{}); ok {
-						if sev, exists := labels["severity"]; exists {
-							severity = fmt.Sprintf("%v", sev)
-						}
+					if sev, exists := rule.Labels["severity"]; exists {
+						severity = sev
 					}
 					break
 				}
@@ -572,7 +585,7 @@ func disableEmailChannel(ctx context.Context, ac *thanos.AlertCustomization) err
 	}
 
 	// Check if email is already disabled
-	if ac.GetChannelStatus(config, "email") == "Disabled" {
+	if ac.GetChannelStatus(config, constants.ChannelEmail) == "Disabled" {
 		fmt.Println("ℹ️  Email channel is already disabled")
 		return nil
 	}
@@ -665,7 +678,7 @@ func disableTelegramChannel(ctx context.Context, ac *thanos.AlertCustomization) 
 	}
 
 	// Check if telegram is already disabled
-	if ac.GetChannelStatus(config, "telegram") == "Disabled" {
+	if ac.GetChannelStatus(config, constants.ChannelTelegram) == "Disabled" {
 		fmt.Println("ℹ️  Telegram channel is already disabled")
 		return nil
 	}

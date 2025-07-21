@@ -299,3 +299,28 @@ func WaitPVCReady(ctx context.Context, namespace string) error {
 
 	return fmt.Errorf("PVC not ready after %d attempts", maxRetries)
 }
+
+// CheckNamespaceExists checks if a namespace exists in Kubernetes
+func CheckNamespaceExists(ctx context.Context, namespace string) (bool, error) {
+	output, err := ExecuteCommand(ctx, "kubectl", "get", "namespace", namespace, "--ignore-not-found=true")
+	if err != nil {
+		return false, fmt.Errorf("failed to check namespace existence: %w", err)
+	}
+	return strings.TrimSpace(output) != "", nil
+}
+
+// EnsureNamespaceExists checks if namespace exists and creates it if needed
+func EnsureNamespaceExists(ctx context.Context, namespace string) error {
+	exists, err := CheckNamespaceExists(ctx, namespace)
+	if err != nil {
+		return fmt.Errorf("failed to check namespace existence: %w", err)
+	}
+
+	if !exists {
+		if _, err := ExecuteCommand(ctx, "kubectl", "create", "namespace", namespace); err != nil {
+			return fmt.Errorf("failed to create namespace: %w", err)
+		}
+	}
+
+	return nil
+}
