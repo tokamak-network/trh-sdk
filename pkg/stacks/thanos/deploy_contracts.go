@@ -192,7 +192,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		}
 
 		// STEP 2. Clone the repository
-		err = t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
+		err = t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git", "feat/util-extract-onchain-bytecode")
 		if err != nil {
 			return err
 		}

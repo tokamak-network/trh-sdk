@@ -60,7 +60,7 @@ func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string, inputs *Deplo
 }
 
 func (t *ThanosStack) deployLocalDevnet(ctx context.Context) error {
-	err := t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
+	err := t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git", "feat/util-extract-onchain-bytecode")
 	if err != nil {
 		return err
 	}

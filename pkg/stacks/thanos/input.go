@@ -1732,15 +1732,20 @@ func makeBlockExplorerEnvs(dirPath string, filename string, config types.BlockEx
 	return nil
 }
 
-func (t *ThanosStack) cloneSourcecode(ctx context.Context, repositoryName, url string) error {
+func (t *ThanosStack) cloneSourcecode(ctx context.Context, repositoryName, url string, branch ...string) error {
 	existingSourcecode, err := utils.CheckExistingSourceCode(t.deploymentPath, repositoryName)
 	if err != nil {
 		fmt.Println("Error while checking existing source code")
 		return err
 	}
 
+	branchToClone := "main" // default branch
+	if len(branch) > 0 && branch[0] != "" {
+		branchToClone = branch[0]
+	}
+
 	if !existingSourcecode {
-		err := utils.CloneRepo(ctx, t.l, t.deploymentPath, url, repositoryName)
+		err := utils.CloneRepo(ctx, t.l, t.deploymentPath, url, repositoryName, branchToClone)
 		if err != nil {
 			fmt.Println("Error while cloning the repository")
 			return err
@@ -1765,7 +1770,7 @@ func (t *ThanosStack) cloneSourcecode(ctx context.Context, repositoryName, url s
 	}
 
 	t.l.Info("Re-cloning repository after cleanup...", "repo", repositoryName)
-	err = utils.CloneRepo(ctx, t.l, t.deploymentPath, url, repositoryName)
+	err = utils.CloneRepo(ctx, t.l, t.deploymentPath, url, repositoryName, branchToClone)
 	if err != nil {
 		t.l.Error("Failed to re-clone repository", "repo", repositoryName, "err", err)
 		return err

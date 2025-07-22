@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func CloneRepo(ctx context.Context, l *zap.SugaredLogger, deploymentPath string, url string, folderName string) error {
+func CloneRepo(ctx context.Context, l *zap.SugaredLogger, deploymentPath string, url string, folderName string, branch string) error {
 	var clonePath string
 	if filepath.IsAbs(deploymentPath) {
 		clonePath = filepath.Join(deploymentPath, folderName)
@@ -22,7 +22,7 @@ func CloneRepo(ctx context.Context, l *zap.SugaredLogger, deploymentPath string,
 		return fmt.Errorf("destination path '%s' already exists", clonePath)
 	}
 
-	return ExecuteCommandStream(ctx, l, "git", "clone", url, clonePath)
+	return ExecuteCommandStream(ctx, l, "git", "clone", "--branch", branch, url, clonePath)
 }
 
 func PullLatestCode(ctx context.Context, l *zap.SugaredLogger, deploymentPath string, folderName string) error {
