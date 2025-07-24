@@ -55,7 +55,7 @@ type DeployCrossTradeContractsOutput struct {
 }
 
 const (
-	DeployL1CrossTradeL2L1 = "DeployL1CrossTradeL2L1.s.sol"
+	DeployL1CrossTradeL2L1 = "DeployL1CrossTrade_L2L1.s.sol"
 	DeployL2CrossTradeL2L1 = "DeployL2CrossTrade_L2L1.s.sol"
 	DeployL1CrossTradeL2L2 = "DeployL1CrossTrade_L2L2.s.sol"
 	DeployL2CrossTradeL2L2 = "DeployL2CrossTrade_L2L2.s.sol"
