@@ -43,7 +43,7 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *types.Monit
 
 	// Generate values file
 	logger.Info("Generating values file for monitoring stack")
-	if err := t.generateValuesFile(ctx, config); err != nil {
+	if err := t.generateValuesFile(config); err != nil {
 		logger.Errorw("Failed to generate values file", "err", err)
 		return nil, fmt.Errorf("failed to generate values file: %w", err)
 	}
@@ -100,7 +100,7 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *types.Monit
 }
 
 // GetMonitoringConfig gathers all required configuration for monitoring
-func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword string, alertManagerConfig types.AlertManagerConfig) (*types.MonitoringConfig, error) {
+func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword string, alertManagerConfig types.AlertManagerConfig, loggingEnabled bool) (*types.MonitoringConfig, error) {
 	// Remove trailing % character from admin password if present
 	adminPassword = strings.TrimSuffix(adminPassword, "%")
 
@@ -135,6 +135,7 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 		ValuesFilePath:    "",
 		ChainName:         chainName,
 		AlertManager:      alertManagerConfig,
+		LoggingEnabled:    loggingEnabled,
 	}
 
 	return config, nil
@@ -256,7 +257,7 @@ func (t *ThanosStack) checkALBIngressStatus(ctx context.Context, config *types.M
 }
 
 // generateValuesFile creates the values.yaml file
-func (t *ThanosStack) generateValuesFile(ctx context.Context, config *types.MonitoringConfig) error {
+func (t *ThanosStack) generateValuesFile(config *types.MonitoringConfig) error {
 	valuesConfig := map[string]interface{}{
 		"global": map[string]interface{}{
 			"l1RpcUrl": config.L1RpcUrl,
@@ -290,6 +291,15 @@ func (t *ThanosStack) generateValuesFile(ctx context.Context, config *types.Moni
 				"enabled": false,
 			},
 		},
+	}
+
+	// Only set loki/promtail enabled flags dynamically; use values.yaml defaults for all other settings
+	if config.LoggingEnabled {
+		valuesConfig["loki"] = map[string]interface{}{"enabled": true}
+		valuesConfig["promtail"] = map[string]interface{}{"enabled": true}
+	} else {
+		valuesConfig["loki"] = map[string]interface{}{"enabled": false}
+		valuesConfig["promtail"] = map[string]interface{}{"enabled": false}
 	}
 
 	yamlContent, err := yaml.Marshal(valuesConfig)

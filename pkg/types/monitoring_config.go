@@ -17,6 +17,8 @@ type MonitoringConfig struct {
 	AlertManager AlertManagerConfig
 	// Alert rules configuration
 	AlertRules map[string]AlertRule
+	// Logging enabled flag
+	LoggingEnabled bool
 }
 
 // AlertManagerConfig holds alertmanager-specific configuration
