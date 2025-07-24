@@ -184,20 +184,17 @@ func ActionInstallationPlugins() cli.ActionFunc {
 
 							fmt.Printf("Installing cross-trade plugin with type: %s\n", crossTradeType)
 
-							if crossTradeType == string(constants.CrossTradeDeployModeL2ToL2) {
-								input, err := thanosStack.GetCrossTradeL2ToL2ContractsInput(ctx)
-								if err != nil {
-									return err
-								}
-
-								_, err = thanosStack.DeployCrossTradeL2ToL2Contracts(ctx, input)
-								if err != nil {
-									return err
-								}
-								return nil
-							} else if crossTradeType == string(constants.CrossTradeDeployModeL2ToL1) {
-								return fmt.Errorf("L2-to-L1 cross-trade deployment is not yet implemented")
+							input, err := thanosStack.GetCrossTradeContractsInputs(ctx, constants.CrossTradeDeployMode(crossTradeType))
+							if err != nil {
+								return err
 							}
+
+							_, err = thanosStack.DeployCrossTradeContracts(ctx, input)
+							if err != nil {
+								return err
+							}
+							return nil
+
 						default:
 							return nil
 						}

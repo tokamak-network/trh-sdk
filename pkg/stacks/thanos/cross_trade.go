@@ -10,8 +10,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
-	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
@@ -20,6 +20,8 @@ type L1CrossTradeChainInput struct {
 	ChainID                uint64 `json:"chain_id"`
 	PrivateKey             string `json:"private_key"`
 	IsDeployedNew          bool   `json:"is_deployed_new"`
+	DeploymentScriptPath   string `json:"deployment_script_path"`
+	ContractName           string `json:"contract_name"`
 	EtherscanAPIKey        string `json:"etherscan_api_key"`
 	CrossTradeProxyAddress string `json:"cross_trade_proxy_address"`
 	CrossTradeAddress      string `json:"cross_trade_address"`
@@ -30,30 +32,87 @@ type L2CrossTradeChainInput struct {
 	ChainID                uint64 `json:"chain_id"`
 	PrivateKey             string `json:"private_key"`
 	IsDeployedNew          bool   `json:"is_deployed_new"`
+	DeploymentScriptPath   string `json:"deployment_script_path"`
+	ContractName           string `json:"contract_name"`
 	EtherscanAPIKey        string `json:"etherscan_api_key"`
 	CrossDomainMessenger   string `json:"cross_domain_messenger"`
 	CrossTradeProxyAddress string `json:"cross_trade_proxy_address"`
+	CrossTradeAddress      string `json:"cross_trade_address"`
 }
 
-type DeployCrossTradeContractsL2ToL2Input struct {
-	L1ChainConfig *L1CrossTradeChainInput   `json:"l1_chain_config"`
-	L2ChainConfig []*L2CrossTradeChainInput `json:"l2_chain_config"`
+type DeployCrossTradeContractsInputs struct {
+	Mode          constants.CrossTradeDeployMode `json:"mode"`
+	L1ChainConfig *L1CrossTradeChainInput        `json:"l1_chain_config"`
+	L2ChainConfig []*L2CrossTradeChainInput      `json:"l2_chain_config"`
 }
 
-type DeployCrossTradeContractsL2ToL2Result struct {
-	L1CrossTradeProxyAddress   string            `json:"l1_cross_trade_proxy_address"`
-	L1CrossTradeAddress        string            `json:"l1_cross_trade_address"`
-	L2CrossTradeProxyAddresses map[uint64]string `json:"l2_cross_trade_proxy_addresses"`
-	L2CrossTradeAddresses      map[uint64]string `json:"l2_cross_trade_addresses"`
+type DeployCrossTradeContractsOutput struct {
+	Mode                       constants.CrossTradeDeployMode `json:"mode"`
+	L1CrossTradeProxyAddress   string                         `json:"l1_cross_trade_proxy_address"`
+	L1CrossTradeAddress        string                         `json:"l1_cross_trade_address"`
+	L2CrossTradeProxyAddresses map[uint64][]string            `json:"l2_cross_trade_proxy_addresses"`
+	L2CrossTradeAddresses      map[uint64][]string            `json:"l2_cross_trade_addresses"`
 }
 
-func (t *ThanosStack) GetCrossTradeL2ToL2ContractsInput(ctx context.Context) (*DeployCrossTradeContractsL2ToL2Input, error) {
+const (
+	DeployL1CrossTradeL2L1 = "DeployL1CrossTradeL2L1.s.sol"
+	DeployL2CrossTradeL2L1 = "DeployL2CrossTrade_L2L1.s.sol"
+	DeployL1CrossTradeL2L2 = "DeployL1CrossTrade_L2L2.s.sol"
+	DeployL2CrossTradeL2L2 = "DeployL2CrossTrade_L2L2.s.sol"
+)
+
+const (
+	L2L2CrossTradeProxyL1ContractName = "L2toL2CrossTradeProxyL1"
+	L2L2CrossTradeL1ContractName      = "L2toL2CrossTradeL1"
+	L1L2CrossTradeProxyL1ContractName = "L1CrossTradeProxy"
+	L1L2CrossTradeL1ContractName      = "L1CrossTrade"
+
+	L2L2CrossTradeProxyL2ContractName = "L2toL2CrossTradeProxy"
+	L2L2CrossTradeL2ContractName      = "L2toL2CrossTradeL2"
+	L1L2CrossTradeProxyL2ContractName = "L2CrossTradeProxy"
+	L1L2CrossTradeL2ContractName      = "L2CrossTrade"
+)
+
+const (
+	L2L2ScriptPath = "scripts/foundry_scripts"
+	L1L2ScriptPath = "scripts/foundry_scripts/L2L1"
+)
+
+func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode constants.CrossTradeDeployMode) (*DeployCrossTradeContractsInputs, error) {
 	// Step 1: Ask the user want to deploy new contracts for L1
 	// If yes, ask to input the private key and RPC URL
 	// Get chain id from this rpc
 	// if no, set IsDeployNew to false and ask to input the cross trade proxy address
 
 	// Same as L2s, but we have multiple l2 chains
+
+	var (
+		l1ContractFileName, l2ContractFileName  string
+		l1CrossTradeProxyName, l1CrossTradeName string
+		l2CrossTradeProxyName, l2CrossTradeName string
+		deploymentScriptPath                    string
+	)
+
+	switch mode {
+	case constants.CrossTradeDeployModeL2ToL1:
+		l1ContractFileName = DeployL1CrossTradeL2L1
+		l2ContractFileName = DeployL2CrossTradeL2L1
+		l1CrossTradeProxyName = L1L2CrossTradeProxyL1ContractName
+		l1CrossTradeName = L1L2CrossTradeL1ContractName
+		l2CrossTradeProxyName = L1L2CrossTradeProxyL2ContractName
+		l2CrossTradeName = L1L2CrossTradeL2ContractName
+		deploymentScriptPath = L1L2ScriptPath
+	case constants.CrossTradeDeployModeL2ToL2:
+		l1ContractFileName = DeployL1CrossTradeL2L2
+		l2ContractFileName = DeployL2CrossTradeL2L2
+		l1CrossTradeProxyName = L2L2CrossTradeProxyL1ContractName
+		l1CrossTradeName = L2L2CrossTradeL1ContractName
+		l2CrossTradeProxyName = L2L2CrossTradeProxyL2ContractName
+		l2CrossTradeName = L2L2CrossTradeL2ContractName
+		deploymentScriptPath = L2L2ScriptPath
+	default:
+		return nil, fmt.Errorf("invalid cross trade deploy mode: %s", mode)
+	}
 
 	var l1ChainConfig *L1CrossTradeChainInput
 
@@ -89,20 +148,22 @@ func (t *ThanosStack) GetCrossTradeL2ToL2ContractsInput(ctx context.Context) (*D
 		}
 
 		l1ChainConfig = &L1CrossTradeChainInput{
-			RPC:             l1RPC,
-			ChainID:         l1ChainID,
-			PrivateKey:      "0x" + l1PrivateKey,
-			IsDeployedNew:   true,
-			EtherscanAPIKey: l1EtherscanAPIKey,
+			RPC:                  l1RPC,
+			ChainID:              l1ChainID,
+			ContractName:         l1ContractFileName,
+			PrivateKey:           "0x" + l1PrivateKey,
+			IsDeployedNew:        true,
+			EtherscanAPIKey:      l1EtherscanAPIKey,
+			DeploymentScriptPath: deploymentScriptPath,
 		}
 	} else {
-		contracts, err := t.getContractAddressFromOutput(ctx, "DeployL1CrossTrade.s.sol", t.deployConfig.L1ChainID)
+		contracts, err := t.getContractAddressFromOutput(ctx, l1ContractFileName, t.deployConfig.L1ChainID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get the contract address: %w", err)
 		}
 
-		l1CrossTradeProxyAddress := contracts["L2toL2CrossTradeProxyL1"]
-		l1CrossTradeAddress := contracts["L2toL2CrossTradeL1"]
+		l1CrossTradeProxyAddress := contracts[l1CrossTradeProxyName]
+		l1CrossTradeAddress := contracts[l1CrossTradeName]
 		if l1CrossTradeProxyAddress == "" {
 			for {
 				fmt.Print("Please enter the L1 cross-trade proxy address: ")
@@ -147,10 +208,12 @@ func (t *ThanosStack) GetCrossTradeL2ToL2ContractsInput(ctx context.Context) (*D
 		l1ChainConfig = &L1CrossTradeChainInput{
 			RPC:                    l1RPC,
 			ChainID:                l1ChainID,
+			ContractName:           l1ContractFileName,
 			PrivateKey:             "0x" + l1PrivateKey,
 			IsDeployedNew:          false,
 			CrossTradeProxyAddress: l1CrossTradeProxyAddress,
 			CrossTradeAddress:      l1CrossTradeAddress,
+			DeploymentScriptPath:   deploymentScriptPath,
 		}
 	}
 
@@ -159,23 +222,6 @@ func (t *ThanosStack) GetCrossTradeL2ToL2ContractsInput(ctx context.Context) (*D
 	l2RPC := t.deployConfig.L2RpcUrl
 	l2ChainID := t.deployConfig.L2ChainID
 
-	// Get cross domain messenger address
-	file, err := os.Open(fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%s", t.deploymentPath, fmt.Sprintf("%d-deploy.json", t.deployConfig.L1ChainID)))
-	if err != nil {
-		fmt.Println("Error opening deployment file:", err)
-		return nil, fmt.Errorf("failed to open deployment file: %w", err)
-	}
-
-	// Decode JSON
-	var contracts types.Contracts
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&contracts); err != nil {
-		fmt.Println("Error decoding deployment JSON file:", err)
-		return nil, fmt.Errorf("failed to decode deployment JSON file: %w", err)
-	}
-
-	l1CrossDomainMessenger := contracts.L1CrossDomainMessengerProxy
-	l1CrossDomainMessengerProxy := contracts.L1CrossDomainMessengerProxy
 	fmt.Println("=== Your L2 Chain Configuration ===")
 	fmt.Print("Do you want to deploy the L2 cross-trade contracts to the current L2 chain? (Y/n): ")
 	deployNewL2, err := scanner.ScanBool(true)
@@ -213,89 +259,248 @@ func (t *ThanosStack) GetCrossTradeL2ToL2ContractsInput(ctx context.Context) (*D
 			}
 		}
 		l2ChainConfigs = append(l2ChainConfigs, &L2CrossTradeChainInput{
-			RPC:                    l2RPC,
-			ChainID:                l2ChainID,
-			PrivateKey:             privateKey,
-			IsDeployedNew:          deployNewL2,
-			EtherscanAPIKey:        etherscanAPIKey,
-			CrossDomainMessenger:   l1CrossDomainMessenger,
-			CrossTradeProxyAddress: l1CrossDomainMessengerProxy,
+			RPC:                  l2RPC,
+			ChainID:              l2ChainID,
+			ContractName:         l2ContractFileName,
+			PrivateKey:           privateKey,
+			IsDeployedNew:        deployNewL2,
+			EtherscanAPIKey:      etherscanAPIKey,
+			CrossDomainMessenger: constants.L2CrossDomainMessenger,
+			DeploymentScriptPath: deploymentScriptPath,
 		})
-	}
-
-	fmt.Println("=== Other L2 Chain Configuration ===")
-	fmt.Print("Do you want to deploy contracts to other L2 chain? (Y/n): ")
-	addOtherL2, err := scanner.ScanBool(true)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read other L2 chain option: %w", err)
-	}
-	var otherChainID *big.Int
-	if addOtherL2 {
-		fmt.Print("Please enter the RPC URL: ")
-		otherRpc, err := scanner.ScanString()
+	} else {
+		contracts, err := t.getContractAddressFromOutput(ctx, l2ContractFileName, t.deployConfig.L2ChainID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read RPC URL: %w", err)
-		}
-		if otherRpc == "" {
-			return nil, fmt.Errorf("RPC URL cannot be empty")
+			return nil, fmt.Errorf("failed to get the contract address: %w", err)
 		}
 
-		l2RpcClient, err := ethclient.Dial(otherRpc)
-		if err != nil {
-			return nil, fmt.Errorf("failed to dial RPC URL: %w", err)
+		l2CrossTradeProxyAddress := contracts[l2CrossTradeProxyName]
+		l2CrossTradeAddress := contracts[l2CrossTradeName]
+		if l2CrossTradeProxyAddress == "" {
+			for {
+				fmt.Print("Please enter the L2 cross-trade proxy address: ")
+				l2CrossTradeProxyAddress, err = scanner.ScanString()
+				if err != nil {
+					return nil, fmt.Errorf("failed to read L2 cross-trade proxy address: %w", err)
+				}
+				if l2CrossTradeProxyAddress == "" {
+					fmt.Println("L2 cross-trade proxy address cannot be empty")
+					continue
+				}
+				if !common.IsHexAddress(l2CrossTradeProxyAddress) {
+					fmt.Println("Invalid L1 cross-trade proxy address")
+					continue
+				}
+				break
+			}
+			l2CrossTradeProxyAddress = common.HexToAddress(l2CrossTradeProxyAddress).Hex()
 		}
 
-		fmt.Print("Please enter the private key: ")
-		otherPrivateKey, err := scanner.ScanString()
-		if err != nil {
-			return nil, fmt.Errorf("failed to read private key: %w", err)
+		if l2CrossTradeAddress == "" {
+			for {
+				fmt.Print("Please enter the L2 cross-trade address: ")
+				l2CrossTradeAddress, err = scanner.ScanString()
+				if err != nil {
+					return nil, fmt.Errorf("failed to read L2 cross-trade address: %w", err)
+				}
+				if l2CrossTradeAddress == "" {
+					fmt.Println("L2 cross-trade address cannot be empty")
+					continue
+				}
+				if !common.IsHexAddress(l2CrossTradeAddress) {
+					fmt.Println("Invalid L1 cross-trade address")
+					continue
+				}
+				break
+			}
+			l2CrossTradeAddress = common.HexToAddress(l2CrossTradeAddress).Hex()
 		}
-		if otherPrivateKey == "" {
-			return nil, fmt.Errorf("private key cannot be empty")
-		}
-
-		if !strings.HasPrefix(otherPrivateKey, "0x") {
-			otherPrivateKey = "0x" + otherPrivateKey
-		}
-
-		otherChainID, err = l2RpcClient.ChainID(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get chain ID: %w", err)
-		}
-
 		fmt.Print("Do you want to verify the L2 cross-trade contracts? (Y/n): ")
-		verifyOtherL2, err := scanner.ScanBool(true)
+		verifyL2, err := scanner.ScanBool(true)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read L2 verification option: %w", err)
 		}
 
-		var otherL2EtherscanAPIKey string
-		if verifyOtherL2 {
+		var etherscanAPIKey string
+		if verifyL2 {
 			fmt.Print("Please enter the Etherscan API key: ")
-			otherL2EtherscanAPIKey, err = scanner.ScanString()
+			etherscanAPIKey, err = scanner.ScanString()
 			if err != nil {
 				return nil, fmt.Errorf("failed to read Etherscan API key: %w", err)
 			}
 		}
 
+		// Read for the deployment file
 		l2ChainConfigs = append(l2ChainConfigs, &L2CrossTradeChainInput{
-			RPC:                    otherRpc,
-			ChainID:                otherChainID.Uint64(),
-			PrivateKey:             otherPrivateKey,
-			IsDeployedNew:          addOtherL2,
-			EtherscanAPIKey:        otherL2EtherscanAPIKey,
-			CrossDomainMessenger:   l1CrossDomainMessenger,
-			CrossTradeProxyAddress: l1CrossDomainMessengerProxy,
+			RPC:                    l2RPC,
+			ChainID:                l2ChainID,
+			ContractName:           l2ContractFileName,
+			PrivateKey:             "0x" + privateKey,
+			IsDeployedNew:          false,
+			EtherscanAPIKey:        etherscanAPIKey,
+			CrossDomainMessenger:   constants.L2CrossDomainMessenger,
+			CrossTradeProxyAddress: l2CrossTradeProxyAddress,
+			CrossTradeAddress:      l2CrossTradeAddress,
+			DeploymentScriptPath:   deploymentScriptPath,
 		})
 	}
 
-	return &DeployCrossTradeContractsL2ToL2Input{
+	if mode == constants.CrossTradeDeployModeL2ToL2 {
+		fmt.Println("=== Other L2 Chain Configuration ===")
+		fmt.Print("Do you want to deploy contracts to other L2 chain? (Y/n): ")
+		addOtherL2, err := scanner.ScanBool(true)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read other L2 chain option: %w", err)
+		}
+		var otherChainID *big.Int
+		if addOtherL2 {
+			fmt.Print("Please enter the RPC URL: ")
+			otherRpc, err := scanner.ScanString()
+			if err != nil {
+				return nil, fmt.Errorf("failed to read RPC URL: %w", err)
+			}
+			if otherRpc == "" {
+				return nil, fmt.Errorf("RPC URL cannot be empty")
+			}
+
+			l2RpcClient, err := ethclient.Dial(otherRpc)
+			if err != nil {
+				return nil, fmt.Errorf("failed to dial RPC URL: %w", err)
+			}
+
+			fmt.Print("Please enter the private key: ")
+			otherPrivateKey, err := scanner.ScanString()
+			if err != nil {
+				return nil, fmt.Errorf("failed to read private key: %w", err)
+			}
+			if otherPrivateKey == "" {
+				return nil, fmt.Errorf("private key cannot be empty")
+			}
+
+			if !strings.HasPrefix(otherPrivateKey, "0x") {
+				otherPrivateKey = "0x" + otherPrivateKey
+			}
+
+			otherChainID, err = l2RpcClient.ChainID(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get chain ID: %w", err)
+			}
+
+			fmt.Print("Do you want to verify the L2 cross-trade contracts? (Y/n): ")
+			verifyOtherL2, err := scanner.ScanBool(true)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read L2 verification option: %w", err)
+			}
+
+			var otherL2EtherscanAPIKey string
+			if verifyOtherL2 {
+				fmt.Print("Please enter the Etherscan API key: ")
+				otherL2EtherscanAPIKey, err = scanner.ScanString()
+				if err != nil {
+					return nil, fmt.Errorf("failed to read Etherscan API key: %w", err)
+				}
+			}
+
+			l2ChainConfigs = append(l2ChainConfigs, &L2CrossTradeChainInput{
+				RPC:                  otherRpc,
+				ChainID:              otherChainID.Uint64(),
+				ContractName:         l2ContractFileName,
+				PrivateKey:           otherPrivateKey,
+				IsDeployedNew:        addOtherL2,
+				EtherscanAPIKey:      otherL2EtherscanAPIKey,
+				CrossDomainMessenger: constants.L2CrossDomainMessenger,
+				DeploymentScriptPath: deploymentScriptPath,
+			})
+		} else {
+			var l2CrossTradeProxyAddress string
+			var l2CrossTradeAddress string
+
+			var l2ChainID int
+			for {
+				fmt.Print("Please enter the L2 cross-trade chain ID: ")
+				l2ChainID, err = scanner.ScanInt()
+				if err != nil {
+					return nil, fmt.Errorf("failed to read L2 cross-trade chain ID: %w", err)
+				}
+				if l2ChainID == 0 {
+					fmt.Println("L2 cross-trade chain ID cannot be empty")
+					continue
+				}
+				break
+			}
+
+			for {
+				fmt.Print("Please enter the L2 cross-trade proxy address: ")
+				l2CrossTradeProxyAddress, err = scanner.ScanString()
+				if err != nil {
+					return nil, fmt.Errorf("failed to read L2 cross-trade proxy address: %w", err)
+				}
+				if l2CrossTradeProxyAddress == "" {
+					fmt.Println("L2 cross-trade proxy address cannot be empty")
+					continue
+				}
+				if !common.IsHexAddress(l2CrossTradeProxyAddress) {
+					fmt.Println("Invalid L1 cross-trade proxy address")
+					continue
+				}
+				break
+			}
+
+			for {
+				fmt.Print("Please enter the L2 cross-trade address: ")
+				l2CrossTradeAddress, err = scanner.ScanString()
+				if err != nil {
+					return nil, fmt.Errorf("failed to read L2 cross-trade address: %w", err)
+				}
+				if l2CrossTradeAddress == "" {
+					fmt.Println("L2 cross-trade address cannot be empty")
+					continue
+				}
+				if !common.IsHexAddress(l2CrossTradeAddress) {
+					fmt.Println("Invalid L1 cross-trade address")
+					continue
+				}
+				break
+			}
+
+			var etherscanAPIKey string
+			fmt.Print("Do you want to verify the L2 cross-trade contracts? (Y/n): ")
+			verifyL2, err := scanner.ScanBool(true)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read L2 verification option: %w", err)
+			}
+
+			if verifyL2 {
+				fmt.Print("Please enter the Etherscan API key: ")
+				etherscanAPIKey, err = scanner.ScanString()
+				if err != nil {
+					return nil, fmt.Errorf("failed to read Etherscan API key: %w", err)
+				}
+			}
+
+			l2ChainConfigs = append(l2ChainConfigs, &L2CrossTradeChainInput{
+				RPC:                    l2RPC,
+				ChainID:                uint64(l2ChainID),
+				ContractName:           l2ContractFileName,
+				PrivateKey:             "0x" + privateKey,
+				IsDeployedNew:          false,
+				EtherscanAPIKey:        etherscanAPIKey,
+				CrossDomainMessenger:   constants.L2CrossDomainMessenger,
+				CrossTradeProxyAddress: l2CrossTradeProxyAddress,
+				CrossTradeAddress:      l2CrossTradeAddress,
+				DeploymentScriptPath:   deploymentScriptPath,
+			})
+		}
+	}
+
+	return &DeployCrossTradeContractsInputs{
+		Mode:          mode,
 		L1ChainConfig: l1ChainConfig,
 		L2ChainConfig: l2ChainConfigs,
 	}, nil
 }
 
-func (t *ThanosStack) DeployCrossTradeL2ToL2Contracts(ctx context.Context, input *DeployCrossTradeContractsL2ToL2Input) (*DeployCrossTradeContractsL2ToL2Result, error) {
+func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *DeployCrossTradeContractsInputs) (*DeployCrossTradeContractsOutput, error) {
 	if input.L1ChainConfig == nil {
 		return nil, fmt.Errorf("l1 chain config is required")
 	}
@@ -324,15 +529,17 @@ func (t *ThanosStack) DeployCrossTradeL2ToL2Contracts(ctx context.Context, input
 		l1CrossTradeProxyAddress   string
 		l1CrossTradeAddress        string
 		l1ContractAddresses        = make(map[string]string)
-		l2CrossTradeProxyAddresses = make(map[uint64]string)
-		l2CrossTradeAddresses      = make(map[uint64]string)
+		l2CrossTradeProxyAddresses = make(map[uint64][]string)
+		l2CrossTradeAddresses      = make(map[uint64][]string)
 	)
 	if input.L1ChainConfig.IsDeployedNew {
 		t.l.Info("L1 contracts are not deployed. Deploying new L1 contracts")
 		// PRIVATE_KEY=0X1233 forge script script/foundry_scripts/DeployL1CrossTrade.s.sol:DeployL1CrossTrade --rpc-url https://sepolia.infura.io/v3/1234567890 --broadcast --chain sepolia
 		script := fmt.Sprintf(
-			"cd crossTrade && PRIVATE_KEY=%s forge script scripts/foundry_scripts/DeployL1CrossTrade.s.sol:DeployL1CrossTrade --rpc-url %s --broadcast --chain %s",
+			"cd crossTrade && PRIVATE_KEY=%s forge script %s/%s --rpc-url %s --broadcast --chain %s",
 			input.L1ChainConfig.PrivateKey,
+			input.L1ChainConfig.DeploymentScriptPath,
+			input.L1ChainConfig.ContractName,
 			input.L1ChainConfig.RPC,
 			"sepolia",
 		)
@@ -342,7 +549,7 @@ func (t *ThanosStack) DeployCrossTradeL2ToL2Contracts(ctx context.Context, input
 			return nil, fmt.Errorf("failed to deploy the contracts: %s", err)
 		}
 		// Get the contract address from the output
-		l1ContractAddresses, err = t.getContractAddressFromOutput(ctx, "DeployL1CrossTrade.s.sol", input.L1ChainConfig.ChainID)
+		l1ContractAddresses, err = t.getContractAddressFromOutput(ctx, input.L1ChainConfig.ContractName, input.L1ChainConfig.ChainID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get the contract address: %s", err)
 		}
@@ -350,9 +557,9 @@ func (t *ThanosStack) DeployCrossTradeL2ToL2Contracts(ctx context.Context, input
 		for contractName, address := range l1ContractAddresses {
 			t.l.Infof("L1 contract address %s with address %s", contractName, address)
 			switch contractName {
-			case "L2toL2CrossTradeProxyL1":
+			case L2L2CrossTradeProxyL1ContractName, L1L2CrossTradeProxyL1ContractName:
 				l1CrossTradeProxyAddress = address
-			case "L2toL2CrossTradeL1":
+			case L2L2CrossTradeL1ContractName, L1L2CrossTradeL1ContractName:
 				l1CrossTradeAddress = address
 			default:
 				t.l.Infof("Unknown contract %s", contractName)
@@ -364,8 +571,6 @@ func (t *ThanosStack) DeployCrossTradeL2ToL2Contracts(ctx context.Context, input
 	}
 	// Verify the contracts
 	//
-	// forge verify-contract 0xA01bD9DB74800BC3189b1dba835DB006d03aD76c contracts/L1/L2toL2CrossTradeL1.sol:L2toL2CrossTradeL1 --etherscan-api-key apyKey --chain sepolia
-	// forge verify-contract 0x0000000000000000000000000000000000000000 contracts/L1/L2toL2CrossTradeProxyL1.sol:L2toL2CrossTradeProxyL1 --etherscan-api-key APYKEY --chain sepolia
 	if input.L1ChainConfig.EtherscanAPIKey != "" {
 		for contractName, address := range l1ContractAddresses {
 			if address == "" {
@@ -395,14 +600,15 @@ func (t *ThanosStack) DeployCrossTradeL2ToL2Contracts(ctx context.Context, input
 			continue
 		}
 
-		// PRIVATE_KEY=0X1233 forge script scripts/foundry_scripts/DeployL2CrossTrade.s.sol:DeployL2CrossTrade --rpc-url https://rpc.thanos-sepolia.tokamak.network --broadcast network thanosSepolia
 		script := fmt.Sprintf(
-			`cd crossTrade && PRIVATE_KEY=%s CHAIN_ID=%d NATIVE_TOKEN=%s CROSS_DOMAIN_MESSENGER=%s L1_CROSS_TRADE=%s forge script scripts/foundry_scripts/DeployL2CrossTrade.s.sol:DeployL2CrossTrade --rpc-url %s --broadcast`,
+			`cd crossTrade && PRIVATE_KEY=%s CHAIN_ID=%d NATIVE_TOKEN=%s CROSS_DOMAIN_MESSENGER=%s L1_CROSS_TRADE=%s forge script %s/%s --rpc-url %s --broadcast`,
 			l2ChainConfig.PrivateKey,
 			l2ChainConfig.ChainID,
-			"0x0000000000000000000000000000000000000000",
+			constants.NativeToken,
 			l2ChainConfig.CrossDomainMessenger,
 			l1CrossTradeProxyAddress,
+			l2ChainConfig.DeploymentScriptPath,
+			l2ChainConfig.ContractName,
 			l2ChainConfig.RPC,
 		)
 		t.l.Infof("Deploying L2 contracts %s", script)
@@ -412,7 +618,7 @@ func (t *ThanosStack) DeployCrossTradeL2ToL2Contracts(ctx context.Context, input
 		}
 
 		// Get the contract address from the output
-		addresses, err := t.getContractAddressFromOutput(ctx, "DeployL2CrossTrade.s.sol", l2ChainConfig.ChainID)
+		addresses, err := t.getContractAddressFromOutput(ctx, l2ChainConfig.ContractName, l2ChainConfig.ChainID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get the contract address: %s", err)
 		}
@@ -420,10 +626,10 @@ func (t *ThanosStack) DeployCrossTradeL2ToL2Contracts(ctx context.Context, input
 		for contractName, address := range addresses {
 			t.l.Infof("L2 contract address %s with address %s", contractName, address)
 			switch contractName {
-			case "L2toL2CrossTradeProxy":
-				l2CrossTradeProxyAddresses[l2ChainConfig.ChainID] = address
-			case "L2toL2CrossTradeL2":
-				l2CrossTradeAddresses[l2ChainConfig.ChainID] = address
+			case L2L2CrossTradeProxyL2ContractName, L1L2CrossTradeProxyL2ContractName:
+				l2CrossTradeProxyAddresses[l2ChainConfig.ChainID] = append(l2CrossTradeProxyAddresses[l2ChainConfig.ChainID], address)
+			case L2L2CrossTradeL2ContractName, L1L2CrossTradeL2ContractName:
+				l2CrossTradeAddresses[l2ChainConfig.ChainID] = append(l2CrossTradeAddresses[l2ChainConfig.ChainID], address)
 			default:
 				t.l.Infof("Unknown contract %s", contractName)
 			}
@@ -431,8 +637,6 @@ func (t *ThanosStack) DeployCrossTradeL2ToL2Contracts(ctx context.Context, input
 
 		// Verify the contracts
 		//
-		// forge verify-contract 0xA01bD9DB74800BC3189b1dba835DB006d03aD76c contracts/L1/L2toL2CrossTradeL1.sol:L2toL2CrossTradeL1 --etherscan-api-key apyKey --chain sepolia
-		// forge verify-contract 0x0000000000000000000000000000000000000000 contracts/L1/L2toL2CrossTradeProxyL1.sol:L2toL2CrossTradeProxyL1 --etherscan-api-key APYKEY --chain sepolia
 		if l2ChainConfig.EtherscanAPIKey != "" {
 			for contractName, address := range addresses {
 				t.l.Infof("Verifying L2 contract %s with address %s", contractName, address)
@@ -460,7 +664,8 @@ func (t *ThanosStack) DeployCrossTradeL2ToL2Contracts(ctx context.Context, input
 	t.l.Infof("L2 cross trade proxy addresses %v", l2CrossTradeProxyAddresses)
 	t.l.Infof("L2 cross trade addresses %v", l2CrossTradeAddresses)
 
-	return &DeployCrossTradeContractsL2ToL2Result{
+	return &DeployCrossTradeContractsOutput{
+		Mode:                       input.Mode,
 		L1CrossTradeProxyAddress:   l1CrossTradeProxyAddress,
 		L1CrossTradeAddress:        l1CrossTradeAddress,
 		L2CrossTradeProxyAddresses: l2CrossTradeProxyAddresses,
