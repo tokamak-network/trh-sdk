@@ -16,7 +16,7 @@ import (
 func ActionAlertConfig() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
 		// Check if monitoring plugin is installed
-		if err := checkMonitoringPluginInstalled(ctx); err != nil {
+		if err := utils.CheckMonitoringPluginInstalled(ctx); err != nil {
 			return err
 		}
 
@@ -97,62 +97,6 @@ func handleChannelConfigure(ctx context.Context, channelType string) error {
 	}
 }
 
-// checkMonitoringPluginInstalled checks if monitoring plugin is installed
-func checkMonitoringPluginInstalled(ctx context.Context) error {
-	// Check if alert namespace exists
-	namespaceExists, err := checkNamespaceExists(ctx, "monitoring")
-	if err != nil {
-		return fmt.Errorf("failed to check monitoring namespace: %w", err)
-	}
-
-	if !namespaceExists {
-		fmt.Println("❌ Monitoring plugin is not installed!")
-		fmt.Println()
-		fmt.Println("To install monitoring plugin, run:")
-		fmt.Println("  trh-sdk install monitoring")
-		fmt.Println()
-		fmt.Println("After installation, you can customize alert settings.")
-		return fmt.Errorf("monitoring plugin not installed")
-	}
-
-	// Check if alert Helm release exists
-	releaseExists, err := checkAlertReleaseExists(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to check monitoring release: %w", err)
-	}
-
-	if !releaseExists {
-		fmt.Println("❌ Monitoring plugin is not properly installed!")
-		fmt.Println()
-		fmt.Println("To install monitoring plugin, run:")
-		fmt.Println("  trh-sdk install monitoring")
-		fmt.Println()
-		fmt.Println("After installation, you can customize alert settings.")
-		return fmt.Errorf("monitoring plugin not properly installed")
-	}
-	return nil
-}
-
-// checkNamespaceExists checks if a namespace exists
-func checkNamespaceExists(ctx context.Context, namespace string) (bool, error) {
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "namespace", namespace, "--ignore-not-found=true")
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(output) != "", nil
-}
-
-// checkAlertReleaseExists checks if alert Helm release exists
-func checkAlertReleaseExists(ctx context.Context) (bool, error) {
-	output, err := utils.ExecuteCommand(ctx, "helm", "list", "-n", "monitoring", "--output", "json")
-	if err != nil {
-		return false, err
-	}
-
-	// Simple check for alert-related releases
-	return strings.Contains(output, "monitoring"), nil
-}
-
 // showAlertConfigHelp displays help for alert configuration
 func showAlertConfigHelp() error {
 	fmt.Println("🔧 Alert Configuration Commands")
@@ -197,7 +141,7 @@ func handleAlertStatus(ctx context.Context) error {
 	ac := &thanos.AlertCustomization{}
 
 	// Check monitoring namespace
-	_, err := checkNamespaceExists(ctx, "monitoring")
+	_, err := utils.CheckNamespaceExists(ctx, "monitoring")
 	if err != nil {
 		return fmt.Errorf("failed to check alert namespace: %w", err)
 	}
