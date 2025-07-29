@@ -11,7 +11,7 @@ import (
 func ActionUpgrade() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
 		fmt.Println("🔄 Upgrading trh-sdk...")
-		_, err := utils.ExecuteCommand("bash", "-c", "go install github.com/tokamak-network/trh-sdk@latest")
+		_, err := utils.ExecuteCommand(ctx, "bash", "-c", "go install github.com/tokamak-network/trh-sdk@latest")
 		if err != nil {
 			fmt.Printf("Failed to upgrade trh-sdk, err: %v \n", err)
 		}

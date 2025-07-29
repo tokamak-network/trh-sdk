@@ -53,7 +53,7 @@ func Run() {
 								fmt.Println("Installing dependencies...")
 								// Add installation logic here
 								dependenciesCmd := commands.Dependencies{}
-								return dependenciesCmd.Install(cmd.Args().Slice())
+								return dependenciesCmd.Install(ctx, cmd.Args().Slice())
 
 							} else {
 								fmt.Println("Installation skipped.")
@@ -66,7 +66,7 @@ func Run() {
 						Usage: "Check the dependencies",
 						Action: func(ctx context.Context, cmd *cli.Command) error {
 							dependenciesCmd := commands.Dependencies{}
-							dependenciesCmd.Check(cmd.Args().Slice())
+							dependenciesCmd.Check(ctx, cmd.Args().Slice())
 							return nil
 						},
 					},
@@ -155,6 +155,64 @@ func Run() {
 				Name:   "verify-register-candidate",
 				Usage:  "Verify and Register Candidate",
 				Action: commands.ActionVerifyRegisterCandidates(),
+			},
+			{
+				Name:  "alert-config",
+				Usage: "Customize alert notifications and rules",
+				Description: `Examples:
+  # Check alert status and rules
+  trh-sdk alert-config --status
+
+  # Interactive rule configuration
+  trh-sdk alert-config --rule set
+
+  # Disable email channel
+  trh-sdk alert-config --channel email --disable
+
+  # Configure email channel
+  trh-sdk alert-config --channel email --configure
+
+  # Disable telegram channel
+  trh-sdk alert-config --channel telegram --disable
+
+  # Configure telegram channel
+  trh-sdk alert-config --channel telegram --configure
+
+  # Reset all alert rules to default values
+  trh-sdk alert-config --rule reset`,
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:     "status",
+						Aliases:  []string{"s"},
+						Required: false,
+						Usage:    "Show current alert status",
+					},
+					&cli.StringFlag{
+						Name:     "channel",
+						Aliases:  []string{"c"},
+						Required: false,
+						Usage:    "Channel type (email, telegram)",
+						Value:    "",
+					},
+					&cli.BoolFlag{
+						Name:     "disable",
+						Required: false,
+						Usage:    "Disable the specified channel",
+					},
+					&cli.BoolFlag{
+						Name:     "configure",
+						Required: false,
+						Usage:    "Configure the specified channel",
+					},
+
+					&cli.StringFlag{
+						Name:     "rule",
+						Required: false,
+						Usage:    "Rule action (reset, set)",
+						Value:    "",
+					},
+				},
+				Action: commands.ActionAlertConfig(),
 			},
 			{
 				Name:   "register-metadata",

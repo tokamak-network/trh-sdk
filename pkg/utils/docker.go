@@ -29,7 +29,7 @@ type DockerContainer struct {
 }
 
 func GetDockerContainers(ctx context.Context) ([]string, error) {
-	containersOutput, err := ExecuteCommand("docker", "ps", "--format", "json")
+	containersOutput, err := ExecuteCommand(ctx, "docker", "ps", "--format", "json")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get docker containers: %w", err)
 	}
@@ -55,19 +55,19 @@ func GetDockerContainers(ctx context.Context) ([]string, error) {
 }
 
 // Check if Docker is running and start it if necessary
-func EnsureDockerReady() error {
+func EnsureDockerReady(ctx context.Context) error {
 	// Check OS
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		return nil
 	}
 
 	// Check if Docker daemon is running
-	if _, err := ExecuteCommand("docker", "info"); err == nil {
+	if _, err := ExecuteCommand(ctx, "docker", "info"); err == nil {
 		return nil // already running
 	}
 
 	// Start Docker
-	if err := startDocker(); err != nil {
+	if err := startDocker(ctx); err != nil {
 		return err
 	}
 
@@ -78,9 +78,9 @@ func EnsureDockerReady() error {
 	}
 
 	for i := 0; i < maxRetries; i++ {
-		if _, err := ExecuteCommand("docker", "info"); err == nil {
+		if _, err := ExecuteCommand(ctx, "docker", "info"); err == nil {
 			// Docker is running, fix socket permissions if needed
-			fixDockerSocketPermissions()
+			fixDockerSocketPermissions(ctx)
 			return nil // success
 		}
 		time.Sleep(2 * time.Second)
@@ -89,7 +89,7 @@ func EnsureDockerReady() error {
 	return fmt.Errorf("docker failed to start within timeout")
 }
 
-func startDocker() error {
+func startDocker(ctx context.Context) error {
 	switch runtime.GOOS {
 	case "darwin":
 		// Check Docker Desktop paths
@@ -97,17 +97,17 @@ func startDocker() error {
 		for _, path := range dockerPaths {
 			if _, err := os.Stat(path); err == nil {
 				// Check if already running
-				if _, err := ExecuteCommand("pgrep", "-f", "Docker Desktop"); err == nil {
+				if _, err := ExecuteCommand(ctx, "pgrep", "-f", "Docker Desktop"); err == nil {
 					return nil
 				}
-				_, err := ExecuteCommand("open", "-a", path)
+				_, err := ExecuteCommand(ctx, "open", "-a", path)
 				return err
 			}
 		}
 
 		// Check colima
-		if _, err := ExecuteCommand("which", "colima"); err == nil {
-			_, err := ExecuteCommand("colima", "start")
+		if _, err := ExecuteCommand(ctx, "which", "colima"); err == nil {
+			_, err := ExecuteCommand(ctx, "colima", "start")
 			return err
 		}
 
@@ -116,7 +116,7 @@ func startDocker() error {
 	case "linux":
 		// Check systemd
 		if _, err := os.Stat("/run/systemd/system"); err == nil {
-			_, err := ExecuteCommand("sudo", "systemctl", "start", "docker")
+			_, err := ExecuteCommand(ctx, "sudo", "systemctl", "start", "docker")
 			return err
 		}
 
@@ -130,16 +130,16 @@ func startDocker() error {
 }
 
 // fixDockerSocketPermissions fixes Docker socket permission issues
-func fixDockerSocketPermissions() {
+func fixDockerSocketPermissions(ctx context.Context) {
 	switch runtime.GOOS {
 	case "linux":
-		fixLinuxDockerPermissions()
+		fixLinuxDockerPermissions(ctx)
 	}
 	// darwin: Docker Desktop in macOS is automatically managing docker socket
 }
 
 // fixLinuxDockerPermissions fixes Docker socket permissions on Linux
-func fixLinuxDockerPermissions() {
+func fixLinuxDockerPermissions(ctx context.Context) {
 	dockerSock := "/var/run/docker.sock"
 
 	// Check if socket exists
@@ -148,6 +148,6 @@ func fixLinuxDockerPermissions() {
 	}
 
 	// Fix socket permissions (ignore errors - best effort)
-	ExecuteCommand("sudo", "chmod", "666", dockerSock)
-	ExecuteCommand("sudo", "chgrp", "docker", dockerSock)
+	ExecuteCommand(ctx, "sudo", "chmod", "666", dockerSock)
+	ExecuteCommand(ctx, "sudo", "chgrp", "docker", dockerSock)
 }

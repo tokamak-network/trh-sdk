@@ -1,35 +1,70 @@
 package aws
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
-type AccountProfile struct {
-	UserId            string   `json:"UserId"`
-	Account           string   `json:"Account"`
-	Arn               string   `json:"Arn"`
-	AvailabilityZones []string `json:"AvailabilityZones"`
+func LoginAWS(ctx context.Context, awsConfig *types.AWSConfig) (*types.AWSProfile, error) {
+	var (
+		err error
+	)
+
+	if awsConfig == nil {
+		fmt.Println("You aren't logged into your AWS account.")
+		return nil, fmt.Errorf("You aren't logged into your AWS account.")
+	}
+
+	// Login to AWS account
+	fmt.Println("Authenticating AWS account...")
+	profileAccount, err := loginAWS(awsConfig.AccessKey, awsConfig.SecretKey, awsConfig.Region, awsConfig.DefaultFormat)
+	if err != nil {
+		return nil, fmt.Errorf("failed to log in into AWS: %v", err)
+	}
+
+	if profileAccount == nil {
+		return nil, fmt.Errorf("failed to get AWS profile account")
+	}
+
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(awsConfig.Region))
+	if err != nil {
+		return nil, fmt.Errorf("failed to load AWS configuration: %v", err)
+	}
+
+	s3Client := s3.NewFromConfig(cfg)
+
+	return &types.AWSProfile{
+		S3Client:       s3Client,
+		AccountProfile: profileAccount,
+		AwsConfig:      awsConfig,
+	}, nil
 }
 
-type AvailabilityZone struct {
-	ZoneName string `json:"ZoneName"`
-	State    string `json:"State"`
-}
+func loginAWS(accessKey, secretKey, region, formatFile string) (*types.AccountProfile, error) {
+	if accessKey == "" {
+		return nil, fmt.Errorf("accessKey can't be empty")
+	}
 
-type AWSAvailabilityZoneResponse struct {
-	AvailabilityZones []AvailabilityZone `json:"AvailabilityZones"`
-}
+	if secretKey == "" {
+		return nil, fmt.Errorf("secretKey can't be empty")
+	}
 
-type AWSTableListResponse struct {
-	TableNames []string `json:"TableNames"`
-}
+	if region == "" {
+		return nil, fmt.Errorf("region can't be empty")
+	}
 
-func LoginAWS(accessKey, secretKey, region, formatFile string) (*AccountProfile, error) {
+	if formatFile == "" {
+		formatFile = "json"
+	}
+
 	configureAWS("aws", "configure", "set", "aws_access_key_id", accessKey)
 	configureAWS("aws", "configure", "set", "aws_secret_access_key", secretKey)
 	configureAWS("aws", "configure", "set", "region", region)
@@ -42,7 +77,7 @@ func LoginAWS(accessKey, secretKey, region, formatFile string) (*AccountProfile,
 		return nil, err
 	}
 
-	var profile AccountProfile
+	var profile types.AccountProfile
 	if err := json.Unmarshal(output, &profile); err != nil {
 		return nil, err
 	}
@@ -98,7 +133,7 @@ func getAvailabilityZones(region string) ([]string, error) {
 		fmt.Println("Error fetching AWS availability zones:", err)
 		return nil, err
 	}
-	var awsResponse AWSAvailabilityZoneResponse
+	var awsResponse types.AWSAvailabilityZoneResponse
 	err = json.Unmarshal([]byte(output), &awsResponse)
 	if err != nil {
 		fmt.Printf("❌ Error parsing JSON: %v\n", err)
@@ -123,7 +158,7 @@ func getTablesByRegion(region string) ([]string, error) {
 		fmt.Println("Error fetching the table list:", err)
 		return nil, err
 	}
-	var awsResponse AWSTableListResponse
+	var awsResponse types.AWSTableListResponse
 	err = json.Unmarshal(output, &awsResponse)
 	if err != nil {
 		fmt.Printf("❌ Error parsing JSON: %v\n", err)

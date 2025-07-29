@@ -2,6 +2,7 @@ package utils
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -51,4 +52,21 @@ func IsAvailableRegion(region string, availableRegions []string) bool {
 		}
 	}
 	return false
+}
+
+func SwitchKubernetesContext(ctx context.Context, namespace string, region string) error {
+	eksSetup, err := ExecuteCommand(ctx, "aws", []string{
+		"eks",
+		"update-kubeconfig",
+		"--region", region,
+		"--name", namespace,
+	}...)
+	if err != nil {
+		fmt.Println("Error configuring EKS access:", err, "details:", eksSetup)
+		return fmt.Errorf("error configuring EKS access: %w, details: %s", err, eksSetup)
+	}
+
+	fmt.Println("EKS configuration updated:", eksSetup)
+
+	return nil
 }

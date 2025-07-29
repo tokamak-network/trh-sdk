@@ -5,15 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	ethCommon "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
-
-	"os"
 
 	"github.com/tokamak-network/trh-sdk/abis"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
@@ -24,6 +24,34 @@ import (
 type DesignatedOwners struct {
 	TokamakDAO ethCommon.Address
 	Foundation ethCommon.Address
+}
+
+type RegisterCandidateInput struct {
+	Amount   float64
+	UseTon   bool
+	Memo     string
+	NameInfo string
+}
+
+func (r *RegisterCandidateInput) Validate(ctx context.Context) error {
+	if r.Amount < 1000.1 {
+		return fmt.Errorf("amount must be at least 1000.1")
+	}
+	if r.Memo == "" {
+		return fmt.Errorf("memo cannot be empty")
+	}
+
+	useWTON := !r.UseTon
+	if useWTON {
+		return fmt.Errorf("currently only TON is accepted")
+	}
+
+	return nil
+}
+
+func (t *ThanosStack) SetRegisterCandidate(value bool) *ThanosStack {
+	t.registerCandidate = value
+	return t
 }
 
 func (t *ThanosStack) checkAdminBalance(ctx context.Context, adminAddress ethCommon.Address, amount float64, l1Client *ethclient.Client) error {
@@ -58,8 +86,48 @@ func (t *ThanosStack) checkAdminBalance(ctx context.Context, adminAddress ethCom
 	return nil
 }
 
+// waitForAllowanceWithTimeout waits for allowance to be set with a context timeout
+func waitForAllowanceWithTimeout(ctx context.Context, tonContract *abis.TON, adminAddress, l2ManagerAddress ethCommon.Address, requiredAmount *big.Int, timeout time.Duration) error {
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	currentDelay := 2 * time.Second
+	const maxDelay = 60 * time.Second
+
+	fmt.Printf("Waiting for allowance to propagate with incremental backoff (timeout: %v)...\n", timeout)
+
+	for {
+		allowance, err := tonContract.Allowance(&bind.CallOpts{Context: timeoutCtx}, adminAddress, l2ManagerAddress)
+		if err != nil {
+			if timeoutCtx.Err() == nil {
+				fmt.Printf("Error checking allowance: %v\n", err)
+			}
+		} else {
+			if allowance.Cmp(requiredAmount) >= 0 {
+				fmt.Printf("✅ Allowance verified: %s TON\n", new(big.Float).Quo(new(big.Float).SetInt(allowance), big.NewFloat(1e18)).String())
+				return nil
+			}
+			fmt.Printf("Allowance: %s/%s (retrying in %v...)\n", allowance.String(), requiredAmount.String(), currentDelay)
+		}
+
+		select {
+		case <-timeoutCtx.Done():
+			return fmt.Errorf("timeout waiting for allowance propagation after %v", timeout)
+		case <-time.After(currentDelay):
+			currentDelay *= 2
+			if currentDelay > maxDelay {
+				currentDelay = maxDelay
+			}
+		}
+	}
+}
+
 // fromDeployContract flag would be true if the function would be called from the deploy contract function
 func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCandidate *RegisterCandidateInput) error {
+	if err := registerCandidate.Validate(ctx); err != nil {
+		return err
+	}
+
 	l1Client, err := ethclient.DialContext(ctx, t.deployConfig.L1RPCURL)
 	if err != nil {
 		return err
@@ -72,13 +140,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 
 	chainConfig := constants.L1ChainConfigurations[chainID.Uint64()]
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Println("Error determining current directory:", err)
-		return err
-	}
-
-	file, err := os.Open(fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%s", cwd, fmt.Sprintf("%d-deploy.json", chainID)))
+	file, err := os.Open(fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%s", t.deploymentPath, fmt.Sprintf("%d-deploy.json", chainID)))
 	if err != nil {
 		fmt.Println("Error opening deployment file:", err)
 		return err
@@ -160,7 +222,8 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 	}
 
 	if rollupType != 0 {
-		fmt.Printf("Config already registered \n")
+		fmt.Println("✅ Rollup config is already registered.")
+		return nil
 	}
 
 	// Verify and register config
@@ -169,7 +232,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 			auth,
 			ethCommon.HexToAddress(systemConfigProxy),
 			ethCommon.HexToAddress(proxyAdmin),
-			registerCandidate.nameInfo,
+			registerCandidate.NameInfo,
 			ethCommon.HexToAddress(safeWalletAddress),
 		)
 		if err != nil {
@@ -195,7 +258,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 	}
 
 	// Convert amount to Wei
-	amountInWei := new(big.Float).Mul(big.NewFloat(registerCandidate.amount), big.NewFloat(1e18))
+	amountInWei := new(big.Float).Mul(big.NewFloat(registerCandidate.Amount), big.NewFloat(1e18))
 	amountBigInt, _ := amountInWei.Int(nil)
 
 	// Get contract address from environment
@@ -233,6 +296,14 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 
 	fmt.Printf("Transaction confirmed in block %d\n", receiptApprove.BlockNumber.Uint64())
 
+	adminAddress, err := utils.GetAddressFromPrivateKey(t.deployConfig.AdminPrivateKey)
+	if err != nil {
+		return err
+	}
+
+	// Verify the allowance was set correctly
+	waitForAllowanceWithTimeout(ctx, tonContract, adminAddress, l2ManagerAddress, amountBigInt, 60*time.Second)
+
 	// Create contract instance
 	l2ManagerContract, err := abis.NewLayer2ManagerV1(l2ManagerAddress, l1Client)
 	if err != nil {
@@ -241,13 +312,24 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 
 	fmt.Println("Initiating transaction to register DAO candidate...")
 
+	// Final balance check before transfer
+	currentBalance, err := tonContract.BalanceOf(&bind.CallOpts{Context: ctx}, adminAddress)
+	if err != nil {
+		return fmt.Errorf("failed to get current balance: %v", err)
+	}
+
+	if currentBalance.Cmp(amountBigInt) < 0 {
+		return fmt.Errorf("insufficient balance at transfer time: have %s, required %s",
+			currentBalance.String(), amountBigInt.String())
+	}
+
 	// Call registerCandidateAddOn
 	txRegisterCandidate, err := l2ManagerContract.RegisterCandidateAddOn(
 		auth,
 		ethCommon.HexToAddress(systemConfigProxy),
 		amountBigInt,
-		registerCandidate.useTon,
-		registerCandidate.memo,
+		registerCandidate.UseTon,
+		registerCandidate.Memo,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to register candidate: %v", err)
@@ -270,14 +352,19 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 	return nil
 }
 
-func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, cwd string) error {
+func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, registerCandidate *RegisterCandidateInput) error {
+	if t.deployConfig.Network != constants.Testnet {
+		return fmt.Errorf("register candidates verification is supported only on Testnet")
+	}
+
 	var err error
 	fmt.Println("Starting candidate registration process...")
 	fmt.Println("💲 Admin account will be used to register the candidate. Please ensure it has sufficient TON token balance.")
-	registerCandidate, err := t.inputRegisterCandidate()
-	if err != nil {
-		return fmt.Errorf("❌ failed to get register candidate input: %w", err)
+
+	if err := registerCandidate.Validate(ctx); err != nil {
+		return err
 	}
+
 	l1Client, err := ethclient.DialContext(ctx, t.deployConfig.L1RPCURL)
 	if err != nil {
 		return err
@@ -286,11 +373,11 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, cwd string) 
 	if err != nil {
 		return err
 	}
-	err = t.checkAdminBalance(ctx, adminAddress, registerCandidate.amount, l1Client)
+	err = t.checkAdminBalance(ctx, adminAddress, registerCandidate.Amount, l1Client)
 	if err != nil {
 		return err
 	}
-	err = t.setupSafeWallet(ctx, cwd)
+	err = t.setupSafeWallet(ctx, t.deploymentPath)
 	if err != nil {
 		return fmt.Errorf("❌ failed to set up Safe Wallet: %w", err)
 	}
@@ -405,7 +492,7 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, cwd string) error {
 	// Run hardhat task
 	sdkPath := filepath.Join(cwd, "tokamak-thanos", "packages", "tokamak", "sdk")
 	cmdStr := fmt.Sprintf("cd %s && L1_URL=%s PRIVATE_KEY=%s SAFE_WALLET_ADDRESS=%s npx hardhat set-safe-wallet", sdkPath, t.deployConfig.L1RPCURL, t.deployConfig.AdminPrivateKey, safeWalletAddress)
-	if err := utils.ExecuteCommandStream("bash", "-c", cmdStr); err != nil {
+	if err := utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", cmdStr); err != nil {
 		fmt.Print("\rfailed to setup the Safe wallet!\n")
 		return err
 	}
@@ -427,5 +514,97 @@ func GetDesignatedOwnersByChainID(chainID uint64) (DesignatedOwners, error) {
 		}, nil
 	default:
 		return DesignatedOwners{}, fmt.Errorf("unsupported chain ID: %d", chainID)
+	}
+}
+
+// GetRegistrationAdditionalInfo returns additional information after candidate registration
+func (t *ThanosStack) GetRegistrationAdditionalInfo(ctx context.Context, registerCandidate *RegisterCandidateInput) (*types.RegistrationAdditionalInfo, error) {
+	// Connect to L1 to get contract information
+	l1Client, err := ethclient.DialContext(ctx, t.deployConfig.L1RPCURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to L1 RPC: %w", err)
+	}
+	defer l1Client.Close()
+
+	chainID, err := l1Client.ChainID(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chain ID: %w", err)
+	}
+
+	// Read deployment file to get contract addresses
+	deploymentFile := fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", t.deploymentPath, chainID)
+	file, err := os.Open(deploymentFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open deployment file: %w", err)
+	}
+	defer file.Close()
+
+	var contracts types.Contracts
+	decoder := json.NewDecoder(file)
+	if err := decoder.Decode(&contracts); err != nil {
+		return nil, fmt.Errorf("failed to decode deployment JSON: %w", err)
+	}
+
+	result := &types.RegistrationAdditionalInfo{
+		URL: constants.L1ChainConfigurations[chainID.Uint64()].StakingURL,
+	}
+
+	// 1. Safe wallet information
+	if contracts.SystemOwnerSafe != "" {
+		safeAddress := ethCommon.HexToAddress(contracts.SystemOwnerSafe)
+		safeContract, err := abis.NewSafeExtender(safeAddress, l1Client)
+		if err == nil {
+			callOpts := &bind.CallOpts{Context: ctx}
+
+			// Get owners
+			owners, err := safeContract.GetOwners(callOpts)
+			if err == nil {
+				ownerStrings := make([]string, len(owners))
+				for i, owner := range owners {
+					ownerStrings[i] = owner.Hex()
+				}
+
+				// Get threshold
+				threshold, err := safeContract.GetThreshold(callOpts)
+				if err == nil {
+					result.SafeWallet = &types.SafeWalletInfo{
+						Address:   contracts.SystemOwnerSafe,
+						Owners:    ownerStrings,
+						Threshold: threshold.Uint64(),
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Candidate registration information
+	result.CandidateRegistration = &types.CandidateRegistrationInfo{
+		StakingAmount:       registerCandidate.Amount,
+		RollupConfigAddress: contracts.SystemConfigProxy,
+		CandidateName:       registerCandidate.NameInfo,
+		CandidateMemo:       registerCandidate.Memo,
+		RegistrationTime:    time.Now().Format("2006-01-02 15:04:05 MST"),
+	}
+
+	return result, nil
+}
+
+// DisplayRegistrationAdditionalInfo retrieves and displays additional registration information
+func (t *ThanosStack) DisplayRegistrationAdditionalInfo(ctx context.Context, registerCandidate *RegisterCandidateInput) {
+	// Get and display additional registration information
+	additionalInfo, err := t.GetRegistrationAdditionalInfo(ctx, registerCandidate)
+	if err != nil {
+		fmt.Printf("⚠️  Warning: Failed to retrieve additional information: %v\n", err)
+		return
+	}
+
+	// Pretty print the additional information
+	fmt.Println("\n📋 Registration Summary:")
+	prettyJSON, err := json.MarshalIndent(additionalInfo, "", "  ")
+	if err != nil {
+		fmt.Printf("Failed to format additional info: %v\n", err)
+		fmt.Printf("Raw data: %+v\n", additionalInfo)
+	} else {
+		fmt.Println(string(prettyJSON))
 	}
 }

@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"regexp"
-	"strings"
-	"time"
+	"path/filepath"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
@@ -22,6 +20,11 @@ func CopyFile(src, dst string) error {
 	}
 	defer sourceFile.Close()
 
+	// Ensure destination directory exists
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return fmt.Errorf("failed to create destination directory: %v", err)
+	}
+
 	// Create the destination file
 	destinationFile, err := os.Create(dst)
 	if err != nil {
@@ -29,10 +32,18 @@ func CopyFile(src, dst string) error {
 	}
 	defer destinationFile.Close()
 
-	// Copy the content from source to destination
-	_, err = io.Copy(destinationFile, sourceFile)
-	if err != nil {
+	// Copy content
+	if _, err := io.Copy(destinationFile, sourceFile); err != nil {
 		return fmt.Errorf("failed to copy content: %v", err)
+	}
+
+	// Preserve file permissions
+	info, err := os.Stat(src)
+	if err != nil {
+		return fmt.Errorf("failed to stat source file: %v", err)
+	}
+	if err := os.Chmod(dst, info.Mode()); err != nil {
+		return fmt.Errorf("failed to set destination file permissions: %v", err)
 	}
 
 	return nil
@@ -64,18 +75,18 @@ func CheckDirExists(path string) bool {
 	return info.IsDir()
 }
 
-func ReadConfigFromJSONFile() (*types.Config, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
+func ReadConfigFromJSONFile(deploymentPath string) (*types.Config, error) {
 
-	fileExist := CheckFileExists(fmt.Sprintf("%s/%s", cwd, types.ConfigFileName))
+	filePath := fmt.Sprintf("%s/%s", deploymentPath, types.ConfigFileName)
+
+	fmt.Println("Reading config from:", filePath)
+
+	fileExist := CheckFileExists(filePath)
 	if !fileExist {
 		return nil, nil
 	}
 
-	data, err := os.ReadFile(types.ConfigFileName)
+	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -102,15 +113,4 @@ func ReadConfigFromJSONFile() (*types.Config, error) {
 	}
 
 	return &config, nil
-}
-
-func ConvertChainNameToNamespace(chainName string) string {
-	processed := strings.ToLower(chainName)
-	processed = strings.ReplaceAll(processed, " ", "-")
-	processed = regexp.MustCompile(`[^a-z0-9-]`).ReplaceAllString(processed, "")
-	processed = strings.Trim(processed, "-")
-	if len(processed) > 20 {
-		processed = processed[:20]
-	}
-	return fmt.Sprintf("%s-%d", processed, time.Now().Unix())
 }

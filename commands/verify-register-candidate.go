@@ -4,34 +4,81 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
+	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
+	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"github.com/urfave/cli/v3"
 )
 
 func ActionVerifyRegisterCandidates() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
-		var err error
+		var network, stack string
+
+		var config *types.Config
+
 		// Retrieve the current working directory
-		cwd, err := os.Getwd()
+		deploymentPath, err := os.Getwd()
 		if err != nil {
-			return fmt.Errorf("failed to get current working directory: %v", err)
+			return err
 		}
-		config, err := utils.ReadConfigFromJSONFile()
-		if err != nil || config == nil {
-			return fmt.Errorf("Check if contracts deployed on L1, use `deploy-contracts` command for that: %v", err)
+
+		config, err = utils.ReadConfigFromJSONFile(deploymentPath)
+		if err != nil {
+			fmt.Println("Error reading settings.json")
+			return err
+		}
+
+		if config == nil {
+			network = constants.LocalDevnet
+			stack = constants.ThanosStack
+		} else {
+			network = config.Network
+			stack = config.Stack
+		}
+
+		if !constants.SupportedStacks[stack] {
+			return fmt.Errorf("unsupported stack: %s", stack)
+		}
+
+		if !constants.SupportedNetworks[network] {
+			return fmt.Errorf("unsupported network: %s", network)
 		}
 
 		switch config.Stack {
 		case constants.ThanosStack:
-			thanosStack := thanos.NewThanosStack(config.Network, config.Stack, config)
-			if config.Network == "Mainnet" {
-				return fmt.Errorf("register candidates verification is not supported on Mainnet")
+
+			// Initialize the logger
+			now := time.Now().Unix()
+			fileName := fmt.Sprintf("%s/logs/verify_register_candidate_%s_%s_%d.log", deploymentPath, config.Network, config.Stack, now)
+			l, err := logging.InitLogger(fileName)
+			if err != nil {
+				return fmt.Errorf("failed to initialize logger: %w", err)
 			}
-			err = thanosStack.VerifyRegisterCandidates(ctx, cwd)
-			return err
+
+			thanosStack, err := thanos.NewThanosStack(ctx, l, config.Network, true, deploymentPath, config.AWS)
+			if err != nil {
+				return fmt.Errorf("failed to create thanos stack: %v", err)
+			}
+
+			registerCandidate, err := thanos.InputRegisterCandidate()
+			if err != nil {
+				return fmt.Errorf("❌ failed to get register candidate input: %w", err)
+			}
+
+			// Register candidate
+			err = thanosStack.VerifyRegisterCandidates(ctx, registerCandidate)
+			if err != nil {
+				return err
+			}
+
+			// Display additional registration information
+			thanosStack.DisplayRegistrationAdditionalInfo(ctx, registerCandidate)
+
+			return nil
 		default:
 			return fmt.Errorf("unsupported stack: %s", config.Stack)
 		}

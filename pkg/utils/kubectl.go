@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -129,12 +130,12 @@ type IngressJSON struct {
 	} `json:"items"`
 }
 
-func getK8sPods(namespace string) (string, error) {
-	return ExecuteCommand("kubectl", "-n", namespace, "get", "pods", "-o", "json")
+func getK8sPods(ctx context.Context, namespace string) (string, error) {
+	return ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pods", "-o", "json")
 }
 
-func GetK8sPods(namespace string) ([]string, error) {
-	output, err := getK8sPods(namespace)
+func GetK8sPods(ctx context.Context, namespace string) ([]string, error) {
+	output, err := getK8sPods(ctx, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -153,8 +154,8 @@ func GetK8sPods(namespace string) ([]string, error) {
 	return pods, nil
 }
 
-func GetPodsByName(namespace string, podName string) ([]string, error) {
-	output, err := getK8sPods(namespace)
+func GetPodsByName(ctx context.Context, namespace string, podName string) ([]string, error) {
+	output, err := getK8sPods(ctx, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -176,15 +177,15 @@ func GetPodsByName(namespace string, podName string) ([]string, error) {
 	return pods, nil
 }
 
-func getK8sIngresses(namespace string) (string, error) {
-	return ExecuteCommand("kubectl", "-n", namespace, "get", "ingress", "-o", "json")
+func getK8sIngresses(ctx context.Context, namespace string) (string, error) {
+	return ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "ingress", "-o", "json")
 }
-func getK8sSVC(namespace string) (string, error) {
-	return ExecuteCommand("kubectl", "-n", namespace, "get", "svc", "-o", "json")
+func getK8sSVC(ctx context.Context, namespace string) (string, error) {
+	return ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "svc", "-o", "json")
 }
 
-func GetIngresses(namespace string) (map[string][]string, error) {
-	output, err := getK8sIngresses(namespace)
+func GetIngresses(ctx context.Context, namespace string) (map[string][]string, error) {
+	output, err := getK8sIngresses(ctx, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -212,8 +213,8 @@ func GetIngresses(namespace string) (map[string][]string, error) {
 	return addresses, nil
 }
 
-func GetAddressByIngress(namespace string, ingressName string) ([]string, error) {
-	output, err := getK8sIngresses(namespace)
+func GetAddressByIngress(ctx context.Context, namespace string, ingressName string) ([]string, error) {
+	output, err := getK8sIngresses(ctx, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -235,8 +236,8 @@ func GetAddressByIngress(namespace string, ingressName string) ([]string, error)
 	return addresses, nil
 }
 
-func GetServiceNames(namespace string, serviceName string) ([]string, error) {
-	output, err := getK8sSVC(namespace)
+func GetServiceNames(ctx context.Context, namespace string, serviceName string) ([]string, error) {
+	output, err := getK8sSVC(ctx, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -256,13 +257,13 @@ func GetServiceNames(namespace string, serviceName string) ([]string, error) {
 	return addresses, nil
 }
 
-func CheckPVCStatus(namespace string) (bool, error) {
+func CheckPVCStatus(ctx context.Context, namespace string) (bool, error) {
 	cmd := []string{
 		"get", "pvc",
 		"-n", namespace,
 		"-o", "jsonpath={range .items[*]}{.status.phase}{\"\\n\"}{end}",
 	}
-	output, err := ExecuteCommand("kubectl", cmd...)
+	output, err := ExecuteCommand(ctx, "kubectl", cmd...)
 	if err != nil {
 		return false, fmt.Errorf("failed to get PVC status: %w", err)
 	}
@@ -282,10 +283,10 @@ func CheckPVCStatus(namespace string) (bool, error) {
 	return true, nil
 }
 
-func WaitPVCReady(namespace string) error {
+func WaitPVCReady(ctx context.Context, namespace string) error {
 	maxRetries := 5
 	for i := 0; i < maxRetries; i++ {
-		isReady, err := CheckPVCStatus(namespace)
+		isReady, err := CheckPVCStatus(ctx, namespace)
 		if err != nil {
 			fmt.Println("Error checking PVC status:", err)
 			return err
@@ -297,4 +298,29 @@ func WaitPVCReady(namespace string) error {
 	}
 
 	return fmt.Errorf("PVC not ready after %d attempts", maxRetries)
+}
+
+// CheckNamespaceExists checks if a namespace exists in Kubernetes
+func CheckNamespaceExists(ctx context.Context, namespace string) (bool, error) {
+	output, err := ExecuteCommand(ctx, "kubectl", "get", "namespace", namespace, "--ignore-not-found=true")
+	if err != nil {
+		return false, fmt.Errorf("failed to check namespace existence: %w", err)
+	}
+	return strings.TrimSpace(output) != "", nil
+}
+
+// EnsureNamespaceExists checks if namespace exists and creates it if needed
+func EnsureNamespaceExists(ctx context.Context, namespace string) error {
+	exists, err := CheckNamespaceExists(ctx, namespace)
+	if err != nil {
+		return fmt.Errorf("failed to check namespace existence: %w", err)
+	}
+
+	if !exists {
+		if _, err := ExecuteCommand(ctx, "kubectl", "create", "namespace", namespace); err != nil {
+			return fmt.Errorf("failed to create namespace: %w", err)
+		}
+	}
+
+	return nil
 }

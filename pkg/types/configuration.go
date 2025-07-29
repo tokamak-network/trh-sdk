@@ -2,8 +2,11 @@ package types
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 )
 
 type K8sConfig struct {
@@ -39,6 +42,45 @@ func (c *ChainConfiguration) GetFinalizationPeriodSeconds() uint64 {
 	return c.ChallengePeriod
 }
 
+func (c *ChainConfiguration) Validate(l1ChainId uint64) error {
+	if c.BatchSubmissionFrequency <= 0 {
+		return errors.New("BatchSubmissionFrequency is not set")
+	}
+
+	if c.ChallengePeriod <= 0 {
+		return errors.New("ChallengePeriod is not set")
+	}
+
+	if c.OutputRootFrequency <= 0 {
+		return errors.New("OutputRootFrequency is not set")
+	}
+
+	if c.L1BlockTime <= 0 {
+		return errors.New("L1BlockTime is not set")
+	}
+
+	if c.L2BlockTime <= 0 {
+		return errors.New("L2BlockTime is not set")
+	}
+
+	if c.OutputRootFrequency%c.L2BlockTime != 0 {
+		return fmt.Errorf("OutputRootFrequency must be a multiple of %d", c.L2BlockTime)
+	}
+
+	if c.BatchSubmissionFrequency%c.L1BlockTime != 0 {
+		return fmt.Errorf("BatchSubmissionFrequency must be a multiple of %d", c.L1BlockTime)
+	}
+
+	if l1ChainId == constants.EthereumMainnetChainID {
+		mainnetChallengePeriod := constants.L1ChainConfigurations[l1ChainId].FinalizationPeriodSeconds
+		if c.ChallengePeriod != mainnetChallengePeriod {
+			return fmt.Errorf("challengePeriod must be equal by %d", mainnetChallengePeriod)
+		}
+	}
+
+	return nil
+}
+
 type DeployContractStatus int
 
 const (
@@ -58,12 +100,12 @@ type Config struct {
 	ProposerPrivateKey   string `json:"proposer_private_key"`
 	ChallengerPrivateKey string `json:"challenger_private_key,omitempty"`
 
-	DeploymentPath string `json:"deployment_path"`
-	L1RPCURL       string `json:"l1_rpc_url"`
-	L1BeaconURL    string `json:"l1_beacon_url"`
-	L1RPCProvider  string `json:"l1_rpc_provider"`
-	L1ChainID      uint64 `json:"l1_chain_id"`
-	L2ChainID      uint64 `json:"l2_chain_id"`
+	DeploymentFilePath string `json:"deployment_file_path"`
+	L1RPCURL           string `json:"l1_rpc_url"`
+	L1BeaconURL        string `json:"l1_beacon_url"`
+	L1RPCProvider      string `json:"l1_rpc_provider"`
+	L1ChainID          uint64 `json:"l1_chain_id"`
+	L2ChainID          uint64 `json:"l2_chain_id"`
 
 	Stack            string `json:"stack"`
 	Network          string `json:"network"`
@@ -73,12 +115,12 @@ type Config struct {
 	L2RpcUrl string `json:"l2_rpc_url"`
 
 	// AWS config
-	AWS *AWSConfig `json:"aws"`
+	AWS *AWSConfig `json:"aws,omitempty"`
 
 	// K8s config
-	K8s *K8sConfig `json:"k8s"`
+	K8s *K8sConfig `json:"k8s,omitempty"`
 
-	ChainName string `json:"chain_name"`
+	ChainName string `json:"chain_name,omitempty"`
 
 	ChainConfiguration *ChainConfiguration `json:"chain_configuration"`
 
@@ -88,19 +130,24 @@ type Config struct {
 
 const ConfigFileName = "settings.json"
 
-func (c *Config) WriteToJSONFile() error {
+func (c *Config) WriteToJSONFile(deploymentPath string) error {
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		fmt.Println("Error marshalling JSON:", err)
 		return err
 	}
 
+	fileName := fmt.Sprintf("%s/%s", deploymentPath, ConfigFileName)
 	// Write JSON to a file
-	err = os.WriteFile(ConfigFileName, data, 0644)
+	err = os.WriteFile(fileName, data, 0644)
 	if err != nil {
 		fmt.Println("Error writing JSON file:", err)
 		return err
 	}
 
 	return nil
+}
+
+func (c *Config) SupportAWS() bool {
+	return c != nil && (c.Network == constants.Testnet || c.Network == constants.Mainnet)
 }

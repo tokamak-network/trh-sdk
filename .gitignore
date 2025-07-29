@@ -40,3 +40,7 @@ settings.json
 nam@tokamak.network_accessKeys.csv
 logs/
 *.log
+
+settings.json
+tokamak-thanos
+tokamak-thanos-stack

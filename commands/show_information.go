@@ -3,8 +3,11 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
+	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
+	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -13,9 +16,17 @@ import (
 
 func ActionShowInformation() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
-		var err error
 		var network, stack string
-		config, err := utils.ReadConfigFromJSONFile()
+
+		var config *types.Config
+
+		var awsConfig *types.AWSConfig
+
+		deploymentPath, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		config, err = utils.ReadConfigFromJSONFile(deploymentPath)
 		if err != nil {
 			fmt.Println("Error reading settings.json")
 			return err
@@ -27,18 +38,34 @@ func ActionShowInformation() cli.ActionFunc {
 		} else {
 			network = config.Network
 			stack = config.Stack
+			awsConfig = config.AWS
 		}
-		return ShowInformation(ctx, network, stack, config)
+
+		if awsConfig == nil {
+			awsConfig, err = thanos.InputAWSLogin()
+			if err != nil {
+				fmt.Printf("Failed to login AWS: %s \n", err)
+				return err
+			}
+		}
+
+		fileName := fmt.Sprintf("%s/logs/show_info_%s_%s_%d.log", deploymentPath, stack, network, time.Now().Unix())
+		l, err := logging.InitLogger(fileName)
+		if err != nil {
+			return fmt.Errorf("failed to initialize logger: %w", err)
+		}
+
+		switch stack {
+		case constants.ThanosStack:
+			thanosStack, err := thanos.NewThanosStack(ctx, l, network, true, deploymentPath, awsConfig)
+			if err != nil {
+				fmt.Println("Failed to initialize thanos stack", "err", err)
+				return err
+			}
+			_, err = thanosStack.ShowInformation(ctx)
+			return err
+		}
+
+		return nil
 	}
-}
-
-func ShowInformation(ctx context.Context, network, stack string, config *types.Config) error {
-
-	switch stack {
-	case constants.ThanosStack:
-		thanosStack := thanos.NewThanosStack(network, stack, config)
-		return thanosStack.ShowInformation(ctx)
-	}
-
-	return nil
 }
