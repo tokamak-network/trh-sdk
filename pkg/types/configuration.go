@@ -126,6 +126,16 @@ type Config struct {
 
 	// Deployments
 	DeployContractState *DeployContractState `json:"deploy_contract_state"`
+
+	// Logging configuration
+	LoggingConfig *LoggingConfig `json:"logging_config,omitempty"`
+}
+
+type LoggingConfig struct {
+	Enabled             bool   `json:"enabled"`
+	LokiRetention       string `json:"loki_retention,omitempty"`
+	LokiStorageSize     string `json:"loki_storage_size,omitempty"`
+	PromtailStorageSize string `json:"promtail_storage_size,omitempty"`
 }
 
 const ConfigFileName = "settings.json"

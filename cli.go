@@ -214,6 +214,63 @@ func Run() {
 				},
 				Action: commands.ActionAlertConfig(),
 			},
+			{
+				Name:  "log-config",
+				Usage: "Configure logging settings",
+				Description: `Configure logging settings for Loki and Promtail.
+
+Examples:
+  # Enable logging with default settings
+  trh-sdk log-config --enable
+
+  # Disable logging
+  trh-sdk log-config --disable
+
+  # Set retention period to 7 days
+  trh-sdk log-config --retention 7d
+
+  # Set Loki storage size to 100Gi
+  trh-sdk log-config --loki-size 100Gi
+
+  # Set Promtail storage size to 10Gi
+  trh-sdk log-config --promtail-size 10Gi
+
+  # Show current logging configuration
+  trh-sdk log-config --show
+
+  # Apply all settings at once
+  trh-sdk log-config --enable --retention 30d --loki-size 50Gi --promtail-size 5Gi`,
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:  "enable",
+						Usage: "Enable logging",
+					},
+					&cli.BoolFlag{
+						Name:  "disable",
+						Usage: "Disable logging",
+					},
+					&cli.StringFlag{
+						Name:  "retention",
+						Usage: "Log retention period (e.g., 7d, 30d, 90d, 1y)",
+						Value: "",
+					},
+					&cli.StringFlag{
+						Name:  "loki-size",
+						Usage: "Loki storage size (e.g., 10Gi, 50Gi, 100Gi)",
+						Value: "",
+					},
+					&cli.StringFlag{
+						Name:  "promtail-size",
+						Usage: "Promtail storage size (e.g., 1Gi, 5Gi, 10Gi)",
+						Value: "",
+					},
+					&cli.BoolFlag{
+						Name:  "show",
+						Usage: "Show current logging configuration",
+					},
+				},
+				Action: commands.ActionLogConfig(),
+			},
 		},
 	}
 
