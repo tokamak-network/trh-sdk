@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 
@@ -1668,4 +1670,40 @@ func (t *ThanosStack) cloneSourcecode(ctx context.Context, repositoryName, url s
 	fmt.Printf("\r✅ Clone the %s repository successfully \n", repositoryName)
 
 	return nil
+}
+
+func (t *ThanosStack) forkRepository(username, token, repoName string) error {
+	fmt.Printf("🍴 Creating fork of %s in %s's account...\n", repoName, username)
+
+	// GitHub API endpoint to create a fork
+	url := fmt.Sprintf("https://api.github.com/repos/tokamak-network/%s/forks", repoName)
+
+	// Create empty body for fork request
+	req, err := http.NewRequest("POST", url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create fork request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "token "+token)
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to create fork: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 202 {
+		fmt.Println("✅ Fork created successfully!")
+		// Wait a moment for the fork to be ready
+		time.Sleep(3 * time.Second)
+		return nil
+	} else if resp.StatusCode == 200 {
+		fmt.Println("✅ Fork already exists!")
+		return nil
+	} else {
+		return fmt.Errorf("failed to create fork, status code: %d", resp.StatusCode)
+	}
 }

@@ -31,3 +31,10 @@ func displayAccounts(accounts map[int]types.Account) {
 		fmt.Printf("\t%d. %s(%.4f ETH)\n", i, account.Address, utils.WeiToEther(balance))
 	}
 }
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}

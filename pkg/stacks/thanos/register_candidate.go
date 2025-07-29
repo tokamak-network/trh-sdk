@@ -349,6 +349,48 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 
 	fmt.Printf("Transaction confirmed in block %d\n", receiptRegisterCandidate.BlockNumber.Uint64())
 
+	// Get block details to extract timestamp
+	blockNumber := receiptRegisterCandidate.BlockNumber
+	block, err := l1Client.BlockByNumber(ctx, blockNumber)
+	if err != nil {
+		return fmt.Errorf("failed to get block details: %v", err)
+	}
+
+	// Convert block timestamp to the required format
+	blockTime := time.Unix(int64(block.Time()), 0)
+	formattedTime := blockTime.Format("2006-01-02 15:04:05 MST")
+
+	// Extract candidateAddOn address from event logs
+	var candidateAddress string
+
+	// Look for the specific event topic in the logs
+	targetTopic := "0x3685763fd42e5061ff53b001782ad759eafbc93a460b368a4ce42228ec45da98"
+	for _, log := range receiptRegisterCandidate.Logs {
+		if len(log.Topics) > 0 && log.Topics[0].Hex() == targetTopic {
+			candidateAddOnBytes := log.Data[128:160]
+			candidateAddress = ethCommon.BytesToAddress(candidateAddOnBytes).Hex()
+			break
+		}
+	}
+
+	t.deployConfig.StakingInfo = &types.StakingInfo{
+		IsCandidate:         true,
+		StakingAmount:       registerCandidate.Amount,
+		RollupConfigAddress: contracts.SystemConfigProxy,
+		CandidateName:       registerCandidate.NameInfo,
+		CandidateMemo:       registerCandidate.Memo,
+		RegistrationTime:    formattedTime,
+		RegistrationTxHash:  txRegisterCandidate.Hash().Hex(),
+		CandidateAddress:    candidateAddress,
+	}
+
+	err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
+	if err != nil {
+		fmt.Println("Failed to write settings file:", err)
+		return err
+	}
+	fmt.Println("✅ Settings file updated successfully with StakingInfo")
+
 	return nil
 }
 

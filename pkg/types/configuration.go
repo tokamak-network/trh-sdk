@@ -21,6 +21,17 @@ type ChainConfiguration struct {
 	L1BlockTime              uint64 `json:"l1_block_time"`
 }
 
+type StakingInfo struct {
+	IsCandidate         bool    `json:"is_candidate"`
+	StakingAmount       float64 `json:"staking_amount"`
+	RollupConfigAddress string  `json:"rollup_config_address"`
+	CandidateName       string  `json:"candidate_name"`
+	CandidateMemo       string  `json:"candidate_memo"`
+	RegistrationTime    string  `json:"registration_time"`
+	RegistrationTxHash  string  `json:"registration_tx_hash"`
+	CandidateAddress    string  `json:"candidate_address"`
+}
+
 func (c *ChainConfiguration) GetL2OutputOracleSubmissionInterval() uint64 {
 	if c.L2BlockTime == 0 {
 		panic("L2BlockTime is not set")
@@ -126,6 +137,9 @@ type Config struct {
 
 	// Deployments
 	DeployContractState *DeployContractState `json:"deploy_contract_state"`
+
+	// Staking information
+	StakingInfo *StakingInfo `json:"staking_info,omitempty"`
 }
 
 const ConfigFileName = "settings.json"
