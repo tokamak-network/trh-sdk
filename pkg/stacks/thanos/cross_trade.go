@@ -15,29 +15,35 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
+type BlockExplorerConfig struct {
+	APIKey string                      `json:"api_key"`
+	URL    string                      `json:"url"`
+	Type   constants.BlockExplorerType `json:"type"`
+}
+
 type L1CrossTradeChainInput struct {
-	RPC                    string `json:"rpc"`
-	ChainID                uint64 `json:"chain_id"`
-	PrivateKey             string `json:"private_key"`
-	IsDeployedNew          bool   `json:"is_deployed_new"`
-	DeploymentScriptPath   string `json:"deployment_script_path"`
-	ContractName           string `json:"contract_name"`
-	EtherscanAPIKey        string `json:"etherscan_api_key"`
-	CrossTradeProxyAddress string `json:"cross_trade_proxy_address"`
-	CrossTradeAddress      string `json:"cross_trade_address"`
+	RPC                    string               `json:"rpc"`
+	ChainID                uint64               `json:"chain_id"`
+	PrivateKey             string               `json:"private_key"`
+	IsDeployedNew          bool                 `json:"is_deployed_new"`
+	DeploymentScriptPath   string               `json:"deployment_script_path"`
+	ContractName           string               `json:"contract_name"`
+	BlockExplorerConfig    *BlockExplorerConfig `json:"block_explorer_config"`
+	CrossTradeProxyAddress string               `json:"cross_trade_proxy_address"`
+	CrossTradeAddress      string               `json:"cross_trade_address"`
 }
 
 type L2CrossTradeChainInput struct {
-	RPC                    string `json:"rpc"`
-	ChainID                uint64 `json:"chain_id"`
-	PrivateKey             string `json:"private_key"`
-	IsDeployedNew          bool   `json:"is_deployed_new"`
-	DeploymentScriptPath   string `json:"deployment_script_path"`
-	ContractName           string `json:"contract_name"`
-	EtherscanAPIKey        string `json:"etherscan_api_key"`
-	CrossDomainMessenger   string `json:"cross_domain_messenger"`
-	CrossTradeProxyAddress string `json:"cross_trade_proxy_address"`
-	CrossTradeAddress      string `json:"cross_trade_address"`
+	RPC                    string               `json:"rpc"`
+	ChainID                uint64               `json:"chain_id"`
+	PrivateKey             string               `json:"private_key"`
+	IsDeployedNew          bool                 `json:"is_deployed_new"`
+	DeploymentScriptPath   string               `json:"deployment_script_path"`
+	ContractName           string               `json:"contract_name"`
+	BlockExplorerConfig    *BlockExplorerConfig `json:"block_explorer_config"`
+	CrossDomainMessenger   string               `json:"cross_domain_messenger"`
+	CrossTradeProxyAddress string               `json:"cross_trade_proxy_address"`
+	CrossTradeAddress      string               `json:"cross_trade_address"`
 }
 
 type DeployCrossTradeContractsInputs struct {
@@ -138,12 +144,16 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 			return nil, fmt.Errorf("failed to read L1 verification option: %w", err)
 		}
 
-		var l1EtherscanAPIKey string
+		var l1BlockExplorerConfig *BlockExplorerConfig
 		if verifyL1 {
 			fmt.Print("Please enter Etherscan API key (optional, press Enter to skip): ")
-			l1EtherscanAPIKey, err = scanner.ScanString()
+			l1EtherscanAPIKey, err := scanner.ScanString()
 			if err != nil {
 				return nil, fmt.Errorf("failed to read Etherscan API key: %w", err)
+			}
+			l1BlockExplorerConfig = &BlockExplorerConfig{
+				APIKey: l1EtherscanAPIKey,
+				Type:   constants.BlockExplorerTypeEtherscan,
 			}
 		}
 
@@ -153,7 +163,7 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 			ContractName:         l1ContractFileName,
 			PrivateKey:           "0x" + l1PrivateKey,
 			IsDeployedNew:        true,
-			EtherscanAPIKey:      l1EtherscanAPIKey,
+			BlockExplorerConfig:  l1BlockExplorerConfig,
 			DeploymentScriptPath: deploymentScriptPath,
 		}
 	} else {
@@ -244,27 +254,25 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 			privateKey = "0x" + privateKey
 		}
 
-		fmt.Print("Do you want to verify the L2 cross-trade contracts? (Y/n): ")
-		verifyL2, err := scanner.ScanBool(true)
+		// Get block explorer URL
+		var l2BlockExplorerConfig *BlockExplorerConfig
+		l2BlockExplorerURL, err := t.GetBlockExplorerURL(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read L2 verification option: %w", err)
-		}
-
-		var etherscanAPIKey string
-		if verifyL2 {
-			fmt.Print("Please enter the Etherscan API key: ")
-			etherscanAPIKey, err = scanner.ScanString()
-			if err != nil {
-				return nil, fmt.Errorf("failed to read Etherscan API key: %w", err)
+			t.l.Warnf("No block explorer URL found, skip verifying L2 cross-trade contracts")
+		} else {
+			l2BlockExplorerConfig = &BlockExplorerConfig{
+				URL:  l2BlockExplorerURL,
+				Type: constants.BlockExplorerTypeBlockscout,
 			}
 		}
+
 		l2ChainConfigs = append(l2ChainConfigs, &L2CrossTradeChainInput{
 			RPC:                  l2RPC,
 			ChainID:              l2ChainID,
 			ContractName:         l2ContractFileName,
 			PrivateKey:           privateKey,
 			IsDeployedNew:        deployNewL2,
-			EtherscanAPIKey:      etherscanAPIKey,
+			BlockExplorerConfig:  l2BlockExplorerConfig,
 			CrossDomainMessenger: constants.L2CrossDomainMessenger,
 			DeploymentScriptPath: deploymentScriptPath,
 		})
@@ -315,18 +323,15 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 			}
 			l2CrossTradeAddress = common.HexToAddress(l2CrossTradeAddress).Hex()
 		}
-		fmt.Print("Do you want to verify the L2 cross-trade contracts? (Y/n): ")
-		verifyL2, err := scanner.ScanBool(true)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read L2 verification option: %w", err)
-		}
 
-		var etherscanAPIKey string
-		if verifyL2 {
-			fmt.Print("Please enter the Etherscan API key: ")
-			etherscanAPIKey, err = scanner.ScanString()
-			if err != nil {
-				return nil, fmt.Errorf("failed to read Etherscan API key: %w", err)
+		var l2BlockExplorerConfig *BlockExplorerConfig
+		l2BlockExplorerURL, err := t.GetBlockExplorerURL(ctx)
+		if err != nil {
+			t.l.Warnf("No block explorer URL found, skip verifying L2 cross-trade contracts")
+		} else {
+			l2BlockExplorerConfig = &BlockExplorerConfig{
+				URL:  l2BlockExplorerURL,
+				Type: constants.BlockExplorerTypeBlockscout,
 			}
 		}
 
@@ -337,7 +342,7 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 			ContractName:           l2ContractFileName,
 			PrivateKey:             "0x" + privateKey,
 			IsDeployedNew:          false,
-			EtherscanAPIKey:        etherscanAPIKey,
+			BlockExplorerConfig:    l2BlockExplorerConfig,
 			CrossDomainMessenger:   constants.L2CrossDomainMessenger,
 			CrossTradeProxyAddress: l2CrossTradeProxyAddress,
 			CrossTradeAddress:      l2CrossTradeAddress,
@@ -392,12 +397,16 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 				return nil, fmt.Errorf("failed to read L2 verification option: %w", err)
 			}
 
-			var otherL2EtherscanAPIKey string
+			var otherL2BlockExplorerConfig *BlockExplorerConfig
 			if verifyOtherL2 {
 				fmt.Print("Please enter the Etherscan API key: ")
-				otherL2EtherscanAPIKey, err = scanner.ScanString()
+				otherL2EtherscanAPIKey, err := scanner.ScanString()
 				if err != nil {
 					return nil, fmt.Errorf("failed to read Etherscan API key: %w", err)
+				}
+				otherL2BlockExplorerConfig = &BlockExplorerConfig{
+					APIKey: otherL2EtherscanAPIKey,
+					Type:   constants.BlockExplorerTypeEtherscan,
 				}
 			}
 
@@ -407,7 +416,7 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 				ContractName:         l2ContractFileName,
 				PrivateKey:           otherPrivateKey,
 				IsDeployedNew:        addOtherL2,
-				EtherscanAPIKey:      otherL2EtherscanAPIKey,
+				BlockExplorerConfig:  otherL2BlockExplorerConfig,
 				CrossDomainMessenger: constants.L2CrossDomainMessenger,
 				DeploymentScriptPath: deploymentScriptPath,
 			})
@@ -463,7 +472,7 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 				break
 			}
 
-			var etherscanAPIKey string
+			var l2BlockExplorerConfig *BlockExplorerConfig
 			fmt.Print("Do you want to verify the L2 cross-trade contracts? (Y/n): ")
 			verifyL2, err := scanner.ScanBool(true)
 			if err != nil {
@@ -472,9 +481,13 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 
 			if verifyL2 {
 				fmt.Print("Please enter the Etherscan API key: ")
-				etherscanAPIKey, err = scanner.ScanString()
+				l2EtherscanAPIKey, err := scanner.ScanString()
 				if err != nil {
 					return nil, fmt.Errorf("failed to read Etherscan API key: %w", err)
+				}
+				l2BlockExplorerConfig = &BlockExplorerConfig{
+					APIKey: l2EtherscanAPIKey,
+					Type:   constants.BlockExplorerTypeEtherscan,
 				}
 			}
 
@@ -484,7 +497,7 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 				ContractName:           l2ContractFileName,
 				PrivateKey:             "0x" + privateKey,
 				IsDeployedNew:          false,
-				EtherscanAPIKey:        etherscanAPIKey,
+				BlockExplorerConfig:    l2BlockExplorerConfig,
 				CrossDomainMessenger:   constants.L2CrossDomainMessenger,
 				CrossTradeProxyAddress: l2CrossTradeProxyAddress,
 				CrossTradeAddress:      l2CrossTradeAddress,
@@ -571,18 +584,19 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *Depl
 	}
 	// Verify the contracts
 	//
-	if input.L1ChainConfig.EtherscanAPIKey != "" {
+	if input.L1ChainConfig.BlockExplorerConfig != nil {
 		for contractName, address := range l1ContractAddresses {
 			if address == "" {
 				continue
 			}
 			t.l.Infof("Verifying L1 contract %s with address %s", contractName, address)
 			script := fmt.Sprintf(
-				"cd crossTrade && forge verify-contract %s contracts/L1/%s.sol:%s --etherscan-api-key %s",
+				"cd crossTrade && forge verify-contract %s contracts/L1/%s.sol:%s --etherscan-api-key %s --chain %s",
 				address,
 				contractName,
 				contractName,
-				input.L1ChainConfig.EtherscanAPIKey,
+				input.L1ChainConfig.BlockExplorerConfig.APIKey,
+				constants.ChainIDToForgeChainName[input.L1ChainConfig.ChainID],
 			)
 			t.l.Infof("Verifying L1 contract %s", script)
 			err = utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", script)
@@ -637,23 +651,42 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *Depl
 
 		// Verify the contracts
 		//
-		if l2ChainConfig.EtherscanAPIKey != "" {
+		if l2ChainConfig.BlockExplorerConfig != nil {
 			for contractName, address := range addresses {
 				t.l.Infof("Verifying L2 contract %s with address %s", contractName, address)
-				script = fmt.Sprintf(
-					"cd crossTrade && forge verify-contract %s contracts/L2/%s.sol:%s --etherscan-api-key %s",
-					address,
-					contractName,
-					contractName,
-					l2ChainConfig.EtherscanAPIKey,
-				)
-				t.l.Infof("Verifying L2 contract %s", script)
-				err = utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", script)
-				if err != nil {
-					t.l.Errorf("failed to verify the contracts: %s", err)
-					continue
+				if l2ChainConfig.BlockExplorerConfig.Type == constants.BlockExplorerTypeEtherscan {
+					script = fmt.Sprintf(
+						"cd crossTrade && forge verify-contract %s contracts/L2/%s.sol:%s --etherscan-api-key %s --chain %s",
+						address,
+						contractName,
+						contractName,
+						l2ChainConfig.BlockExplorerConfig.APIKey,
+						constants.ChainIDToForgeChainName[l2ChainConfig.ChainID],
+					)
+					t.l.Infof("Verifying L2 contract %s", script)
+					err = utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", script)
+					if err != nil {
+						t.l.Errorf("failed to verify the contracts: %s", err)
+						continue
+					}
+					t.l.Infof("Verified L2 contract %s with address %s", contractName, address)
+				} else if l2ChainConfig.BlockExplorerConfig.Type == constants.BlockExplorerTypeBlockscout {
+					script = fmt.Sprintf(
+						"cd crossTrade && forge verify-contract --rpc-url %s %s contracts/L2/%s.sol:%s --verifier blockscout --verifier-url %s/api",
+						l2ChainConfig.RPC,
+						address,
+						contractName,
+						contractName,
+						l2ChainConfig.BlockExplorerConfig.URL,
+					)
+					t.l.Infof("Verifying L2 contract %s", script)
+					err = utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", script)
+					if err != nil {
+						t.l.Errorf("failed to verify the contracts: %s", err)
+						continue
+					}
+					t.l.Infof("Verified L2 contract %s with address %s", contractName, address)
 				}
-				t.l.Infof("Verified L2 contract %s with address %s", contractName, address)
 			}
 		}
 
