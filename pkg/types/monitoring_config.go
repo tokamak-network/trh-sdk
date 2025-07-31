@@ -23,20 +23,6 @@ type MonitoringConfig struct {
 
 	// Logging enabled flag
 	LoggingEnabled bool
-
-	// Logging configuration (optional)
-	LokiConfig     *LokiConfig
-	PromtailConfig *PromtailConfig
-}
-
-type LokiConfig struct {
-	Mode      string `json:"mode,omitempty"`
-	Retention string `json:"retention,omitempty"`
-	Size      string `json:"size,omitempty"`
-}
-
-type PromtailConfig struct {
-	Size string `json:"size,omitempty"`
 }
 
 // AlertManagerConfig holds alertmanager-specific configuration

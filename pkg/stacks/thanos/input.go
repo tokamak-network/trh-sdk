@@ -652,13 +652,15 @@ func InputInstallMonitoring() (*InstallMonitoringInput, error) {
 	alertManagerConfig := getAlertManagerConfigFromUser()
 
 	// Prompt for logging usage (default: y)
-	fmt.Print("Would you like to enable log collection? (y/[n], default: y): ")
+
+	// Prompt for logging usage
+	fmt.Print("Would you like to enable log collection? (y/[n], default: n): ")
 	loggingInput, err := scanner.ScanString()
 	if err != nil {
+		fmt.Printf("Error while reading log collection choice: %s\n", err)
 		return nil, err
 	}
-	loggingInput = strings.ToLower(strings.TrimSpace(loggingInput))
-	loggingEnabled := loggingInput == "y" || loggingInput == ""
+	loggingEnabled := strings.ToLower(strings.TrimSpace(loggingInput)) == "y"
 
 	return &InstallMonitoringInput{
 		AdminPassword:  adminPassword,

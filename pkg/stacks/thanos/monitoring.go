@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -55,6 +56,13 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *types.Monit
 		logger.Errorw("Failed to update chart dependencies", "err", err, "output", out)
 	}
 
+	// Clear Helm cache to prevent conflicts
+	logger.Info("Clearing Helm cache")
+	_, err = utils.ExecuteCommand(ctx, "helm", "repo", "update")
+	if err != nil {
+		logger.Errorw("Failed to update Helm repos", "err", err)
+	}
+
 	// Install monitoring stack
 	logger.Infow("Installing monitoring stack via Helm", "release", config.HelmReleaseName)
 	installCmd := []string{
@@ -73,6 +81,13 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *types.Monit
 		logger.Errorw("Failed to install monitoring stack", "err", err, "output", out)
 	}
 
+	// Clean up existing resources before creating new ones
+	logger.Info("Cleaning up existing dashboard ConfigMaps")
+	if err := t.cleanupExistingDashboardConfigMaps(ctx, config); err != nil {
+		logger.Errorw("Failed to cleanup existing dashboard ConfigMaps", "err", err)
+		// Continue with installation even if cleanup fails
+	}
+
 	// Create additional resources
 	logger.Info("Creating AlertManager secret")
 	if err := t.createAlertManagerSecret(ctx, config); err != nil {
@@ -87,6 +102,16 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *types.Monit
 	if err := t.createDashboardConfigMaps(ctx, config); err != nil {
 		logger.Errorw("Failed to create dashboard configmaps", "err", err)
 		return nil, fmt.Errorf("failed to create dashboard configmaps: %w", err)
+	}
+
+	// Install AWS Fluent Bit for log collection if logging is enabled
+	if config.LoggingEnabled {
+		logger.Info("Installing AWS Fluent Bit for log collection")
+		if err := t.installFluentBit(ctx, config); err != nil {
+			logger.Errorw("Failed to install AWS Fluent Bit", "err", err)
+			// Continue with installation even if Fluent Bit fails
+			logger.Warn("Continuing without log collection")
+		}
 	}
 
 	monitoringInfo := t.createMonitoringInfo(ctx, config)
@@ -149,6 +174,25 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 	}
 	logger.Info("Starting monitoring uninstallation...")
 	monitoringNamespace := "monitoring"
+
+	// Get actual namespace for Thanos Stack components
+	actualNamespace, err := t.getActualNamespace(ctx)
+	if err != nil {
+		logger.Warnw("Failed to get actual namespace, will skip sidecar cleanup", "err", err)
+	} else {
+		// Clean up Sidecar deployments
+		logger.Info("Cleaning up Sidecar deployments")
+		if err := t.cleanupSidecarDeployments(ctx, actualNamespace); err != nil {
+			logger.Warnw("Failed to cleanup Sidecar deployments", "err", err)
+		}
+
+		// Clean up RBAC resources
+		logger.Info("Cleaning up RBAC resources")
+		if err := t.cleanupRBACResources(ctx); err != nil {
+			logger.Warnw("Failed to cleanup RBAC resources", "err", err)
+		}
+	}
+
 	releases, err := utils.FilterHelmReleases(ctx, monitoringNamespace, "monitoring")
 	if err != nil {
 		logger.Errorw("Failed to filter Helm releases", "err", err)
@@ -172,6 +216,83 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 		return err
 	}
 	logger.Info("🧹 Monitoring plugin uninstalled successfully")
+	return nil
+}
+
+// cleanupSidecarDeployments cleans up Sidecar deployments
+func (t *ThanosStack) cleanupSidecarDeployments(ctx context.Context, namespace string) error {
+	logger := t.l
+	if logger == nil {
+		logger = zap.NewExample().Sugar()
+	}
+
+	// List of Sidecar deployments to delete
+	sidecarDeployments := []string{
+		"op-node-sidecar",
+		"op-geth-sidecar",
+		"op-batcher-sidecar",
+		"op-proposer-sidecar",
+	}
+
+	for _, deployment := range sidecarDeployments {
+		logger.Infow("Deleting Sidecar deployment", "deployment", deployment, "namespace", namespace)
+		out, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "deployment", deployment, "-n", namespace, "--ignore-not-found=true")
+		if err != nil {
+			logger.Warnw("Failed to delete Sidecar deployment", "deployment", deployment, "err", err, "output", out)
+		} else {
+			logger.Infow("Successfully deleted Sidecar deployment", "deployment", deployment)
+		}
+	}
+
+	// Delete ConfigMap
+	logger.Info("Deleting Fluent Bit Sidecar ConfigMap")
+	out, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "configmap", "fluent-bit-sidecar-config", "-n", namespace, "--ignore-not-found=true")
+	if err != nil {
+		logger.Warnw("Failed to delete Fluent Bit Sidecar ConfigMap", "err", err, "output", out)
+	} else {
+		logger.Info("Successfully deleted Fluent Bit Sidecar ConfigMap")
+	}
+
+	return nil
+}
+
+// cleanupRBACResources cleans up RBAC resources
+func (t *ThanosStack) cleanupRBACResources(ctx context.Context) error {
+	logger := t.l
+	if logger == nil {
+		logger = zap.NewExample().Sugar()
+	}
+
+	// Delete ClusterRoleBinding
+	logger.Info("Deleting Fluent Bit Sidecar ClusterRoleBinding")
+	out, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "clusterrolebinding", "fluent-bit-sidecar-binding", "--ignore-not-found=true")
+	if err != nil {
+		logger.Warnw("Failed to delete Fluent Bit Sidecar ClusterRoleBinding", "err", err, "output", out)
+	} else {
+		logger.Info("Successfully deleted Fluent Bit Sidecar ClusterRoleBinding")
+	}
+
+	// Delete ClusterRole
+	logger.Info("Deleting Fluent Bit Sidecar ClusterRole")
+	out, err = utils.ExecuteCommand(ctx, "kubectl", "delete", "clusterrole", "fluent-bit-sidecar-role", "--ignore-not-found=true")
+	if err != nil {
+		logger.Warnw("Failed to delete Fluent Bit Sidecar ClusterRole", "err", err, "output", out)
+	} else {
+		logger.Info("Successfully deleted Fluent Bit Sidecar ClusterRole")
+	}
+
+	// Delete ServiceAccount from all namespaces (it might be in multiple namespaces)
+	namespaces := []string{"theo0730-78s3a", "monitoring"}
+	for _, namespace := range namespaces {
+		logger.Infow("Deleting Fluent Bit Sidecar ServiceAccount", "namespace", namespace)
+		out, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "serviceaccount", "fluent-bit-sidecar", "-n", namespace, "--ignore-not-found=true")
+		if err != nil {
+			logger.Warnw("Failed to delete Fluent Bit Sidecar ServiceAccount", "namespace", namespace, "err", err, "output", out)
+		} else {
+			logger.Infow("Successfully deleted Fluent Bit Sidecar ServiceAccount", "namespace", namespace)
+		}
+	}
+
 	return nil
 }
 
@@ -293,19 +414,87 @@ func (t *ThanosStack) generateValuesFile(config *types.MonitoringConfig) error {
 		},
 	}
 
-	// Only set loki/promtail enabled flags dynamically; use values.yaml defaults for all other settings
+	// Add CloudWatch Logs configuration when logging is enabled
 	if config.LoggingEnabled {
-		valuesConfig["loki"] = map[string]interface{}{"enabled": true}
-		valuesConfig["promtail"] = map[string]interface{}{"enabled": true}
-	} else {
-		valuesConfig["loki"] = map[string]interface{}{"enabled": false}
-		valuesConfig["promtail"] = map[string]interface{}{"enabled": false}
+		// Get actual namespace from deployed pods
+		actualNamespace, err := t.getActualNamespace(context.Background())
+		if err != nil {
+			fmt.Printf("⚠️ Warning: Failed to get actual namespace, using chain name: %v\n", err)
+			actualNamespace = config.ChainName
+		}
+
+		// Define log groups for different components using actual namespace
+		logGroups := []map[string]interface{}{
+			{
+				"name":        fmt.Sprintf("/aws/eks/%s/op-node", actualNamespace),
+				"retention":   30,
+				"description": "OP Node logs",
+			},
+			{
+				"name":        fmt.Sprintf("/aws/eks/%s/op-batcher", actualNamespace),
+				"retention":   30,
+				"description": "OP Batcher logs",
+			},
+			{
+				"name":        fmt.Sprintf("/aws/eks/%s/op-proposer", actualNamespace),
+				"retention":   30,
+				"description": "OP Proposer logs",
+			},
+			{
+				"name":        fmt.Sprintf("/aws/eks/%s/op-geth", actualNamespace),
+				"retention":   30,
+				"description": "OP Geth logs",
+			},
+			{
+				"name":        fmt.Sprintf("/aws/eks/%s/blockscout", actualNamespace),
+				"retention":   30,
+				"description": "BlockScout logs",
+			},
+			{
+				"name":        fmt.Sprintf("/aws/eks/%s/application", actualNamespace),
+				"retention":   30,
+				"description": "General application logs",
+			},
+		}
+
+		valuesConfig["cloudwatch-logs"] = map[string]interface{}{
+			"enabled":   true,
+			"region":    t.deployConfig.AWS.Region,
+			"logGroups": logGroups,
+		}
+
+		// Add CloudWatch datasource to Grafana with AWS credentials
+		grafanaConfig := valuesConfig["kube-prometheus-stack"].(map[string]interface{})["grafana"].(map[string]interface{})
+		grafanaConfig["datasources"] = map[string]interface{}{
+			"datasources.yaml": map[string]interface{}{
+				"apiVersion": 1,
+				"datasources": []map[string]interface{}{
+					{
+						"name":      "CloudWatch",
+						"type":      "cloudwatch",
+						"access":    "proxy",
+						"isDefault": false,
+						"jsonData": map[string]interface{}{
+							"authType":      "keys",
+							"defaultRegion": t.deployConfig.AWS.Region,
+						},
+						"secureJsonData": map[string]interface{}{
+							"accessKey": t.deployConfig.AWS.AccessKey,
+							"secretKey": t.deployConfig.AWS.SecretKey,
+						},
+					},
+				},
+			},
+		}
 	}
 
 	yamlContent, err := yaml.Marshal(valuesConfig)
 	if err != nil {
 		return fmt.Errorf("error marshaling values to YAML: %w", err)
 	}
+
+	// Debug: Print the generated values for troubleshooting
+	fmt.Printf("🔍 Generated monitoring values:\n%s\n", string(yamlContent))
 
 	configFileDir := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", t.deploymentPath)
 	if err := os.MkdirAll(configFileDir, os.ModePerm); err != nil {
@@ -318,6 +507,1034 @@ func (t *ThanosStack) generateValuesFile(config *types.MonitoringConfig) error {
 	}
 
 	config.ValuesFilePath = valuesFilePath
+	return nil
+}
+
+// getActualNamespace gets the actual namespace where Thanos Stack components are deployed
+func (t *ThanosStack) getActualNamespace(ctx context.Context) (string, error) {
+	// Try to find namespace by looking for Thanos Stack pods
+	cmd := exec.CommandContext(ctx, "kubectl", "get", "pods", "-A", "--no-headers", "-o", "custom-columns=NAMESPACE:.metadata.namespace")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get namespaces: %w", err)
+	}
+
+	namespaces := strings.Split(strings.TrimSpace(string(output)), "\n")
+
+	// Look for namespace containing Thanos Stack components
+	for _, namespace := range namespaces {
+		namespace = strings.TrimSpace(namespace)
+		if namespace == "" {
+			continue
+		}
+
+		// Check if this namespace contains Thanos Stack pods
+		cmd = exec.CommandContext(ctx, "kubectl", "get", "pods", "-n", namespace, "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
+		podOutput, err := cmd.Output()
+		if err != nil {
+			continue
+		}
+
+		podNames := strings.Split(strings.TrimSpace(string(podOutput)), "\n")
+		for _, podName := range podNames {
+			podName = strings.TrimSpace(podName)
+			if strings.Contains(podName, "op-node") ||
+				strings.Contains(podName, "op-geth") ||
+				strings.Contains(podName, "op-batcher") ||
+				strings.Contains(podName, "op-proposer") {
+				return namespace, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no Thanos Stack namespace found")
+}
+
+// installFluentBit installs AWS Fluent Bit for log collection
+func (t *ThanosStack) installFluentBit(ctx context.Context, config *types.MonitoringConfig) error {
+	logger := t.l
+	if logger == nil {
+		logger = zap.NewExample().Sugar()
+	}
+
+	// Get actual namespace where Thanos Stack components are deployed
+	actualNamespace, err := t.getActualNamespace(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get actual namespace: %w", err)
+	}
+
+	logger.Infow("Installing AWS Fluent Bit", "namespace", actualNamespace)
+
+	// Install AWS Fluent Bit as Sidecar containers
+	logger.Info("Installing AWS Fluent Bit as Sidecar containers")
+	if err := t.installFluentBitSidecar(ctx, actualNamespace); err != nil {
+		return fmt.Errorf("failed to install AWS Fluent Bit via Sidecar: %w", err)
+	}
+
+	logger.Info("AWS Fluent Bit installed successfully")
+	return nil
+}
+
+// installFluentBitSidecar installs AWS Fluent Bit as Sidecar containers
+func (t *ThanosStack) installFluentBitSidecar(ctx context.Context, namespace string) error {
+	logger := t.l
+	if logger == nil {
+		logger = zap.NewExample().Sugar()
+	}
+
+	logger.Info("Installing AWS Fluent Bit as Sidecar containers")
+
+	// Create Fluent Bit ConfigMap for sidecar
+	fluentBitConfigMap := fmt.Sprintf(`
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluent-bit-sidecar-config
+  namespace: %s
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        Parsers_File    parsers.conf
+        HTTP_Server     On
+        HTTP_Listen     0.0.0.0
+        HTTP_Port       2020
+
+    [INPUT]
+        Name                tail
+        Tag                 kube.*
+        Path                /var/log/containers/*.log
+        Parser              docker
+        DB                  /var/log/flb_kube.db
+        Skip_Long_Lines     On
+        Refresh_Interval    10
+        Mem_Buf_Limit      5MB
+
+    [FILTER]
+        Name                kubernetes
+        Match               kube.*
+        Kube_URL           https://kubernetes.default.svc:443
+        Kube_CA_Path       /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        Kube_Token_Path    /var/run/secrets/kubernetes.io/serviceaccount/token
+        Merge_Log          On
+        Merge_Log_Key      log_processed
+        K8S-Logging.Parser On
+        K8S-Logging.Exclude On
+        Use_Kubelet        Off
+        Kubelet_Port       10250
+
+    [OUTPUT]
+        Name                cloudwatch
+        Match               *
+        region              %s
+        log_group_name      /aws/eks/%s/op-node
+        log_stream_prefix   fluentbit-sidecar-
+        auto_create_group   true
+        use_put_log_events true
+        log_retention_days  30
+
+  parsers.conf: |
+    [PARSER]
+        Name        docker
+        Format      json
+        Time_Key    time
+        Time_Format %%Y-%%m-%%dT%%H:%%M:%%S.%%L
+        Time_Keep   On
+`, namespace, t.deployConfig.AWS.Region, namespace)
+
+	// Apply Fluent Bit ConfigMap
+	logger.Info("Creating Fluent Bit Sidecar ConfigMap")
+	if err := t.applyManifest(ctx, fluentBitConfigMap); err != nil {
+		return fmt.Errorf("failed to create Fluent Bit Sidecar ConfigMap: %w", err)
+	}
+
+	// Create ServiceAccount for sidecar
+	serviceAccount := fmt.Sprintf(`
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fluent-bit-sidecar
+  namespace: %s
+`, namespace)
+
+	// Create ClusterRole for log access
+	clusterRole := fmt.Sprintf(`
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: fluent-bit-sidecar-role
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list"]
+`)
+
+	// Create ClusterRoleBinding
+	clusterRoleBinding := fmt.Sprintf(`
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: fluent-bit-sidecar-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: fluent-bit-sidecar-role
+subjects:
+- kind: ServiceAccount
+  name: fluent-bit-sidecar
+  namespace: %s
+`, namespace)
+
+	// Apply ClusterRole
+	logger.Info("Creating Fluent Bit Sidecar ClusterRole")
+	if err := t.applyManifest(ctx, clusterRole); err != nil {
+		return fmt.Errorf("failed to create Fluent Bit Sidecar ClusterRole: %w", err)
+	}
+
+	// Apply ClusterRoleBinding
+	logger.Info("Creating Fluent Bit Sidecar ClusterRoleBinding")
+	if err := t.applyManifest(ctx, clusterRoleBinding); err != nil {
+		return fmt.Errorf("failed to create Fluent Bit Sidecar ClusterRoleBinding: %w", err)
+	}
+
+	// Apply ServiceAccount
+	logger.Info("Creating Fluent Bit Sidecar ServiceAccount")
+	if err := t.applyManifest(ctx, serviceAccount); err != nil {
+		return fmt.Errorf("failed to create Fluent Bit Sidecar ServiceAccount: %w", err)
+	}
+
+	// Create sidecar deployment for each Thanos Stack component
+	logger.Info("Creating sidecar deployments for Thanos Stack components")
+	if err := t.createSidecarDeployments(ctx, namespace); err != nil {
+		return fmt.Errorf("failed to create sidecar deployments: %w", err)
+	}
+
+	logger.Info("AWS Fluent Bit Sidecar installed successfully")
+	return nil
+}
+
+// patchPodsWithSidecar patches existing pods to add Fluent Bit sidecar
+func (t *ThanosStack) patchPodsWithSidecar(ctx context.Context, namespace string) error {
+	logger := t.l
+	if logger == nil {
+		logger = zap.NewExample().Sugar()
+	}
+
+	// Get existing Thanos Stack pods
+	cmd := exec.CommandContext(ctx, "kubectl", "get", "pods", "-n", namespace, "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get pods: %w", err)
+	}
+
+	podNames := strings.Split(strings.TrimSpace(string(output)), "\n")
+
+	for _, podName := range podNames {
+		podName = strings.TrimSpace(podName)
+		if podName == "" {
+			continue
+		}
+
+		// Check if pod is a Thanos Stack component
+		if strings.Contains(podName, "op-node") ||
+			strings.Contains(podName, "op-geth") ||
+			strings.Contains(podName, "op-batcher") ||
+			strings.Contains(podName, "op-proposer") {
+
+			logger.Infow("Patching pod with Fluent Bit sidecar", "pod", podName)
+
+			// Create sidecar patch
+			sidecarPatch := fmt.Sprintf(`
+{
+  "spec": {
+    "template": {
+      "spec": {
+        "containers": [
+          {
+            "name": "fluent-bit-sidecar",
+            "image": "public.ecr.aws/aws-observability/aws-for-fluent-bit:stable",
+            "imagePullPolicy": "Always",
+            "env": [
+              {
+                "name": "AWS_REGION",
+                "value": "%s"
+              },
+              {
+                "name": "AWS_ACCESS_KEY_ID",
+                "value": "%s"
+              },
+              {
+                "name": "AWS_SECRET_ACCESS_KEY",
+                "value": "%s"
+              }
+            ],
+            "volumeMounts": [
+              {
+                "name": "varlog",
+                "mountPath": "/var/log"
+              },
+              {
+                "name": "varlibdockercontainers",
+                "mountPath": "/var/lib/docker/containers",
+                "readOnly": true
+              },
+              {
+                "name": "fluentbitconfig",
+                "mountPath": "/fluent-bit/etc/"
+              }
+            ]
+          }
+        ],
+        "volumes": [
+          {
+            "name": "varlog",
+            "hostPath": {
+              "path": "/var/log"
+            }
+          },
+          {
+            "name": "varlibdockercontainers",
+            "hostPath": {
+              "path": "/var/lib/docker/containers"
+            }
+          },
+          {
+            "name": "fluentbitconfig",
+            "configMap": {
+              "name": "fluent-bit-sidecar-config"
+            }
+          }
+        ]
+      }
+    }
+  }
+}
+`, t.deployConfig.AWS.Region, t.deployConfig.AWS.AccessKey, t.deployConfig.AWS.SecretKey)
+
+			// Write patch to temporary file
+			tmpFile, err := os.CreateTemp("", "sidecar-patch-*.json")
+			if err != nil {
+				return fmt.Errorf("failed to create temp file: %w", err)
+			}
+			defer os.Remove(tmpFile.Name())
+
+			if _, err := tmpFile.WriteString(sidecarPatch); err != nil {
+				return fmt.Errorf("failed to write patch to temp file: %w", err)
+			}
+			tmpFile.Close()
+
+			// Apply patch
+			out, err := utils.ExecuteCommand(ctx, "kubectl", "patch", "deployment", strings.TrimSuffix(podName, "-0"), "-n", namespace, "--type", "strategic", "--patch", fmt.Sprintf("$(cat %s)", tmpFile.Name()))
+			if err != nil {
+				logger.Warnw("Failed to patch pod", "pod", podName, "err", err, "output", out)
+				continue
+			}
+
+			logger.Infow("Successfully patched pod", "pod", podName)
+		}
+	}
+
+	return nil
+}
+
+// installFluentBitCronJob installs AWS Fluent Bit as CronJob
+func (t *ThanosStack) installFluentBitCronJob(ctx context.Context, namespace string) error {
+	logger := t.l
+	if logger == nil {
+		logger = zap.NewExample().Sugar()
+	}
+
+	logger.Info("Installing AWS Fluent Bit as CronJob")
+
+	// Create CronJob for log collection
+	cronJob := fmt.Sprintf(`
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: log-collector
+  namespace: %s
+spec:
+  schedule: "*/5 * * * *"  # 5분마다 실행
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: fluent-bit-cronjob
+          containers:
+          - name: log-collector
+            image: amazon/aws-cli:latest
+            command:
+            - /bin/bash
+            - -c
+            - |
+              # op-node 로그 수집
+              kubectl logs -n %s theo0730-78s3a-1753840526-thanos-stack-op-node-0 --tail=100 --since=5m | \
+              while read line; do
+                aws logs put-log-events \
+                  --log-group-name "/aws/eks/%s/op-node" \
+                  --log-stream-name "cronjob-collection" \
+                  --log-events timestamp=$(date +%%s)000,message="$line" \
+                  --region %s
+              done
+              
+              # op-geth 로그 수집
+              kubectl logs -n %s theo0730-78s3a-1753840526-thanos-stack-op-geth-0 --tail=100 --since=5m | \
+              while read line; do
+                aws logs put-log-events \
+                  --log-group-name "/aws/eks/%s/op-geth" \
+                  --log-stream-name "cronjob-collection" \
+                  --region %s \
+                  --log-events timestamp=$(date +%%s)000,message="$line"
+              done
+              
+              # op-batcher 로그 수집
+              kubectl logs -n %s theo0730-78s3a-1753840526-thanos-stack-op-batcher-* --tail=100 --since=5m | \
+              while read line; do
+                aws logs put-log-events \
+                  --log-group-name "/aws/eks/%s/op-batcher" \
+                  --log-stream-name "cronjob-collection" \
+                  --region %s \
+                  --log-events timestamp=$(date +%%s)000,message="$line"
+              done
+              
+              # op-proposer 로그 수집
+              kubectl logs -n %s theo0730-78s3a-1753840526-thanos-stack-op-proposer-* --tail=100 --since=5m | \
+              while read line; do
+                aws logs put-log-events \
+                  --log-group-name "/aws/eks/%s/op-proposer" \
+                  --log-stream-name "cronjob-collection" \
+                  --region %s \
+                  --log-events timestamp=$(date +%%s)000,message="$line"
+              done
+            env:
+            - name: AWS_REGION
+              value: "%s"
+            - name: AWS_ACCESS_KEY_ID
+              value: "%s"
+            - name: AWS_SECRET_ACCESS_KEY
+              value: "%s"
+          restartPolicy: OnFailure
+`, namespace, namespace, namespace, t.deployConfig.AWS.Region, namespace, namespace, t.deployConfig.AWS.Region, namespace, namespace, t.deployConfig.AWS.Region, namespace, namespace, t.deployConfig.AWS.Region, t.deployConfig.AWS.Region, t.deployConfig.AWS.AccessKey, t.deployConfig.AWS.SecretKey)
+
+	// Apply CronJob
+	logger.Info("Creating Log Collector CronJob")
+	if err := t.applyManifest(ctx, cronJob); err != nil {
+		return fmt.Errorf("failed to create Log Collector CronJob: %w", err)
+	}
+
+	// Create ServiceAccount for CronJob
+	serviceAccount := fmt.Sprintf(`
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fluent-bit-cronjob
+  namespace: %s
+`, namespace)
+
+	// Apply ServiceAccount
+	logger.Info("Creating Fluent Bit CronJob ServiceAccount")
+	if err := t.applyManifest(ctx, serviceAccount); err != nil {
+		return fmt.Errorf("failed to create Fluent Bit CronJob ServiceAccount: %w", err)
+	}
+
+	logger.Info("AWS Fluent Bit CronJob installed successfully")
+	return nil
+}
+
+// installManualLogCollection installs manual log collection script
+func (t *ThanosStack) installManualLogCollection(ctx context.Context, namespace string) error {
+	logger := t.l
+	if logger == nil {
+		logger = zap.NewExample().Sugar()
+	}
+
+	logger.Info("Installing manual log collection script")
+
+	// Create log collection script
+	script := fmt.Sprintf(`#!/bin/bash
+# Manual Log Collection Script for Thanos Stack
+# Usage: ./collect-logs.sh
+
+NAMESPACE="%s"
+REGION="%s"
+AWS_ACCESS_KEY_ID="%s"
+AWS_SECRET_ACCESS_KEY="%s"
+
+echo "Starting log collection for Thanos Stack components..."
+
+# op-node 로그 수집
+echo "Collecting op-node logs..."
+kubectl logs -n $NAMESPACE theo0730-78s3a-1753840526-thanos-stack-op-node-0 --tail=100 --since=5m | \
+while read line; do
+    aws logs put-log-events \
+        --log-group-name "/aws/eks/%s/op-node" \
+        --log-stream-name "manual-collection" \
+        --log-events timestamp=$(date +%%s)000,message="$line" \
+        --region $REGION
+done
+
+# op-geth 로그 수집
+echo "Collecting op-geth logs..."
+kubectl logs -n $NAMESPACE theo0730-78s3a-1753840526-thanos-stack-op-geth-0 --tail=100 --since=5m | \
+while read line; do
+    aws logs put-log-events \
+        --log-group-name "/aws/eks/%s/op-geth" \
+        --log-stream-name "manual-collection" \
+        --region $REGION \
+        --log-events timestamp=$(date +%%s)000,message="$line"
+done
+
+# op-batcher 로그 수집
+echo "Collecting op-batcher logs..."
+kubectl logs -n $NAMESPACE theo0730-78s3a-1753840526-thanos-stack-op-batcher-* --tail=100 --since=5m | \
+while read line; do
+    aws logs put-log-events \
+        --log-group-name "/aws/eks/%s/op-batcher" \
+        --log-stream-name "manual-collection" \
+        --region $REGION \
+        --log-events timestamp=$(date +%%s)000,message="$line"
+done
+
+# op-proposer 로그 수집
+echo "Collecting op-proposer logs..."
+kubectl logs -n $NAMESPACE theo0730-78s3a-1753840526-thanos-stack-op-proposer-* --tail=100 --since=5m | \
+while read line; do
+    aws logs put-log-events \
+        --log-group-name "/aws/eks/%s/op-proposer" \
+        --log-stream-name "manual-collection" \
+        --region $REGION \
+        --log-events timestamp=$(date +%%s)000,message="$line"
+done
+
+echo "Log collection completed!"
+`, namespace, t.deployConfig.AWS.Region, t.deployConfig.AWS.AccessKey, t.deployConfig.AWS.SecretKey, namespace, namespace, namespace, namespace)
+
+	// Write script to file
+	scriptPath := filepath.Join(t.deploymentPath, "collect-logs.sh")
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		return fmt.Errorf("failed to write log collection script: %w", err)
+	}
+
+	logger.Infow("Manual log collection script created", "path", scriptPath)
+	logger.Info("To collect logs manually, run: ./collect-logs.sh")
+
+	return nil
+}
+
+// createSidecarDeployments creates sidecar deployments for Thanos Stack components
+func (t *ThanosStack) createSidecarDeployments(ctx context.Context, namespace string) error {
+	logger := t.l
+	if logger == nil {
+		logger = zap.NewExample().Sugar()
+	}
+
+	// Create sidecar deployment for op-node
+	opNodeSidecar := fmt.Sprintf(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: op-node-sidecar
+  namespace: %s
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: op-node-sidecar
+  template:
+    metadata:
+      labels:
+        app: op-node-sidecar
+    spec:
+      serviceAccountName: fluent-bit-sidecar
+      containers:
+      - name: log-collector
+        image: amazon/aws-cli:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          # Install kubectl
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          mv kubectl /usr/local/bin/
+          
+          while true; do
+            # op-node 로그 수집
+            NODE_POD=$(kubectl get pods -n %s --no-headers -o custom-columns="NAME:.metadata.name" | grep "thanos-stack-op-node" | head -1)
+            if [ ! -z "$NODE_POD" ]; then
+              # 로그 스트림 생성 확인
+              aws logs create-log-stream --log-group-name "/aws/eks/theo0730-78s3a/op-node" --log-stream-name "sidecar-collection" --region %s 2>/dev/null || true
+              
+              kubectl logs -n %s $NODE_POD --tail=50 --since=1m | \
+              while read line; do
+                # 로그 메시지 JSON 이스케이프 처리 (개선된 버전)
+                if [ ! -z "$line" ]; then
+                  # 간단한 메시지로 전송 (특수문자 제거)
+                  CLEAN_MESSAGE=$(echo "$line" | tr -d '"' | tr -d "'" | tr -d '\\' | tr -d '\n' | tr -d '\r' | tr -d '\t')
+                  aws logs put-log-events \
+                    --log-group-name "/aws/eks/theo0730-78s3a/op-node" \
+                    --log-stream-name "sidecar-collection" \
+                    --log-events timestamp=$(date +%%s)000,message="$CLEAN_MESSAGE" \
+                    --region %s || true
+                fi
+              done
+            fi
+            
+            sleep 30
+          done
+        env:
+        - name: AWS_REGION
+          value: "%s"
+        - name: AWS_ACCESS_KEY_ID
+          value: "%s"
+        - name: AWS_SECRET_ACCESS_KEY
+          value: "%s"
+        volumeMounts:
+        - name: fluentbitconfig
+          mountPath: /fluent-bit/etc/
+      volumes:
+      - name: fluentbitconfig
+        configMap:
+          name: fluent-bit-sidecar-config
+`, namespace, namespace, t.deployConfig.AWS.Region, namespace, t.deployConfig.AWS.Region, t.deployConfig.AWS.Region, t.deployConfig.AWS.AccessKey, t.deployConfig.AWS.SecretKey)
+
+	// Apply op-node sidecar deployment
+	logger.Info("Creating op-node sidecar deployment")
+	if err := t.applyManifest(ctx, opNodeSidecar); err != nil {
+		return fmt.Errorf("failed to create op-node sidecar deployment: %w", err)
+	}
+
+	// Create sidecar deployment for op-geth
+	opGethSidecar := fmt.Sprintf(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: op-geth-sidecar
+  namespace: %s
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: op-geth-sidecar
+  template:
+    metadata:
+      labels:
+        app: op-geth-sidecar
+    spec:
+      serviceAccountName: fluent-bit-sidecar
+      containers:
+      - name: log-collector
+        image: amazon/aws-cli:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          # Install kubectl
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          mv kubectl /usr/local/bin/
+          
+          while true; do
+            # op-geth 로그 수집
+            GETH_POD=$(kubectl get pods -n %s --no-headers -o custom-columns="NAME:.metadata.name" | grep "thanos-stack-op-geth" | head -1)
+            if [ ! -z "$GETH_POD" ]; then
+              # 로그 스트림 생성 확인
+              aws logs create-log-stream --log-group-name "/aws/eks/theo0730-78s3a/op-geth" --log-stream-name "sidecar-collection" --region %s 2>/dev/null || true
+              
+              kubectl logs -n %s $GETH_POD --tail=50 --since=1m | \
+              while read line; do
+                # 로그 메시지 JSON 이스케이프 처리 (개선된 버전)
+                if [ ! -z "$line" ]; then
+                  # 간단한 메시지로 전송 (특수문자 제거)
+                  CLEAN_MESSAGE=$(echo "$line" | tr -d '"' | tr -d "'" | tr -d '\\' | tr -d '\n' | tr -d '\r' | tr -d '\t')
+                  aws logs put-log-events \
+                    --log-group-name "/aws/eks/theo0730-78s3a/op-geth" \
+                    --log-stream-name "sidecar-collection" \
+                    --log-events timestamp=$(date +%%s)000,message="$CLEAN_MESSAGE" \
+                    --region %s || true
+                fi
+              done
+            fi
+            
+            sleep 30
+          done
+        env:
+        - name: AWS_REGION
+          value: "%s"
+        - name: AWS_ACCESS_KEY_ID
+          value: "%s"
+        - name: AWS_SECRET_ACCESS_KEY
+          value: "%s"
+        volumeMounts:
+        - name: fluentbitconfig
+          mountPath: /fluent-bit/etc/
+      volumes:
+      - name: fluentbitconfig
+        configMap:
+          name: fluent-bit-sidecar-config
+`, namespace, namespace, t.deployConfig.AWS.Region, namespace, t.deployConfig.AWS.Region, t.deployConfig.AWS.Region, t.deployConfig.AWS.AccessKey, t.deployConfig.AWS.SecretKey)
+
+	// Apply op-geth sidecar deployment
+	logger.Info("Creating op-geth sidecar deployment")
+	if err := t.applyManifest(ctx, opGethSidecar); err != nil {
+		return fmt.Errorf("failed to create op-geth sidecar deployment: %w", err)
+	}
+
+	// Create sidecar deployment for op-batcher
+	opBatcherSidecar := fmt.Sprintf(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: op-batcher-sidecar
+  namespace: %s
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: op-batcher-sidecar
+  template:
+    metadata:
+      labels:
+        app: op-batcher-sidecar
+    spec:
+      serviceAccountName: fluent-bit-sidecar
+      containers:
+      - name: log-collector
+        image: amazon/aws-cli:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          # Install kubectl
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          mv kubectl /usr/local/bin/
+          
+          while true; do
+            # op-batcher 로그 수집
+            BATCHER_PODS=$(kubectl get pods -n %s --no-headers -o custom-columns="NAME:.metadata.name" | grep "thanos-stack-op-batcher")
+            if [ ! -z "$BATCHER_PODS" ]; then
+              # 로그 스트림 생성 확인
+              aws logs create-log-stream --log-group-name "/aws/eks/theo0730-78s3a/op-batcher" --log-stream-name "sidecar-collection" --region %s 2>/dev/null || true
+              
+              echo "$BATCHER_PODS" | while read BATCHER_POD; do
+                if [ ! -z "$BATCHER_POD" ]; then
+                  kubectl logs -n %s $BATCHER_POD --tail=50 --since=1m | \
+                  while read line; do
+                    # 로그 메시지 JSON 이스케이프 처리 (개선된 버전)
+                    if [ ! -z "$line" ]; then
+                      # 간단한 메시지로 전송 (특수문자 제거)
+                      CLEAN_MESSAGE=$(echo "$line" | tr -d '"' | tr -d "'" | tr -d '\\' | tr -d '\n' | tr -d '\r' | tr -d '\t')
+                      aws logs put-log-events \
+                        --log-group-name "/aws/eks/theo0730-78s3a/op-batcher" \
+                        --log-stream-name "sidecar-collection" \
+                        --log-events timestamp=$(date +%%s)000,message="$CLEAN_MESSAGE" \
+                        --region %s || true
+                    fi
+                  done
+                fi
+              done
+            fi
+            
+            sleep 30
+          done
+        env:
+        - name: AWS_REGION
+          value: "%s"
+        - name: AWS_ACCESS_KEY_ID
+          value: "%s"
+        - name: AWS_SECRET_ACCESS_KEY
+          value: "%s"
+        volumeMounts:
+        - name: fluentbitconfig
+          mountPath: /fluent-bit/etc/
+      volumes:
+      - name: fluentbitconfig
+        configMap:
+          name: fluent-bit-sidecar-config
+`, namespace, namespace, t.deployConfig.AWS.Region, namespace, t.deployConfig.AWS.Region, t.deployConfig.AWS.Region, t.deployConfig.AWS.AccessKey, t.deployConfig.AWS.SecretKey)
+
+	// Apply op-batcher sidecar deployment
+	logger.Info("Creating op-batcher sidecar deployment")
+	if err := t.applyManifest(ctx, opBatcherSidecar); err != nil {
+		return fmt.Errorf("failed to create op-batcher sidecar deployment: %w", err)
+	}
+
+	// Create sidecar deployment for op-proposer
+	opProposerSidecar := fmt.Sprintf(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: op-proposer-sidecar
+  namespace: %s
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: op-proposer-sidecar
+  template:
+    metadata:
+      labels:
+        app: op-proposer-sidecar
+    spec:
+      serviceAccountName: fluent-bit-sidecar
+      containers:
+      - name: log-collector
+        image: amazon/aws-cli:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          # Install kubectl
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          mv kubectl /usr/local/bin/
+          
+          while true; do
+            # op-proposer 로그 수집
+            PROPOSER_PODS=$(kubectl get pods -n %s --no-headers -o custom-columns="NAME:.metadata.name" | grep "thanos-stack-op-proposer")
+            if [ ! -z "$PROPOSER_PODS" ]; then
+              # 로그 스트림 생성 확인
+              aws logs create-log-stream --log-group-name "/aws/eks/theo0730-78s3a/op-proposer" --log-stream-name "sidecar-collection" --region %s 2>/dev/null || true
+              
+              echo "$PROPOSER_PODS" | while read PROPOSER_POD; do
+                if [ ! -z "$PROPOSER_POD" ]; then
+                  kubectl logs -n %s $PROPOSER_POD --tail=50 --since=1m | \
+                  while read line; do
+                    # 로그 메시지 JSON 이스케이프 처리 (개선된 버전)
+                    if [ ! -z "$line" ]; then
+                      # 간단한 메시지로 전송 (특수문자 제거)
+                      CLEAN_MESSAGE=$(echo "$line" | tr -d '"' | tr -d "'" | tr -d '\\' | tr -d '\n' | tr -d '\r' | tr -d '\t')
+                      aws logs put-log-events \
+                        --log-group-name "/aws/eks/theo0730-78s3a/op-proposer" \
+                        --log-stream-name "sidecar-collection" \
+                        --log-events timestamp=$(date +%%s)000,message="$CLEAN_MESSAGE" \
+                        --region %s || true
+                    fi
+                  done
+                fi
+              done
+            fi
+            
+            sleep 30
+          done
+        env:
+        - name: AWS_REGION
+          value: "%s"
+        - name: AWS_ACCESS_KEY_ID
+          value: "%s"
+        - name: AWS_SECRET_ACCESS_KEY
+          value: "%s"
+        volumeMounts:
+        - name: fluentbitconfig
+          mountPath: /fluent-bit/etc/
+      volumes:
+      - name: fluentbitconfig
+        configMap:
+          name: fluent-bit-sidecar-config
+`, namespace, namespace, t.deployConfig.AWS.Region, namespace, t.deployConfig.AWS.Region, t.deployConfig.AWS.Region, t.deployConfig.AWS.AccessKey, t.deployConfig.AWS.SecretKey)
+
+	// Apply op-proposer sidecar deployment
+	logger.Info("Creating op-proposer sidecar deployment")
+	if err := t.applyManifest(ctx, opProposerSidecar); err != nil {
+		return fmt.Errorf("failed to create op-proposer sidecar deployment: %w", err)
+	}
+
+	logger.Info("All sidecar deployments created successfully")
+	return nil
+}
+
+// installFluentBitDaemonSet installs AWS Fluent Bit as DaemonSet
+func (t *ThanosStack) installFluentBitDaemonSet(ctx context.Context, namespace string) error {
+	logger := t.l
+	if logger == nil {
+		logger = zap.NewExample().Sugar()
+	}
+
+	logger.Info("Installing AWS Fluent Bit as DaemonSet")
+
+	// Create Fluent Bit ConfigMap
+	fluentBitConfigMap := fmt.Sprintf(`
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluent-bit-config
+  namespace: kube-system
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        Parsers_File    parsers.conf
+        HTTP_Server     On
+        HTTP_Listen     0.0.0.0
+        HTTP_Port       2020
+
+    [INPUT]
+        Name                tail
+        Tag                 kube.*
+        Path                /var/log/containers/*.log
+        Parser              docker
+        DB                  /var/log/flb_kube.db
+        Skip_Long_Lines     On
+        Refresh_Interval    10
+        Mem_Buf_Limit      5MB
+
+    [FILTER]
+        Name                kubernetes
+        Match               kube.*
+        Kube_URL           https://kubernetes.default.svc:443
+        Kube_CA_Path       /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        Kube_Token_Path    /var/run/secrets/kubernetes.io/serviceaccount/token
+        Merge_Log          On
+        Merge_Log_Key      log_processed
+        K8S-Logging.Parser On
+        K8S-Logging.Exclude On
+        Use_Kubelet        Off
+        Kubelet_Port       10250
+
+    [FILTER]
+        Name                grep
+        Match               kube.*
+        Regex               kubernetes.*%s.*
+        Exclude             kubernetes.*kube-system.*
+
+    [OUTPUT]
+        Name                cloudwatch
+        Match               *
+        region              %s
+        log_group_name      /aws/eks/%s/op-node
+        log_stream_prefix   fluentbit-
+        auto_create_group   true
+        use_put_log_events true
+        log_retention_days  30
+
+  parsers.conf: |
+    [PARSER]
+        Name        docker
+        Format      json
+        Time_Key    time
+        Time_Format %%Y-%%m-%%dT%%H:%%M:%%S.%%L
+        Time_Keep   On
+`, namespace, t.deployConfig.AWS.Region, namespace)
+
+	// Apply Fluent Bit ConfigMap
+	logger.Info("Creating Fluent Bit ConfigMap")
+	if err := t.applyManifest(ctx, fluentBitConfigMap); err != nil {
+		return fmt.Errorf("failed to create Fluent Bit ConfigMap: %w", err)
+	}
+
+	// Create Fluent Bit DaemonSet
+	fluentBitDaemonSet := fmt.Sprintf(`
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fluent-bit
+  namespace: kube-system
+  labels:
+    app: fluent-bit
+spec:
+  selector:
+    matchLabels:
+      app: fluent-bit
+  template:
+    metadata:
+      labels:
+        app: fluent-bit
+    spec:
+      serviceAccountName: fluent-bit
+      containers:
+      - name: fluent-bit
+        image: public.ecr.aws/aws-observability/aws-for-fluent-bit:stable
+        imagePullPolicy: Always
+        env:
+        - name: AWS_REGION
+          value: "%s"
+        - name: AWS_ACCESS_KEY_ID
+          value: "%s"
+        - name: AWS_SECRET_ACCESS_KEY
+          value: "%s"
+        volumeMounts:
+        - name: varlog
+          mountPath: /var/log
+        - name: varlibdockercontainers
+          mountPath: /var/lib/docker/containers
+          readOnly: true
+        - name: fluentbitconfig
+          mountPath: /fluent-bit/etc/
+        - name: flb-ca-cert
+          mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+          readOnly: true
+      terminationGracePeriodSeconds: 10
+      volumes:
+      - name: varlog
+        hostPath:
+          path: /var/log
+      - name: varlibdockercontainers
+        hostPath:
+          path: /var/lib/docker/containers
+      - name: fluentbitconfig
+        configMap:
+          name: fluent-bit-config
+      - name: flb-ca-cert
+        projected:
+          defaultMode: 420
+          sources:
+          - serviceAccountToken:
+              expirationSeconds: 3607
+              path: token
+          - configMap:
+              items:
+              - key: ca.crt
+                path: ca.crt
+              name: kube-root-ca.crt
+`, t.deployConfig.AWS.Region, t.deployConfig.AWS.AccessKey, t.deployConfig.AWS.SecretKey)
+
+	// Apply Fluent Bit DaemonSet
+	logger.Info("Creating Fluent Bit DaemonSet")
+	if err := t.applyManifest(ctx, fluentBitDaemonSet); err != nil {
+		return fmt.Errorf("failed to create Fluent Bit DaemonSet: %w", err)
+	}
+
+	// Create ServiceAccount
+	serviceAccount := `
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fluent-bit
+  namespace: kube-system
+`
+
+	// Apply ServiceAccount
+	logger.Info("Creating Fluent Bit ServiceAccount")
+	if err := t.applyManifest(ctx, serviceAccount); err != nil {
+		return fmt.Errorf("failed to create Fluent Bit ServiceAccount: %w", err)
+	}
+
+	logger.Info("AWS Fluent Bit DaemonSet installed successfully")
+	return nil
+}
+
+// applyManifest applies a Kubernetes manifest
+func (t *ThanosStack) applyManifest(ctx context.Context, manifest string) error {
+	// Write manifest to temporary file
+	tmpFile, err := os.CreateTemp("", "k8s-manifest-*.yaml")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.WriteString(manifest); err != nil {
+		return fmt.Errorf("failed to write manifest to temp file: %w", err)
+	}
+	tmpFile.Close()
+
+	// Apply manifest
+	out, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tmpFile.Name())
+	if err != nil {
+		return fmt.Errorf("failed to apply manifest: %w, output: %s", err, out)
+	}
+
 	return nil
 }
 
@@ -734,6 +1951,33 @@ func (t *ThanosStack) applyPVCManifest(ctx context.Context, component string, ma
 	_, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile)
 	if err != nil {
 		return fmt.Errorf("failed to apply PVC manifest: %w", err)
+	}
+
+	return nil
+}
+
+// cleanupExistingDashboardConfigMaps removes existing dashboard ConfigMaps
+func (t *ThanosStack) cleanupExistingDashboardConfigMaps(ctx context.Context, config *types.MonitoringConfig) error {
+	// List and delete existing dashboard ConfigMaps
+	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "configmap", "-n", config.Namespace, "-l", "grafana_dashboard=1", "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
+	if err != nil {
+		// If no ConfigMaps exist, that's fine
+		return nil
+	}
+
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	for _, line := range lines {
+		configMapName := strings.TrimSpace(line)
+		if configMapName == "" {
+			continue
+		}
+
+		_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "configmap", configMapName, "-n", config.Namespace, "--ignore-not-found=true")
+		if err != nil {
+			fmt.Printf("⚠️  Warning: Failed to delete ConfigMap %s: %v\n", configMapName, err)
+		} else {
+			fmt.Printf("✅ Deleted existing ConfigMap: %s\n", configMapName)
+		}
 	}
 
 	return nil
