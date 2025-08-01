@@ -215,61 +215,84 @@ func Run() {
 				Action: commands.ActionAlertConfig(),
 			},
 			{
-				Name:  "log-config",
-				Usage: "Configure logging settings",
-				Description: `Configure logging settings for Loki and Promtail.
+				Name:  "log-collection",
+				Usage: "Manage CloudWatch logging settings and download logs",
+				Description: `Manage CloudWatch logging settings and download logs for Fluent Bit log collection.
 
 Examples:
-  # Enable logging with default settings
-  trh-sdk log-config --enable
+  # Enable CloudWatch log collection with default settings
+  trh-sdk log-collection --enable
 
-  # Disable logging
-  trh-sdk log-config --disable
+  # Disable CloudWatch log collection
+  trh-sdk log-collection --disable
 
-  # Set retention period to 7 days
-  trh-sdk log-config --retention 7d
+  # Set retention period to 30 days
+  trh-sdk log-collection --retention 30
 
-  # Set Loki storage size to 100Gi
-  trh-sdk log-config --loki-size 100Gi
-
-  # Set Promtail storage size to 10Gi
-  trh-sdk log-config --promtail-size 10Gi
+  # Set collection interval to 60 seconds
+  trh-sdk log-collection --interval 60
 
   # Show current logging configuration
-  trh-sdk log-config --show
+  trh-sdk log-collection --show
+
+  # Download logs for specific component
+  trh-sdk log-collection --download --component op-node --hours 7
+
+  # Download logs for all components with keyword filter
+  trh-sdk log-collection --download --component all --hours 24 --keyword error
 
   # Apply all settings at once
-  trh-sdk log-config --enable --retention 30d --loki-size 50Gi --promtail-size 5Gi`,
+  trh-sdk log-collection --enable --retention 90 --interval 60`,
 				Flags: []cli.Flag{
 					&cli.BoolFlag{
 						Name:  "enable",
-						Usage: "Enable logging",
+						Usage: "Enable CloudWatch log collection",
 					},
 					&cli.BoolFlag{
 						Name:  "disable",
-						Usage: "Disable logging",
+						Usage: "Disable CloudWatch log collection",
 					},
 					&cli.StringFlag{
 						Name:  "retention",
-						Usage: "Log retention period (e.g., 7d, 30d, 90d, 1y)",
+						Usage: "CloudWatch log retention period in days (e.g., 7, 30, 90)",
 						Value: "",
 					},
 					&cli.StringFlag{
-						Name:  "loki-size",
-						Usage: "Loki storage size (e.g., 10Gi, 50Gi, 100Gi)",
-						Value: "",
-					},
-					&cli.StringFlag{
-						Name:  "promtail-size",
-						Usage: "Promtail storage size (e.g., 1Gi, 5Gi, 10Gi)",
+						Name:  "interval",
+						Usage: "Log collection interval in seconds (e.g., 30, 60, 120)",
 						Value: "",
 					},
 					&cli.BoolFlag{
 						Name:  "show",
 						Usage: "Show current logging configuration",
 					},
+					&cli.BoolFlag{
+						Name:  "download",
+						Usage: "Download logs from running components",
+					},
+
+					&cli.StringFlag{
+						Name:  "component",
+						Usage: "Component to download logs from (op-node, op-geth, op-batcher, op-proposer, all)",
+						Value: "",
+					},
+					&cli.StringFlag{
+						Name:  "hours",
+						Usage: "Number of hours to look back for logs",
+						Value: "",
+					},
+					&cli.StringFlag{
+						Name:  "minutes",
+						Usage: "Number of minutes to look back for logs",
+						Value: "",
+					},
+					&cli.StringFlag{
+						Name:  "keyword",
+						Usage: "Keyword to filter logs (case-insensitive)",
+						Value: "",
+					},
 				},
-				Action: commands.ActionLogConfig(),
+				Action: commands.ActionLogCollection(),
 			},
 		},
 	}
