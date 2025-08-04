@@ -108,12 +108,12 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *types.Monit
 		return nil, fmt.Errorf("failed to create dashboard configmaps: %w", err)
 	}
 
-	// Install AWS Fluent Bit for log collection if logging is enabled
+	// Install AWS CLI sidecar for log collection if logging is enabled
 	if config.LoggingEnabled {
-		logger.Info("Installing AWS Fluent Bit for log collection")
-		if err := t.installFluentBit(ctx); err != nil {
-			logger.Errorw("Failed to install AWS Fluent Bit", "err", err)
-			// Continue with installation even if Fluent Bit fails
+		logger.Info("Installing AWS CLI sidecar for log collection")
+		if err := t.installLogCollectionSidecar(ctx); err != nil {
+			logger.Errorw("Failed to install AWS CLI sidecar", "err", err)
+			// Continue with installation even if log collection fails
 			logger.Warn("Continuing without log collection")
 		}
 	}
@@ -250,10 +250,10 @@ func (t *ThanosStack) cleanupSidecarDeployments(ctx context.Context, namespace s
 		}
 	}
 
-	// Delete ConfigMap
-	_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "configmap", "fluent-bit-sidecar-config", "-n", namespace, "--ignore-not-found=true")
+	// Delete ConfigMap (if exists)
+	_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "configmap", "thanos-logs-sidecar-config", "-n", namespace, "--ignore-not-found=true")
 	if err != nil {
-		logger.Warnw("Failed to delete Fluent Bit Sidecar ConfigMap", "err", err)
+		logger.Warnw("Failed to delete logs sidecar ConfigMap", "err", err)
 	}
 
 	logger.Info("Sidecar deployments cleanup completed")
@@ -265,12 +265,12 @@ func (t *ThanosStack) cleanupRBACResources(ctx context.Context) error {
 	logger := t.getLogger()
 
 	// Delete RBAC resources silently
-	_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "clusterrolebinding", "fluent-bit-sidecar-binding", "--ignore-not-found=true")
+	_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "clusterrolebinding", "thanos-logs-sidecar-binding", "--ignore-not-found=true")
 	if err != nil {
 		logger.Warnw("Failed to delete ClusterRoleBinding", "err", err)
 	}
 
-	_, err = utils.ExecuteCommand(ctx, "kubectl", "delete", "clusterrole", "fluent-bit-sidecar-role", "--ignore-not-found=true")
+	_, err = utils.ExecuteCommand(ctx, "kubectl", "delete", "clusterrole", "thanos-logs-sidecar-role", "--ignore-not-found=true")
 	if err != nil {
 		logger.Warnw("Failed to delete ClusterRole", "err", err)
 	}
@@ -278,7 +278,7 @@ func (t *ThanosStack) cleanupRBACResources(ctx context.Context) error {
 	// Delete ServiceAccount from all namespaces
 	namespaces := []string{"theo0730-78s3a", "monitoring"}
 	for _, namespace := range namespaces {
-		_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "serviceaccount", "fluent-bit-sidecar", "-n", namespace, "--ignore-not-found=true")
+		_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "serviceaccount", "thanos-logs-sidecar", "-n", namespace, "--ignore-not-found=true")
 		if err != nil {
 			logger.Warnw("Failed to delete ServiceAccount", "namespace", namespace, "err", err)
 		}
@@ -530,101 +530,6 @@ func (t *ThanosStack) getActualNamespace(ctx context.Context) (string, error) {
 	}
 
 	return "", fmt.Errorf("no Thanos Stack namespace found")
-}
-
-// installFluentBit installs AWS Fluent Bit for log collection
-func (t *ThanosStack) installFluentBit(ctx context.Context) error {
-	// Get actual namespace where Thanos Stack components are deployed
-	actualNamespace, err := t.getActualNamespace(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get actual namespace: %w", err)
-	}
-
-	// Get logging configuration from deploy config
-	var loggingConfig *types.LoggingConfig
-	if t.deployConfig != nil && t.deployConfig.LoggingConfig != nil {
-		loggingConfig = t.deployConfig.LoggingConfig
-	} else {
-		// Use default values if no logging config exists
-		loggingConfig = &types.LoggingConfig{
-			Enabled:             true,
-			CloudWatchRetention: 30,
-			CollectionInterval:  30,
-		}
-	}
-
-	// Install AWS Fluent Bit as Sidecar containers with custom configuration
-	if err := t.installFluentBitSidecar(ctx, actualNamespace, loggingConfig); err != nil {
-		return fmt.Errorf("failed to install AWS Fluent Bit via Sidecar: %w", err)
-	}
-
-	return nil
-}
-
-// installFluentBitSidecar installs AWS Fluent Bit as Sidecar containers
-func (t *ThanosStack) installFluentBitSidecar(ctx context.Context, namespace string, loggingConfig *types.LoggingConfig) error {
-
-	// Create ServiceAccount for sidecar
-	serviceAccount := fmt.Sprintf(`
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: fluent-bit-sidecar
-  namespace: %s
-`, namespace)
-
-	// Create ClusterRole for log access
-	clusterRole := fmt.Sprintf(`
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: fluent-bit-sidecar-role
-rules:
-- apiGroups: [""]
-  resources: ["pods", "pods/log"]
-  verbs: ["get", "list", "watch"]
-- apiGroups: [""]
-  resources: ["namespaces"]
-  verbs: ["get", "list"]
-`)
-
-	// Create ClusterRoleBinding
-	clusterRoleBinding := fmt.Sprintf(`
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: fluent-bit-sidecar-binding
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: fluent-bit-sidecar-role
-subjects:
-- kind: ServiceAccount
-  name: fluent-bit-sidecar
-  namespace: %s
-`, namespace)
-
-	// Apply ClusterRole
-	if err := t.applyManifest(ctx, clusterRole); err != nil {
-		return fmt.Errorf("failed to create Fluent Bit Sidecar ClusterRole: %w", err)
-	}
-
-	// Apply ClusterRoleBinding
-	if err := t.applyManifest(ctx, clusterRoleBinding); err != nil {
-		return fmt.Errorf("failed to create Fluent Bit Sidecar ClusterRoleBinding: %w", err)
-	}
-
-	// Apply ServiceAccount
-	if err := t.applyManifest(ctx, serviceAccount); err != nil {
-		return fmt.Errorf("failed to create Fluent Bit Sidecar ServiceAccount: %w", err)
-	}
-
-	// Create sidecar deployment for each Thanos Stack component
-	if err := t.createSidecarDeployments(ctx, namespace, loggingConfig); err != nil {
-		return fmt.Errorf("failed to create sidecar deployments: %w", err)
-	}
-
-	return nil
 }
 
 // createSidecarDeployments creates a unified sidecar deployment for all Thanos Stack components
@@ -1824,8 +1729,6 @@ func (t *ThanosStack) updateCollectionInterval(ctx context.Context, namespace st
 		logger.Errorw("Failed to recreate sidecar deployment", "error", err)
 		return fmt.Errorf("failed to recreate sidecar deployment: %w", err)
 	}
-
-	logger.Infof("✅ Sidecar restarted with new collection interval: %d seconds", interval)
 	return nil
 }
 
@@ -1842,13 +1745,8 @@ func (t *ThanosStack) verifyRetentionPolicy(ctx context.Context, namespace strin
 			"--query", "logGroups[0].retentionInDays",
 			"--output", "text")
 
-		if output, err := cmd.CombinedOutput(); err != nil {
+		if _, err := cmd.CombinedOutput(); err != nil {
 			fmt.Printf("❌ %s: Verification failed\n", component)
-		} else {
-			retention := strings.TrimSpace(string(output))
-			if retention != "None" {
-				fmt.Printf("✅ %s: %s days\n", component, retention)
-			}
 		}
 	}
 
@@ -1870,16 +1768,6 @@ func (t *ThanosStack) verifyCollectionInterval(ctx context.Context, namespace st
 	podName := strings.TrimSpace(string(output))
 	if podName == "" {
 		fmt.Println("❌ Unified sidecar pod not found.")
-		return nil
-	}
-
-	// Get the actual command from the pod to extract sleep interval
-	cmd = exec.CommandContext(ctx, "kubectl", "get", "pod", podName,
-		"-n", namespace, "-o", "jsonpath={.spec.containers[0].command}")
-
-	output, err = cmd.CombinedOutput()
-	if err != nil {
-		fmt.Printf("❌ Pod command verification failed\n")
 		return nil
 	}
 
@@ -1912,9 +1800,9 @@ func (t *ThanosStack) GetDeployConfig() *types.Config {
 	return t.deployConfig
 }
 
-// InstallFluentBitSidecar installs FluentBit sidecar for log collection
-func (t *ThanosStack) InstallFluentBitSidecar(ctx context.Context, namespace string, loggingConfig *types.LoggingConfig) error {
-	return t.installFluentBitSidecar(ctx, namespace, loggingConfig)
+// InstallLogCollectionSidecar installs AWS CLI sidecar for log collection
+func (t *ThanosStack) InstallLogCollectionSidecar(ctx context.Context, namespace string, loggingConfig *types.LoggingConfig) error {
+	return t.installLogCollectionSidecarDeployment(ctx, namespace, loggingConfig)
 }
 
 // UpdateRetentionPolicy updates the CloudWatch log retention policy
@@ -1950,4 +1838,99 @@ func (t *ThanosStack) VerifyRetentionPolicy(ctx context.Context, namespace strin
 // VerifyCollectionInterval verifies the collection interval
 func (t *ThanosStack) VerifyCollectionInterval(ctx context.Context, namespace string) error {
 	return t.verifyCollectionInterval(ctx, namespace)
+}
+
+// installLogCollectionSidecar installs AWS CLI sidecar for log collection
+func (t *ThanosStack) installLogCollectionSidecar(ctx context.Context) error {
+	// Get actual namespace where Thanos Stack components are deployed
+	actualNamespace, err := t.getActualNamespace(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get actual namespace: %w", err)
+	}
+
+	// Get logging configuration from deploy config
+	var loggingConfig *types.LoggingConfig
+	if t.deployConfig != nil && t.deployConfig.LoggingConfig != nil {
+		loggingConfig = t.deployConfig.LoggingConfig
+	} else {
+		// Use default values if no logging config exists
+		loggingConfig = &types.LoggingConfig{
+			Enabled:             true,
+			CloudWatchRetention: 30,
+			CollectionInterval:  30,
+		}
+	}
+
+	// Install AWS CLI sidecar with custom configuration
+	if err := t.installLogCollectionSidecarDeployment(ctx, actualNamespace, loggingConfig); err != nil {
+		return fmt.Errorf("failed to install AWS CLI sidecar: %w", err)
+	}
+
+	return nil
+}
+
+// installLogCollectionSidecarDeployment installs AWS CLI sidecar deployment
+func (t *ThanosStack) installLogCollectionSidecarDeployment(ctx context.Context, namespace string, loggingConfig *types.LoggingConfig) error {
+
+	// Create ServiceAccount for sidecar
+	serviceAccount := fmt.Sprintf(`
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: thanos-logs-sidecar
+  namespace: %s
+`, namespace)
+
+	// Create ClusterRole for log access
+	clusterRole := fmt.Sprintf(`
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: thanos-logs-sidecar-role
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list"]
+`)
+
+	// Create ClusterRoleBinding
+	clusterRoleBinding := fmt.Sprintf(`
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: thanos-logs-sidecar-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: thanos-logs-sidecar-role
+subjects:
+- kind: ServiceAccount
+  name: thanos-logs-sidecar
+  namespace: %s
+`, namespace)
+
+	// Apply ClusterRole
+	if err := t.applyManifest(ctx, clusterRole); err != nil {
+		return fmt.Errorf("failed to create logs sidecar ClusterRole: %w", err)
+	}
+
+	// Apply ClusterRoleBinding
+	if err := t.applyManifest(ctx, clusterRoleBinding); err != nil {
+		return fmt.Errorf("failed to create logs sidecar ClusterRoleBinding: %w", err)
+	}
+
+	// Apply ServiceAccount
+	if err := t.applyManifest(ctx, serviceAccount); err != nil {
+		return fmt.Errorf("failed to create logs sidecar ServiceAccount: %w", err)
+	}
+
+	// Create sidecar deployment for log collection
+	if err := t.createSidecarDeployments(ctx, namespace, loggingConfig); err != nil {
+		return fmt.Errorf("failed to create sidecar deployments: %w", err)
+	}
+
+	return nil
 }

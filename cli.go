@@ -217,7 +217,7 @@ func Run() {
 			{
 				Name:  "log-collection",
 				Usage: "Manage CloudWatch logging settings and download logs",
-				Description: `Manage CloudWatch logging settings and download logs for Fluent Bit log collection.
+				Description: `Manage CloudWatch logging settings and download logs for AWS CLI sidecar log collection.
 
 Examples:
   # Enable CloudWatch log collection with default settings

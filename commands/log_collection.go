@@ -320,7 +320,7 @@ func UpdateLoggingConfig(ctx context.Context, thanosStack *thanos.ThanosStack, c
 	if loggingConfig.Enabled {
 		if !sidecarRunning {
 			// Sidecar is not running, install it
-			if err := thanosStack.InstallFluentBitSidecar(ctx, actualNamespace, loggingConfig); err != nil {
+			if err := thanosStack.InstallLogCollectionSidecar(ctx, actualNamespace, loggingConfig); err != nil {
 				return fmt.Errorf("failed to install new sidecar deployments: %w", err)
 			}
 		} else {
@@ -361,16 +361,15 @@ func UpdateLoggingConfig(ctx context.Context, thanosStack *thanos.ThanosStack, c
 		return fmt.Errorf("failed to generate values file: %w", err)
 	}
 
-	// Verify the changes
-	if loggingConfig.Enabled && sidecarRunning {
-		fmt.Println("\n🔍 Configuration Change Verification:")
-		if err := thanosStack.VerifyRetentionPolicy(ctx, actualNamespace); err != nil {
-			logger.Warnw("Failed to verify retention policy", "err", err)
-		}
-		if err := thanosStack.VerifyCollectionInterval(ctx, actualNamespace); err != nil {
-			logger.Warnw("Failed to verify collection interval", "err", err)
-		}
-	}
+	// // Verify the changes
+	// if loggingConfig.Enabled && sidecarRunning {
+	// 	if err := thanosStack.VerifyRetentionPolicy(ctx, actualNamespace); err != nil {
+	// 		logger.Warnw("Failed to verify retention policy", "err", err)
+	// 	}
+	// 	if err := thanosStack.VerifyCollectionInterval(ctx, actualNamespace); err != nil {
+	// 		logger.Warnw("Failed to verify collection interval", "err", err)
+	// 	}
+	// }
 
 	fmt.Printf("✅ Logging configuration updated successfully\n")
 	return nil
