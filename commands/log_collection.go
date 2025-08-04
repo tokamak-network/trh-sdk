@@ -93,8 +93,6 @@ func ActionLogCollection() cli.ActionFunc {
 				Enabled:             false,
 				CloudWatchRetention: 30,
 				CollectionInterval:  30,
-				LogStreamPrefix:     "fluentbit-sidecar",
-				Components:          "op-node,op-geth,op-batcher,op-proposer",
 			}
 		}
 
@@ -184,7 +182,7 @@ func applyLoggingConfig(ctx context.Context, config *types.Config, thanosStack *
 	}
 
 	// Apply logging configuration
-	if err := UpdateLoggingConfig(ctx, thanosStack, monitoringConfig, logger); err != nil {
+	if err := UpdateLoggingConfig(ctx, thanosStack, monitoringConfig, logger, config.LoggingConfig); err != nil {
 		logger.Errorw("Failed to update logging configuration", "err", err)
 		return fmt.Errorf("failed to update logging configuration: %w", err)
 	}
@@ -283,27 +281,32 @@ func showDownloadHelp() error {
 }
 
 // UpdateLoggingConfig updates the logging configuration for the monitoring stack
-func UpdateLoggingConfig(ctx context.Context, thanosStack *thanos.ThanosStack, config *types.MonitoringConfig, logger *zap.SugaredLogger) error {
+func UpdateLoggingConfig(ctx context.Context, thanosStack *thanos.ThanosStack, config *types.MonitoringConfig, logger *zap.SugaredLogger, loggingConfig *types.LoggingConfig) error {
 	// Get actual namespace where Thanos Stack components are deployed
 	actualNamespace, err := thanosStack.GetActualNamespace(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get actual namespace: %w", err)
 	}
 
-	// Get logging configuration from deploy config
-	var loggingConfig *types.LoggingConfig
-	deployConfig := thanosStack.GetDeployConfig()
-	if deployConfig != nil && deployConfig.LoggingConfig != nil {
-		loggingConfig = deployConfig.LoggingConfig
-	} else {
-		// Use default values if no logging config exists
-		loggingConfig = &types.LoggingConfig{
-			Enabled:             true,
-			CloudWatchRetention: 30,
-			CollectionInterval:  30,
-			LogStreamPrefix:     "fluentbit-sidecar",
-			Components:          "op-node,op-geth,op-batcher,op-proposer",
+	// Use the provided loggingConfig if available, otherwise fall back to deploy config
+	if loggingConfig == nil {
+		deployConfig := thanosStack.GetDeployConfig()
+		if deployConfig != nil && deployConfig.LoggingConfig != nil {
+			loggingConfig = deployConfig.LoggingConfig
+			logger.Infof("Using deploy config logging settings: Enabled=%t, Retention=%d, Interval=%d",
+				loggingConfig.Enabled, loggingConfig.CloudWatchRetention, loggingConfig.CollectionInterval)
+		} else {
+			// Use default values if no logging config exists
+			loggingConfig = &types.LoggingConfig{
+				Enabled:             true,
+				CloudWatchRetention: 30,
+				CollectionInterval:  30,
+			}
+			logger.Info("Using default logging config")
 		}
+	} else {
+		logger.Infof("Using provided logging config: Enabled=%t, Retention=%d, Interval=%d",
+			loggingConfig.Enabled, loggingConfig.CloudWatchRetention, loggingConfig.CollectionInterval)
 	}
 
 	// Check if sidecar is already running

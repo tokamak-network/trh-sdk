@@ -132,11 +132,9 @@ type Config struct {
 }
 
 type LoggingConfig struct {
-	Enabled             bool   `json:"enabled"`
-	CloudWatchRetention int    `json:"cloudwatch_retention,omitempty"` // CloudWatch log retention period (days)
-	CollectionInterval  int    `json:"collection_interval,omitempty"`  // Log collection interval (seconds)
-	LogStreamPrefix     string `json:"log_stream_prefix,omitempty"`    // Log stream prefix
-	Components          string `json:"components,omitempty"`           // Components to collect (comma-separated)
+	Enabled             bool `json:"enabled"`
+	CloudWatchRetention int  `json:"cloudwatch_retention,omitempty"` // CloudWatch log retention period (days)
+	CollectionInterval  int  `json:"collection_interval,omitempty"`  // Log collection interval (seconds)
 }
 
 const ConfigFileName = "settings.json"

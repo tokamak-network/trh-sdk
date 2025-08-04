@@ -654,7 +654,7 @@ func InputInstallMonitoring() (*InstallMonitoringInput, error) {
 	// Prompt for logging usage (default: y)
 
 	// Prompt for logging usage
-	fmt.Print("Would you like to enable log collection? (y/[n], default: n): ")
+	fmt.Print("Would you like to enable log collection? (y/n): ")
 	loggingInput, err := scanner.ScanString()
 	if err != nil {
 		fmt.Printf("Error while reading log collection choice: %s\n", err)
