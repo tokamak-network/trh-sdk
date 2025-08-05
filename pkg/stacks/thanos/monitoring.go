@@ -560,7 +560,7 @@ spec:
       labels:
         app: thanos-logs-sidecar
     spec:
-      serviceAccountName: fluent-bit-sidecar
+      serviceAccountName: thanos-logs-sidecar
       containers:
       - name: log-collector
         image: amazon/aws-cli:latest
