@@ -157,27 +157,21 @@ CloudWatch Log Groups:
 
 **Example CloudWatch Logs Insights queries:**
 ```sql
-# All logs from multiple log groups
-fields @timestamp, @message, @logGroup
-| sort @timestamp desc
-| limit 100
+# Retrieve up to the 200 most recent log entries
+fields @timestamp, @message |
+ sort @timestamp desc |
+ limit 200
 
-# Error logs from all components
-fields @timestamp, @message, @logGroup
-| filter @message like /error/
+# Retrieve the 50 most recent log entries containing any of the following keywords: "payload", "chain", "block", or "imported"
+fields @timestamp, @message
+| filter @message like /payload|chain|block|imported/
 | sort @timestamp desc
-| limit 100
+| limit 50
 
-# Logs from specific time range (last 1 hour)
-fields @timestamp, @message, @logGroup
-| filter @timestamp >= 1640995200000 and @timestamp <= 1641081600000
-| sort @timestamp desc
-| limit 100
-
-# Search for specific keywords in all components
-fields @timestamp, @message, @logGroup
-| filter @message like /block/ or @message like /transaction/
-| sort @timestamp desc
+# Retrieve up to 100 log entries within a specific timestamp range (from 1753787368000 to 1754387368000 microseconds)
+fields @timestamp, @message
+| filter @timestamp >= 1753787368000
+| filter @timestamp <= 1754387368000
 | limit 100
 ```
 
