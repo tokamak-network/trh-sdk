@@ -77,14 +77,23 @@ func ActionLogCollection() cli.ActionFunc {
 		// Handle download command
 		if download {
 			if component == "" && hours == "" && minutes == "" && keyword == "" {
-				return showDownloadHelp()
+				fmt.Println("Download Options:")
+				fmt.Println("  --component <name>          Component to download logs from (op-node, op-geth, op-batcher, op-proposer, all)")
+				fmt.Println("  --hours <number>            Number of hours to look back for logs")
+				fmt.Println("  --minutes <number>          Number of minutes to look back for logs")
+				fmt.Println("  --keyword <text>            Keyword to filter logs (case-insensitive)")
+				fmt.Println()
+				fmt.Println("Examples:")
+				fmt.Println("  trh-sdk log-collection --download --component op-node --hours 7")
+				fmt.Println("  trh-sdk log-collection --download --component all --hours 24 --keyword error")
+				return nil
 			}
-			return handleLogDownload(ctx, config, thanosStack, logger, component, hours, minutes, keyword)
+			return handleLogDownload(ctx, thanosStack, logger, component, hours, minutes, keyword)
 		}
 
 		// Handle show command
 		if show {
-			return handleLogConfigShow(ctx)
+			return handleLogConfigShow()
 		}
 
 		// Initialize logging config if it doesn't exist
@@ -147,11 +156,32 @@ func ActionLogCollection() cli.ActionFunc {
 		// Apply changes to running monitoring plugin
 		if hasChanges {
 			logger.Info("Applying logging configuration changes...")
-			return applyLoggingConfig(ctx, config, thanosStack, logger)
+
+			if err := UpdateLoggingConfig(ctx, thanosStack, logger, config.LoggingConfig); err != nil {
+				logger.Errorw("Failed to update logging configuration", "err", err)
+				return fmt.Errorf("failed to update logging configuration: %w", err)
+			}
+
+			logger.Info("✅ Logging configuration applied successfully!")
 		}
 
 		// Show help if no valid command
-		return showLogConfigHelp()
+		fmt.Println("Usage: trh-sdk log-collection [OPTIONS]")
+		fmt.Println()
+		fmt.Println("Options:")
+		fmt.Println("  --enable                    Enable CloudWatch log collection")
+		fmt.Println("  --disable                   Disable CloudWatch log collection")
+		fmt.Println("  --retention <days>          Set CloudWatch log retention period in days (e.g., 7, 30, 90)")
+		fmt.Println("  --interval <seconds>        Set log collection interval in seconds (e.g., 30, 60, 120)")
+		fmt.Println("  --show                      Show current logging configuration")
+		fmt.Println()
+		fmt.Println("Subcommand Download Options:")
+		fmt.Println("  --download                  Download logs from running components")
+		fmt.Println("  --component <name>          Component to download logs from (op-node, op-geth, op-batcher, op-proposer, all)")
+		fmt.Println("  --hours <number>            Number of hours to look back for logs")
+		fmt.Println("  --minutes <number>          Number of minutes to look back for logs")
+		fmt.Println("  --keyword <text>            Keyword to filter logs (case-insensitive)")
+		return nil
 	}
 }
 
@@ -169,30 +199,8 @@ func loadCurrentConfig(deploymentPath string) (*types.Config, error) {
 	return config, nil
 }
 
-// applyLoggingConfig applies logging configuration to the running monitoring plugin
-func applyLoggingConfig(ctx context.Context, config *types.Config, thanosStack *thanos.ThanosStack, logger *zap.SugaredLogger) error {
-	logger.Info("Applying logging configuration to monitoring plugin...")
-
-	// Create monitoring config with logging settings
-	monitoringConfig := &types.MonitoringConfig{
-		Namespace:       config.ChainName,
-		HelmReleaseName: "monitoring",
-		ChainName:       config.ChainName,
-		LoggingEnabled:  config.LoggingConfig.Enabled,
-	}
-
-	// Apply logging configuration
-	if err := UpdateLoggingConfig(ctx, thanosStack, monitoringConfig, logger, config.LoggingConfig); err != nil {
-		logger.Errorw("Failed to update logging configuration", "err", err)
-		return fmt.Errorf("failed to update logging configuration: %w", err)
-	}
-
-	logger.Info("✅ Logging configuration applied successfully!")
-	return nil
-}
-
 // handleLogConfigShow displays current logging configuration
-func handleLogConfigShow(ctx context.Context) error {
+func handleLogConfigShow() error {
 	deploymentPath, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get current directory: %w", err)
@@ -226,62 +234,8 @@ func handleLogConfigShow(ctx context.Context) error {
 	return nil
 }
 
-// showLogConfigHelp displays help information
-func showLogConfigHelp() error {
-	fmt.Println("Usage: trh-sdk log-collection [OPTIONS]")
-	fmt.Println()
-	fmt.Println("Log Configuration Options:")
-	fmt.Println("  --enable                    Enable CloudWatch log collection")
-	fmt.Println("  --disable                   Disable CloudWatch log collection")
-	fmt.Println("  --retention <days>          Set CloudWatch log retention period in days (e.g., 7, 30, 90)")
-	fmt.Println("  --interval <seconds>        Set log collection interval in seconds (e.g., 30, 60, 120)")
-	fmt.Println("  --show                      Show current logging configuration")
-	fmt.Println()
-	fmt.Println("Examples:")
-	fmt.Println("  # Log configuration")
-	fmt.Println("  trh-sdk log-collection --enable")
-	fmt.Println("  trh-sdk log-collection --retention 30")
-	fmt.Println("  trh-sdk log-collection --interval 60")
-	fmt.Println("  trh-sdk log-collection --show")
-	fmt.Println()
-	fmt.Println("  # Log download from running components")
-	fmt.Println("  trh-sdk log-collection --download --component op-node --hours 7")
-	fmt.Println("  trh-sdk log-collection --download --component all --hours 24 --keyword error")
-	fmt.Println("  trh-sdk log-collection --download --component op-geth --minutes 30 --keyword warning")
-	fmt.Println()
-	fmt.Println("  # Apply all settings at once")
-	fmt.Println("  trh-sdk log-collection --enable --retention 90 --interval 60")
-	fmt.Println()
-	fmt.Println("For download options, use: trh-sdk log-collection --download --help")
-	return nil
-}
-
-// showDownloadHelp displays help information for download options
-func showDownloadHelp() error {
-	fmt.Println("Usage: trh-sdk log-collection --download [OPTIONS]")
-	fmt.Println()
-	fmt.Println("Download Options:")
-	fmt.Println("  --component <name>          Component to download logs from (op-node, op-geth, op-batcher, op-proposer, all)")
-	fmt.Println("  --hours <number>            Number of hours to look back for logs")
-	fmt.Println("  --minutes <number>          Number of minutes to look back for logs")
-	fmt.Println("  --keyword <text>            Keyword to filter logs (case-insensitive)")
-	fmt.Println()
-	fmt.Println("Examples:")
-	fmt.Println("  # Download logs for specific component")
-	fmt.Println("  trh-sdk log-collection --download --component op-node --hours 7")
-	fmt.Println("  trh-sdk log-collection --download --component op-geth --minutes 30")
-	fmt.Println()
-	fmt.Println("  # Download logs for all components with keyword filter")
-	fmt.Println("  trh-sdk log-collection --download --component all --hours 24 --keyword error")
-	fmt.Println("  trh-sdk log-collection --download --component op-node --hours 1 --keyword warning")
-	fmt.Println()
-	fmt.Println("  # Download logs with time and keyword filters")
-	fmt.Println("  trh-sdk log-collection --download --component op-batcher --hours 12 --keyword failed")
-	return nil
-}
-
 // UpdateLoggingConfig updates the logging configuration for the monitoring stack
-func UpdateLoggingConfig(ctx context.Context, thanosStack *thanos.ThanosStack, config *types.MonitoringConfig, logger *zap.SugaredLogger, loggingConfig *types.LoggingConfig) error {
+func UpdateLoggingConfig(ctx context.Context, thanosStack *thanos.ThanosStack, logger *zap.SugaredLogger, loggingConfig *types.LoggingConfig) error {
 	// Get actual namespace where Thanos Stack components are deployed
 	actualNamespace, err := thanosStack.GetActualNamespace(ctx)
 	if err != nil {
@@ -357,7 +311,15 @@ func UpdateLoggingConfig(ctx context.Context, thanosStack *thanos.ThanosStack, c
 	}
 
 	// Generate new values file with updated logging configuration
-	if err := thanosStack.GenerateValuesFile(config); err != nil {
+	// Note: config parameter was removed from UpdateLoggingConfig, so we need to create a minimal config
+	monitoringConfig := &types.MonitoringConfig{
+		Namespace:       "monitoring", // Default namespace
+		HelmReleaseName: "monitoring",
+		ChainName:       "thanos-stack",
+		LoggingEnabled:  loggingConfig.Enabled,
+	}
+
+	if err := thanosStack.GenerateValuesFile(monitoringConfig); err != nil {
 		return fmt.Errorf("failed to generate values file: %w", err)
 	}
 
@@ -376,7 +338,7 @@ func UpdateLoggingConfig(ctx context.Context, thanosStack *thanos.ThanosStack, c
 }
 
 // handleLogDownload handles log download functionality
-func handleLogDownload(ctx context.Context, config *types.Config, thanosStack *thanos.ThanosStack, logger *zap.SugaredLogger, component, hours, minutes, keyword string) error {
+func handleLogDownload(ctx context.Context, thanosStack *thanos.ThanosStack, logger *zap.SugaredLogger, component, hours, minutes, keyword string) error {
 	logger.Info("📥 Starting log download...")
 
 	// Get actual namespace
@@ -388,13 +350,20 @@ func handleLogDownload(ctx context.Context, config *types.Config, thanosStack *t
 
 	// Validate component
 	validComponents := []string{"op-node", "op-geth", "op-batcher", "op-proposer", "all"}
-	if component != "" && !contains(validComponents, component) {
+	valid := false
+	for _, validComp := range validComponents {
+		if component == validComp {
+			valid = true
+			break
+		}
+	}
+	if component != "" && !valid {
 		logger.Errorw("Invalid component", "component", component, "valid_components", validComponents)
 		return fmt.Errorf("invalid component: %s. Valid components are: %v", component, validComponents)
 	}
 
 	// Calculate time duration
-	duration, err := calculateDuration("", hours, minutes)
+	duration, err := calculateDuration(hours, minutes)
 	if err != nil {
 		logger.Errorw("Failed to calculate duration", "err", err)
 		return err
@@ -526,16 +495,8 @@ func getPodName(ctx context.Context, namespace, component string) (string, error
 }
 
 // calculateDuration calculates time duration from hours and minutes
-func calculateDuration(days, hours, minutes string) (time.Duration, error) {
+func calculateDuration(hours, minutes string) (time.Duration, error) {
 	var duration time.Duration
-
-	if days != "" {
-		d, err := strconv.Atoi(days)
-		if err != nil {
-			return 0, fmt.Errorf("invalid days value: %s", days)
-		}
-		duration += time.Duration(d) * 24 * time.Hour
-	}
 
 	if hours != "" {
 		h, err := strconv.Atoi(hours)
@@ -554,14 +515,4 @@ func calculateDuration(days, hours, minutes string) (time.Duration, error) {
 	}
 
 	return duration, nil
-}
-
-// contains checks if a string slice contains a specific string
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
 }

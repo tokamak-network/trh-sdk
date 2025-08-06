@@ -111,10 +111,29 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *types.Monit
 	// Install AWS CLI sidecar for log collection if logging is enabled
 	if config.LoggingEnabled {
 		logger.Info("Installing AWS CLI sidecar for log collection")
-		if err := t.installLogCollectionSidecar(ctx); err != nil {
-			logger.Errorw("Failed to install AWS CLI sidecar", "err", err)
-			// Continue with installation even if log collection fails
+		actualNamespace, err := t.getActualNamespace(ctx)
+		if err != nil {
+			logger.Errorw("Failed to get actual namespace", "err", err)
 			logger.Warn("Continuing without log collection")
+		} else {
+			// Get logging configuration from deploy config
+			var loggingConfig *types.LoggingConfig
+			if t.deployConfig != nil && t.deployConfig.LoggingConfig != nil {
+				loggingConfig = t.deployConfig.LoggingConfig
+			} else {
+				// Use default values if no logging config exists
+				loggingConfig = &types.LoggingConfig{
+					Enabled:             true,
+					CloudWatchRetention: 30,
+					CollectionInterval:  30,
+				}
+			}
+
+			if err := t.installLogCollectionSidecarDeployment(ctx, actualNamespace, loggingConfig); err != nil {
+				logger.Errorw("Failed to install AWS CLI sidecar", "err", err)
+				// Continue with installation even if log collection fails
+				logger.Warn("Continuing without log collection")
+			}
 		}
 	}
 
@@ -1838,35 +1857,6 @@ func (t *ThanosStack) VerifyRetentionPolicy(ctx context.Context, namespace strin
 // VerifyCollectionInterval verifies the collection interval
 func (t *ThanosStack) VerifyCollectionInterval(ctx context.Context, namespace string) error {
 	return t.verifyCollectionInterval(ctx, namespace)
-}
-
-// installLogCollectionSidecar installs AWS CLI sidecar for log collection
-func (t *ThanosStack) installLogCollectionSidecar(ctx context.Context) error {
-	// Get actual namespace where Thanos Stack components are deployed
-	actualNamespace, err := t.getActualNamespace(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get actual namespace: %w", err)
-	}
-
-	// Get logging configuration from deploy config
-	var loggingConfig *types.LoggingConfig
-	if t.deployConfig != nil && t.deployConfig.LoggingConfig != nil {
-		loggingConfig = t.deployConfig.LoggingConfig
-	} else {
-		// Use default values if no logging config exists
-		loggingConfig = &types.LoggingConfig{
-			Enabled:             true,
-			CloudWatchRetention: 30,
-			CollectionInterval:  30,
-		}
-	}
-
-	// Install AWS CLI sidecar with custom configuration
-	if err := t.installLogCollectionSidecarDeployment(ctx, actualNamespace, loggingConfig); err != nil {
-		return fmt.Errorf("failed to install AWS CLI sidecar: %w", err)
-	}
-
-	return nil
 }
 
 // installLogCollectionSidecarDeployment installs AWS CLI sidecar deployment

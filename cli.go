@@ -219,27 +219,31 @@ func Run() {
 				Usage: "Manage CloudWatch logging settings and download logs",
 				Description: `Manage CloudWatch logging settings and download logs for AWS CLI sidecar log collection.
 
+Options:
+  --enable                    Enable CloudWatch log collection
+  --disable                   Disable CloudWatch log collection
+  --retention <days>          Set CloudWatch log retention period in days (e.g., 7, 30, 90)
+  --interval <seconds>        Set log collection interval in seconds (e.g., 30, 60, 120)
+  --show                      Show current logging configuration
+
+Subcommand Download Options:
+  --download                  Download logs from running components
+  --component <name>          Component to download logs from (op-node, op-geth, op-batcher, op-proposer, all)
+  --hours <number>            Number of hours to look back for logs
+  --minutes <number>          Number of minutes to look back for logs
+  --keyword <text>            Keyword to filter logs (case-insensitive)
+
 Examples:
-  # Enable CloudWatch log collection with default settings
+  # Log configuration
   trh-sdk log-collection --enable
-
-  # Disable CloudWatch log collection
-  trh-sdk log-collection --disable
-
-  # Set retention period to 30 days
   trh-sdk log-collection --retention 30
-
-  # Set collection interval to 60 seconds
   trh-sdk log-collection --interval 60
-
-  # Show current logging configuration
   trh-sdk log-collection --show
 
-  # Download logs for specific component
+  # Log download from running components
   trh-sdk log-collection --download --component op-node --hours 7
-
-  # Download logs for all components with keyword filter
   trh-sdk log-collection --download --component all --hours 24 --keyword error
+  trh-sdk log-collection --download --component op-geth --minutes 30 --keyword warning
 
   # Apply all settings at once
   trh-sdk log-collection --enable --retention 90 --interval 60`,
