@@ -165,6 +165,10 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 	// Remove trailing % character from admin password if present
 	adminPassword = strings.TrimSuffix(adminPassword, "%")
 
+	if t.deployConfig == nil {
+		return nil, fmt.Errorf("deploy configuration is not initialized")
+	}
+
 	chainName := strings.ToLower(t.deployConfig.ChainName)
 	chainName = strings.ReplaceAll(chainName, " ", "-")
 	helmReleaseName := fmt.Sprintf("monitoring-%d", time.Now().Unix())
@@ -172,6 +176,13 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 	chartsPath := fmt.Sprintf("%s/tokamak-thanos-stack/charts/monitoring", t.deploymentPath)
 	if _, err := os.Stat(chartsPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("chart directory not found: %s", chartsPath)
+	}
+
+	// Ensure K8s configuration exists with default namespace
+	if t.deployConfig.K8s == nil {
+		t.deployConfig.K8s = &types.K8sConfig{
+			Namespace: t.deployConfig.ChainName, // Use chain name as default namespace
+		}
 	}
 
 	serviceNames, err := t.getServiceNames(ctx, t.deployConfig.K8s.Namespace)
@@ -384,6 +395,17 @@ func (t *ThanosStack) checkALBIngressStatus(ctx context.Context, config *types.M
 
 // generateValuesFile creates the values.yaml file
 func (t *ThanosStack) generateValuesFile(config *types.MonitoringConfig) error {
+	if t.deployConfig == nil || t.deployConfig.AWS == nil {
+		return fmt.Errorf("deploy configuration is not properly initialized")
+	}
+
+	// Ensure K8s configuration exists with default namespace
+	if t.deployConfig.K8s == nil {
+		t.deployConfig.K8s = &types.K8sConfig{
+			Namespace: t.deployConfig.ChainName, // Use chain name as default namespace
+		}
+	}
+
 	valuesConfig := map[string]interface{}{
 		"global": map[string]interface{}{
 			"l1RpcUrl": config.L1RpcUrl,
