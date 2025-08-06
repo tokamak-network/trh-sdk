@@ -1444,6 +1444,8 @@ func (t *ThanosStack) cleanupExistingPrometheusRules(ctx context.Context, config
 		_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "prometheusrule", ruleName, "-n", config.Namespace)
 		if err != nil {
 			// Continue with other rules even if one fails
+			// Log the error but don't fail the entire operation
+			t.getLogger().Warnw("Failed to delete PrometheusRule", "rule", ruleName, "err", err)
 		}
 	}
 
@@ -1872,8 +1874,7 @@ metadata:
 `, namespace)
 
 	// Create ClusterRole for log access
-	clusterRole := fmt.Sprintf(`
-apiVersion: rbac.authorization.k8s.io/v1
+	clusterRole := `apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: thanos-logs-sidecar-role
@@ -1884,7 +1885,7 @@ rules:
 - apiGroups: [""]
   resources: ["namespaces"]
   verbs: ["get", "list"]
-`)
+`
 
 	// Create ClusterRoleBinding
 	clusterRoleBinding := fmt.Sprintf(`
