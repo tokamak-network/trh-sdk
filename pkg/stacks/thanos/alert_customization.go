@@ -506,15 +506,57 @@ func (a *AlertCustomization) UpdateEmailConfig(ctx context.Context, smtpServer, 
 		receiversList = append(receiversList, mainReceiver)
 	}
 
+	// Get Grafana URL for templates by finding the actual Helm release
+	helmReleaseOutput, _ := utils.ExecuteCommand(ctx, "kubectl", "get", "ingress", "-n", "monitoring", "-o", "jsonpath={.items[0].metadata.name}")
+
+	// Extract Helm release name from ingress name (remove -grafana suffix)
+	helmReleaseName := strings.TrimSuffix(helmReleaseOutput, "-grafana")
+	grafanaURL := a.Stack.getGrafanaURL(ctx, &types.MonitoringConfig{
+		Namespace:       "monitoring",
+		HelmReleaseName: helmReleaseName,
+	})
+
 	// Add email_configs to the receiver
 	emailConfigs := []interface{}{}
+
 	for _, receiver := range receivers {
 		emailConfig := map[string]interface{}{
 			"to": receiver,
 			"headers": map[string]string{
 				"subject": "🚨 Critical Alert - {{ .GroupLabels.chain_name }}",
 			},
-			"text": "🚨 Critical Alert - {{ .GroupLabels.chain_name }}\nAlert Name: {{ .GroupLabels.alertname }}\nSeverity: {{ .GroupLabels.severity }}\nComponent: {{ .GroupLabels.component }}\n\nSummary:\n{{ .CommonAnnotations.summary }}\nDescription:\n{{ .CommonAnnotations.description }}\n⏰ Alert Time: {{ range .Alerts }}{{ .StartsAt }}{{ end }}\nDashboard: View Details",
+			"html": `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .alert { border-left: 4px solid #dc3545; padding: 10px; margin: 10px 0; background-color: #f8f9fa; }
+        .header { color: #dc3545; font-weight: bold; margin-bottom: 15px; }
+        .info { margin: 5px 0; }
+        .timestamp { color: #6c757d; font-size: 12px; margin-top: 10px; }
+        .dashboard { margin-top: 15px; }
+        a { color: #007bff; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="alert">
+        <div class="header">🚨 Critical Alert - {{ .GroupLabels.chain_name }}</div>
+        <div class="info"><strong>Alert Name:</strong> {{ .GroupLabels.alertname }}</div>
+        <div class="info"><strong>Severity:</strong> {{ .GroupLabels.severity }}</div>
+        <div class="info"><strong>Component:</strong> {{ .GroupLabels.component }}</div>
+        <div class="info" style="margin-top: 15px;"><strong>Summary:</strong></div>
+        <div class="info">{{ .CommonAnnotations.summary }}</div>
+        <div class="info" style="margin-top: 10px;"><strong>Description:</strong></div>
+        <div class="info">{{ .CommonAnnotations.description }}</div>
+        <div class="timestamp">⏰ Alert Time: {{ range .Alerts }}{{ .StartsAt }}{{ end }}</div>
+        <div class="dashboard">
+            <strong>Dashboard:</strong> <a href="` + grafanaURL + `">View Details</a>
+        </div>
+    </div>
+</body>
+</html>`,
 		}
 		emailConfigs = append(emailConfigs, emailConfig)
 	}
@@ -650,11 +692,15 @@ func (a *AlertCustomization) UpdateTelegramConfig(ctx context.Context, botToken,
 		return fmt.Errorf("invalid chat ID format: %w", err)
 	}
 
+	// Get Grafana URL for templates
+	grafanaURL := a.Stack.getGrafanaURL(ctx, &types.MonitoringConfig{})
+	templates := a.Stack.generateAlertTemplates(grafanaURL)
+
 	// Add telegram_configs to the receiver
 	telegramConfig := map[string]interface{}{
 		"bot_token":  botToken,
-		"chat_id":    chatIDInt, // 정수로 설정
-		"message":    "🚨 Critical Alert - {{ .GroupLabels.chain_name }}\nAlert Name: {{ .GroupLabels.alertname }}\nSeverity: {{ .GroupLabels.severity }}\nComponent: {{ .GroupLabels.component }}\n\nSummary:\n{{ .CommonAnnotations.summary }}\nDescription:\n{{ .CommonAnnotations.description }}\n⏰ Alert Time: {{ range .Alerts }}{{ .StartsAt }}{{ end }}\nDashboard: View Details",
+		"chat_id":    chatIDInt,
+		"message":    templates["telegram_message"],
 		"parse_mode": "Markdown",
 	}
 

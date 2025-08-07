@@ -387,8 +387,39 @@ func (t *ThanosStack) generateGrafanaStorageConfig(config *types.MonitoringConfi
 // generateAlertTemplates generates common alert templates
 func (t *ThanosStack) generateAlertTemplates(grafanaURL string) map[string]string {
 	return map[string]string{
-		"email_subject":    "🚨 Critical Alert - {{ .GroupLabels.chain_name }}",
-		"email_message":    "🚨 Critical Alert - {{ .GroupLabels.chain_name }}\nAlert Name: {{ .GroupLabels.alertname }}\nSeverity: {{ .GroupLabels.severity }}\nComponent: {{ .GroupLabels.component }}\n\nSummary:\n{{ .CommonAnnotations.summary }}\nDescription:\n{{ .CommonAnnotations.description }}\n⏰ Alert Time: {{ range .Alerts }}{{ .StartsAt }}{{ end }}\nDashboard: View Details",
+		"email_subject": "🚨 Critical Alert - {{ .GroupLabels.chain_name }}",
+		"email_html": `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .alert { border-left: 4px solid #dc3545; padding: 10px; margin: 10px 0; background-color: #f8f9fa; }
+        .header { color: #dc3545; font-weight: bold; margin-bottom: 15px; }
+        .info { margin: 5px 0; }
+        .timestamp { color: #6c757d; font-size: 12px; margin-top: 10px; }
+        .dashboard { margin-top: 15px; }
+        a { color: #007bff; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="alert">
+        <div class="header">🚨 Critical Alert - {{ .GroupLabels.chain_name }}</div>
+        <div class="info"><strong>Alert Name:</strong> {{ .GroupLabels.alertname }}</div>
+        <div class="info"><strong>Severity:</strong> {{ .GroupLabels.severity }}</div>
+        <div class="info"><strong>Component:</strong> {{ .GroupLabels.component }}</div>
+        <div class="info" style="margin-top: 15px;"><strong>Summary:</strong></div>
+        <div class="info">{{ .CommonAnnotations.summary }}</div>
+        <div class="info" style="margin-top: 10px;"><strong>Description:</strong></div>
+        <div class="info">{{ .CommonAnnotations.description }}</div>
+        <div class="timestamp">⏰ Alert Time: {{ range .Alerts }}{{ .StartsAt }}{{ end }}</div>
+        <div class="dashboard">
+            <strong>Dashboard:</strong> <a href="` + grafanaURL + `">View Details</a>
+        </div>
+    </div>
+</body>
+</html>`,
 		"telegram_message": "🚨 Critical Alert - {{ .GroupLabels.chain_name }}\n\nAlert Name: {{ .GroupLabels.alertname }}\nSeverity: {{ .GroupLabels.severity }}\nComponent: {{ .GroupLabels.component }}\n\nSummary: {{ .CommonAnnotations.summary }}\nDescription: {{ .CommonAnnotations.description }}\n\n⏰ Alert Time: {{ range .Alerts }}{{ .StartsAt }}{{ end }}\n\nDashboard: [View Details](" + grafanaURL + ")",
 	}
 }
@@ -807,7 +838,7 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *types.MonitoringC
 					"headers": map[string]string{
 						"subject": templates["email_subject"],
 					},
-					"text": templates["email_message"],
+					"html": "<p>" + templates["email_message"] + "</p>",
 				})
 			}
 		}
