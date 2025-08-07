@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
@@ -16,7 +17,7 @@ import (
 func ActionAlertConfig() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
 		// Check if monitoring plugin is installed
-		if err := checkMonitoringPluginInstalled(ctx); err != nil {
+		if err := utils.CheckMonitoringPluginInstalled(ctx); err != nil {
 			return err
 		}
 
@@ -97,62 +98,6 @@ func handleChannelConfigure(ctx context.Context, channelType string) error {
 	}
 }
 
-// checkMonitoringPluginInstalled checks if monitoring plugin is installed
-func checkMonitoringPluginInstalled(ctx context.Context) error {
-	// Check if alert namespace exists
-	namespaceExists, err := checkNamespaceExists(ctx, "monitoring")
-	if err != nil {
-		return fmt.Errorf("failed to check monitoring namespace: %w", err)
-	}
-
-	if !namespaceExists {
-		fmt.Println("❌ Monitoring plugin is not installed!")
-		fmt.Println()
-		fmt.Println("To install monitoring plugin, run:")
-		fmt.Println("  trh-sdk install monitoring")
-		fmt.Println()
-		fmt.Println("After installation, you can customize alert settings.")
-		return fmt.Errorf("monitoring plugin not installed")
-	}
-
-	// Check if alert Helm release exists
-	releaseExists, err := checkAlertReleaseExists(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to check monitoring release: %w", err)
-	}
-
-	if !releaseExists {
-		fmt.Println("❌ Monitoring plugin is not properly installed!")
-		fmt.Println()
-		fmt.Println("To install monitoring plugin, run:")
-		fmt.Println("  trh-sdk install monitoring")
-		fmt.Println()
-		fmt.Println("After installation, you can customize alert settings.")
-		return fmt.Errorf("monitoring plugin not properly installed")
-	}
-	return nil
-}
-
-// checkNamespaceExists checks if a namespace exists
-func checkNamespaceExists(ctx context.Context, namespace string) (bool, error) {
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "namespace", namespace, "--ignore-not-found=true")
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(output) != "", nil
-}
-
-// checkAlertReleaseExists checks if alert Helm release exists
-func checkAlertReleaseExists(ctx context.Context) (bool, error) {
-	output, err := utils.ExecuteCommand(ctx, "helm", "list", "-n", "monitoring", "--output", "json")
-	if err != nil {
-		return false, err
-	}
-
-	// Simple check for alert-related releases
-	return strings.Contains(output, "monitoring"), nil
-}
-
 // showAlertConfigHelp displays help for alert configuration
 func showAlertConfigHelp() error {
 	fmt.Println("🔧 Alert Configuration Commands")
@@ -173,7 +118,7 @@ func showAlertConfigHelp() error {
 	fmt.Printf("  # Disable %s channel\n", constants.ChannelEmail)
 	fmt.Printf("  trh-sdk alert-config --channel %s --disable\n", constants.ChannelEmail)
 	fmt.Println()
-	fmt.Printf("  # Configure %s channel\n", constants.ChannelEmail)
+	fmt.Printf("  # Configure %s channel (Gmail only)\n", constants.ChannelEmail)
 	fmt.Printf("  trh-sdk alert-config --channel %s --configure\n", constants.ChannelEmail)
 	fmt.Println()
 	fmt.Printf("  # Disable %s channel\n", constants.ChannelTelegram)
@@ -184,11 +129,6 @@ func showAlertConfigHelp() error {
 	fmt.Println()
 	fmt.Println("  # Interactive rule configuration")
 	fmt.Println("  trh-sdk alert-config --rule set")
-	fmt.Println()
-
-	fmt.Println()
-	fmt.Println("💡 Use 'trh-sdk alert-config --status' to see detailed rule status")
-	fmt.Println("💡 Use 'trh-sdk alert-config --rule set' for interactive rule management")
 	return nil
 }
 
@@ -197,7 +137,7 @@ func handleAlertStatus(ctx context.Context) error {
 	ac := &thanos.AlertCustomization{}
 
 	// Check monitoring namespace
-	_, err := checkNamespaceExists(ctx, "monitoring")
+	_, err := utils.CheckNamespaceExists(ctx, "monitoring")
 	if err != nil {
 		return fmt.Errorf("failed to check alert namespace: %w", err)
 	}
@@ -291,7 +231,6 @@ func handleAlertStatus(ctx context.Context) error {
 		for ruleName, description := range ruleMap {
 			found := false
 			var currentValue string
-			var severity string
 
 			for _, rule := range allRules {
 				if rule.Alert == ruleName {
@@ -299,10 +238,6 @@ func handleAlertStatus(ctx context.Context) error {
 					// Extract current value from expression
 					if rule.Expr != "" {
 						currentValue = ac.ExtractValueFromExpression(ruleName, rule.Expr)
-					}
-					// Extract severity
-					if sev, exists := rule.Labels["severity"]; exists {
-						severity = sev
 					}
 					break
 				}
@@ -330,17 +265,9 @@ func handleAlertStatus(ctx context.Context) error {
 					fmt.Printf(" (Default: %s)", defaultValue)
 				}
 			}
-			if severity != "" {
-				fmt.Printf(" [%s]", severity)
-			}
 			fmt.Printf(" - %s\n", description)
 		}
 	}
-
-	fmt.Println()
-	fmt.Println("💡 Use 'trh-sdk alert-config --rule set' to modify configurable rules")
-	fmt.Println("💡 Use 'trh-sdk alert-config --channel email --configure' to configure email")
-	fmt.Println("💡 Use 'trh-sdk alert-config --channel telegram --configure' to configure telegram")
 
 	return nil
 }
@@ -361,20 +288,20 @@ func handleRuleCommand(ctx context.Context, ruleAction string) error {
 
 // configureAlertRules allows users to configure alert rules interactively
 func configureAlertRules(ctx context.Context, ac *thanos.AlertCustomization) error {
-	fmt.Println("🔧 Alert Rules Configuration")
-	fmt.Println("============================")
-
-	// Define available rules with numbers
-	rules := map[string]string{
-		"1": "OpBatcherBalanceCritical",
-		"2": "OpProposerBalanceCritical",
-		"3": "BlockProductionStalled",
-		"4": "ContainerCpuUsageHigh",
-		"5": "ContainerMemoryUsageHigh",
-		"6": "PodCrashLooping",
+	// Define rule names for easy mapping
+	ruleNames := []string{
+		"OpBatcherBalanceCritical",
+		"OpProposerBalanceCritical",
+		"BlockProductionStalled",
+		"ContainerCpuUsageHigh",
+		"ContainerMemoryUsageHigh",
+		"PodCrashLooping",
 	}
 
-	fmt.Println("\nAvailable rules to configure:")
+	fmt.Println("🔧 Alert Rules Configuration")
+	fmt.Println("============================")
+	fmt.Println()
+	fmt.Println("Available rules to configure:")
 	fmt.Println("1.  OpBatcherBalanceCritical - OP Batcher balance threshold")
 	fmt.Println("2.  OpProposerBalanceCritical - OP Proposer balance threshold")
 	fmt.Println("3.  BlockProductionStalled - Block production stall detection")
@@ -385,75 +312,147 @@ func configureAlertRules(ctx context.Context, ac *thanos.AlertCustomization) err
 	fmt.Println("⚠️  Note: Core system alerts (OpNodeDown, OpBatcherDown, OpProposerDown, OpGethDown, L1RpcDown)")
 	fmt.Println("    are essential and cannot be modified to ensure system stability.")
 	fmt.Println()
-	fmt.Println("Commands:")
-	fmt.Println("- Enter rule number (1-6) to configure threshold/value")
-	fmt.Println("- Enter 'enable <number>' to enable a rule")
-	fmt.Println("- Enter 'disable <number>' to disable a rule")
-	fmt.Println("- Enter 'quit' to exit")
-	fmt.Println()
-	fmt.Println("💡 Use 'trh-sdk alert-config --status' to see detailed rule status")
 
-	fmt.Print("\nEnter command: ")
-	ruleInput, err := scanner.ScanString()
-	if err != nil {
-		return fmt.Errorf("failed to read rule selection: %w", err)
-	}
+	for {
+		fmt.Println("Commands:")
+		fmt.Println("- Enter rule number (1-6) to configure threshold/value")
+		fmt.Println("- Enter 'enable <number>' to enable a rule")
+		fmt.Println("- Enter 'disable <number>' to disable a rule")
+		fmt.Println("- Enter 'quit' to exit (or Ctrl+C)")
+		fmt.Println()
+		fmt.Println("💡 Use 'trh-sdk alert-config --status' to see detailed rule status")
 
-	if ruleInput == "quit" {
-		fmt.Println("Configuration cancelled")
-		return nil
-	}
+		fmt.Print("\nEnter command: ")
+		ruleInput, err := scanner.ScanString()
+		if err != nil {
+			return fmt.Errorf("failed to read rule selection: %w", err)
+		}
 
-	// Handle enable/disable commands
-	if strings.HasPrefix(ruleInput, "enable ") {
-		parts := strings.Fields(ruleInput)
-		if len(parts) != 2 {
-			fmt.Println("❌ Invalid command format. Use: enable <number>")
+		ruleInput = strings.TrimSpace(ruleInput)
+		if ruleInput == "quit" {
+			fmt.Println("Configuration cancelled")
 			return nil
 		}
-		ruleName, exists := rules[parts[1]]
-		if !exists {
-			fmt.Printf("❌ Invalid rule number: %s\n", parts[1])
-			return nil
-		}
-		return enableRule(ctx, ac, ruleName)
-	}
 
-	if strings.HasPrefix(ruleInput, "disable ") {
-		parts := strings.Fields(ruleInput)
-		if len(parts) != 2 {
-			fmt.Println("❌ Invalid command format. Use: disable <number>")
-			return nil
-		}
-		ruleName, exists := rules[parts[1]]
-		if !exists {
-			fmt.Printf("❌ Invalid rule number: %s\n", parts[1])
-			return nil
-		}
-		return disableRule(ctx, ac, ruleName)
-	}
+		// Handle enable/disable commands
+		if strings.HasPrefix(ruleInput, "enable ") {
+			parts := strings.Fields(ruleInput)
+			if len(parts) != 2 {
+				fmt.Println("❌ Invalid command format. Use 'enable <number>'")
+				continue
+			}
 
-	// Get rule name from number for configuration
-	ruleName, exists := rules[ruleInput]
-	if !exists {
-		fmt.Printf("❌ Invalid command: %s\n", ruleInput)
-		fmt.Println("Valid commands: rule number (1-6), enable <number>, disable <number>, quit")
-		return nil
-	}
+			ruleNum, err := strconv.Atoi(parts[1])
+			if err != nil || ruleNum < 1 || ruleNum > 6 {
+				fmt.Println("❌ Invalid rule number. Please enter a number between 1 and 6")
+				continue
+			}
 
-	// Configure based on rule type
-	switch ruleName {
-	case "OpBatcherBalanceCritical", "OpProposerBalanceCritical":
-		return configureBalanceThreshold(ctx, ac, ruleName)
-	case "BlockProductionStalled":
-		return configureBlockProductionStall(ctx, ac)
-	case "ContainerCpuUsageHigh", "ContainerMemoryUsageHigh":
-		return configureUsageThreshold(ctx, ac, ruleName)
-	case "PodCrashLooping":
-		return configurePodCrashLoop(ctx, ac)
-	default:
-		fmt.Printf("❌ Unknown rule: %s\n", ruleName)
-		return nil
+			ruleName := ruleNames[ruleNum-1]
+
+			// Check if rule is already enabled
+			isEnabled, err := ac.IsRuleEnabled(ctx, ruleName)
+			if err != nil {
+				fmt.Printf("❌ Failed to check rule status: %v\n", err)
+				continue
+			}
+
+			if isEnabled {
+				fmt.Printf("ℹ️  %s is already enabled\n", ruleName)
+				continue
+			}
+
+			fmt.Printf("🔧 Enabling %s...\n", ruleName)
+			fmt.Println("⚠️  Note: Rule will be enabled with default threshold value")
+
+			if err := ac.EnableRule(ctx, ruleName); err != nil {
+				fmt.Printf("❌ Failed to enable rule: %v\n", err)
+			} else {
+				fmt.Printf("✅ %s enabled successfully\n", ruleName)
+			}
+			continue
+		}
+
+		if strings.HasPrefix(ruleInput, "disable ") {
+			parts := strings.Fields(ruleInput)
+			if len(parts) != 2 {
+				fmt.Println("❌ Invalid command format. Use 'disable <number>'")
+				continue
+			}
+
+			ruleNum, err := strconv.Atoi(parts[1])
+			if err != nil || ruleNum < 1 || ruleNum > 6 {
+				fmt.Println("❌ Invalid rule number. Please enter a number between 1 and 6")
+				continue
+			}
+
+			ruleName := ruleNames[ruleNum-1]
+
+			// Check if rule is already disabled
+			isEnabled, err := ac.IsRuleEnabled(ctx, ruleName)
+			if err != nil {
+				fmt.Printf("❌ Failed to check rule status: %v\n", err)
+				continue
+			}
+
+			if !isEnabled {
+				fmt.Printf("ℹ️  %s is already disabled\n", ruleName)
+				continue
+			}
+
+			fmt.Printf("🔧 Disabling %s...\n", ruleName)
+
+			if err := ac.DisableRule(ctx, ruleName); err != nil {
+				fmt.Printf("❌ Failed to disable rule: %v\n", err)
+			} else {
+				fmt.Printf("✅ %s disabled successfully\n", ruleName)
+			}
+			continue
+		}
+
+		// Get rule name from number for configuration
+		ruleNum, err := strconv.Atoi(ruleInput)
+		if err != nil || ruleNum < 1 || ruleNum > 6 {
+			fmt.Printf("❌ Invalid command: %s\n", ruleInput)
+			fmt.Println("Valid commands: rule number (1-6), enable <number>, disable <number>, quit")
+			continue
+		}
+
+		ruleName := ruleNames[ruleNum-1]
+
+		// Check if rule is disabled
+		isEnabled, err := ac.IsRuleEnabled(ctx, ruleName)
+		if err != nil {
+			fmt.Printf("❌ Failed to check rule status: %v\n", err)
+			continue
+		}
+
+		if !isEnabled {
+			fmt.Printf("ℹ️  %s is currently disabled. Please enable it first.\n", ruleName)
+			continue
+		}
+
+		// Configure based on rule type
+		switch ruleName {
+		case "OpBatcherBalanceCritical", "OpProposerBalanceCritical":
+			if err := configureBalanceThreshold(ctx, ac, ruleName); err != nil {
+				fmt.Printf("❌ Failed to configure rule: %v\n", err)
+			}
+		case "BlockProductionStalled":
+			if err := configureBlockProductionStall(ctx, ac); err != nil {
+				fmt.Printf("❌ Failed to configure rule: %v\n", err)
+			}
+		case "ContainerCpuUsageHigh", "ContainerMemoryUsageHigh":
+			if err := configureUsageThreshold(ctx, ac, ruleName); err != nil {
+				fmt.Printf("❌ Failed to configure rule: %v\n", err)
+			}
+		case "PodCrashLooping":
+			if err := configurePodCrashLoop(ctx, ac); err != nil {
+				fmt.Printf("❌ Failed to configure rule: %v\n", err)
+			}
+		default:
+			fmt.Printf("❌ Unknown rule: %s\n", ruleName)
+		}
 	}
 }
 
@@ -467,7 +466,12 @@ func validateRuleInput(input, inputType string) error {
 
 // configureBalanceThreshold configures balance threshold for batcher/proposer
 func configureBalanceThreshold(ctx context.Context, ac *thanos.AlertCustomization, ruleName string) error {
-	fmt.Printf("💰 Configuring %s balance threshold\n", ruleName)
+	// Get current value
+	currentValue := ac.GetCurrentRuleValue(ctx, ruleName)
+
+	if currentValue != "" {
+		fmt.Printf("Current threshold: %s ETH\n", currentValue)
+	}
 	fmt.Println("Enter the minimum ETH balance threshold (e.g., 0.01, 0.1, 1.0):")
 
 	fmt.Print("Balance threshold (ETH): ")
@@ -490,42 +494,45 @@ func configureBalanceThreshold(ctx context.Context, ac *thanos.AlertCustomizatio
 	return nil
 }
 
-// configureBlockProductionStall configures block production stall detection
+// configureBlockProductionStall configures block production stall detection time
 func configureBlockProductionStall(ctx context.Context, ac *thanos.AlertCustomization) error {
-	fmt.Println("⏱️  Configuring BlockProductionStalled detection time")
-	fmt.Println("Enter the time duration for block production stall detection:")
-	fmt.Println("Examples: 30s, 1m, 2m, 5m")
+	// Get current value
+	currentValue := ac.GetCurrentRuleValue(ctx, "BlockProductionStalled")
 
-	fmt.Print("Stall detection time: ")
-	stallTime, err := scanner.ScanString()
+	if currentValue != "" {
+		fmt.Printf("Current detection time: %s\n", currentValue)
+	}
+	fmt.Println("Enter the time duration for block production stall detection:")
+	fmt.Println("Examples: 1m, 2m, 5m, 10m")
+
+	fmt.Print("Block production stall detection time: ")
+	detectionTime, err := scanner.ScanString()
 	if err != nil {
-		return fmt.Errorf("failed to read stall time: %w", err)
+		return fmt.Errorf("failed to read detection time: %w", err)
 	}
 
 	// Validate input
-	if err := validateRuleInput(stallTime, "stall detection time"); err != nil {
+	if err := validateRuleInput(detectionTime, "detection time"); err != nil {
 		return err
 	}
 
-	fmt.Printf("🔧 Configuring BlockProductionStalled with detection time '%s'...\n", stallTime)
-	if err := ac.UpdatePrometheusRule(ctx, "BlockProductionStalled", stallTime); err != nil {
+	fmt.Printf("🔧 Configuring BlockProductionStalled with detection time '%s'...\n", detectionTime)
+	if err := ac.UpdatePrometheusRule(ctx, "BlockProductionStalled", detectionTime); err != nil {
 		return fmt.Errorf("failed to update rule: %w", err)
 	}
 
-	fmt.Printf("✅ BlockProductionStalled configured successfully with detection time %s\n", stallTime)
+	fmt.Printf("✅ BlockProductionStalled configured successfully with detection time %s\n", detectionTime)
 	return nil
 }
 
 // configureUsageThreshold configures CPU/Memory usage threshold
 func configureUsageThreshold(ctx context.Context, ac *thanos.AlertCustomization, ruleName string) error {
-	var resourceType string
-	if ruleName == "ContainerCpuUsageHigh" {
-		resourceType = "CPU"
-	} else {
-		resourceType = "Memory"
-	}
+	// Get current value
+	currentValue := ac.GetCurrentRuleValue(ctx, ruleName)
 
-	fmt.Printf("📊 Configuring %s usage threshold\n", resourceType)
+	if currentValue != "" {
+		fmt.Printf("Current threshold: %s%%\n", currentValue)
+	}
 	fmt.Println("Enter the usage percentage threshold (e.g., 70, 80, 90):")
 
 	fmt.Print("Usage threshold (%): ")
@@ -550,7 +557,12 @@ func configureUsageThreshold(ctx context.Context, ac *thanos.AlertCustomization,
 
 // configurePodCrashLoop configures pod crash loop detection time
 func configurePodCrashLoop(ctx context.Context, ac *thanos.AlertCustomization) error {
-	fmt.Println("🔄 Configuring PodCrashLooping detection time")
+	// Get current value
+	currentValue := ac.GetCurrentRuleValue(ctx, "PodCrashLooping")
+
+	if currentValue != "" {
+		fmt.Printf("Current detection time: %s\n", currentValue)
+	}
 	fmt.Println("Enter the time duration for pod crash loop detection:")
 	fmt.Println("Examples: 1m, 2m, 5m, 10m")
 
@@ -603,29 +615,25 @@ func disableEmailChannel(ctx context.Context, ac *thanos.AlertCustomization) err
 func configureEmailChannel(ctx context.Context, ac *thanos.AlertCustomization) error {
 	fmt.Println("📧 Configuring Email Channel...")
 
-	// Get new email configuration from user
-	fmt.Println("Enter email configuration:")
+	// Set Gmail SMTP configuration automatically
+	smtpServer := "smtp.gmail.com:587"
+	smtpUsername := ""
+	smtpPassword := ""
 
-	fmt.Print("SMTP Server (e.g., smtp.gmail.com:587): ")
-	smtpServer, err := scanner.ScanString()
-	if err != nil {
-		return fmt.Errorf("failed to read SMTP server: %w", err)
-	}
-
-	fmt.Print("From Email Address: ")
+	fmt.Print("Sender Address (only Gmail): ")
 	smtpFrom, err := scanner.ScanString()
 	if err != nil {
-		return fmt.Errorf("failed to read from email: %w", err)
+		return fmt.Errorf("failed to read sender address: %w", err)
 	}
 
-	// Automatically use the "From Email Address" as SMTP username
-	smtpUsername := smtpFrom
+	// Automatically use the Gmail address as SMTP username
+	smtpUsername = smtpFrom
 	fmt.Printf("✅ SMTP Username automatically set to: %s\n", smtpUsername)
 
-	fmt.Print("SMTP Password: ")
-	smtpPassword, err := scanner.ScanString()
+	fmt.Print("App Password (Gmail 2FA App Password): ")
+	smtpPassword, err = scanner.ScanString()
 	if err != nil {
-		return fmt.Errorf("failed to read SMTP password: %w", err)
+		return fmt.Errorf("failed to read app password: %w", err)
 	}
 
 	// Clean up the password input
@@ -636,7 +644,7 @@ func configureEmailChannel(ctx context.Context, ac *thanos.AlertCustomization) e
 		return err
 	}
 
-	fmt.Print("Default Receivers (comma-separated): ")
+	fmt.Print("Receiver addresses (comma-separated): ")
 	receiversInput, err := scanner.ScanString()
 	if err != nil {
 		return fmt.Errorf("failed to read receivers: %w", err)
@@ -651,14 +659,14 @@ func configureEmailChannel(ctx context.Context, ac *thanos.AlertCustomization) e
 		}
 	}
 
-	fmt.Printf("📧 Email Configuration Summary:\n")
-	fmt.Printf("   SMTP Server: %s\n", smtpServer)
+	fmt.Printf("📧 Gmail Configuration Summary:\n")
+	fmt.Printf("   SMTP Server: %s (Gmail)\n", smtpServer)
 	fmt.Printf("   From Address: %s\n", smtpFrom)
-	fmt.Printf("   Username: %s\n", smtpUsername)
 	fmt.Printf("   Receivers: %v\n", receivers)
+	fmt.Println("   ⚠️  Note: Using Gmail App Password for 2FA security")
 
 	// Apply configuration to AlertManager
-	fmt.Println("🔧 Applying email configuration to AlertManager...")
+	fmt.Println("🔧 Applying Gmail configuration to AlertManager...")
 	if err := ac.UpdateEmailConfig(ctx, smtpServer, smtpFrom, smtpUsername, smtpPassword, receivers); err != nil {
 		return fmt.Errorf("failed to update AlertManager configuration: %w", err)
 	}
@@ -769,7 +777,6 @@ func resetAlertRules(ctx context.Context, ac *thanos.AlertCustomization) error {
 		}
 
 		fmt.Println("✅ Alert rules reset to default successfully")
-		fmt.Println("💡 Prometheus will reload rules automatically")
 	} else {
 		fmt.Println("❌ Reset cancelled")
 	}

@@ -104,6 +104,10 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 	// Remove trailing % character from admin password if present
 	adminPassword = strings.TrimSuffix(adminPassword, "%")
 
+	if t.deployConfig == nil {
+		return nil, fmt.Errorf("deploy configuration is not initialized")
+	}
+
 	chainName := strings.ToLower(t.deployConfig.ChainName)
 	chainName = strings.ReplaceAll(chainName, " ", "-")
 	helmReleaseName := fmt.Sprintf("monitoring-%d", time.Now().Unix())
@@ -111,6 +115,13 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 	chartsPath := fmt.Sprintf("%s/tokamak-thanos-stack/charts/monitoring", t.deploymentPath)
 	if _, err := os.Stat(chartsPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("chart directory not found: %s", chartsPath)
+	}
+
+	// Ensure K8s configuration exists with default namespace
+	if t.deployConfig.K8s == nil {
+		t.deployConfig.K8s = &types.K8sConfig{
+			Namespace: t.deployConfig.ChainName, // Use chain name as default namespace
+		}
 	}
 
 	serviceNames, err := t.getServiceNames(ctx, t.deployConfig.K8s.Namespace)
@@ -376,39 +387,8 @@ func (t *ThanosStack) generateGrafanaStorageConfig(config *types.MonitoringConfi
 // generateAlertTemplates generates common alert templates
 func (t *ThanosStack) generateAlertTemplates(grafanaURL string) map[string]string {
 	return map[string]string{
-		"email_subject": "🚨 Critical Alert - {{ .GroupLabels.chain_name }}",
-		"email_html": `<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .alert { border-left: 4px solid #dc3545; padding: 10px; margin: 10px 0; background-color: #f8f9fa; }
-        .header { color: #dc3545; font-weight: bold; margin-bottom: 15px; }
-        .info { margin: 5px 0; }
-        .timestamp { color: #6c757d; font-size: 12px; margin-top: 10px; }
-        .dashboard { margin-top: 15px; }
-        a { color: #007bff; text-decoration: none; }
-        a:hover { text-decoration: underline; }
-    </style>
-</head>
-<body>
-    <div class="alert">
-        <div class="header">🚨 Critical Alert - {{ .GroupLabels.chain_name }}</div>
-        <div class="info"><strong>Alert Name:</strong> {{ .GroupLabels.alertname }}</div>
-        <div class="info"><strong>Severity:</strong> {{ .GroupLabels.severity }}</div>
-        <div class="info"><strong>Component:</strong> {{ .GroupLabels.component }}</div>
-        <div class="info" style="margin-top: 15px;"><strong>Summary:</strong></div>
-        <div class="info">{{ .CommonAnnotations.summary }}</div>
-        <div class="info" style="margin-top: 10px;"><strong>Description:</strong></div>
-        <div class="info">{{ .CommonAnnotations.description }}</div>
-        <div class="timestamp">⏰ Alert Time: {{ range .Alerts }}{{ .StartsAt }}{{ end }}</div>
-        <div class="dashboard">
-            <strong>Dashboard:</strong> <a href="` + grafanaURL + `">View Details</a>
-        </div>
-    </div>
-</body>
-</html>`,
+		"email_subject":    "🚨 Critical Alert - {{ .GroupLabels.chain_name }}",
+		"email_message":    "🚨 Critical Alert - {{ .GroupLabels.chain_name }}\nAlert Name: {{ .GroupLabels.alertname }}\nSeverity: {{ .GroupLabels.severity }}\nComponent: {{ .GroupLabels.component }}\n\nSummary:\n{{ .CommonAnnotations.summary }}\nDescription:\n{{ .CommonAnnotations.description }}\n⏰ Alert Time: {{ range .Alerts }}{{ .StartsAt }}{{ end }}\nDashboard: View Details",
 		"telegram_message": "🚨 Critical Alert - {{ .GroupLabels.chain_name }}\n\nAlert Name: {{ .GroupLabels.alertname }}\nSeverity: {{ .GroupLabels.severity }}\nComponent: {{ .GroupLabels.component }}\n\nSummary: {{ .CommonAnnotations.summary }}\nDescription: {{ .CommonAnnotations.description }}\n\n⏰ Alert Time: {{ range .Alerts }}{{ .StartsAt }}{{ end }}\n\nDashboard: [View Details](" + grafanaURL + ")",
 	}
 }
@@ -827,7 +807,7 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *types.MonitoringC
 					"headers": map[string]string{
 						"subject": templates["email_subject"],
 					},
-					"html": templates["email_html"],
+					"text": templates["email_message"],
 				})
 			}
 		}
@@ -1053,7 +1033,7 @@ spec:
         namespace: "%s"
       annotations:
         summary: "OP Batcher ETH balance critically low"
-        description: "OP Batcher balance is {{ $value }} ETH, below 0.01 ETH threshold"
+        description: "OP Batcher balance is {{ $value }} ETH, below threshold"
     
     - alert: OpProposerBalanceCritical
       expr: op_proposer_default_balance < 0.01
@@ -1065,7 +1045,7 @@ spec:
         namespace: "%s"
       annotations:
         summary: "OP Proposer ETH balance critically low"
-        description: "OP Proposer balance is {{ $value }} ETH, below 0.01 ETH threshold"
+        description: "OP Proposer balance is {{ $value }} ETH, below threshold"
     
     - alert: BlockProductionStalled
       expr: increase(chain_head_block[5m]) == 0
@@ -1077,7 +1057,7 @@ spec:
         namespace: "%s"
       annotations:
         summary: "Block production has stalled"
-        description: "No new blocks have been produced for more than 1 minute"
+        description: "No new blocks have been produced"
     
     - alert: ContainerCpuUsageHigh
       expr: (sum(rate(container_cpu_usage_seconds_total[5m])) by (pod) / sum(container_spec_cpu_quota/container_spec_cpu_period) by (pod)) * 100 > 80
@@ -1089,7 +1069,7 @@ spec:
         namespace: "%s"
       annotations:
         summary: "High CPU usage in Thanos Stack pod"
-        description: "Pod {{ $labels.pod }} CPU usage has been above 80%% for more than 2 minutes"
+        description: "Pod {{ $labels.pod }} CPU usage has been above threshold for more than 2 minutes"
     
     - alert: ContainerMemoryUsageHigh
       expr: (sum(container_memory_working_set_bytes) by (pod) / sum(container_spec_memory_limit_bytes) by (pod)) * 100 > 80
@@ -1101,7 +1081,7 @@ spec:
         namespace: "%s"
       annotations:
         summary: "High memory usage in Thanos Stack pod"
-        description: "Pod {{ $labels.pod }} memory usage has been above 80%% for more than 2 minutes"
+        description: "Pod {{ $labels.pod }} memory usage has been above threshold for more than 2 minutes"
     
     - alert: PodCrashLooping
       expr: rate(kube_pod_container_status_restarts_total[5m]) > 0
@@ -1113,7 +1093,7 @@ spec:
         namespace: "%s"
       annotations:
         summary: "Pod is crash looping"
-        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has been restarting frequently for more than 2 minutes"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has been restarting frequently"
 `,
 		config.HelmReleaseName,
 		config.Namespace,
