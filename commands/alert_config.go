@@ -825,26 +825,3 @@ func validateTelegramInput(botToken, chatID string) error {
 
 	return nil
 }
-
-// Helper functions for rule management
-func enableRule(ctx context.Context, ac *thanos.AlertCustomization, ruleName string) error {
-	fmt.Printf("🟢 Enabling rule '%s'...\n", ruleName)
-
-	if err := ac.EnableRule(ctx, ruleName); err != nil {
-		return fmt.Errorf("failed to enable rule: %w", err)
-	}
-
-	fmt.Printf("✅ Rule '%s' enabled successfully\n", ruleName)
-	return nil
-}
-
-func disableRule(ctx context.Context, ac *thanos.AlertCustomization, ruleName string) error {
-	fmt.Printf("🔴 Disabling rule '%s'...\n", ruleName)
-
-	if err := ac.DisableRule(ctx, ruleName); err != nil {
-		return fmt.Errorf("failed to disable rule: %w", err)
-	}
-
-	fmt.Printf("✅ Rule '%s' disabled successfully\n", ruleName)
-	return nil
-}
