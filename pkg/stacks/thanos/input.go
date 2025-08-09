@@ -1672,6 +1672,27 @@ func (t *ThanosStack) cloneSourcecode(ctx context.Context, repositoryName, url s
 	return nil
 }
 
+func (t *ThanosStack) checkIfForkExists(username, token, repoName string) (bool, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s", username, repoName)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "token "+token)
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode == 200, nil
+}
+
 func (t *ThanosStack) forkRepository(username, token, repoName string) error {
 	fmt.Printf("🍴 Creating fork of %s in %s's account...\n", repoName, username)
 

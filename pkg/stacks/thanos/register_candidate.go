@@ -140,18 +140,11 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 
 	chainConfig := constants.L1ChainConfigurations[chainID.Uint64()]
 
-	file, err := os.Open(fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%s", t.deploymentPath, fmt.Sprintf("%d-deploy.json", chainID)))
-	if err != nil {
-		fmt.Println("Error opening deployment file:", err)
-		return err
-	}
+	var contracts *types.Contracts
 
-	// Decode JSON
-	var contracts types.Contracts
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&contracts); err != nil {
-		fmt.Println("Error decoding deployment JSON file:", err)
-		return err
+	contracts, err = utils.ReadDeployementConfigFromJSONFile(t.deploymentPath, t.deployConfig.L1ChainID)
+	if err != nil {
+		return fmt.Errorf("failed to read deployment config: %w", err)
 	}
 
 	privateKeyString := t.deployConfig.AdminPrivateKey
@@ -573,18 +566,11 @@ func (t *ThanosStack) GetRegistrationAdditionalInfo(ctx context.Context, registe
 		return nil, fmt.Errorf("failed to get chain ID: %w", err)
 	}
 
-	// Read deployment file to get contract addresses
-	deploymentFile := fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", t.deploymentPath, chainID)
-	file, err := os.Open(deploymentFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open deployment file: %w", err)
-	}
-	defer file.Close()
+	var contracts *types.Contracts
 
-	var contracts types.Contracts
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&contracts); err != nil {
-		return nil, fmt.Errorf("failed to decode deployment JSON: %w", err)
+	contracts, err = utils.ReadDeployementConfigFromJSONFile(t.deploymentPath, chainID.Uint64())
+	if err != nil {
+		return nil, fmt.Errorf("failed to read deployment config: %w", err)
 	}
 
 	result := &types.RegistrationAdditionalInfo{

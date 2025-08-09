@@ -44,3 +44,4 @@ logs/
 settings.json
 tokamak-thanos
 tokamak-thanos-stack
+stack-info.json
