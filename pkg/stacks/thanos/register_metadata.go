@@ -265,6 +265,7 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context) error {
 
 	branchName := fmt.Sprintf("feat/add-rollup-%s", systemConfigAddress)
 	// STEP 1. Fork the repository
+	fmt.Println("\n📋 STEP 1: Forking repository...")
 	forkExists, err := t.checkIfForkExists(creds.Username, creds.Token, MetadataRepoName)
 	if err != nil {
 		fmt.Printf("⚠️ Warning: Could not check if fork exists: %v\n", err)
@@ -281,6 +282,7 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context) error {
 	}
 
 	// STEP 2. Clone the user's forked repository locally
+	fmt.Println("\n📋 STEP 2: Cloning your forked repository...")
 	forkURL := fmt.Sprintf("https://%s:%s@github.com/%s/%s.git", creds.Username, creds.Token, creds.Username, MetadataRepoName)
 	err = t.cloneSourcecode(ctx, MetadataRepoName, forkURL)
 	if err != nil {
@@ -595,7 +597,7 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context) error {
 	validationPath := fmt.Sprintf("data/sepolia/%s.json", systemConfigAddress)
 	validationCmd := fmt.Sprintf("cd %s && npm run validate -- --pr-title \"%s\" %s", MetadataRepoName, prTitle, validationPath)
 
-	fmt.Printf("Running validation command: %s\n", validationCmd)
+	fmt.Printf("\n📋STEP 6: Running validation command: %s\n", validationCmd)
 	err = utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", validationCmd)
 	if err != nil {
 		return fmt.Errorf("metadata validation failed: %w", err)
@@ -622,6 +624,7 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context) error {
 	fmt.Println("✅ Changes committed successfully!")
 
 	// STEP 8. Push changes to user's fork
+	fmt.Println("\n📋 STEP 8: Pushing changes to your fork...")
 	err = utils.ExecuteCommandStream(ctx, t.l, "git", "-C", MetadataRepoName, "push", "origin", branchName)
 	if err != nil {
 		return fmt.Errorf("failed to push changes to fork: %w", err)
