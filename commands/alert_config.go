@@ -207,19 +207,19 @@ func handleAlertStatus(ctx context.Context) error {
 	// Define all rules with their categories
 	expectedRules := map[string]map[string]string{
 		"Core System Alerts": {
-			"OpNodeDown":     "OP Node down detection",
-			"OpBatcherDown":  "OP Batcher down detection",
-			"OpProposerDown": "OP Proposer down detection",
-			"OpGethDown":     "OP Geth down detection",
-			"L1RpcDown":      "L1 RPC connection failure",
+			constants.AlertOpNodeDown:     "OP Node down detection",
+			constants.AlertOpBatcherDown:  "OP Batcher down detection",
+			constants.AlertOpProposerDown: "OP Proposer down detection",
+			constants.AlertOpGethDown:     "OP Geth down detection",
+			constants.AlertL1RpcDown:      "L1 RPC connection failure",
 		},
 		"Configurable Alerts": {
-			"OpBatcherBalanceCritical":  "OP Batcher balance threshold",
-			"OpProposerBalanceCritical": "OP Proposer balance threshold",
-			"BlockProductionStalled":    "Block production stall detection",
-			"ContainerCpuUsageHigh":     "Container CPU usage threshold",
-			"ContainerMemoryUsageHigh":  "Container memory usage threshold",
-			"PodCrashLooping":           "Pod crash loop detection",
+			constants.AlertOpBatcherBalanceCritical:  "OP Batcher balance threshold",
+			constants.AlertOpProposerBalanceCritical: "OP Proposer balance threshold",
+			constants.AlertBlockProductionStalled:    "Block production stall detection",
+			constants.AlertContainerCpuUsageHigh:     "Container CPU usage threshold",
+			constants.AlertContainerMemoryUsageHigh:  "Container memory usage threshold",
+			constants.AlertPodCrashLooping:           "Pod crash loop detection",
 		},
 	}
 
@@ -254,12 +254,12 @@ func handleAlertStatus(ctx context.Context) error {
 			} else if !found && category == "Configurable Alerts" {
 				// Show default value for disabled configurable rules
 				defaultValues := map[string]string{
-					"OpBatcherBalanceCritical":  "0.01",
-					"OpProposerBalanceCritical": "0.01",
-					"BlockProductionStalled":    "1m",
-					"ContainerCpuUsageHigh":     "80",
-					"ContainerMemoryUsageHigh":  "80",
-					"PodCrashLooping":           "2m",
+					constants.AlertOpBatcherBalanceCritical:  "0.01",
+					constants.AlertOpProposerBalanceCritical: "0.01",
+					constants.AlertBlockProductionStalled:    "1m",
+					constants.AlertContainerCpuUsageHigh:     "80",
+					constants.AlertContainerMemoryUsageHigh:  "80",
+					constants.AlertPodCrashLooping:           "2m",
 				}
 				if defaultValue, exists := defaultValues[ruleName]; exists {
 					fmt.Printf(" (Default: %s)", defaultValue)
@@ -290,26 +290,31 @@ func handleRuleCommand(ctx context.Context, ruleAction string) error {
 func configureAlertRules(ctx context.Context, ac *thanos.AlertCustomization) error {
 	// Define rule names for easy mapping
 	ruleNames := []string{
-		"OpBatcherBalanceCritical",
-		"OpProposerBalanceCritical",
-		"BlockProductionStalled",
-		"ContainerCpuUsageHigh",
-		"ContainerMemoryUsageHigh",
-		"PodCrashLooping",
+		constants.AlertOpBatcherBalanceCritical,
+		constants.AlertOpProposerBalanceCritical,
+		constants.AlertBlockProductionStalled,
+		constants.AlertContainerCpuUsageHigh,
+		constants.AlertContainerMemoryUsageHigh,
+		constants.AlertPodCrashLooping,
 	}
 
 	fmt.Println("🔧 Alert Rules Configuration")
 	fmt.Println("============================")
 	fmt.Println()
 	fmt.Println("Available rules to configure:")
-	fmt.Println("1.  OpBatcherBalanceCritical - OP Batcher balance threshold")
-	fmt.Println("2.  OpProposerBalanceCritical - OP Proposer balance threshold")
-	fmt.Println("3.  BlockProductionStalled - Block production stall detection")
-	fmt.Println("4.  ContainerCpuUsageHigh - Container CPU usage threshold")
-	fmt.Println("5.  ContainerMemoryUsageHigh - Container memory usage threshold")
-	fmt.Println("6.  PodCrashLooping - Pod crash loop detection")
+	fmt.Printf("1.  %s - OP Batcher balance threshold\n", constants.AlertOpBatcherBalanceCritical)
+	fmt.Printf("2.  %s - OP Proposer balance threshold\n", constants.AlertOpProposerBalanceCritical)
+	fmt.Printf("3.  %s - Block production stall detection\n", constants.AlertBlockProductionStalled)
+	fmt.Printf("4.  %s - Container CPU usage threshold\n", constants.AlertContainerCpuUsageHigh)
+	fmt.Printf("5.  %s - Container memory usage threshold\n", constants.AlertContainerMemoryUsageHigh)
+	fmt.Printf("6.  %s - Pod crash loop detection\n", constants.AlertPodCrashLooping)
 	fmt.Println()
-	fmt.Println("⚠️  Note: Core system alerts (OpNodeDown, OpBatcherDown, OpProposerDown, OpGethDown, L1RpcDown)")
+	fmt.Printf("⚠️  Note: Core system alerts (%s, %s, %s, %s, %s)\n",
+		constants.AlertOpNodeDown,
+		constants.AlertOpBatcherDown,
+		constants.AlertOpProposerDown,
+		constants.AlertOpGethDown,
+		constants.AlertL1RpcDown)
 	fmt.Println("    are essential and cannot be modified to ensure system stability.")
 	fmt.Println()
 
@@ -434,19 +439,19 @@ func configureAlertRules(ctx context.Context, ac *thanos.AlertCustomization) err
 
 		// Configure based on rule type
 		switch ruleName {
-		case "OpBatcherBalanceCritical", "OpProposerBalanceCritical":
+		case constants.AlertOpBatcherBalanceCritical, constants.AlertOpProposerBalanceCritical:
 			if err := configureBalanceThreshold(ctx, ac, ruleName); err != nil {
 				fmt.Printf("❌ Failed to configure rule: %v\n", err)
 			}
-		case "BlockProductionStalled":
+		case constants.AlertBlockProductionStalled:
 			if err := configureBlockProductionStall(ctx, ac); err != nil {
 				fmt.Printf("❌ Failed to configure rule: %v\n", err)
 			}
-		case "ContainerCpuUsageHigh", "ContainerMemoryUsageHigh":
+		case constants.AlertContainerCpuUsageHigh, constants.AlertContainerMemoryUsageHigh:
 			if err := configureUsageThreshold(ctx, ac, ruleName); err != nil {
 				fmt.Printf("❌ Failed to configure rule: %v\n", err)
 			}
-		case "PodCrashLooping":
+		case constants.AlertPodCrashLooping:
 			if err := configurePodCrashLoop(ctx, ac); err != nil {
 				fmt.Printf("❌ Failed to configure rule: %v\n", err)
 			}
@@ -497,7 +502,7 @@ func configureBalanceThreshold(ctx context.Context, ac *thanos.AlertCustomizatio
 // configureBlockProductionStall configures block production stall detection time
 func configureBlockProductionStall(ctx context.Context, ac *thanos.AlertCustomization) error {
 	// Get current value
-	currentValue := ac.GetCurrentRuleValue(ctx, "BlockProductionStalled")
+	currentValue := ac.GetCurrentRuleValue(ctx, constants.AlertBlockProductionStalled)
 
 	if currentValue != "" {
 		fmt.Printf("Current detection time: %s\n", currentValue)
@@ -516,12 +521,12 @@ func configureBlockProductionStall(ctx context.Context, ac *thanos.AlertCustomiz
 		return err
 	}
 
-	fmt.Printf("🔧 Configuring BlockProductionStalled with detection time '%s'...\n", detectionTime)
-	if err := ac.UpdatePrometheusRule(ctx, "BlockProductionStalled", detectionTime); err != nil {
+	fmt.Printf("🔧 Configuring %s with detection time '%s'...\n", constants.AlertBlockProductionStalled, detectionTime)
+	if err := ac.UpdatePrometheusRule(ctx, constants.AlertBlockProductionStalled, detectionTime); err != nil {
 		return fmt.Errorf("failed to update rule: %w", err)
 	}
 
-	fmt.Printf("✅ BlockProductionStalled configured successfully with detection time %s\n", detectionTime)
+	fmt.Printf("✅ %s configured successfully with detection time %s\n", constants.AlertBlockProductionStalled, detectionTime)
 	return nil
 }
 
@@ -558,7 +563,7 @@ func configureUsageThreshold(ctx context.Context, ac *thanos.AlertCustomization,
 // configurePodCrashLoop configures pod crash loop detection time
 func configurePodCrashLoop(ctx context.Context, ac *thanos.AlertCustomization) error {
 	// Get current value
-	currentValue := ac.GetCurrentRuleValue(ctx, "PodCrashLooping")
+	currentValue := ac.GetCurrentRuleValue(ctx, constants.AlertPodCrashLooping)
 
 	if currentValue != "" {
 		fmt.Printf("Current detection time: %s\n", currentValue)
@@ -577,12 +582,12 @@ func configurePodCrashLoop(ctx context.Context, ac *thanos.AlertCustomization) e
 		return err
 	}
 
-	fmt.Printf("🔧 Configuring PodCrashLooping with detection time '%s'...\n", detectionTime)
-	if err := ac.UpdatePrometheusRule(ctx, "PodCrashLooping", detectionTime); err != nil {
+	fmt.Printf("🔧 Configuring %s with detection time '%s'...\n", constants.AlertPodCrashLooping, detectionTime)
+	if err := ac.UpdatePrometheusRule(ctx, constants.AlertPodCrashLooping, detectionTime); err != nil {
 		return fmt.Errorf("failed to update rule: %w", err)
 	}
 
-	fmt.Printf("✅ PodCrashLooping configured successfully with detection time %s\n", detectionTime)
+	fmt.Printf("✅ %s configured successfully with detection time %s\n", constants.AlertPodCrashLooping, detectionTime)
 	return nil
 }
 
