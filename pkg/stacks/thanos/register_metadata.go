@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -338,7 +339,7 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context) error {
 
 	// STEP 5. Create metadata file
 	fmt.Println("\n📋 STEP 5: Creating metadata file...")
-	if t.deployConfig.L1ChainID != 11155111 { // Sepolia chain ID
+	if t.deployConfig.L1ChainID != constants.EthereumSepoliaChainID { // Sepolia chain ID
 		return fmt.Errorf("unsupported network. Currently only Sepolia (chain ID: 11155111) is supported, got chain ID: %d", t.deployConfig.L1ChainID)
 	}
 	networkDir := fmt.Sprintf("%s/data/sepolia", MetadataRepoName)
@@ -451,16 +452,6 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context) error {
 				SupportedTokens: metadata.Bridges[0].SupportedTokens,
 			},
 		}
-	} else {
-		metadata.Bridges = []types.Bridge{
-			{
-				Name:            metadata.Bridges[0].Name,
-				Type:            metadata.Bridges[0].Type,
-				URL:             metadata.Bridges[0].URL,
-				Status:          metadata.Bridges[0].Status,
-				SupportedTokens: metadata.Bridges[0].SupportedTokens,
-			},
-		}
 	}
 
 	if stackInfo.BlockExplorer != "" {
@@ -470,15 +461,6 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context) error {
 				URL:    stackInfo.BlockExplorer,
 				Type:   metadata.Explorers[0].Type,
 				Status: "active",
-			},
-		}
-	} else {
-		metadata.Explorers = []types.Explorer{
-			{
-				Name:   metadata.Explorers[0].Name,
-				URL:    metadata.Explorers[0].URL,
-				Type:   metadata.Explorers[0].Type,
-				Status: metadata.Explorers[0].Status,
 			},
 		}
 	}

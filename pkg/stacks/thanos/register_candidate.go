@@ -356,13 +356,17 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 	// Extract candidateAddOn address from event logs
 	var candidateAddress string
 
-	// Look for the specific event topic in the logs
-	targetTopic := "0x3685763fd42e5061ff53b001782ad759eafbc93a460b368a4ce42228ec45da98"
-	for _, log := range receiptRegisterCandidate.Logs {
-		if len(log.Topics) > 0 && log.Topics[0].Hex() == targetTopic {
-			candidateAddOnBytes := log.Data[128:160]
-			candidateAddress = ethCommon.BytesToAddress(candidateAddOnBytes).Hex()
-			break
+	for _, vLog := range receiptRegisterCandidate.Logs {
+		// Check if this log is from the L2Manager contract
+		if vLog.Address == l2ManagerAddress {
+			// Try to parse as RegisteredCandidateAddOn event
+			event, err := l2ManagerContract.ParseRegisteredCandidateAddOn(*vLog)
+			if err == nil {
+				// Successfully parsed the event
+				candidateAddress = event.CandidateAddOn.Hex()
+				fmt.Printf("✅ Successfully extracted Candidate address: %s\n", candidateAddress)
+				break
+			}
 		}
 	}
 
