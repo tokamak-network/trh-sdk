@@ -104,10 +104,6 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 	// Remove trailing % character from admin password if present
 	adminPassword = strings.TrimSuffix(adminPassword, "%")
 
-	if t.deployConfig == nil {
-		return nil, fmt.Errorf("deploy configuration is not initialized")
-	}
-
 	chainName := strings.ToLower(t.deployConfig.ChainName)
 	chainName = strings.ReplaceAll(chainName, " ", "-")
 	helmReleaseName := fmt.Sprintf("monitoring-%d", time.Now().Unix())
@@ -117,11 +113,8 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 		return nil, fmt.Errorf("chart directory not found: %s", chartsPath)
 	}
 
-	// Ensure K8s configuration exists with default namespace
 	if t.deployConfig.K8s == nil {
-		t.deployConfig.K8s = &types.K8sConfig{
-			Namespace: t.deployConfig.ChainName, // Use chain name as default namespace
-		}
+		return nil, fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
 	serviceNames, err := t.getServiceNames(ctx, t.deployConfig.K8s.Namespace)
