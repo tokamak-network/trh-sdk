@@ -713,6 +713,9 @@ func (t *ThanosStack) getContractAddressFromOutput(_ context.Context, deployFile
 	// Open and read the file
 	file, err := os.Open(filePath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return make(map[string]string), nil
+		}
 		return nil, fmt.Errorf("failed to open deployment file %s: %w", filePath, err)
 	}
 	defer file.Close()
