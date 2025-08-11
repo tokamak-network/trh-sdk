@@ -3,6 +3,7 @@ package thanos
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -111,10 +112,13 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *types.Monit
 	// Install AWS CLI sidecar for log collection if logging is enabled
 	if config.LoggingEnabled {
 		logger.Info("Installing AWS CLI sidecar for log collection")
-		actualNamespace, err := t.getActualNamespace(ctx)
-		if err != nil {
-			logger.Errorw("Failed to get actual namespace", "err", err)
-			logger.Warn("Continuing without log collection")
+		ns := strings.TrimSpace(t.deployConfig.K8s.Namespace)
+		if ns == "" {
+			logger.Warn("K8s namespace is not set in deploy config. Continuing without log collection")
+		} else if exists, err := utils.CheckNamespaceExists(ctx, ns); err != nil {
+			logger.Errorw("Failed to check namespace existence", "err", err)
+		} else if !exists {
+			logger.Errorw("Namespace does not exist", "namespace", ns)
 		} else {
 			// Get logging configuration from deploy config
 			var loggingConfig *types.LoggingConfig
@@ -129,7 +133,7 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *types.Monit
 				}
 			}
 
-			if err := t.installLogCollectionSidecarDeployment(ctx, actualNamespace, loggingConfig); err != nil {
+			if err := t.installLogCollectionSidecarDeployment(ctx, ns, loggingConfig); err != nil {
 				logger.Errorw("Failed to install AWS CLI sidecar", "err", err)
 				// Continue with installation even if log collection fails
 				logger.Warn("Continuing without log collection")
@@ -146,13 +150,11 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *types.Monit
 	// Check CloudWatch Log Groups status if logging is enabled
 	if config.LoggingEnabled {
 		logger.Info("Checking CloudWatch Log Groups status")
-		actualNamespace, err := t.getActualNamespace(ctx)
-		if err != nil {
-			logger.Warnw("Failed to get actual namespace for log group check", "err", err)
-		} else {
-			if err := t.checkCloudWatchLogGroupsStatus(ctx, actualNamespace); err != nil {
-				logger.Warnw("Failed to check CloudWatch Log Groups status", "err", err)
-			}
+		ns := strings.TrimSpace(t.deployConfig.K8s.Namespace)
+		if ns == "" {
+			logger.Errorw("K8s namespace is not set in deploy config")
+		} else if err := t.checkCloudWatchLogGroupsStatus(ctx, ns); err != nil {
+			logger.Errorw("Failed to check CloudWatch Log Groups status", "err", err)
 		}
 	}
 
@@ -219,14 +221,16 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 	logger.Info("Starting monitoring uninstallation...")
 	monitoringNamespace := "monitoring"
 
-	// Get actual namespace for Thanos Stack components
-	actualNamespace, err := t.getActualNamespace(ctx)
-	if err != nil {
-		logger.Warnw("Failed to get actual namespace, will skip sidecar cleanup", "err", err)
-	} else {
+	// Use namespace from deploy config; skip sidecar cleanup if invalid
+	ns := strings.TrimSpace(t.deployConfig.K8s.Namespace)
+	if ns == "" {
+		logger.Errorw("K8s namespace is not set in deploy config")
+	} else if exists, err := utils.CheckNamespaceExists(ctx, ns); err != nil {
+		logger.Errorw("Failed to check namespace existence", "err", err)
+	} else if exists {
 		// Clean up Sidecar deployments
 		logger.Info("Cleaning up Sidecar deployments")
-		if err := t.cleanupSidecarDeployments(ctx, actualNamespace); err != nil {
+		if err := t.cleanupSidecarDeployments(ctx, ns); err != nil {
 			logger.Warnw("Failed to cleanup Sidecar deployments", "err", err)
 		}
 
@@ -305,13 +309,18 @@ func (t *ThanosStack) cleanupRBACResources(ctx context.Context) error {
 		logger.Warnw("Failed to delete ClusterRole", "err", err)
 	}
 
-	// Delete ServiceAccount from all namespaces
-	namespaces := []string{"theo0730-78s3a", "monitoring"}
-	for _, namespace := range namespaces {
-		_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "serviceaccount", "thanos-logs-sidecar", "-n", namespace, "--ignore-not-found=true")
-		if err != nil {
-			logger.Warnw("Failed to delete ServiceAccount", "namespace", namespace, "err", err)
-		}
+	// Delete ServiceAccount from the deploy-config namespace only
+	ns := ""
+	if t.deployConfig != nil && t.deployConfig.K8s != nil {
+		ns = strings.TrimSpace(t.deployConfig.K8s.Namespace)
+	}
+	if ns == "" {
+		logger.Errorw("K8s namespace is not set in deploy config")
+		return nil
+	}
+	_, err = utils.ExecuteCommand(ctx, "kubectl", "delete", "serviceaccount", "thanos-logs-sidecar", "-n", ns, "--ignore-not-found=true")
+	if err != nil {
+		logger.Warnw("Failed to delete ServiceAccount", "namespace", ns, "err", err)
 	}
 
 	return nil
@@ -443,41 +452,41 @@ func (t *ThanosStack) generateValuesFile(config *types.MonitoringConfig) error {
 
 	// Add CloudWatch Logs configuration when logging is enabled
 	if config.LoggingEnabled {
-		// Get actual namespace from deployed pods
-		actualNamespace, err := t.getActualNamespace(context.Background())
-		if err != nil {
-			actualNamespace = config.ChainName
+		// Use namespace from deploy config
+		ns := strings.TrimSpace(t.deployConfig.K8s.Namespace)
+		if ns == "" {
+			return fmt.Errorf("k8s namespace is not set in deploy config")
 		}
 
-		// Define log groups for different components using actual namespace
+		// Define log groups for different components using validated namespace
 		logGroups := []map[string]interface{}{
 			{
-				"name":        fmt.Sprintf("/aws/eks/%s/op-node", actualNamespace),
+				"name":        fmt.Sprintf("/aws/eks/%s/op-node", ns),
 				"retention":   30,
 				"description": "OP Node logs",
 			},
 			{
-				"name":        fmt.Sprintf("/aws/eks/%s/op-batcher", actualNamespace),
+				"name":        fmt.Sprintf("/aws/eks/%s/op-batcher", ns),
 				"retention":   30,
 				"description": "OP Batcher logs",
 			},
 			{
-				"name":        fmt.Sprintf("/aws/eks/%s/op-proposer", actualNamespace),
+				"name":        fmt.Sprintf("/aws/eks/%s/op-proposer", ns),
 				"retention":   30,
 				"description": "OP Proposer logs",
 			},
 			{
-				"name":        fmt.Sprintf("/aws/eks/%s/op-geth", actualNamespace),
+				"name":        fmt.Sprintf("/aws/eks/%s/op-geth", ns),
 				"retention":   30,
 				"description": "OP Geth logs",
 			},
 			{
-				"name":        fmt.Sprintf("/aws/eks/%s/blockscout", actualNamespace),
+				"name":        fmt.Sprintf("/aws/eks/%s/blockscout", ns),
 				"retention":   30,
 				"description": "BlockScout logs",
 			},
 			{
-				"name":        fmt.Sprintf("/aws/eks/%s/application", actualNamespace),
+				"name":        fmt.Sprintf("/aws/eks/%s/application", ns),
 				"retention":   30,
 				"description": "General application logs",
 			},
@@ -531,46 +540,6 @@ func (t *ThanosStack) generateValuesFile(config *types.MonitoringConfig) error {
 
 	config.ValuesFilePath = valuesFilePath
 	return nil
-}
-
-// getActualNamespace gets the actual namespace where Thanos Stack components are deployed
-func (t *ThanosStack) getActualNamespace(ctx context.Context) (string, error) {
-	// Try to find namespace by looking for Thanos Stack pods
-	cmd := exec.CommandContext(ctx, "kubectl", "get", "pods", "-A", "--no-headers", "-o", "custom-columns=NAMESPACE:.metadata.namespace")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("failed to get namespaces: %w", err)
-	}
-
-	namespaces := strings.Split(strings.TrimSpace(string(output)), "\n")
-
-	// Look for namespace containing Thanos Stack components
-	for _, namespace := range namespaces {
-		namespace = strings.TrimSpace(namespace)
-		if namespace == "" {
-			continue
-		}
-
-		// Check if this namespace contains Thanos Stack pods
-		cmd = exec.CommandContext(ctx, "kubectl", "get", "pods", "-n", namespace, "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
-		podOutput, err := cmd.Output()
-		if err != nil {
-			continue
-		}
-
-		podNames := strings.Split(strings.TrimSpace(string(podOutput)), "\n")
-		for _, podName := range podNames {
-			podName = strings.TrimSpace(podName)
-			if strings.Contains(podName, "op-node") ||
-				strings.Contains(podName, "op-geth") ||
-				strings.Contains(podName, "op-batcher") ||
-				strings.Contains(podName, "op-proposer") {
-				return namespace, nil
-			}
-		}
-	}
-
-	return "", fmt.Errorf("no Thanos Stack namespace found")
 }
 
 // createSidecarDeployments creates a unified sidecar deployment for all Thanos Stack components
@@ -1708,7 +1677,8 @@ func (t *ThanosStack) checkCloudWatchLogGroupsStatus(ctx context.Context, namesp
 
 		_, err := utils.ExecuteCommand(ctx, "aws", checkCmd...)
 		if err != nil {
-			logger.Warnw("Failed to check log group", "logGroup", logGroupName, "err", err)
+			// Lower log noise in periodic checks; keep as debug unless troubleshooting
+			logger.Infow("CloudWatch log group check failed", "logGroup", logGroupName, "err", err)
 		}
 	}
 
@@ -1798,44 +1768,44 @@ func (t *ThanosStack) verifyRetentionPolicy(ctx context.Context, namespace strin
 
 // verifyCollectionInterval verifies the actual collection interval from sidecar
 func (t *ThanosStack) verifyCollectionInterval(ctx context.Context, namespace string) error {
-	// Get sidecar pod name
-	cmd := exec.CommandContext(ctx, "kubectl", "get", "pods", "-n", namespace,
-		"-l", "app=thanos-logs-sidecar",
-		"--no-headers", "-o", "custom-columns=NAME:.metadata.name")
+	// Fetch sidecar pod via label selector
+	pods, err := utils.GetPodNamesByLabel(ctx, namespace, "app=thanos-logs-sidecar")
+	if err != nil || len(pods) == 0 {
+		return fmt.Errorf("unified sidecar pod not found")
+	}
+	podName := pods[0]
 
-	output, err := cmd.CombinedOutput()
+	// Get pod spec as JSON and extract container command/args
+	out, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pod", podName, "-n", namespace, "-o", "json")
 	if err != nil {
-		return fmt.Errorf("failed to get sidecar pod: %w", err)
+		return fmt.Errorf("failed to get sidecar pod spec: %w", err)
 	}
 
-	podName := strings.TrimSpace(string(output))
-	if podName == "" {
-		fmt.Println("❌ Unified sidecar pod not found.")
-		return nil
+	// Parse minimal JSON to locate sleep argument
+	type containerSpec struct {
+		Command []string `json:"command"`
+		Args    []string `json:"args"`
+	}
+	var podJSON struct {
+		Spec struct {
+			Containers []containerSpec `json:"containers"`
+		} `json:"spec"`
+	}
+	if err := json.Unmarshal([]byte(out), &podJSON); err != nil {
+		return fmt.Errorf("failed to parse pod json: %w", err)
 	}
 
-	// Extract sleep value from the command
-	commandStr := string(output)
-	if strings.Contains(commandStr, "sleep") {
-		// Look for sleep pattern in the command
-		sleepPattern := regexp.MustCompile(`sleep\s+(\d+)`)
-		matches := sleepPattern.FindStringSubmatch(commandStr)
-		if len(matches) > 1 {
-			interval := matches[1]
-			fmt.Printf("✅ Collection Interval: %s seconds\n", interval)
-		} else {
-			fmt.Printf("❌ Could not extract sleep interval from pod command\n")
+	// Search sleep value in command or args
+	sleepRe := regexp.MustCompile(`\bsleep\s+(\d+)\b`)
+	for _, c := range podJSON.Spec.Containers {
+		joined := strings.Join(append(c.Command, c.Args...), " ")
+		if m := sleepRe.FindStringSubmatch(joined); len(m) > 1 {
+			fmt.Printf("✅ Collection Interval: %s seconds\n", m[1])
+			return nil
 		}
-	} else {
-		fmt.Printf("❌ Sleep command not found in pod\n")
 	}
-
+	fmt.Printf("❌ Could not extract sleep interval from sidecar command\n")
 	return nil
-}
-
-// GetActualNamespace returns the actual namespace where components are deployed
-func (t *ThanosStack) GetActualNamespace(ctx context.Context) (string, error) {
-	return t.getActualNamespace(ctx)
 }
 
 // GetDeployConfig returns the deploy configuration

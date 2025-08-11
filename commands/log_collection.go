@@ -61,10 +61,13 @@ func ActionLogCollection() cli.ActionFunc {
 		}
 
 		// Load current configuration
-		config, err := loadCurrentConfig(deploymentPath)
+		config, err := utils.ReadConfigFromJSONFile(deploymentPath)
 		if err != nil {
 			logger.Errorw("Failed to load current config", "err", err)
 			return err
+		}
+		if config == nil {
+			return fmt.Errorf("no configuration found. Please run 'trh-sdk deploy' first")
 		}
 
 		// Initialize ThanosStack
@@ -144,25 +147,21 @@ func ActionLogCollection() cli.ActionFunc {
 			hasChanges = true
 		}
 
-		// Save updated configuration to settings.json
+		// Save and apply changes
 		if hasChanges {
-			if err := config.WriteToJSONFile("."); err != nil {
+			if err := config.WriteToJSONFile(deploymentPath); err != nil {
 				logger.Errorw("Failed to save configuration", "err", err)
 				return fmt.Errorf("failed to save configuration: %w", err)
 			}
 			logger.Info("✅ Configuration saved to settings.json")
-		}
 
-		// Apply changes to running monitoring plugin
-		if hasChanges {
 			logger.Info("Applying logging configuration changes...")
-
 			if err := UpdateLoggingConfig(ctx, thanosStack, logger, config.LoggingConfig); err != nil {
 				logger.Errorw("Failed to update logging configuration", "err", err)
 				return fmt.Errorf("failed to update logging configuration: %w", err)
 			}
-
 			logger.Info("✅ Logging configuration applied successfully!")
+			return nil
 		}
 
 		// Show help if no valid command
@@ -186,18 +185,6 @@ func ActionLogCollection() cli.ActionFunc {
 }
 
 // loadCurrentConfig loads the current configuration from settings.json
-func loadCurrentConfig(deploymentPath string) (*types.Config, error) {
-	config, err := utils.ReadConfigFromJSONFile(deploymentPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load configuration: %w", err)
-	}
-
-	if config == nil {
-		return nil, fmt.Errorf("no configuration found. Please run 'trh-sdk deploy' first")
-	}
-
-	return config, nil
-}
 
 // handleLogConfigShow displays current logging configuration
 func handleLogConfigShow() error {
@@ -206,9 +193,12 @@ func handleLogConfigShow() error {
 		return fmt.Errorf("failed to get current directory: %w", err)
 	}
 
-	config, err := loadCurrentConfig(deploymentPath)
+	config, err := utils.ReadConfigFromJSONFile(deploymentPath)
 	if err != nil {
 		return err
+	}
+	if config == nil {
+		return fmt.Errorf("no configuration found. Please run 'trh-sdk deploy' first")
 	}
 
 	if config.LoggingConfig == nil {
@@ -236,10 +226,16 @@ func handleLogConfigShow() error {
 
 // UpdateLoggingConfig updates the logging configuration for the monitoring stack
 func UpdateLoggingConfig(ctx context.Context, thanosStack *thanos.ThanosStack, logger *zap.SugaredLogger, loggingConfig *types.LoggingConfig) error {
-	// Get actual namespace where Thanos Stack components are deployed
-	actualNamespace, err := thanosStack.GetActualNamespace(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get actual namespace: %w", err)
+	// Resolve namespace from deploy config and validate existence
+	deployCfg := thanosStack.GetDeployConfig()
+	if deployCfg == nil || deployCfg.K8s == nil || strings.TrimSpace(deployCfg.K8s.Namespace) == "" {
+		return fmt.Errorf("k8s namespace is not configured in settings.json")
+	}
+	namespace := strings.TrimSpace(deployCfg.K8s.Namespace)
+	if ok, err := utils.CheckNamespaceExists(ctx, namespace); err != nil {
+		return fmt.Errorf("failed to check namespace existence: %w", err)
+	} else if !ok {
+		return fmt.Errorf("namespace does not exist: %s", namespace)
 	}
 
 	// Use the provided loggingConfig if available, otherwise fall back to deploy config
@@ -263,18 +259,17 @@ func UpdateLoggingConfig(ctx context.Context, thanosStack *thanos.ThanosStack, l
 			loggingConfig.Enabled, loggingConfig.CloudWatchRetention, loggingConfig.CollectionInterval)
 	}
 
-	// Check if sidecar is already running
-	cmd := exec.Command("kubectl", "get", "pods", "-n", actualNamespace,
-		"-l", "app=thanos-logs-sidecar",
-		"--no-headers", "-o", "custom-columns=NAME:.metadata.name")
-
-	output, err := cmd.CombinedOutput()
-	sidecarRunning := err == nil && strings.TrimSpace(string(output)) != ""
+	// Check if sidecar is already running (use kubectl util)
+	pods, err := utils.GetPodNamesByLabel(ctx, namespace, "app=thanos-logs-sidecar")
+	if err != nil {
+		logger.Warnw("Failed to list sidecar pods", "err", err)
+	}
+	sidecarRunning := len(pods) > 0
 
 	if loggingConfig.Enabled {
 		if !sidecarRunning {
 			// Sidecar is not running, install it
-			if err := thanosStack.InstallLogCollectionSidecar(ctx, actualNamespace, loggingConfig); err != nil {
+			if err := thanosStack.InstallLogCollectionSidecar(ctx, namespace, loggingConfig); err != nil {
 				return fmt.Errorf("failed to install new sidecar deployments: %w", err)
 			}
 		} else {
@@ -282,26 +277,26 @@ func UpdateLoggingConfig(ctx context.Context, thanosStack *thanos.ThanosStack, l
 
 			// Update retention policy if changed
 			if loggingConfig.CloudWatchRetention > 0 {
-				if err := thanosStack.UpdateRetentionPolicy(ctx, actualNamespace, loggingConfig.CloudWatchRetention); err != nil {
+				if err := thanosStack.UpdateRetentionPolicy(ctx, namespace, loggingConfig.CloudWatchRetention); err != nil {
 					logger.Warnw("Failed to update retention policy", "err", err)
 				} else {
-					fmt.Println("✅ Retention policy updated successfully")
+					logger.Info("✅ Retention policy updated successfully")
 				}
 			}
 
 			// Update collection interval if changed
 			if loggingConfig.CollectionInterval > 0 {
-				if err := thanosStack.UpdateCollectionInterval(ctx, actualNamespace, loggingConfig.CollectionInterval); err != nil {
+				if err := thanosStack.UpdateCollectionInterval(ctx, namespace, loggingConfig.CollectionInterval); err != nil {
 					logger.Warnw("Failed to update collection interval", "err", err)
 				} else {
-					fmt.Println("✅ Collection interval updated successfully")
+					logger.Info("✅ Collection interval updated successfully")
 				}
 			}
 		}
 	} else {
 		// Disable logging - remove sidecar
 		if sidecarRunning {
-			if err := thanosStack.CleanupSidecarDeployments(ctx, actualNamespace); err != nil {
+			if err := thanosStack.CleanupSidecarDeployments(ctx, namespace); err != nil {
 				logger.Warnw("Failed to cleanup existing sidecar deployments", "err", err)
 			}
 			if err := thanosStack.CleanupRBACResources(ctx); err != nil {
@@ -323,17 +318,7 @@ func UpdateLoggingConfig(ctx context.Context, thanosStack *thanos.ThanosStack, l
 		return fmt.Errorf("failed to generate values file: %w", err)
 	}
 
-	// // Verify the changes
-	// if loggingConfig.Enabled && sidecarRunning {
-	// 	if err := thanosStack.VerifyRetentionPolicy(ctx, actualNamespace); err != nil {
-	// 		logger.Warnw("Failed to verify retention policy", "err", err)
-	// 	}
-	// 	if err := thanosStack.VerifyCollectionInterval(ctx, actualNamespace); err != nil {
-	// 		logger.Warnw("Failed to verify collection interval", "err", err)
-	// 	}
-	// }
-
-	fmt.Printf("✅ Logging configuration updated successfully\n")
+	logger.Info("✅ Logging configuration updated successfully")
 	return nil
 }
 
@@ -341,11 +326,17 @@ func UpdateLoggingConfig(ctx context.Context, thanosStack *thanos.ThanosStack, l
 func handleLogDownload(ctx context.Context, thanosStack *thanos.ThanosStack, logger *zap.SugaredLogger, component, hours, minutes, keyword string) error {
 	logger.Info("📥 Starting log download...")
 
-	// Get actual namespace
-	actualNamespace, err := thanosStack.GetActualNamespace(ctx)
-	if err != nil {
-		logger.Errorw("Failed to get actual namespace", "err", err)
-		return fmt.Errorf("failed to get actual namespace: %w", err)
+	// Resolve namespace from deploy config and validate existence
+	deployCfg := thanosStack.GetDeployConfig()
+	if deployCfg == nil || deployCfg.K8s == nil || strings.TrimSpace(deployCfg.K8s.Namespace) == "" {
+		return fmt.Errorf("k8s namespace is not configured in settings.json")
+	}
+	namespace := strings.TrimSpace(deployCfg.K8s.Namespace)
+	if ok, err := utils.CheckNamespaceExists(ctx, namespace); err != nil {
+		logger.Errorw("Failed to check namespace existence", "err", err)
+		return fmt.Errorf("failed to check namespace existence: %w", err)
+	} else if !ok {
+		return fmt.Errorf("namespace does not exist: %s", namespace)
 	}
 
 	// Validate component
@@ -382,13 +373,13 @@ func handleLogDownload(ctx context.Context, thanosStack *thanos.ThanosStack, log
 	if component == "all" || component == "" {
 		// Download logs for all components
 		for _, comp := range []string{"op-node", "op-geth", "op-batcher", "op-proposer"} {
-			if err := downloadComponentLogs(ctx, logger, actualNamespace, comp, duration, keyword, downloadDir); err != nil {
+			if err := downloadComponentLogs(ctx, logger, namespace, comp, duration, keyword, downloadDir); err != nil {
 				logger.Warnw("Failed to download logs for component", "component", comp, "err", err)
 			}
 		}
 	} else {
 		// Download logs for specific component
-		if err := downloadComponentLogs(ctx, logger, actualNamespace, component, duration, keyword, downloadDir); err != nil {
+		if err := downloadComponentLogs(ctx, logger, namespace, component, duration, keyword, downloadDir); err != nil {
 			logger.Errorw("Failed to download logs", "component", component, "err", err)
 			return err
 		}
@@ -456,7 +447,7 @@ func downloadComponentLogs(ctx context.Context, logger *zap.SugaredLogger, names
 
 // getPodName gets the pod name for a specific component
 func getPodName(ctx context.Context, namespace, component string) (string, error) {
-	// Try different label patterns for finding the pod
+	// Try label selectors to find the pod name
 	labelPatterns := []string{
 		fmt.Sprintf("app=%s", component),
 		fmt.Sprintf("app=%s-%s", namespace, component),
@@ -464,33 +455,22 @@ func getPodName(ctx context.Context, namespace, component string) (string, error
 	}
 
 	for _, pattern := range labelPatterns {
-		cmd := exec.Command("kubectl", "get", "pods", "-n", namespace,
-			"-l", pattern,
-			"--no-headers", "-o", "custom-columns=NAME:.metadata.name")
-
-		output, err := cmd.CombinedOutput()
-		if err == nil && strings.TrimSpace(string(output)) != "" {
-			podName := strings.TrimSpace(string(output))
-			return podName, nil
+		pods, err := utils.GetPodNamesByLabel(ctx, namespace, pattern)
+		if err == nil && len(pods) > 0 {
+			return pods[0], nil
 		}
 	}
 
-	// If no pod found with labels, try to find by name pattern
-	cmd := exec.Command("kubectl", "get", "pods", "-n", namespace,
-		"--no-headers", "-o", "custom-columns=NAME:.metadata.name")
-
-	output, err := cmd.CombinedOutput()
+	// Fallback: scan all pods and match by substring
+	allPods, err := utils.GetK8sPods(ctx, namespace)
 	if err != nil {
-		return "", fmt.Errorf("failed to get pods for %s: %w", component, err)
+		return "", fmt.Errorf("failed to list pods in namespace %s: %w", namespace, err)
 	}
-
-	podNames := strings.Split(strings.TrimSpace(string(output)), "\n")
-	for _, podName := range podNames {
-		if strings.Contains(podName, component) {
-			return strings.TrimSpace(podName), nil
+	for _, pod := range allPods {
+		if strings.Contains(pod, component) {
+			return pod, nil
 		}
 	}
-
 	return "", fmt.Errorf("no pod found for component: %s", component)
 }
 
