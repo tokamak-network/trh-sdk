@@ -258,15 +258,15 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 				continue
 			}
 
-			if !strings.HasPrefix(privateKey, "0x") {
-				privateKey = "0x" + privateKey
-			}
-
 			// Validate this private key is valid
 			privateKeyECDSA, err := crypto.HexToECDSA(privateKey)
 			if err != nil {
 				fmt.Println("Invalid private key: ", err)
 				continue
+			}
+
+			if !strings.HasPrefix(privateKey, "0x") {
+				privateKey = "0x" + privateKey
 			}
 
 			address := crypto.PubkeyToAddress(privateKeyECDSA.PublicKey)
