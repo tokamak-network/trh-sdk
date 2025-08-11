@@ -94,7 +94,7 @@ type SvcJSON struct {
 				Name       string `json:"name"`
 				Port       int    `json:"port"`
 				Protocol   string `json:"protocol"`
-				TargetPort int    `json:"targetPort"`
+				TargetPort any    `json:"targetPort"`
 			} `json:"ports"`
 			Selector struct {
 				AppKubernetesIoInstance string `json:"app.kubernetes.io/instance"`
@@ -134,6 +134,13 @@ func getK8sPods(ctx context.Context, namespace string) (string, error) {
 	return ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pods", "-o", "json")
 }
 
+func getK8sPodsByLabel(ctx context.Context, namespace string, labelSelector string) (string, error) {
+	if strings.TrimSpace(labelSelector) == "" {
+		return "", fmt.Errorf("labelSelector must not be empty")
+	}
+	return ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pods", "-l", labelSelector, "-o", "json")
+}
+
 func GetK8sPods(ctx context.Context, namespace string) ([]string, error) {
 	output, err := getK8sPods(ctx, namespace)
 	if err != nil {
@@ -171,6 +178,29 @@ func GetPodsByName(ctx context.Context, namespace string, podName string) ([]str
 			continue
 		}
 		if strings.HasPrefix(item.Metadata.Name, podName) {
+			pods = append(pods, item.Metadata.Name)
+		}
+	}
+	return pods, nil
+}
+
+// GetPodNamesByLabel returns pod names filtered by the given label selector in a namespace
+func GetPodNamesByLabel(ctx context.Context, namespace string, labelSelector string) ([]string, error) {
+	output, err := getK8sPodsByLabel(ctx, namespace, labelSelector)
+	if err != nil {
+		return nil, err
+	}
+
+	var podData PodsJSON
+	if err := json.Unmarshal([]byte(output), &podData); err != nil {
+		fmt.Println("Error parsing JSON:", err)
+		return nil, err
+	}
+
+	allowed := map[string]bool{"Running": true, "Pending": true, "Succeeded": true}
+	pods := make([]string, 0, len(podData.Items))
+	for _, item := range podData.Items {
+		if allowed[item.Status.Phase] {
 			pods = append(pods, item.Metadata.Name)
 		}
 	}

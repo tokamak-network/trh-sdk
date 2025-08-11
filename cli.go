@@ -215,6 +215,90 @@ func Run() {
 				Action: commands.ActionAlertConfig(),
 			},
 			{
+				Name:  "log-collection",
+				Usage: "Manage CloudWatch logging settings and download logs",
+				Description: `Manage CloudWatch logging settings and download logs for AWS CLI sidecar log collection.
+
+Options:
+  --enable                    Enable CloudWatch log collection
+  --disable                   Disable CloudWatch log collection
+  --retention <days>          Set CloudWatch log retention period in days (e.g., 7, 30, 90)
+  --interval <seconds>        Set log collection interval in seconds (e.g., 30, 60, 120)
+  --show                      Show current logging configuration
+
+Subcommand Download Options:
+  --download                  Download logs from running components
+  --component <name>          Component to download logs from (op-node, op-geth, op-batcher, op-proposer, all)
+  --hours <number>            Number of hours to look back for logs
+  --minutes <number>          Number of minutes to look back for logs
+  --keyword <text>            Keyword to filter logs (case-insensitive)
+
+Examples:
+  # Log configuration
+  trh-sdk log-collection --enable
+  trh-sdk log-collection --retention 30
+  trh-sdk log-collection --interval 60
+  trh-sdk log-collection --show
+
+  # Log download from running components
+  trh-sdk log-collection --download --component op-node --hours 7
+  trh-sdk log-collection --download --component all --hours 24 --keyword error
+  trh-sdk log-collection --download --component op-geth --minutes 30 --keyword warning
+
+  # Apply all settings at once
+  trh-sdk log-collection --enable --retention 90 --interval 60`,
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:  "enable",
+						Usage: "Enable CloudWatch log collection",
+					},
+					&cli.BoolFlag{
+						Name:  "disable",
+						Usage: "Disable CloudWatch log collection",
+					},
+					&cli.StringFlag{
+						Name:  "retention",
+						Usage: "CloudWatch log retention period in days (e.g., 7, 30, 90)",
+						Value: "",
+					},
+					&cli.StringFlag{
+						Name:  "interval",
+						Usage: "Log collection interval in seconds (e.g., 30, 60, 120)",
+						Value: "",
+					},
+					&cli.BoolFlag{
+						Name:  "show",
+						Usage: "Show current logging configuration",
+					},
+					&cli.BoolFlag{
+						Name:  "download",
+						Usage: "Download logs from running components",
+					},
+
+					&cli.StringFlag{
+						Name:  "component",
+						Usage: "Component to download logs from (op-node, op-geth, op-batcher, op-proposer, all)",
+						Value: "",
+					},
+					&cli.StringFlag{
+						Name:  "hours",
+						Usage: "Number of hours to look back for logs",
+						Value: "",
+					},
+					&cli.StringFlag{
+						Name:  "minutes",
+						Usage: "Number of minutes to look back for logs",
+						Value: "",
+					},
+					&cli.StringFlag{
+						Name:  "keyword",
+						Usage: "Keyword to filter logs (case-insensitive)",
+						Value: "",
+					},
+				},
+				Action: commands.ActionLogCollection(),
+			},
+			{
 				Name:   "register-metadata",
 				Usage:  "Register L2 Metadata",
 				Action: commands.ActionRegisterMetadata(),

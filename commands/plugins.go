@@ -125,6 +125,18 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							}
 							return nil
 						case constants.PluginMonitoring:
+							// Check if monitoring namespace already exists
+							exists, err := utils.CheckNamespaceExists(ctx, "monitoring")
+							if err != nil {
+								fmt.Printf("Error checking monitoring namespace: %v\n", err)
+								return err
+							}
+
+							if exists {
+								fmt.Println("✅ Monitoring plugin is already installed")
+								return nil
+							}
+
 							// Get monitoring configuration
 							installMonitoringInput, err := thanos.InputInstallMonitoring()
 							if err != nil || installMonitoringInput == nil {
@@ -137,7 +149,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 								return fmt.Errorf("invalid monitoring configuration: %w", err)
 							}
 
-							config, err := thanosStack.GetMonitoringConfig(ctx, installMonitoringInput.AdminPassword, installMonitoringInput.AlertManager)
+							config, err := thanosStack.GetMonitoringConfig(ctx, installMonitoringInput.AdminPassword, installMonitoringInput.AlertManager, installMonitoringInput.LoggingEnabled)
 							if err != nil {
 								return fmt.Errorf("failed to get monitoring configuration: %w", err)
 							}
