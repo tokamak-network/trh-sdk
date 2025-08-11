@@ -1753,7 +1753,7 @@ func (t *ThanosStack) verifyRetentionPolicy(ctx context.Context, namespace strin
 			"--output", "text")
 
 		if _, err := cmd.CombinedOutput(); err != nil {
-			fmt.Printf("❌ %s: Verification failed\n", component)
+			t.getLogger().Errorw("Verification failed", "component", component)
 		}
 	}
 
@@ -1794,11 +1794,11 @@ func (t *ThanosStack) verifyCollectionInterval(ctx context.Context, namespace st
 	for _, c := range podJSON.Spec.Containers {
 		joined := strings.Join(append(c.Command, c.Args...), " ")
 		if m := sleepRe.FindStringSubmatch(joined); len(m) > 1 {
-			fmt.Printf("✅ Collection Interval: %s seconds\n", m[1])
+			t.getLogger().Infow("Collection Interval", "interval", m[1])
 			return nil
 		}
 	}
-	fmt.Printf("❌ Could not extract sleep interval from sidecar command\n")
+	t.getLogger().Errorw("Could not extract sleep interval from sidecar command")
 	return nil
 }
 
