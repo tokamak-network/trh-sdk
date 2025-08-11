@@ -94,7 +94,7 @@ type SvcJSON struct {
 				Name       string `json:"name"`
 				Port       int    `json:"port"`
 				Protocol   string `json:"protocol"`
-				TargetPort string `json:"targetPort"`
+				TargetPort any    `json:"targetPort"`
 			} `json:"ports"`
 			Selector struct {
 				AppKubernetesIoInstance string `json:"app.kubernetes.io/instance"`
