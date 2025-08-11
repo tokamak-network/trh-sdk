@@ -97,3 +97,26 @@ func UninstallHelmRelease(ctx context.Context, namespace string, releaseName str
 	}
 	return nil
 }
+
+// CheckMonitoringPluginInstalled checks if monitoring plugin is installed
+func CheckMonitoringPluginInstalled(ctx context.Context) error {
+	// Check if monitoring namespace exists
+	exists, err := CheckNamespaceExists(ctx, "monitoring")
+	if err != nil {
+		return fmt.Errorf("failed to check monitoring namespace: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("monitoring plugin is not installed. Please install it first with 'trh-sdk install monitoring'")
+	}
+
+	// Check if monitoring release exists
+	releases, err := GetHelmReleases(ctx, "monitoring")
+	if err != nil {
+		return fmt.Errorf("failed to check monitoring releases: %w", err)
+	}
+	if len(releases) == 0 {
+		return fmt.Errorf("monitoring plugin is not installed. Please install it first with 'trh-sdk install monitoring'")
+	}
+
+	return nil
+}
