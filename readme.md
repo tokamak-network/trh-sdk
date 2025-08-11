@@ -178,30 +178,21 @@ After deploying the chain successfully, we can get the chain information by:
 trh-sdk info
 ```
 
-### Alert Configuration
+## Monitoring Plugin
 
-The SDK provides comprehensive alert configuration capabilities for monitoring your Thanos Stack deployment.
+The Monitoring plugin provides comprehensive monitoring, alerting and log collection capabilities for the Thanos Stack. For detailed documentation on monitoring features, including alert customization and log collection management, see the [Monitoring Plugin Documentation](docs/monitoring.md).
 
-#### Quick Start
+### Quick Start
 ```bash
-# Check current alert status
-trh-sdk alert-config --status
+# Install monitoring plugin
+trh-sdk install monitoring
 
-# Configure email alerts
-trh-sdk alert-config --channel email --configure
+# Configure alerts
+trh-sdk alert-config --${flag}
 
-# Configure telegram alerts  
-trh-sdk alert-config --channel telegram --configure
+# Manage log collection
+trh-sdk log-collection --${flag}
 
-# Configure alert rules interactively
-trh-sdk alert-config --rule set
-
-# Reset all rules to default values
-trh-sdk alert-config --rule reset
+# Uninstall monitoring plugin
+trh-sdk uninstall monitoring
 ```
-
-#### Features
-- **Email & Telegram Notifications**: Set up multiple notification channels
-- **Configurable Alert Rules**: Adjust thresholds for balance, CPU, memory, and more
-- **Interactive Configuration**: User-friendly command-line interface
-- **Status Monitoring**: Real-time alert status and configuration details

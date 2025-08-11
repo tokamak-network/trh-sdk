@@ -2,21 +2,27 @@ package types
 
 // MonitoringConfig holds all configuration needed for monitoring installation
 type MonitoringConfig struct {
-	Namespace         string
-	HelmReleaseName   string
-	AdminPassword     string
-	L1RpcUrl          string
-	ServiceNames      map[string]string
+	// Basic configuration
+	Namespace       string
+	HelmReleaseName string
+	ChainName       string
+	AdminPassword   string
+	L1RpcUrl        string
+	ServiceNames    map[string]string
+
+	// Storage configuration
 	EnablePersistence bool
 	EFSFileSystemId   string
 	ChartsPath        string
 	ValuesFilePath    string
 	ResourceName      string
-	ChainName         string
+
 	// AlertManager configuration
 	AlertManager AlertManagerConfig
-	// Alert rules configuration
-	AlertRules map[string]AlertRule
+	AlertRules   map[string]AlertRule
+
+	// Logging enabled flag
+	LoggingEnabled bool
 }
 
 // AlertManagerConfig holds alertmanager-specific configuration

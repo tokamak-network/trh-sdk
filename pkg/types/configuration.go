@@ -126,6 +126,15 @@ type Config struct {
 
 	// Deployments
 	DeployContractState *DeployContractState `json:"deploy_contract_state"`
+
+	// Logging configuration
+	LoggingConfig *LoggingConfig `json:"logging_config,omitempty"`
+}
+
+type LoggingConfig struct {
+	Enabled             bool `json:"enabled"`
+	CloudWatchRetention int  `json:"cloudwatch_retention,omitempty"` // CloudWatch log retention period (days)
+	CollectionInterval  int  `json:"collection_interval,omitempty"`  // Log collection interval (seconds)
 }
 
 const ConfigFileName = "settings.json"

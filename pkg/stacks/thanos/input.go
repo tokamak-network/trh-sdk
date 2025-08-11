@@ -110,8 +110,9 @@ type InstallBlockExplorerInput struct {
 }
 
 type InstallMonitoringInput struct {
-	AdminPassword string
-	AlertManager  types.AlertManagerConfig
+	AdminPassword  string
+	AlertManager   types.AlertManagerConfig
+	LoggingEnabled bool
 }
 
 // Validate validates the InstallMonitoringInput
@@ -650,9 +651,21 @@ func InputInstallMonitoring() (*InstallMonitoringInput, error) {
 	// Get AlertManager configuration from user input
 	alertManagerConfig := getAlertManagerConfigFromUser()
 
+	// Prompt for logging usage (default: y)
+
+	// Prompt for logging usage
+	fmt.Print("Would you like to enable log collection? (y/n): ")
+	loggingInput, err := scanner.ScanString()
+	if err != nil {
+		fmt.Printf("Error while reading log collection choice: %s\n", err)
+		return nil, err
+	}
+	loggingEnabled := strings.ToLower(strings.TrimSpace(loggingInput)) == "y"
+
 	return &InstallMonitoringInput{
-		AdminPassword: adminPassword,
-		AlertManager:  alertManagerConfig,
+		AdminPassword:  adminPassword,
+		AlertManager:   alertManagerConfig,
+		LoggingEnabled: loggingEnabled,
 	}, nil
 }
 
