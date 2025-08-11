@@ -184,8 +184,6 @@ func ActionLogCollection() cli.ActionFunc {
 	}
 }
 
-// loadCurrentConfig loads the current configuration from settings.json
-
 // handleLogConfigShow displays current logging configuration
 func handleLogConfigShow() error {
 	deploymentPath, err := os.Getwd()

@@ -1403,6 +1403,7 @@ func (t *ThanosStack) createPrometheusRule(ctx context.Context, config *types.Mo
 
 // cleanupExistingPrometheusRules removes all PrometheusRules except thanos-stack-alerts
 func (t *ThanosStack) cleanupExistingPrometheusRules(ctx context.Context, config *types.MonitoringConfig) error {
+	logger := t.getLogger()
 	// Get all PrometheusRules in the monitoring namespace
 	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", config.Namespace, "-o", "jsonpath={.items[*].metadata.name}")
 	if err != nil {
@@ -1430,7 +1431,7 @@ func (t *ThanosStack) cleanupExistingPrometheusRules(ctx context.Context, config
 		if err != nil {
 			// Continue with other rules even if one fails
 			// Log the error but don't fail the entire operation
-			t.getLogger().Warnw("Failed to delete PrometheusRule", "rule", ruleName, "err", err)
+			logger.Warnw("Failed to delete PrometheusRule", "rule", ruleName, "err", err)
 		}
 	}
 
@@ -1741,6 +1742,7 @@ func (t *ThanosStack) updateCollectionInterval(ctx context.Context, namespace st
 
 // verifyRetentionPolicy verifies the actual retention policy of CloudWatch Log Groups
 func (t *ThanosStack) verifyRetentionPolicy(ctx context.Context, namespace string) error {
+	logger := t.getLogger()
 	components := CoreComponents
 
 	for _, component := range components {
@@ -1753,7 +1755,7 @@ func (t *ThanosStack) verifyRetentionPolicy(ctx context.Context, namespace strin
 			"--output", "text")
 
 		if _, err := cmd.CombinedOutput(); err != nil {
-			fmt.Printf("❌ %s: Verification failed\n", component)
+			logger.Errorw("Verification failed", "component", component)
 		}
 	}
 
@@ -1762,6 +1764,7 @@ func (t *ThanosStack) verifyRetentionPolicy(ctx context.Context, namespace strin
 
 // verifyCollectionInterval verifies the actual collection interval from sidecar
 func (t *ThanosStack) verifyCollectionInterval(ctx context.Context, namespace string) error {
+	logger := t.getLogger()
 	// Fetch sidecar pod via label selector
 	pods, err := utils.GetPodNamesByLabel(ctx, namespace, "app=thanos-logs-sidecar")
 	if err != nil || len(pods) == 0 {
@@ -1794,11 +1797,11 @@ func (t *ThanosStack) verifyCollectionInterval(ctx context.Context, namespace st
 	for _, c := range podJSON.Spec.Containers {
 		joined := strings.Join(append(c.Command, c.Args...), " ")
 		if m := sleepRe.FindStringSubmatch(joined); len(m) > 1 {
-			fmt.Printf("✅ Collection Interval: %s seconds\n", m[1])
+			logger.Infow("Collection Interval", "interval", m[1])
 			return nil
 		}
 	}
-	fmt.Printf("❌ Could not extract sleep interval from sidecar command\n")
+	logger.Errorw("Could not extract sleep interval from sidecar command")
 	return nil
 }
 
