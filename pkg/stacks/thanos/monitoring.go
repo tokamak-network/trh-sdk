@@ -180,11 +180,8 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 		return nil, fmt.Errorf("chart directory not found: %s", chartsPath)
 	}
 
-	// Ensure K8s configuration exists with default namespace
 	if t.deployConfig.K8s == nil {
-		t.deployConfig.K8s = &types.K8sConfig{
-			Namespace: t.deployConfig.ChainName, // Use chain name as default namespace
-		}
+		return nil, fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
 	serviceNames, err := t.getServiceNames(ctx, t.deployConfig.K8s.Namespace)
@@ -408,11 +405,8 @@ func (t *ThanosStack) generateValuesFile(config *types.MonitoringConfig) error {
 		return fmt.Errorf("deploy configuration is not properly initialized")
 	}
 
-	// Ensure K8s configuration exists with default namespace
 	if t.deployConfig.K8s == nil {
-		t.deployConfig.K8s = &types.K8sConfig{
-			Namespace: t.deployConfig.ChainName, // Use chain name as default namespace
-		}
+		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
 	valuesConfig := map[string]interface{}{
