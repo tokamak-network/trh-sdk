@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
@@ -230,6 +231,10 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 	l2ChainConfigs := make([]*L2CrossTradeChainInput, 0)
 	// Get current running L2 chain
 	l2RPC := t.deployConfig.L2RpcUrl
+	l2RpcClient, err := ethclient.Dial(l2RPC)
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial RPC URL: %w", err)
+	}
 	l2ChainID := t.deployConfig.L2ChainID
 
 	fmt.Println("=== Your L2 Chain Configuration ===")
@@ -241,17 +246,42 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 
 	var privateKey string
 	if deployNewL2 {
-		fmt.Print("Please enter the private key: ")
-		privateKey, err = scanner.ScanString()
-		if err != nil {
-			return nil, fmt.Errorf("failed to read L2 private key: %w", err)
-		}
-		if privateKey == "" {
-			return nil, fmt.Errorf("L2 private key cannot be empty")
-		}
+		for {
+			fmt.Print("Please enter the private key: ")
+			privateKey, err = scanner.ScanString()
+			if err != nil {
+				fmt.Println("Failed to read L2 private key: ", err)
+				continue
+			}
+			if privateKey == "" {
+				fmt.Println("L2 private key cannot be empty")
+				continue
+			}
 
-		if !strings.HasPrefix(privateKey, "0x") {
-			privateKey = "0x" + privateKey
+			if !strings.HasPrefix(privateKey, "0x") {
+				privateKey = "0x" + privateKey
+			}
+
+			// Validate this private key is valid
+			privateKeyECDSA, err := crypto.HexToECDSA(privateKey)
+			if err != nil {
+				fmt.Println("Invalid private key: ", err)
+				continue
+			}
+
+			address := crypto.PubkeyToAddress(privateKeyECDSA.PublicKey)
+			balance, err := l2RpcClient.BalanceAt(ctx, address, nil)
+			if err != nil {
+				fmt.Println("Failed to get balance: ", err)
+				continue
+			}
+
+			if balance.Cmp(big.NewInt(0)) == 0 {
+				fmt.Println("Balance is 0, please enter a valid private key")
+				continue
+			}
+
+			break
 		}
 
 		// Get block explorer URL
@@ -374,16 +404,43 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 			}
 
 			fmt.Print("Please enter the private key: ")
-			otherPrivateKey, err := scanner.ScanString()
-			if err != nil {
-				return nil, fmt.Errorf("failed to read private key: %w", err)
-			}
-			if otherPrivateKey == "" {
-				return nil, fmt.Errorf("private key cannot be empty")
-			}
+			var otherPrivateKey string
+			for {
+				otherPrivateKey, err = scanner.ScanString()
+				if err != nil {
+					fmt.Println("Failed to read private key: ", err)
+					continue
+				}
+				if otherPrivateKey == "" {
+					fmt.Println("Private key cannot be empty")
+					continue
+				}
 
-			if !strings.HasPrefix(otherPrivateKey, "0x") {
-				otherPrivateKey = "0x" + otherPrivateKey
+				// Validate this private key is valid
+				privateKeyECDSA, err := crypto.HexToECDSA(otherPrivateKey)
+				if err != nil {
+					fmt.Println("Invalid private key: ", err)
+					continue
+				}
+
+				if !strings.HasPrefix(otherPrivateKey, "0x") {
+					otherPrivateKey = "0x" + otherPrivateKey
+				}
+
+				// Get balance of this private key
+				address := crypto.PubkeyToAddress(privateKeyECDSA.PublicKey)
+				balance, err := l2RpcClient.BalanceAt(ctx, address, nil)
+				if err != nil {
+					fmt.Println("Failed to get balance: ", err)
+					continue
+				}
+
+				if balance.Cmp(big.NewInt(0)) == 0 {
+					fmt.Println("Balance is 0, please enter a valid private key")
+					continue
+				}
+
+				break
 			}
 
 			otherChainID, err = l2RpcClient.ChainID(ctx)
@@ -721,14 +778,14 @@ func (t *ThanosStack) getContractAddressFromOutput(_ context.Context, deployFile
 	defer file.Close()
 
 	// Parse the JSON structure
-	var deploymentData map[string]interface{}
+	var deploymentData map[string]any
 	decoder := json.NewDecoder(file)
 	if err := decoder.Decode(&deploymentData); err != nil {
 		return nil, fmt.Errorf("failed to decode deployment JSON: %w", err)
 	}
 
 	// Extract the transactions array
-	transactions, ok := deploymentData["transactions"].([]interface{})
+	transactions, ok := deploymentData["transactions"].([]any)
 	if !ok {
 		return nil, fmt.Errorf("transactions field not found or not an array in deployment file")
 	}
@@ -738,7 +795,7 @@ func (t *ThanosStack) getContractAddressFromOutput(_ context.Context, deployFile
 
 	// Loop through transactions to find CREATE type
 	for _, tx := range transactions {
-		txMap, ok := tx.(map[string]interface{})
+		txMap, ok := tx.(map[string]any)
 		if !ok {
 			continue
 		}
