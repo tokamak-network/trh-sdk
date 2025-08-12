@@ -97,6 +97,7 @@ func (t *ThanosStack) ShowInformation(ctx context.Context) (*types.ChainInformat
 	}
 
 	return &types.ChainInformation{
+		L2ChainID:     int(t.deployConfig.L2ChainID),
 		L2RpcUrl:      l2RpcUrl,
 		BridgeUrl:     bridgeUrl,
 		BlockExplorer: blockExplorerUrl,
