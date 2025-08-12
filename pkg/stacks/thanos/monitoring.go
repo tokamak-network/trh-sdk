@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"go.uber.org/zap"
@@ -195,7 +196,7 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 	}
 
 	config := &types.MonitoringConfig{
-		Namespace:         "monitoring",
+		Namespace:         constants.MonitoringNamespace,
 		HelmReleaseName:   helmReleaseName,
 		AdminPassword:     adminPassword,
 		L1RpcUrl:          t.deployConfig.L1RPCURL,
@@ -216,7 +217,7 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 	logger := t.getLogger()
 	logger.Info("Starting monitoring uninstallation...")
-	monitoringNamespace := "monitoring"
+	monitoringNamespace := constants.MonitoringNamespace
 
 	// Use namespace from deploy config; skip sidecar cleanup if invalid
 	ns := strings.TrimSpace(t.deployConfig.K8s.Namespace)
@@ -238,7 +239,7 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 		}
 	}
 
-	releases, err := utils.FilterHelmReleases(ctx, monitoringNamespace, "monitoring")
+	releases, err := utils.FilterHelmReleases(ctx, monitoringNamespace, constants.MonitoringNamespace)
 	if err != nil {
 		logger.Errorw("Failed to filter Helm releases", "err", err)
 		return err
@@ -1403,6 +1404,7 @@ func (t *ThanosStack) createPrometheusRule(ctx context.Context, config *types.Mo
 
 // cleanupExistingPrometheusRules removes all PrometheusRules except thanos-stack-alerts
 func (t *ThanosStack) cleanupExistingPrometheusRules(ctx context.Context, config *types.MonitoringConfig) error {
+	logger := t.getLogger()
 	// Get all PrometheusRules in the monitoring namespace
 	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", config.Namespace, "-o", "jsonpath={.items[*].metadata.name}")
 	if err != nil {
@@ -1430,7 +1432,7 @@ func (t *ThanosStack) cleanupExistingPrometheusRules(ctx context.Context, config
 		if err != nil {
 			// Continue with other rules even if one fails
 			// Log the error but don't fail the entire operation
-			t.getLogger().Warnw("Failed to delete PrometheusRule", "rule", ruleName, "err", err)
+			logger.Warnw("Failed to delete PrometheusRule", "rule", ruleName, "err", err)
 		}
 	}
 
@@ -1741,6 +1743,7 @@ func (t *ThanosStack) updateCollectionInterval(ctx context.Context, namespace st
 
 // verifyRetentionPolicy verifies the actual retention policy of CloudWatch Log Groups
 func (t *ThanosStack) verifyRetentionPolicy(ctx context.Context, namespace string) error {
+	logger := t.getLogger()
 	components := CoreComponents
 
 	for _, component := range components {
@@ -1753,7 +1756,7 @@ func (t *ThanosStack) verifyRetentionPolicy(ctx context.Context, namespace strin
 			"--output", "text")
 
 		if _, err := cmd.CombinedOutput(); err != nil {
-			t.getLogger().Errorw("Verification failed", "component", component)
+			logger.Errorw("Verification failed", "component", component)
 		}
 	}
 
@@ -1762,6 +1765,7 @@ func (t *ThanosStack) verifyRetentionPolicy(ctx context.Context, namespace strin
 
 // verifyCollectionInterval verifies the actual collection interval from sidecar
 func (t *ThanosStack) verifyCollectionInterval(ctx context.Context, namespace string) error {
+	logger := t.getLogger()
 	// Fetch sidecar pod via label selector
 	pods, err := utils.GetPodNamesByLabel(ctx, namespace, "app=thanos-logs-sidecar")
 	if err != nil || len(pods) == 0 {
@@ -1794,11 +1798,11 @@ func (t *ThanosStack) verifyCollectionInterval(ctx context.Context, namespace st
 	for _, c := range podJSON.Spec.Containers {
 		joined := strings.Join(append(c.Command, c.Args...), " ")
 		if m := sleepRe.FindStringSubmatch(joined); len(m) > 1 {
-			t.getLogger().Infow("Collection Interval", "interval", m[1])
+			logger.Infow("Collection Interval", "interval", m[1])
 			return nil
 		}
 	}
-	t.getLogger().Errorw("Could not extract sleep interval from sidecar command")
+	logger.Errorw("Could not extract sleep interval from sidecar command")
 	return nil
 }
 

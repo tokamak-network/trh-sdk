@@ -137,7 +137,7 @@ func handleAlertStatus(ctx context.Context) error {
 	ac := &thanos.AlertCustomization{}
 
 	// Check monitoring namespace
-	_, err := utils.CheckNamespaceExists(ctx, "monitoring")
+	_, err := utils.CheckNamespaceExists(ctx, constants.MonitoringNamespace)
 	if err != nil {
 		return fmt.Errorf("failed to check alert namespace: %w", err)
 	}
@@ -766,7 +766,7 @@ func resetAlertRules(ctx context.Context, ac *thanos.AlertCustomization) error {
 		fmt.Println("🔧 Resetting PrometheusRules to default...")
 
 		// Get current rules first
-		currentRules, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", "monitoring", "-o", "jsonpath={.items[*].metadata.name}")
+		currentRules, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", constants.MonitoringNamespace, "-o", "jsonpath={.items[*].metadata.name}")
 		if err == nil && strings.TrimSpace(currentRules) != "" {
 			ruleNames := strings.Split(strings.TrimSpace(currentRules), " ")
 			fmt.Printf("Found %d PrometheusRule(s) to reset:\n", len(ruleNames))
