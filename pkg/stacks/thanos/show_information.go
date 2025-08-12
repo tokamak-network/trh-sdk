@@ -96,11 +96,31 @@ func (t *ThanosStack) ShowInformation(ctx context.Context) (*types.ChainInformat
 		}
 	}
 
+	// Get helm release name
+	releasesNameInMonitoringNamespace, err := utils.GetHelmReleases(ctx, "monitoring")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get helm releases: %w", err)
+	}
+
+	var monitoringUrl string
+	for _, release := range releasesNameInMonitoringNamespace {
+		if strings.Contains(release, "monitoring") {
+			monitoringUrl = t.checkALBIngressStatus(ctx, &types.MonitoringConfig{
+				Namespace:       "monitoring",
+				HelmReleaseName: release,
+			})
+		}
+	}
+
 	return &types.ChainInformation{
-		L2ChainID:     int(t.deployConfig.L2ChainID),
-		L2RpcUrl:      l2RpcUrl,
-		BridgeUrl:     bridgeUrl,
-		BlockExplorer: blockExplorerUrl,
+		L2ChainID:      int(t.deployConfig.L2ChainID),
+		L2RpcUrl:       l2RpcUrl,
+		BridgeUrl:      bridgeUrl,
+		BlockExplorer:  blockExplorerUrl,
+		L1ChainID:      int(t.deployConfig.L1ChainID),
+		DeploymentPath: t.deployConfig.DeploymentFilePath,
+		MonitoringUrl:  monitoringUrl,
+		RollupFilePath: fmt.Sprintf("%s/tokamak-thanos/build/rollup.json", t.deployConfig.DeploymentFilePath),
 	}, nil
 }
 
