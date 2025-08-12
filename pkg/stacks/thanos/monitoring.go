@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"go.uber.org/zap"
@@ -195,7 +196,7 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 	}
 
 	config := &types.MonitoringConfig{
-		Namespace:         "monitoring",
+		Namespace:         constants.MonitoringNamespace,
 		HelmReleaseName:   helmReleaseName,
 		AdminPassword:     adminPassword,
 		L1RpcUrl:          t.deployConfig.L1RPCURL,
@@ -216,7 +217,7 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 	logger := t.getLogger()
 	logger.Info("Starting monitoring uninstallation...")
-	monitoringNamespace := "monitoring"
+	monitoringNamespace := constants.MonitoringNamespace
 
 	// Use namespace from deploy config; skip sidecar cleanup if invalid
 	ns := strings.TrimSpace(t.deployConfig.K8s.Namespace)
@@ -238,7 +239,7 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 		}
 	}
 
-	releases, err := utils.FilterHelmReleases(ctx, monitoringNamespace, "monitoring")
+	releases, err := utils.FilterHelmReleases(ctx, monitoringNamespace, constants.MonitoringNamespace)
 	if err != nil {
 		logger.Errorw("Failed to filter Helm releases", "err", err)
 		return err

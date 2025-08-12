@@ -97,16 +97,16 @@ func (t *ThanosStack) ShowInformation(ctx context.Context) (*types.ChainInformat
 	}
 
 	// Get helm release name
-	releasesNameInMonitoringNamespace, err := utils.GetHelmReleases(ctx, "monitoring")
+	releasesNameInMonitoringNamespace, err := utils.GetHelmReleases(ctx, constants.MonitoringNamespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get helm releases: %w", err)
 	}
 
 	var monitoringUrl string
 	for _, release := range releasesNameInMonitoringNamespace {
-		if strings.Contains(release, "monitoring") {
+		if strings.Contains(release, constants.MonitoringNamespace) {
 			monitoringUrl = t.checkALBIngressStatus(ctx, &types.MonitoringConfig{
-				Namespace:       "monitoring",
+				Namespace:       constants.MonitoringNamespace,
 				HelmReleaseName: release,
 			})
 		}

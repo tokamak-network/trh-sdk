@@ -98,7 +98,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 
 						var displayNamespace string
 						if pluginName == constants.PluginMonitoring {
-							displayNamespace = "monitoring"
+							displayNamespace = constants.MonitoringNamespace
 						} else {
 							displayNamespace = config.K8s.Namespace
 						}
@@ -126,7 +126,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							return nil
 						case constants.PluginMonitoring:
 							// Check if monitoring namespace already exists
-							exists, err := utils.CheckNamespaceExists(ctx, "monitoring")
+							exists, err := utils.CheckNamespaceExists(ctx, constants.MonitoringNamespace)
 							if err != nil {
 								fmt.Printf("Error checking monitoring namespace: %v\n", err)
 								return err
@@ -180,7 +180,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 						}
 						var displayNamespace string
 						if pluginName == constants.PluginMonitoring {
-							displayNamespace = "monitoring"
+							displayNamespace = constants.MonitoringNamespace
 						} else {
 							displayNamespace = config.K8s.Namespace
 						}
