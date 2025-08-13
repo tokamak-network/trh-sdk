@@ -23,6 +23,53 @@ func Run() {
 		},
 		Commands: []*cli.Command{
 			{
+				Name:  "backup-manager",
+				Usage: "Manage L2 backups and restores (EFS/RDS)",
+				Description: `Examples:
+    trh-sdk backup-manager --status
+    trh-sdk backup-manager --snapshot --note "pre-upgrade"
+    trh-sdk backup-manager --list --limit 5
+    trh-sdk backup-manager --restore
+    trh-sdk backup-manager --config --on --daily 03:00 --keep 35
+    trh-sdk backup-manager --config --keep-rds 14 --backup-window 03:00-04:00
+    `,
+				Flags: []cli.Flag{
+					// primary actions
+					&cli.BoolFlag{Name: "status", Usage: "Show backup protection status and latest points"},
+					&cli.BoolFlag{Name: "snapshot", Usage: "Create an on-demand backup (EFS + RDS)"},
+					&cli.BoolFlag{Name: "list", Usage: "List recovery points (EFS) and snapshots (RDS)"},
+					&cli.BoolFlag{Name: "restore", Usage: "Interactive restore EFS/RDS"},
+					&cli.BoolFlag{Name: "config", Usage: "Configure backup settings via Terraform (module)"},
+
+					// common options
+					&cli.StringFlag{Name: "limit", Usage: "Limit number of entries when listing"},
+					&cli.StringFlag{Name: "note", Usage: "Tag for manual snapshot (RDS)"},
+
+					// post-restore attach options (EFS)
+					&cli.BoolFlag{Name: "attach", Usage: "Attach workloads to a new EFS and verify (can be used after restore or standalone)"},
+					&cli.StringFlag{Name: "efs-id", Usage: "New EFS FileSystemId (fs-xxxx) to switch to"},
+					&cli.StringFlag{Name: "pvc", Usage: "Comma-separated PVC names to switch (e.g., op-geth,op-node)"},
+					&cli.StringFlag{Name: "sts", Usage: "Comma-separated StatefulSet names to restart and verify"},
+
+					// config options (simplified + legacy hidden)
+					&cli.StringFlag{Name: "daily", Usage: "Daily time (UTC) e.g. 03:00 (converted to cron)"},
+					&cli.StringFlag{Name: "keep", Usage: "EFS keep days (retention)"},
+					&cli.BoolFlag{Name: "reset", Usage: "Reset to defaults (EFS daily 03:00, keep 35; RDS keep 14, window 03:00-04:00)"},
+					&cli.StringFlag{Name: "keep-rds", Usage: "RDS keep days (retention)"},
+					&cli.StringFlag{Name: "backup-window", Usage: "RDS backup window, e.g. 03:00-04:00"},
+					&cli.BoolFlag{Name: "on", Hidden: true},
+					&cli.BoolFlag{Name: "off", Hidden: true},
+					&cli.StringFlag{Name: "vault", Hidden: true},
+					&cli.BoolFlag{Name: "enable", Hidden: true},
+					&cli.BoolFlag{Name: "disable", Hidden: true},
+					&cli.StringFlag{Name: "cron", Hidden: true},
+					&cli.StringFlag{Name: "retention", Hidden: true},
+					&cli.StringFlag{Name: "rds-retention", Hidden: true},
+					&cli.StringFlag{Name: "window", Hidden: true},
+				},
+				Action: commands.ActionBackupManager(),
+			},
+			{
 				Name:   "deploy-contracts",
 				Usage:  "Deploy contracts on L1",
 				Flags:  flags.DeployContractsFlag,
