@@ -21,6 +21,10 @@ var SupportedLogsComponents = map[string]bool{
 }
 
 func (t *ThanosStack) ShowInformation(ctx context.Context) (*types.ChainInformation, error) {
+	config, err := utils.ReadConfigFromJSONFile(t.deploymentPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
 	if t.network == constants.LocalDevnet {
 		// Check the devnet network running
 		runningContainers, err := utils.GetDockerContainers(ctx)
@@ -34,6 +38,9 @@ func (t *ThanosStack) ShowInformation(ctx context.Context) (*types.ChainInformat
 		fmt.Println("✅ L1 and L2 networks are running on local devnet")
 		fmt.Println("L1 network is running on http://localhost:8545")
 		fmt.Println("L2 network is running on http://localhost:9545")
+		if config.MetadataPRLink != "" {
+			fmt.Printf("✅ Metadata PR is available at %s\n", config.MetadataPRLink)
+		}
 		return &types.ChainInformation{
 			L2RpcUrl: "http://localhost:9545",
 		}, nil
@@ -94,6 +101,10 @@ func (t *ThanosStack) ShowInformation(ctx context.Context) (*types.ChainInformat
 			blockExplorerUrl = fmt.Sprintf("http://%s", ingress)
 			fmt.Printf("✅ Block Explorer is running on %s\n", blockExplorerUrl)
 		}
+	}
+
+	if config.MetadataPRLink != "" {
+		fmt.Printf("✅ Metadata PR is available at %s\n", config.MetadataPRLink)
 	}
 
 	// Get helm release name

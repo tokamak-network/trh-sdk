@@ -497,9 +497,15 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context) error {
 
 	// STEP 9. Create Pull Request from user's fork to original repo
 	fmt.Println("\n📋 STEP 9: Creating Pull Request...")
-	err = utils.CreateGitHubPRFromFork(prTitle, branchName, creds.Username, creds.Token, MetadataRepoName, newMetadataEntry)
+	prLink, err := utils.CreateGitHubPRFromFork(prTitle, branchName, creds.Username, creds.Token, MetadataRepoName, newMetadataEntry)
 	if err != nil {
 		return fmt.Errorf("failed to create pull request: %w", err)
+	}
+	t.deployConfig.MetadataPRLink = prLink
+	err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
+	if err != nil {
+		fmt.Println("Failed to write settings file:", err)
+		return err
 	}
 
 	fmt.Println("\n🎉 Metadata registration process completed!")

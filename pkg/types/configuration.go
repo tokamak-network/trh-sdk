@@ -143,6 +143,9 @@ type Config struct {
 
 	// Logging configuration
 	LoggingConfig *LoggingConfig `json:"logging_config,omitempty"`
+
+	// Metadata Registration
+	MetadataPRLink string `json:"metadata_pr_link,omitempty"`
 }
 
 type LoggingConfig struct {

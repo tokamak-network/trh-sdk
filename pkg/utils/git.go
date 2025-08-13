@@ -147,7 +147,7 @@ func generateBasicPRDescription(newMetadataEntry bool) string {
 }
 
 // createGitHubPRFromFork creates a pull request from a forked repository using GitHub API
-func CreateGitHubPRFromFork(prTitle, branchName, username, token, repoName string, newMetadataEntry bool) error {
+func CreateGitHubPRFromFork(prTitle, branchName, username, token, repoName string, newMetadataEntry bool) (string, error) {
 	fmt.Println("\n🔗 Creating Pull Request from fork...")
 
 	prDescription := generateBasicPRDescription(newMetadataEntry)
@@ -161,14 +161,14 @@ func CreateGitHubPRFromFork(prTitle, branchName, username, token, repoName strin
 
 	jsonData, err := json.Marshal(prData)
 	if err != nil {
-		return fmt.Errorf("failed to marshal PR data: %w", err)
+		return "", fmt.Errorf("failed to marshal PR data: %w", err)
 	}
 
 	// Create HTTP request
 	url := fmt.Sprintf("%s/tokamak-network/%s/pulls", gitHubAPIBaseURL, repoName)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Authorization", "token "+token)
@@ -179,7 +179,8 @@ func CreateGitHubPRFromFork(prTitle, branchName, username, token, repoName strin
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to send request: %w", err)
+		fmt.Printf("Failed to send request: %v\n", err)
+		return "", fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -191,13 +192,13 @@ func CreateGitHubPRFromFork(prTitle, branchName, username, token, repoName strin
 			if prURL, ok := result["html_url"].(string); ok {
 				fmt.Printf("✅ Pull Request created successfully!\n")
 				fmt.Printf("🔗 PR URL: %s\n", prURL)
-				return nil
+				return prURL, nil
 			}
 		}
 		fmt.Println("✅ Pull Request created successfully!")
-		return nil
+		return "", nil
 	} else if resp.StatusCode == 401 {
-		return fmt.Errorf("authentication failed - please check your GitHub token has the correct permissions")
+		return "", fmt.Errorf("authentication failed - please check your GitHub token has the correct permissions")
 	} else if resp.StatusCode == 422 {
 		// Parse error details
 		var errorResp map[string]interface{}
@@ -205,14 +206,14 @@ func CreateGitHubPRFromFork(prTitle, branchName, username, token, repoName strin
 			if errors, ok := errorResp["errors"].([]interface{}); ok && len(errors) > 0 {
 				if firstError, ok := errors[0].(map[string]interface{}); ok {
 					if message, ok := firstError["message"].(string); ok {
-						return fmt.Errorf("PR creation failed: %s", message)
+						return "", fmt.Errorf("PR creation failed: %s", message)
 					}
 				}
 			}
 		}
-		return fmt.Errorf("PR creation failed - possibly branch already has a PR or validation error")
+		return "", fmt.Errorf("PR creation failed - possibly branch already has a PR or validation error")
 	} else {
-		return fmt.Errorf("PR creation failed with status %d", resp.StatusCode)
+		return "", fmt.Errorf("PR creation failed with status %d", resp.StatusCode)
 	}
 }
 

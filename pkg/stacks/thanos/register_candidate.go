@@ -510,7 +510,7 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, cwd string) error {
 	if ownersMatch {
 		fmt.Println("✅ All required owners are present in the Safe wallet.")
 	} else {
-		fmt.Println("❌ Required owners do not match the Safe wallet.")
+		fmt.Println("Required owners do not match the Safe wallet.")
 	}
 
 	// Check if the threshold is 3
@@ -519,7 +519,7 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, cwd string) error {
 	if thresholdMatch {
 		fmt.Println("✅ All required threshold are present in the Safe wallet.")
 	} else {
-		fmt.Println("❌ Required threshold do not match the Safe wallet.")
+		fmt.Println("Required threshold do not match the Safe wallet.")
 	}
 
 	// Skip execution if owners and threshold match
