@@ -1511,6 +1511,19 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_thanos_stack_image_tag=\"%s\"\n", config.ThanosStackImageTag))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_max_channel_duration=\"%d\"\n", config.MaxChannelDuration))
 
+	// AWS Backup configuration - Always enabled for production-ready backup protection
+	scheduleCron := config.EfsBackupScheduleCron
+	if scheduleCron == "" {
+		scheduleCron = "cron(0 3 * * ? *)" // daily 03:00 UTC
+	}
+	writer.WriteString(fmt.Sprintf("export TF_VAR_backup_schedule_cron=\"%s\"\n", scheduleCron))
+
+	deleteAfter := config.EfsBackupDeleteAfterDays
+	if deleteAfter <= 0 {
+		deleteAfter = 35 // 35 days
+	}
+	writer.WriteString(fmt.Sprintf("export TF_VAR_backup_delete_after_days=\"%d\"\n", deleteAfter))
+
 	err = writer.Flush()
 	if err != nil {
 		return err
@@ -1623,6 +1636,19 @@ func makeBlockExplorerEnvs(dirPath string, filename string, config types.BlockEx
 		fmt.Sprintf("export TF_VAR_db_name=\"%s\"\n", config.BlockExplorerDatabaseName),
 		fmt.Sprintf("export TF_VAR_vpc_id=\"%s\"\n", config.VpcId),
 	}
+
+	// Apply default values for initialization
+	rdsRetention := config.RdsBackupRetentionDays
+	if rdsRetention <= 0 {
+		rdsRetention = 14 // 14 days
+	}
+	envVars = append(envVars, fmt.Sprintf("export TF_VAR_backup_retention_period=\"%d\"\n", rdsRetention))
+
+	rdsWindow := config.RdsPreferredBackupWindow
+	if strings.TrimSpace(rdsWindow) == "" {
+		rdsWindow = "03:00-04:00" // 03:00-04:00 UTC
+	}
+	envVars = append(envVars, fmt.Sprintf("export TF_VAR_preferred_backup_window=\"%s\"\n", rdsWindow))
 
 	for _, envVar := range envVars {
 		_, err = writer.WriteString(envVar)
