@@ -2,7 +2,6 @@ package thanos
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -53,19 +52,11 @@ func (t *ThanosStack) InstallBridge(ctx context.Context) (string, error) {
 
 	fmt.Println("Installing a bridge component...")
 
-	file, err := os.Open(fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%s", t.deploymentPath, fmt.Sprintf("%d-deploy.json", l1ChainID)))
-	if err != nil {
-		fmt.Println("Error opening deployment file:", err)
-		return "", err
-	}
-	defer file.Close()
+	var contracts *types.Contracts
 
-	// Decode JSON
-	var contracts types.Contracts
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&contracts); err != nil {
-		fmt.Println("Error decoding deployment JSON file:", err)
-		return "", err
+	contracts, err = utils.ReadDeployementConfigFromJSONFile(t.deploymentPath, t.deployConfig.L1ChainID)
+	if err != nil {
+		return "", fmt.Errorf("failed to read deployment config: %w", err)
 	}
 
 	// make yaml file at {cwd}/tokamak-thanos-stack/terraform/thanos-stack/op-bridge-values.yaml

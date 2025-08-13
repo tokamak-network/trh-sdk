@@ -140,18 +140,11 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 
 	chainConfig := constants.L1ChainConfigurations[chainID.Uint64()]
 
-	file, err := os.Open(fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%s", t.deploymentPath, fmt.Sprintf("%d-deploy.json", chainID)))
-	if err != nil {
-		fmt.Println("Error opening deployment file:", err)
-		return err
-	}
+	var contracts *types.Contracts
 
-	// Decode JSON
-	var contracts types.Contracts
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&contracts); err != nil {
-		fmt.Println("Error decoding deployment JSON file:", err)
-		return err
+	contracts, err = utils.ReadDeployementConfigFromJSONFile(t.deploymentPath, t.deployConfig.L1ChainID)
+	if err != nil {
+		return fmt.Errorf("failed to read deployment config: %w", err)
 	}
 
 	privateKeyString := t.deployConfig.AdminPrivateKey
@@ -349,6 +342,52 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 
 	fmt.Printf("Transaction confirmed in block %d\n", receiptRegisterCandidate.BlockNumber.Uint64())
 
+	// Get block details to extract timestamp
+	blockNumber := receiptRegisterCandidate.BlockNumber
+	block, err := l1Client.BlockByNumber(ctx, blockNumber)
+	if err != nil {
+		return fmt.Errorf("failed to get block details: %v", err)
+	}
+
+	// Convert block timestamp to the required format
+	blockTime := time.Unix(int64(block.Time()), 0)
+	formattedTime := blockTime.Format("2006-01-02 15:04:05 MST")
+
+	// Extract candidateAddOn address from event logs
+	var candidateAddress string
+
+	for _, vLog := range receiptRegisterCandidate.Logs {
+		// Check if this log is from the L2Manager contract
+		if vLog.Address == l2ManagerAddress {
+			// Try to parse as RegisteredCandidateAddOn event
+			event, err := l2ManagerContract.ParseRegisteredCandidateAddOn(*vLog)
+			if err == nil {
+				// Successfully parsed the event
+				candidateAddress = event.CandidateAddOn.Hex()
+				fmt.Printf("✅ Successfully extracted Candidate address: %s\n", candidateAddress)
+				break
+			}
+		}
+	}
+
+	t.deployConfig.StakingInfo = &types.StakingInfo{
+		IsCandidate:         true,
+		StakingAmount:       registerCandidate.Amount,
+		RollupConfigAddress: contracts.SystemConfigProxy,
+		CandidateName:       registerCandidate.NameInfo,
+		CandidateMemo:       registerCandidate.Memo,
+		RegistrationTime:    formattedTime,
+		RegistrationTxHash:  txRegisterCandidate.Hash().Hex(),
+		CandidateAddress:    candidateAddress,
+	}
+
+	err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
+	if err != nil {
+		fmt.Println("Failed to write settings file:", err)
+		return err
+	}
+	fmt.Println("✅ Settings file updated successfully with StakingInfo")
+
 	return nil
 }
 
@@ -471,7 +510,7 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, cwd string) error {
 	if ownersMatch {
 		fmt.Println("✅ All required owners are present in the Safe wallet.")
 	} else {
-		fmt.Println("❌ Required owners do not match the Safe wallet.")
+		fmt.Println("Required owners do not match the Safe wallet.")
 	}
 
 	// Check if the threshold is 3
@@ -480,7 +519,7 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, cwd string) error {
 	if thresholdMatch {
 		fmt.Println("✅ All required threshold are present in the Safe wallet.")
 	} else {
-		fmt.Println("❌ Required threshold do not match the Safe wallet.")
+		fmt.Println("Required threshold do not match the Safe wallet.")
 	}
 
 	// Skip execution if owners and threshold match
@@ -531,18 +570,11 @@ func (t *ThanosStack) GetRegistrationAdditionalInfo(ctx context.Context, registe
 		return nil, fmt.Errorf("failed to get chain ID: %w", err)
 	}
 
-	// Read deployment file to get contract addresses
-	deploymentFile := fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", t.deploymentPath, chainID)
-	file, err := os.Open(deploymentFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open deployment file: %w", err)
-	}
-	defer file.Close()
+	var contracts *types.Contracts
 
-	var contracts types.Contracts
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&contracts); err != nil {
-		return nil, fmt.Errorf("failed to decode deployment JSON: %w", err)
+	contracts, err = utils.ReadDeployementConfigFromJSONFile(t.deploymentPath, chainID.Uint64())
+	if err != nil {
+		return nil, fmt.Errorf("failed to read deployment config: %w", err)
 	}
 
 	result := &types.RegistrationAdditionalInfo{
