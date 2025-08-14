@@ -38,6 +38,11 @@ func (t *ThanosStack) getLogger() *zap.SugaredLogger {
 func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *types.MonitoringConfig) (*types.MonitoringInfo, error) {
 	logger := t.getLogger()
 
+	if t.deployConfig == nil && t.deployConfig.K8s == nil {
+		logger.Warn("Deploy configuration is not initialized, skip monitoring installation")
+		return nil, nil
+	}
+
 	logger.Info("🚀 Starting monitoring installation...")
 
 	// Ensure monitoring namespace exists
