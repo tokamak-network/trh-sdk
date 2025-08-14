@@ -219,6 +219,11 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 	logger.Info("Starting monitoring uninstallation...")
 	monitoringNamespace := constants.MonitoringNamespace
 
+	if t.deployConfig == nil && t.deployConfig.K8s == nil {
+		logger.Warn("Deploy configuration is not initialized, skip monitoring uninstallation")
+		return nil
+	}
+
 	// Use namespace from deploy config; skip sidecar cleanup if invalid
 	ns := strings.TrimSpace(t.deployConfig.K8s.Namespace)
 	if ns == "" {
