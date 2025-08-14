@@ -86,13 +86,6 @@ const (
 )
 
 func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode constants.CrossTradeDeployMode) (*DeployCrossTradeContractsInputs, error) {
-	// Step 1: Ask the user want to deploy new contracts for L1
-	// If yes, ask to input the private key and RPC URL
-	// Get chain id from this rpc
-	// if no, set IsDeployNew to false and ask to input the cross trade proxy address
-
-	// Same as L2s, but we have multiple l2 chains
-
 	var (
 		l1ContractFileName, l2ContractFileName  string
 		l1CrossTradeProxyName, l1CrossTradeName string
@@ -138,25 +131,26 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 		return nil, fmt.Errorf("failed to read L1 deployment option: %w", err)
 	}
 
+	verifyL1, err := scanner.ScanBool(true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read L1 verification option: %w", err)
+	}
+
+	var l1BlockExplorerConfig *BlockExplorerConfig
+	if verifyL1 {
+		fmt.Print("Please enter Etherscan API key (optional, press Enter to skip): ")
+		l1EtherscanAPIKey, err := scanner.ScanString()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read Etherscan API key: %w", err)
+		}
+		l1BlockExplorerConfig = &BlockExplorerConfig{
+			APIKey: l1EtherscanAPIKey,
+			Type:   constants.BlockExplorerTypeEtherscan,
+		}
+	}
+
 	if deployNewL1 {
 		fmt.Print("Do you want to verify the L1 cross-trade contracts? (Y/n): ")
-		verifyL1, err := scanner.ScanBool(true)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read L1 verification option: %w", err)
-		}
-
-		var l1BlockExplorerConfig *BlockExplorerConfig
-		if verifyL1 {
-			fmt.Print("Please enter Etherscan API key (optional, press Enter to skip): ")
-			l1EtherscanAPIKey, err := scanner.ScanString()
-			if err != nil {
-				return nil, fmt.Errorf("failed to read Etherscan API key: %w", err)
-			}
-			l1BlockExplorerConfig = &BlockExplorerConfig{
-				APIKey: l1EtherscanAPIKey,
-				Type:   constants.BlockExplorerTypeEtherscan,
-			}
-		}
 
 		l1ChainConfig = &L1CrossTradeChainInput{
 			RPC:                  l1RPC,
@@ -225,6 +219,7 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 			CrossTradeProxyAddress: l1CrossTradeProxyAddress,
 			CrossTradeAddress:      l1CrossTradeAddress,
 			DeploymentScriptPath:   deploymentScriptPath,
+			BlockExplorerConfig:    l1BlockExplorerConfig,
 		}
 	}
 
@@ -242,6 +237,18 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 	deployNewL2, err := scanner.ScanBool(true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read L2 deployment option: %w", err)
+	}
+
+	// Get block explorer URL
+	var l2BlockExplorerConfig *BlockExplorerConfig
+	l2BlockExplorerURL, err := t.GetBlockExplorerURL(ctx)
+	if err != nil {
+		t.l.Warnf("No block explorer URL found, skip verifying L2 cross-trade contracts")
+	} else {
+		l2BlockExplorerConfig = &BlockExplorerConfig{
+			URL:  l2BlockExplorerURL,
+			Type: constants.BlockExplorerTypeBlockscout,
+		}
 	}
 
 	var privateKey string
@@ -282,18 +289,6 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 			}
 
 			break
-		}
-
-		// Get block explorer URL
-		var l2BlockExplorerConfig *BlockExplorerConfig
-		l2BlockExplorerURL, err := t.GetBlockExplorerURL(ctx)
-		if err != nil {
-			t.l.Warnf("No block explorer URL found, skip verifying L2 cross-trade contracts")
-		} else {
-			l2BlockExplorerConfig = &BlockExplorerConfig{
-				URL:  l2BlockExplorerURL,
-				Type: constants.BlockExplorerTypeBlockscout,
-			}
 		}
 
 		l2ChainConfigs = append(l2ChainConfigs, &L2CrossTradeChainInput{
@@ -354,17 +349,6 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 			l2CrossTradeAddress = common.HexToAddress(l2CrossTradeAddress).Hex()
 		}
 
-		var l2BlockExplorerConfig *BlockExplorerConfig
-		l2BlockExplorerURL, err := t.GetBlockExplorerURL(ctx)
-		if err != nil {
-			t.l.Warnf("No block explorer URL found, skip verifying L2 cross-trade contracts")
-		} else {
-			l2BlockExplorerConfig = &BlockExplorerConfig{
-				URL:  l2BlockExplorerURL,
-				Type: constants.BlockExplorerTypeBlockscout,
-			}
-		}
-
 		// Read for the deployment file
 		l2ChainConfigs = append(l2ChainConfigs, &L2CrossTradeChainInput{
 			RPC:                    l2RPC,
@@ -387,6 +371,26 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 		if err != nil {
 			return nil, fmt.Errorf("failed to read other L2 chain option: %w", err)
 		}
+
+		fmt.Print("Do you want to verify the L2 cross-trade contracts? (Y/n): ")
+		verifyOtherL2, err := scanner.ScanBool(true)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read L2 verification option: %w", err)
+		}
+
+		var otherL2BlockExplorerConfig *BlockExplorerConfig
+		if verifyOtherL2 {
+			fmt.Print("Please enter the Etherscan API key: ")
+			otherL2EtherscanAPIKey, err := scanner.ScanString()
+			if err != nil {
+				return nil, fmt.Errorf("failed to read Etherscan API key: %w", err)
+			}
+			otherL2BlockExplorerConfig = &BlockExplorerConfig{
+				APIKey: otherL2EtherscanAPIKey,
+				Type:   constants.BlockExplorerTypeEtherscan,
+			}
+		}
+
 		var otherChainID *big.Int
 		if addOtherL2 {
 			fmt.Print("Please enter the RPC URL: ")
@@ -446,25 +450,6 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 			otherChainID, err = l2RpcClient.ChainID(ctx)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get chain ID: %w", err)
-			}
-
-			fmt.Print("Do you want to verify the L2 cross-trade contracts? (Y/n): ")
-			verifyOtherL2, err := scanner.ScanBool(true)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read L2 verification option: %w", err)
-			}
-
-			var otherL2BlockExplorerConfig *BlockExplorerConfig
-			if verifyOtherL2 {
-				fmt.Print("Please enter the Etherscan API key: ")
-				otherL2EtherscanAPIKey, err := scanner.ScanString()
-				if err != nil {
-					return nil, fmt.Errorf("failed to read Etherscan API key: %w", err)
-				}
-				otherL2BlockExplorerConfig = &BlockExplorerConfig{
-					APIKey: otherL2EtherscanAPIKey,
-					Type:   constants.BlockExplorerTypeEtherscan,
-				}
 			}
 
 			l2ChainConfigs = append(l2ChainConfigs, &L2CrossTradeChainInput{
@@ -527,25 +512,6 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 					continue
 				}
 				break
-			}
-
-			var l2BlockExplorerConfig *BlockExplorerConfig
-			fmt.Print("Do you want to verify the L2 cross-trade contracts? (Y/n): ")
-			verifyL2, err := scanner.ScanBool(true)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read L2 verification option: %w", err)
-			}
-
-			if verifyL2 {
-				fmt.Print("Please enter the Etherscan API key: ")
-				l2EtherscanAPIKey, err := scanner.ScanString()
-				if err != nil {
-					return nil, fmt.Errorf("failed to read Etherscan API key: %w", err)
-				}
-				l2BlockExplorerConfig = &BlockExplorerConfig{
-					APIKey: l2EtherscanAPIKey,
-					Type:   constants.BlockExplorerTypeEtherscan,
-				}
 			}
 
 			l2ChainConfigs = append(l2ChainConfigs, &L2CrossTradeChainInput{
