@@ -38,7 +38,7 @@ func (t *ThanosStack) getLogger() *zap.SugaredLogger {
 func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *types.MonitoringConfig) (*types.MonitoringInfo, error) {
 	logger := t.getLogger()
 
-	if t.deployConfig == nil && t.deployConfig.K8s == nil {
+	if t.deployConfig == nil || t.deployConfig.K8s == nil {
 		logger.Warn("Deploy configuration is not initialized, skip monitoring installation")
 		return nil, nil
 	}
@@ -224,7 +224,7 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 	logger.Info("Starting monitoring uninstallation...")
 	monitoringNamespace := constants.MonitoringNamespace
 
-	if t.deployConfig == nil && t.deployConfig.K8s == nil {
+	if t.deployConfig == nil || t.deployConfig.K8s == nil {
 		logger.Warn("Deploy configuration is not initialized, skip monitoring uninstallation")
 		return nil
 	}
