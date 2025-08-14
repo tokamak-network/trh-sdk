@@ -337,3 +337,27 @@ func (t *ThanosStack) UninstallBlockExplorer(ctx context.Context) error {
 	fmt.Println("✅ Uninstall block explorer components successfully")
 	return nil
 }
+
+func (t *ThanosStack) GetBlockExplorerURL(ctx context.Context) (string, error) {
+	if t.deployConfig.K8s == nil {
+		return "", fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+	}
+
+	var (
+		namespace = t.deployConfig.K8s.Namespace
+	)
+
+	k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, "block-explorer")
+	if err != nil {
+		fmt.Println("Error retrieving ingress addresses:", err, "details:", k8sIngresses)
+		return "", err
+	}
+
+	if len(k8sIngresses) == 0 {
+		return "", fmt.Errorf("block explorer ingress is not found")
+	}
+
+	blockExplorerURL := "http://" + k8sIngresses[0]
+
+	return blockExplorerURL, nil
+}

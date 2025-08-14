@@ -1659,7 +1659,7 @@ func (t *ThanosStack) cloneSourcecode(ctx context.Context, repositoryName, url s
 	t.l.Info("Repository exists. Trying to pull latest changes...", "repo", repositoryName)
 	err = utils.PullLatestCode(ctx, t.l, t.deploymentPath, repositoryName)
 	if err == nil {
-		t.l.Info("Successfully pulled latest changes", "repo", repositoryName)
+		t.l.Info("Successfully pulled latest changes", "repo: ", repositoryName)
 		fmt.Printf("\r✅ Clone the %s repository successfully \n", repositoryName)
 		return nil
 	}
