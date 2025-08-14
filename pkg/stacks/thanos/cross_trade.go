@@ -95,6 +95,7 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 
 	switch mode {
 	case constants.CrossTradeDeployModeL2ToL1:
+		t.l.Infof("Deploying the cross-trade contracts for L2 to L1")
 		l1ContractFileName = DeployL1CrossTradeL2L1
 		l2ContractFileName = DeployL2CrossTradeL2L1
 		l1CrossTradeProxyName = L1L2CrossTradeProxyL1ContractName
@@ -103,6 +104,7 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 		l2CrossTradeName = L1L2CrossTradeL2ContractName
 		deploymentScriptPath = L1L2ScriptPath
 	case constants.CrossTradeDeployModeL2ToL2:
+		t.l.Infof("Deploying the cross-trade contracts for L2 to L2")
 		l1ContractFileName = DeployL1CrossTradeL2L2
 		l2ContractFileName = DeployL2CrossTradeL2L2
 		l1CrossTradeProxyName = L2L2CrossTradeProxyL1ContractName
@@ -116,7 +118,7 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 
 	var l1ChainConfig *L1CrossTradeChainInput
 
-	fmt.Println("=== L1 Chain Configuration ===")
+	t.l.Info("Please enter your configuration to deploy the L1 contracts to your L1 chain")
 
 	// Ask if user wants to deploy new L1 contracts
 	l1RPC := t.deployConfig.L1RPCURL
@@ -232,7 +234,7 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 	}
 	l2ChainID := t.deployConfig.L2ChainID
 
-	fmt.Println("=== Your L2 Chain Configuration ===")
+	t.l.Info("Please enter your configuration to deploy the L2 contracts to your L2 chain")
 	fmt.Print("Do you want to deploy the L2 cross-trade contracts to the current L2 chain? (Y/n): ")
 	deployNewL2, err := scanner.ScanBool(true)
 	if err != nil {
@@ -365,7 +367,7 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 	}
 
 	if mode == constants.CrossTradeDeployModeL2ToL2 {
-		fmt.Println("=== Other L2 Chain Configuration ===")
+		t.l.Info("Please enter your configuration to deploy the L2 contracts to other L2 chain")
 		fmt.Print("Do you want to deploy contracts to other L2 chain? (Y/n): ")
 		addOtherL2, err := scanner.ScanBool(true)
 		if err != nil {

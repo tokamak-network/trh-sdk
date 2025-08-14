@@ -182,8 +182,6 @@ func ActionInstallationPlugins() cli.ActionFunc {
 									crossTradeType, constants.CrossTradeDeployModeL2ToL2, constants.CrossTradeDeployModeL2ToL1)
 							}
 
-							fmt.Printf("Installing cross-trade plugin with type: %s\n", crossTradeType)
-
 							input, err := thanosStack.GetCrossTradeContractsInputs(ctx, constants.CrossTradeDeployMode(crossTradeType))
 							if err != nil {
 								return err
