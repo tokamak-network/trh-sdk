@@ -11,3 +11,10 @@ var SupportedPlugins = map[string]bool{
 	PluginMonitoring:    true,
 	PluginCrossTrade:    true,
 }
+
+var SupportedPluginsList = []string{
+	PluginBridge,
+	PluginBlockExplorer,
+	PluginMonitoring,
+	PluginCrossTrade,
+}
