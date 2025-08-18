@@ -39,7 +39,7 @@ func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string, inputs *Deplo
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
 					fmt.Println("Deployment canceled")
-					return nil
+					return err
 				}
 				fmt.Println("Failed to deploy the testnet chain", "err", err)
 
