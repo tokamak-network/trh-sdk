@@ -225,8 +225,8 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 			auth,
 			ethCommon.HexToAddress(systemConfigProxy),
 			ethCommon.HexToAddress(proxyAdmin),
-			registerCandidate.NameInfo,
 			ethCommon.HexToAddress(safeWalletAddress),
+			registerCandidate.NameInfo,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to register candidate: %v", err)
