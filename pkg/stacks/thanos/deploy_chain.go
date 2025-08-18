@@ -21,7 +21,6 @@ func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string, inputs *Deplo
 		err := t.deployLocalDevnet(ctx)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				fmt.Println("Deployment canceled")
 				return nil
 			}
 			fmt.Printf("Failed to deploy the devnet: %s", err)
@@ -68,7 +67,7 @@ func (t *ThanosStack) deployLocalDevnet(ctx context.Context) error {
 	// Start the devnet
 	fmt.Println("Starting the devnet...")
 
-	err = utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos && export DEVNET_L2OO=true && make devnet-up", t.deploymentPath))
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos && export DEVNET_L2OO=true && make devnet-up", t.deploymentPath))
 	if err != nil {
 		fmt.Print("\r❌ Failed to start devnet!       \n")
 		return err
@@ -198,7 +197,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	}
 
 	// STEP 5. Initialize Terraform backend
-	err = utils.ExecuteCommandStream(ctx, t.l, "bash", []string{
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
 		"-c",
 		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
 		source .envrc &&
@@ -215,7 +214,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 
 	fmt.Println("Deploying Thanos stack infrastructure")
 	// STEP 6. Deploy Thanos stack infrastructure
-	err = utils.ExecuteCommandStream(ctx, t.l, "bash", []string{
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
 		"-c",
 		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
 		source .envrc &&

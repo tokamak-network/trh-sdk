@@ -154,13 +154,13 @@ func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, compon
 	}
 
 	if isTroubleshoot {
-		err = utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f | grep -iE 'error|fail|panic|critical'", namespace, runningPodName))
+		err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f | grep -iE 'error|fail|panic|critical'", namespace, runningPodName))
 		if err != nil {
 			fmt.Printf("failed to show logs: %s \n", err.Error())
 			return err
 		}
 	} else {
-		err = utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f", namespace, runningPodName))
+		err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f", namespace, runningPodName))
 		if err != nil {
 			fmt.Printf("failed to show logs: %s \n", err.Error())
 			return err

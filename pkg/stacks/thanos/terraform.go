@@ -51,7 +51,7 @@ func (t *ThanosStack) clearTerraformState(ctx context.Context) error {
 
 	// STEP 4: delete the `tokamak-thanos-stack/thanos-stack` state to prevent conflicts when reinstalling the stack
 	// This is a workaround for the issue where the bucket name is deleted but the state file remains containing the old bucket name.
-	err = utils.ExecuteCommandStream(ctx, t.l, "bash", []string{
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
 		"-c",
 		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform/thanos-stack && rm -rf terraform.tfstate terraform.tfstate.backup .terraform.lock.hcl .terraform/`, t.deploymentPath),
 	}...)
@@ -78,7 +78,7 @@ func (t *ThanosStack) destroyTerraform(ctx context.Context, path string) error {
 		return nil
 	}
 
-	err = utils.ExecuteCommandStream(ctx, t.l, "bash", []string{
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
 		"-c",
 		fmt.Sprintf(`cd %s && source ../.envrc && terraform destroy -auto-approve -parallelism=100`, path),
 	}...)

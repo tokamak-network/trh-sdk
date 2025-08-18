@@ -492,7 +492,7 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, cwd string) error {
 	// Run hardhat task
 	sdkPath := filepath.Join(cwd, "tokamak-thanos", "packages", "tokamak", "sdk")
 	cmdStr := fmt.Sprintf("cd %s && L1_URL=%s PRIVATE_KEY=%s SAFE_WALLET_ADDRESS=%s npx hardhat set-safe-wallet", sdkPath, t.deployConfig.L1RPCURL, t.deployConfig.AdminPrivateKey, safeWalletAddress)
-	if err := utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", cmdStr); err != nil {
+	if err := utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", cmdStr); err != nil {
 		fmt.Print("\rfailed to setup the Safe wallet!\n")
 		return err
 	}

@@ -1647,7 +1647,7 @@ func (t *ThanosStack) cloneSourcecode(ctx context.Context, repositoryName, url s
 	}
 
 	if !existingSourcecode {
-		err := utils.CloneRepo(ctx, t.l, t.deploymentPath, url, repositoryName)
+		err := utils.CloneRepo(ctx, t.logger, t.deploymentPath, url, repositoryName)
 		if err != nil {
 			fmt.Println("Error while cloning the repository")
 			return err
@@ -1656,25 +1656,25 @@ func (t *ThanosStack) cloneSourcecode(ctx context.Context, repositoryName, url s
 	}
 
 	// Case 2: Repo exists → try pulling
-	t.l.Info("Repository exists. Trying to pull latest changes...", "repo", repositoryName)
-	err = utils.PullLatestCode(ctx, t.l, t.deploymentPath, repositoryName)
+	t.logger.Info("Repository exists. Trying to pull latest changes...", "repo", repositoryName)
+	err = utils.PullLatestCode(ctx, t.logger, t.deploymentPath, repositoryName)
 	if err == nil {
-		t.l.Info("Successfully pulled latest changes", "repo: ", repositoryName)
+		t.logger.Info("Successfully pulled latest changes", "repo: ", repositoryName)
 		fmt.Printf("\r✅ Clone the %s repository successfully \n", repositoryName)
 		return nil
 	}
 
 	// Case 3: Pull failed → likely broken repo → remove and re-clone
-	t.l.Warn("Pull failed. Re-cloning repository...", "repo", repositoryName, "err", err)
+	t.logger.Warn("Pull failed. Re-cloning repository...", "repo", repositoryName, "err", err)
 	if removeErr := os.RemoveAll(fmt.Sprintf("%s/%s", t.deploymentPath, repositoryName)); removeErr != nil {
-		t.l.Error("Failed to remove broken repository folder", "path", t.deploymentPath, "repo", repositoryName, "err", removeErr)
+		t.logger.Error("Failed to remove broken repository folder", "path", t.deploymentPath, "repo", repositoryName, "err", removeErr)
 		return removeErr
 	}
 
-	t.l.Info("Re-cloning repository after cleanup...", "repo", repositoryName)
-	err = utils.CloneRepo(ctx, t.l, t.deploymentPath, url, repositoryName)
+	t.logger.Info("Re-cloning repository after cleanup...", "repo", repositoryName)
+	err = utils.CloneRepo(ctx, t.logger, t.deploymentPath, url, repositoryName)
 	if err != nil {
-		t.l.Error("Failed to re-clone repository", "repo", repositoryName, "err", err)
+		t.logger.Error("Failed to re-clone repository", "repo", repositoryName, "err", err)
 		return err
 	}
 

@@ -17,7 +17,7 @@ type ThanosStack struct {
 	deployConfig      *types.Config
 	usePromptInput    bool
 	awsProfile        *types.AWSProfile
-	l                 *zap.SugaredLogger
+	logger            *zap.SugaredLogger
 	deploymentPath    string
 	registerCandidate bool
 }
@@ -64,7 +64,7 @@ func NewThanosStack(
 		network:        network,
 		usePromptInput: usePromptInput,
 		awsProfile:     awsProfile,
-		l:              l,
+		logger:         l,
 		deploymentPath: deploymentPath,
 		deployConfig:   config,
 	}, nil
