@@ -2,7 +2,6 @@ package thanos
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 
@@ -30,13 +29,13 @@ func NewThanosStack(
 	deploymentPath string,
 	awsConfig *types.AWSConfig,
 ) (*ThanosStack, error) {
-	fmt.Println("Deployment Path:", deploymentPath)
-	fmt.Println("Network:", network)
+	l.Info("Deployment Path:", "deploymentPath", deploymentPath)
+	l.Info("Network:", "network", network)
 
 	// get the config file
 	config, err := utils.ReadConfigFromJSONFile(deploymentPath)
 	if err != nil {
-		fmt.Println("Error reading settings.json")
+		l.Error("Error reading settings.json", "err", err)
 		return nil, err
 	}
 
@@ -47,7 +46,7 @@ func NewThanosStack(
 	if awsConfig != nil {
 		awsProfile, err = aws.LoginAWS(ctx, awsConfig)
 		if err != nil {
-			fmt.Println("Failed to login aws", "err", err)
+			l.Error("Failed to login aws", "err", err)
 			return nil, err
 		}
 
