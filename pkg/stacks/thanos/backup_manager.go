@@ -1107,6 +1107,14 @@ func (t *ThanosStack) BackupConfigure(ctx context.Context, on *bool, off *bool, 
 
 // initializeBackupSystem initializes the backup system after deployment
 func (t *ThanosStack) initializeBackupSystem(ctx context.Context, chainName string) error {
+	if t.deployConfig.AWS == nil {
+		return fmt.Errorf("AWS config is nil")
+	}
+
+	if t.deployConfig.K8s == nil {
+		return fmt.Errorf("K8s config is nil")
+	}
+
 	region := t.deployConfig.AWS.Region
 	namespace := t.deployConfig.K8s.Namespace
 
