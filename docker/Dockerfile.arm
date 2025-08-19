@@ -71,9 +71,14 @@ COPY --from=builder /usr/bin/npm /usr/bin/npm
 COPY --from=builder /usr/bin/npx /usr/bin/npx
 COPY --from=builder /usr/bin/corepack /usr/bin/corepack
 COPY --from=builder /usr/lib/node_modules/n /usr/lib/node_modules/n
+COPY --from=builder /usr/lib/node_modules/npm /usr/lib/node_modules/npm
 COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=builder /usr/local/n /usr/local/n
 COPY --from=builder /usr/lib/node_modules/corepack /usr/lib/node_modules/corepack
+
+# Fix npm/npx wrappers to point to the correct CLI scripts
+RUN ln -sf /usr/lib/node_modules/npm/bin/npm-cli.js /usr/bin/npm && \
+    ln -sf /usr/lib/node_modules/npm/bin/npx-cli.js /usr/bin/npx
 
 # Set Go environment variables
 ENV GOROOT=/usr/local/go
