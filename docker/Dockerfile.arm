@@ -1,0 +1,113 @@
+# Build stage
+FROM --platform=linux/arm64 ubuntu:latest AS builder
+
+# Set non-interactive frontend and working directory
+ENV DEBIAN_FRONTEND=noninteractive
+WORKDIR /app
+
+# Copy scripts
+COPY scripts /app/scripts
+COPY setup.sh /app/scripts/setup.sh
+
+# Install only essential build dependencies
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends \
+  wget \
+  gnupg \
+  curl \
+  unzip \
+  ca-certificates && \
+  # Install Node.js v20.16.0 for ARM64
+  curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+  apt-get install -y --no-install-recommends nodejs && \
+  npm install -g n && \
+  n 20.16.0
+
+# Run setup script
+RUN chmod +x /app/scripts/setup.sh && \
+  DEBIAN_FRONTEND=noninteractive bash -x /app/scripts/setup.sh -c 1d5667bba6f572452b92b9af6a2c8cf1acad793f 2>&1 | tee /var/log/setup.log
+
+# Extract only the necessary binaries and files
+RUN if [ -x "/usr/local/go/bin/go" ]; then \
+    GOPATH=$(/usr/local/go/bin/go env GOPATH) && \
+    if [ -f "$GOPATH/bin/trh-sdk" ]; then \
+      cp "$GOPATH/bin/trh-sdk" /tmp/trh-sdk; \
+    fi; \
+  fi
+
+# Runtime stage
+FROM --platform=linux/arm64 ubuntu:latest AS runtime
+
+# Set non-interactive frontend
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install only runtime dependencies
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends \
+  ca-certificates \
+  curl \
+  python3 \
+  python3-pip \
+  sudo \
+  bc \
+  gnupg \
+  lsb-release \
+  unzip \
+  build-essential \
+  git \
+  git-core \
+  openssh-client \
+  libcurl4-openssl-dev \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
+
+# Copy Go runtime from builder stage (minimal version)
+COPY --from=builder /usr/local/go/bin/go /usr/local/bin/go
+COPY --from=builder /usr/local/go /usr/local/go
+
+# Copy Node.js runtime from builder stage
+COPY --from=builder /usr/bin/node /usr/bin/node
+COPY --from=builder /usr/bin/npm /usr/bin/npm
+COPY --from=builder /usr/bin/npx /usr/bin/npx
+COPY --from=builder /usr/bin/corepack /usr/bin/corepack
+COPY --from=builder /usr/lib/node_modules/n /usr/lib/node_modules/n
+COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=builder /usr/local/n /usr/local/n
+COPY --from=builder /usr/lib/node_modules/corepack /usr/lib/node_modules/corepack
+
+# Set Go environment variables
+ENV GOROOT=/usr/local/go
+ENV PATH=$PATH:/usr/local/go/bin
+
+# Copy pnpm from builder stage
+COPY --from=builder /root/.local/share/pnpm /root/.local/share/pnpm
+ENV PATH=$PATH:/root/.local/share/pnpm
+
+# Copy essential tools from builder stage
+COPY --from=builder /usr/bin/git /usr/bin/git
+COPY --from=builder /usr/bin/terraform /usr/bin/terraform
+COPY --from=builder /usr/local/bin/aws /usr/local/bin/aws
+COPY --from=builder /usr/local/aws-cli /usr/local/aws-cli
+COPY --from=builder /usr/local/aws-cli/v2/2.28.12/dist/libpython3.13.so.1.0 /usr/local/bin/libpython3.13.so.1.0
+COPY --from=builder /root/.foundry /root/.foundry
+COPY --from=builder /usr/bin/python3 /usr/bin/python3
+COPY --from=builder /usr/lib/python3* /usr/lib/
+ENV PATH=$PATH:/root/.foundry/bin
+
+# Copy scripts directory from builder stage
+COPY --from=builder /app/scripts /app/scripts
+
+# Copy only the necessary binary from builder stage
+COPY --from=builder /tmp/trh-sdk /usr/local/bin/trh-sdk
+
+# Set working directory
+WORKDIR /app
+
+# Use bash shell and source profile (like original Dockerfile)
+SHELL ["/bin/bash", "-c"]
+RUN source ~/.bashrc
+
+# Verify the binary works
+RUN trh-sdk version
+
+CMD ["/bin/bash"]
