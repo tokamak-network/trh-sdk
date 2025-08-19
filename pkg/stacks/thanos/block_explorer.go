@@ -12,14 +12,17 @@ import (
 
 func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallBlockExplorerInput) (string, error) {
 	if t.deployConfig.K8s == nil {
+		t.logger.Error("K8s configuration is not set. Please run the deploy command first")
 		return "", fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
 	if inputs == nil {
+		t.logger.Error("inputs are not set. Please provide the inputs")
 		return "", fmt.Errorf("inputs are not set. Please provide the inputs")
 	}
 
 	if err := inputs.Validate(ctx); err != nil {
+		t.logger.Error("Error validating inputs", "err", err)
 		return "", err
 	}
 
@@ -30,16 +33,16 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 
 	blockExplorerPods, err := utils.GetPodsByName(ctx, namespace, "block-explorer")
 	if err != nil {
-		fmt.Println("Error to get block explorer pods:", err)
+		t.logger.Error("Error to get block explorer pods", "err", err)
 		return "", err
 	}
 	if len(blockExplorerPods) > 0 {
-		fmt.Printf("Block Explorer is running: \n")
+		t.logger.Info("Block Explorer is running: \n")
 		var blockExplorerURL string
 		for {
 			k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, "block-explorer")
 			if err != nil {
-				fmt.Println("Error retrieving ingress addresses:", err, "details:", k8sIngresses)
+				t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
 				return "", err
 			}
 
@@ -55,11 +58,11 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 
 	err = t.cloneSourcecode(ctx, "tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git")
 	if err != nil {
-		fmt.Println("Error cloning repository:", err)
+		t.logger.Error("Error cloning repository", "err", err)
 		return "", err
 	}
 
-	fmt.Println("Installing a block explorer component...")
+	t.logger.Info("Installing a block explorer component...")
 
 	// Make .envrc file
 
@@ -81,23 +84,23 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		},
 	)
 	if err != nil {
-		fmt.Println("Error creating block explorer environments file:", err)
+		t.logger.Error("Error creating block explorer environments file", "err", err)
 		return "", err
 	}
 
 	chainReleaseName, err := utils.FilterHelmReleases(ctx, namespace, namespace)
 	if err != nil {
-		fmt.Println("Error filtering helm releases:", err)
+		t.logger.Error("Error filtering helm releases", "err", err)
 		return "", err
 	}
 	if len(chainReleaseName) == 0 {
-		fmt.Println("No helm releases found")
+		t.logger.Error("No helm releases found")
 		return "", nil
 	}
 
 	releaseName := chainReleaseName[0]
 
-	err = utils.ExecuteCommandStream(ctx, t.l, "bash", []string{
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
 		"-c",
 		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
 		source .envrc &&
@@ -108,7 +111,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		`, t.deploymentPath),
 	}...)
 	if err != nil {
-		fmt.Println("Error initializing Terraform backend:", err)
+		t.logger.Error("Error initializing Terraform backend", "err", err)
 		return "", err
 	}
 
@@ -129,7 +132,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	for {
 		k8sSvc, err := utils.GetServiceNames(ctx, namespace, "op-geth")
 		if err != nil {
-			fmt.Println("Error retrieving svc:", err, "details:", k8sSvc)
+			t.logger.Error("Error retrieving svc", "err", err, "details", k8sSvc)
 			return "", err
 		}
 
@@ -145,7 +148,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	for {
 		k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, "op-geth")
 		if err != nil {
-			fmt.Println("Error retrieving ingress addresses:", err, "details:", k8sIngresses)
+			t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
 			return "", err
 		}
 
@@ -193,7 +196,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		fmt.Sprintf("cd %s/tokamak-thanos-stack/charts/blockscout-stack && echo '%s' > .env", t.deploymentPath, envValues),
 	)
 	if err != nil {
-		fmt.Print("\r❌ Make .env file failed!\n")
+		t.logger.Error("❌ Make .env file failed!")
 		return "", err
 	}
 
@@ -203,7 +206,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		fmt.Sprintf("cd %s/tokamak-thanos-stack/charts/blockscout-stack && source .env && bash ./scripts/generate-blockscout.sh", t.deploymentPath),
 	)
 	if err != nil {
-		fmt.Print("\r❌ Make helm values failed!\n")
+		t.logger.Error("❌ Make helm values failed!")
 		return "", err
 	}
 
@@ -220,10 +223,10 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		namespace,
 	}...)
 	if err != nil {
-		fmt.Println("Error installing block explorer backend component:", err)
+		t.logger.Error("Error installing block explorer backend component", "err", err)
 		return "", err
 	}
-	fmt.Println("✅ Install block explorer backend component successfully")
+	t.logger.Info("✅ Install block explorer backend component successfully")
 
 	// Install the frontend
 	// Get the ingress
@@ -231,7 +234,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	for {
 		k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, blockExplorerBackendReleaseName)
 		if err != nil {
-			fmt.Println("Error retrieving ingress addresses:", err, "details:", k8sIngresses)
+			t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
 			return "", err
 		}
 
@@ -246,31 +249,31 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	// update the values file
 	err = utils.UpdateYAMLField(fileValue, "blockscout.enabled", false)
 	if err != nil {
-		fmt.Println("Error updating blockscout.enabled field:", err)
+		t.logger.Error("Error updating blockscout.enabled field", "err", err)
 		return "", err
 	}
 
 	err = utils.UpdateYAMLField(fileValue, "frontend.enabled", true)
 	if err != nil {
-		fmt.Println("Error updating frontend.enabled field:", err)
+		t.logger.Error("Error updating frontend.enabled field", "err", err)
 		return "", err
 	}
 
 	err = utils.UpdateYAMLField(fileValue, "frontend.env.NEXT_PUBLIC_API_HOST", blockExplorerUrl)
 	if err != nil {
-		fmt.Println("Error updating NEXT_PUBLIC_API_HOST field:", err)
+		t.logger.Error("Error updating NEXT_PUBLIC_API_HOST field", "err", err)
 		return "", err
 	}
 
 	err = utils.UpdateYAMLField(fileValue, "frontend.env.NEXT_PUBLIC_APP_HOST", blockExplorerUrl)
 	if err != nil {
-		fmt.Println("Error updating NEXT_PUBLIC_APP_HOST field:", err)
+		t.logger.Error("Error updating NEXT_PUBLIC_APP_HOST field", "err", err)
 		return "", err
 	}
 
 	err = utils.UpdateYAMLField(fileValue, "frontend.ingress.hostname", blockExplorerUrl)
 	if err != nil {
-		fmt.Println("Error updating frontend.ingress.hostname field:", err)
+		t.logger.Error("Error updating frontend.ingress.hostname field", "err", err)
 		return "", err
 	}
 
@@ -285,21 +288,23 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		namespace,
 	}...)
 	if err != nil {
-		fmt.Println("Error installing block explorer front-end component:", err)
+		t.logger.Error("Error installing block explorer front-end component", "err", err)
 		return "", err
 	}
 
-	fmt.Printf("✅ Block Explorer frontend component installed successfully. Accessible at: %s\n", fmt.Sprintf("http://%s", blockExplorerUrl))
+	t.logger.Info("✅ Block Explorer frontend component installed successfully. Accessible at: %s", fmt.Sprintf("http://%s", blockExplorerUrl))
 
 	return "http://" + blockExplorerUrl, nil
 }
 
 func (t *ThanosStack) UninstallBlockExplorer(ctx context.Context) error {
 	if t.deployConfig.K8s == nil {
+		t.logger.Error("K8s configuration is not set. Please run the deploy command first")
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
 	if t.deployConfig.AWS == nil {
+		t.logger.Error("AWS configuration is not set. Please run the deploy command first")
 		return fmt.Errorf("AWS configuration is not set. Please run the deploy command first")
 	}
 
@@ -310,7 +315,7 @@ func (t *ThanosStack) UninstallBlockExplorer(ctx context.Context) error {
 	// 1. Uninstall helm charts
 	releases, err := utils.FilterHelmReleases(ctx, namespace, "block-explorer")
 	if err != nil {
-		fmt.Println("Error to filter helm releases:", err)
+		t.logger.Error("Error to filter helm releases", "err", err)
 		return err
 	}
 
@@ -322,7 +327,7 @@ func (t *ThanosStack) UninstallBlockExplorer(ctx context.Context) error {
 			namespace,
 		}...)
 		if err != nil {
-			fmt.Println("Error uninstalling op-bridge helm chart:", err)
+			t.logger.Error("❌ Error uninstalling op-bridge helm chart", "err", err)
 			return err
 		}
 	}
@@ -330,10 +335,35 @@ func (t *ThanosStack) UninstallBlockExplorer(ctx context.Context) error {
 	// 2. Destroy terraform resources
 	err = t.destroyTerraform(ctx, fmt.Sprintf("%s/tokamak-thanos-stack/terraform/block-explorer", t.deploymentPath))
 	if err != nil {
-		fmt.Println("Error running block-explorer terraform destroy", err)
+		t.logger.Error("❌ Error running block-explorer terraform destroy", "err", err)
 		return err
 	}
 
-	fmt.Println("✅ Uninstall block explorer components successfully")
+	t.logger.Info("✅ Uninstall block explorer components successfully")
 	return nil
+}
+
+func (t *ThanosStack) GetBlockExplorerURL(ctx context.Context) (string, error) {
+	if t.deployConfig.K8s == nil {
+		return "", fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+	}
+
+	var (
+		namespace = t.deployConfig.K8s.Namespace
+	)
+
+	k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, "block-explorer")
+	if err != nil {
+		t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
+		return "", err
+	}
+
+	if len(k8sIngresses) == 0 {
+		t.logger.Error("block explorer ingress is not found")
+		return "", fmt.Errorf("block explorer ingress is not found")
+	}
+
+	blockExplorerURL := "http://" + k8sIngresses[0]
+
+	return blockExplorerURL, nil
 }

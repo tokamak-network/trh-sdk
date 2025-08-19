@@ -1,0 +1,6 @@
+package constants
+
+const (
+	L2CrossDomainMessenger = "0x4200000000000000000000000000000000000007"
+	NativeToken            = "0x0000000000000000000000000000000000000000"
+)

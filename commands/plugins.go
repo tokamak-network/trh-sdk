@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/logging"
@@ -96,6 +97,10 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							continue
 						}
 
+						if config.K8s == nil {
+							return fmt.Errorf("The chain has not been deployed yet. Please deploy the chain first.")
+						}
+
 						var displayNamespace string
 						if pluginName == constants.PluginMonitoring {
 							displayNamespace = constants.MonitoringNamespace
@@ -163,6 +168,31 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							thanosStack.DisplayMonitoringInfo(monitoringInfo)
 
 							return nil
+						case constants.PluginCrossTrade:
+							// Get the cross-trade type from command flags
+							crossTradeType := strings.TrimSpace(strings.ToLower(cmd.String("type")))
+							if crossTradeType == "" {
+								crossTradeType = string(constants.CrossTradeDeployModeL2ToL2)
+							}
+
+							// Validate the cross-trade type
+							if crossTradeType != string(constants.CrossTradeDeployModeL2ToL2) &&
+								crossTradeType != string(constants.CrossTradeDeployModeL2ToL1) {
+								return fmt.Errorf("unsupported cross-trade type: %s. Supported types: %s, %s",
+									crossTradeType, constants.CrossTradeDeployModeL2ToL2, constants.CrossTradeDeployModeL2ToL1)
+							}
+
+							input, err := thanosStack.GetCrossTradeContractsInputs(ctx, constants.CrossTradeDeployMode(crossTradeType))
+							if err != nil {
+								return err
+							}
+
+							_, err = thanosStack.DeployCrossTradeContracts(ctx, input)
+							if err != nil {
+								return err
+							}
+							return nil
+
 						default:
 							return nil
 						}

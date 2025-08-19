@@ -28,15 +28,20 @@ var (
 
 // getLogger returns a logger instance, creating a default one if nil
 func (t *ThanosStack) getLogger() *zap.SugaredLogger {
-	if t.l == nil {
+	if t.logger == nil {
 		return zap.NewExample().Sugar()
 	}
-	return t.l
+	return t.logger
 }
 
 // InstallMonitoring installs monitoring plugin using Helm
 func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *types.MonitoringConfig) (*types.MonitoringInfo, error) {
 	logger := t.getLogger()
+
+	if t.deployConfig == nil || t.deployConfig.K8s == nil {
+		logger.Warn("Deploy configuration is not initialized, skip monitoring installation")
+		return nil, nil
+	}
 
 	logger.Info("🚀 Starting monitoring installation...")
 
@@ -218,6 +223,11 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 	logger := t.getLogger()
 	logger.Info("Starting monitoring uninstallation...")
 	monitoringNamespace := constants.MonitoringNamespace
+
+	if t.deployConfig == nil || t.deployConfig.K8s == nil {
+		logger.Warn("Deploy configuration is not initialized, skip monitoring uninstallation")
+		return nil
+	}
 
 	// Use namespace from deploy config; skip sidecar cleanup if invalid
 	ns := strings.TrimSpace(t.deployConfig.K8s.Namespace)

@@ -9,7 +9,7 @@ import (
 
 	"github.com/tokamak-network/trh-sdk/commands"
 	"github.com/tokamak-network/trh-sdk/flags"
-	"github.com/tokamak-network/trh-sdk/pkg/scanner"
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/urfave/cli/v3"
 )
@@ -27,99 +27,92 @@ func Run() {
 				Usage:  "Deploy contracts on L1",
 				Flags:  flags.DeployContractsFlag,
 				Action: commands.ActionDeployContracts(),
+				Description: `Deploy contracts on L1
+
+Examples:
+  # Deploy contracts on L1 with registering candidate
+  trh-sdk deploy-contracts --network testnet --stack thanos 
+
+  # Deploy contracts on L1 without registering candidate
+  trh-sdk deploy-contracts --network testnet --stack thanos --no-candidate
+  `,
 			},
 			{
 				Name:   "deploy",
 				Usage:  "Deploy infrastructure and bring up the L2 network",
 				Action: commands.ActionDeploy(),
-			},
-			{
-				Name:  "dependencies",
-				Usage: "Check and install dependencies",
+				Description: `Deploy infrastructure and bring up the L2 network. If you want to deploy the devnet network, you can skip the deployment of contracts step.
 
-				Commands: []*cli.Command{
-					{
-						Name:  "setup",
-						Usage: "Install the dependencies",
-						Action: func(ctx context.Context, cmd *cli.Command) error {
-							fmt.Println("Install the dependencies...")
-							fmt.Print("Would you like to install dependencies? (y/N): ")
-							choose, err := scanner.ScanBool(false)
-							if err != nil {
-								return err
-							}
+Examples:
+  # Deploy infrastructure and bring up the L2 testnet network
+  trh-sdk deploy --network testnet --stack thanos && trh-sdk deploy
 
-							if choose {
-								fmt.Println("Installing dependencies...")
-								// Add installation logic here
-								dependenciesCmd := commands.Dependencies{}
-								return dependenciesCmd.Install(ctx, cmd.Args().Slice())
-
-							} else {
-								fmt.Println("Installation skipped.")
-							}
-							return nil
-						},
-					},
-					{
-						Name:  "check",
-						Usage: "Check the dependencies",
-						Action: func(ctx context.Context, cmd *cli.Command) error {
-							dependenciesCmd := commands.Dependencies{}
-							dependenciesCmd.Check(ctx, cmd.Args().Slice())
-							return nil
-						},
-					},
-				},
+  # Deploy infrastructure and bring up the L2 devnet network
+  trh-sdk deploy
+  `,
 			},
 			{
 				Name:   "destroy",
 				Usage:  "Destroy deployed infrastructure and bring down the L2 network",
 				Action: commands.ActionDestroyInfra(),
+				Description: `Destroy deployed infrastructure and bring down the L2 network.
+
+Examples:
+  # Destroy infrastructure and bring down the L2 network(testnet, mainnet and devnet)
+  trh-sdk destroy
+`,
 			},
 			{
 				Name:  "install",
-				Usage: "Install plugins",
+				Usage: fmt.Sprintf("Install plugins(allowed: %s)", strings.Join(constants.SupportedPluginsList, ", ")),
 				Flags: []cli.Flag{
 					&cli.StringFlag{
-						Name:  "plugins",
-						Usage: "",
-						Value: "",
-					},
-					&cli.StringFlag{
-						Name:  "stack",
-						Usage: "Tech stack",
+						Name:  "type",
+						Usage: "Optional type of the plugin",
 						Value: "",
 					},
 				},
 				Action: commands.ActionInstallationPlugins(),
+				Description: `Install plugins
+
+Examples:
+  # Install block-explorer and bridge plugins
+  trh-sdk install block-explorer bridge
+  `,
 			},
 			{
-				Name:  "uninstall",
-				Usage: "Uninstall plugins",
-				Flags: []cli.Flag{
-					&cli.StringFlag{
-						Name:  "plugins",
-						Usage: "",
-						Value: "",
-					},
-					&cli.StringFlag{
-						Name:  "stack",
-						Usage: "Tech stack",
-						Value: "",
-					},
-				},
+				Name:   "uninstall",
+				Usage:  fmt.Sprintf("Uninstall plugins(allowed: %s)", strings.Join(constants.SupportedPluginsList, ", ")),
+				Flags:  []cli.Flag{},
 				Action: commands.ActionInstallationPlugins(),
+				Description: `Uninstall plugins
+
+Examples:
+  # Uninstall block-explorer and bridge plugins
+  trh-sdk uninstall block-explorer bridge
+  `,
 			},
 			{
 				Name:   "version",
 				Usage:  "Show SDK version",
 				Action: commands.ActionVersion(),
+				Description: `Show SDK version
+
+Examples:
+  # Show SDK version
+  trh-sdk version
+  `,
 			},
 			{
 				Name:   "info",
 				Usage:  "Show information about the running chain",
 				Action: commands.ActionShowInformation(),
+				Description: `Get information about the running chain
+
+Examples:
+  # Get information about the running chain
+  trh-sdk info
+  `,
 			},
 			{
 				Name:  "logs",
@@ -140,21 +133,45 @@ func Run() {
 					},
 				},
 				Action: commands.ActionShowLogs(),
+				Description: `Show logs of the running chain
+
+Examples:
+  # Show logs of the running chain
+  trh-sdk logs --component op-node --troubleshoot
+  `,
 			},
 			{
 				Name:   "update",
 				Usage:  "Update the config of the running chain",
 				Action: commands.ActionUpdateNetwork(),
+				Description: `Update the config of the running chain
+
+Examples:
+  # Update the config of the running chain
+  trh-sdk update
+  `,
 			},
 			{
 				Name:   "upgrade",
 				Usage:  "Upgrade the trh-sdk latest version",
 				Action: commands.ActionUpgrade(),
+				Description: `Upgrade the trh-sdk latest version
+
+Examples:
+  # Upgrade the trh-sdk latest version
+  trh-sdk upgrade
+  `,
 			},
 			{
 				Name:   "verify-register-candidate",
 				Usage:  "Verify and Register Candidate",
 				Action: commands.ActionVerifyRegisterCandidates(),
+				Description: `Verify and Register Candidate
+
+Examples:
+  # Verify and Register Candidate
+  trh-sdk verify-register-candidate
+  `,
 			},
 			{
 				Name:  "alert-config",

@@ -153,44 +153,44 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context) error {
 		return fmt.Errorf("failed to clone fork: %w", err)
 	}
 
-	err = utils.ExecuteCommandStream(ctx, t.l, "git", "-C", MetadataRepoName, "remote", "add", "upstream", MetadataRepoURL)
+	err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "remote", "add", "upstream", MetadataRepoURL)
 	if err != nil {
 		fmt.Printf("⚠️ Warning: Failed to add upstream remote: %v\n", err)
 	}
 
 	// Fetch latest changes from upstream
 	fmt.Println("📥 Fetching latest changes from upstream...")
-	err = utils.ExecuteCommandStream(ctx, t.l, "git", "-C", MetadataRepoName, "fetch", "upstream")
+	err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "fetch", "upstream")
 	if err != nil {
 		fmt.Printf("⚠️ Warning: Failed to fetch upstream: %v\n", err)
 	}
 
 	fmt.Println("🔄 Updating main branch...")
-	err = utils.ExecuteCommandStream(ctx, t.l, "git", "-C", MetadataRepoName, "checkout", "main")
+	err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "checkout", "main")
 	if err != nil {
 		fmt.Printf("⚠️ Warning: Failed to checkout main: %v\n", err)
 	}
 
-	err = utils.ExecuteCommandStream(ctx, t.l, "git", "-C", MetadataRepoName, "merge", "upstream/main")
+	err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "merge", "upstream/main")
 	if err != nil {
 		fmt.Printf("⚠️ Warning: Failed to merge upstream/main: %v\n", err)
 	}
 
 	// STEP 3. Create and checkout new branch
 	fmt.Println("\n📋 STEP 3: Creating feature branch...")
-	err = utils.ExecuteCommandStream(ctx, t.l, "git", "-C", MetadataRepoName, "fetch", "origin", fmt.Sprintf("%s:%s", branchName, branchName))
+	err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "fetch", "origin", fmt.Sprintf("%s:%s", branchName, branchName))
 	// Checking if the branch already exists
 	if err != nil {
 		fmt.Printf("Creating and checking out branch: %s\n", branchName)
 		newMetadataEntry = true
-		err = utils.ExecuteCommandStream(ctx, t.l, "git", "-C", MetadataRepoName, "checkout", "-b", branchName)
+		err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "checkout", "-b", branchName)
 		if err != nil {
 			return fmt.Errorf("failed to create and checkout branch: %w", err)
 		}
 	} else {
 		fmt.Println("✅ Branch already exists!")
 		newMetadataEntry = false
-		err = utils.ExecuteCommandStream(ctx, t.l, "git", "-C", MetadataRepoName, "checkout", branchName)
+		err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "checkout", branchName)
 		if err != nil {
 			return fmt.Errorf("failed to checkout branch from remote: %w", err)
 		}
@@ -198,7 +198,7 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context) error {
 
 	// STEP 4. Install dependencies
 	fmt.Println("\n📋 STEP 4: Installing dependencies...")
-	err = utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", fmt.Sprintf("cd %s && npm install", MetadataRepoName))
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && npm install", MetadataRepoName))
 	if err != nil {
 		return fmt.Errorf("failed to install dependencies: %w", err)
 	}
@@ -216,7 +216,7 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context) error {
 
 	if newMetadataEntry {
 		fmt.Printf("Copying example metadata to %s...\n", targetFile)
-		err = utils.ExecuteCommandStream(ctx, t.l, "cp", sourceFile, targetFile)
+		err = utils.ExecuteCommandStream(ctx, t.logger, "cp", sourceFile, targetFile)
 		if err != nil {
 			return fmt.Errorf("failed to copy example metadata file: %w", err)
 		}
@@ -462,7 +462,7 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context) error {
 	validationCmd := fmt.Sprintf("cd %s && npm run validate -- --pr-title \"%s\" %s", MetadataRepoName, prTitle, validationPath)
 
 	fmt.Printf("\n📋STEP 6: Running validation command: %s\n", validationCmd)
-	err = utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", validationCmd)
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", validationCmd)
 	if err != nil {
 		return fmt.Errorf("metadata validation failed: %w", err)
 	}
@@ -470,18 +470,18 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context) error {
 
 	// STEP 7. Setup git config and commit changes
 	fmt.Println("\n📋 STEP 7: Committing changes...")
-	err = utils.SetupGitConfig(ctx, t.l, MetadataRepoName, creds)
+	err = utils.SetupGitConfig(ctx, t.logger, MetadataRepoName, creds)
 	if err != nil {
 		return fmt.Errorf("failed to setup git config: %w", err)
 	}
 
-	err = utils.ExecuteCommandStream(ctx, t.l, "git", "-C", MetadataRepoName, "add", ".")
+	err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "add", ".")
 	if err != nil {
 		return fmt.Errorf("failed to add changes: %w", err)
 	}
 
 	commitMessage := fmt.Sprintf("[Rollup] %s sepolia %s - %s", operation, systemConfigAddress, t.deployConfig.ChainName)
-	err = utils.ExecuteCommandStream(ctx, t.l, "git", "-C", MetadataRepoName, "commit", "-m", commitMessage)
+	err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "commit", "-m", commitMessage)
 	if err != nil {
 		return fmt.Errorf("failed to commit changes: %w", err)
 	}
@@ -489,7 +489,7 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context) error {
 
 	// STEP 8. Push changes to user's fork
 	fmt.Println("\n📋 STEP 8: Pushing changes to your fork...")
-	err = utils.ExecuteCommandStream(ctx, t.l, "git", "-C", MetadataRepoName, "push", "origin", branchName)
+	err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "push", "origin", branchName)
 	if err != nil {
 		return fmt.Errorf("failed to push changes to fork: %w", err)
 	}
