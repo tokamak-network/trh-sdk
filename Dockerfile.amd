@@ -6,6 +6,7 @@ WORKDIR /app
 
 # Copy scripts
 COPY scripts /app/scripts
+COPY setup.sh /app/scripts/setup.sh
 
 # Install base system packages
 RUN apt-get update && apt-get upgrade -y && \
@@ -23,12 +24,20 @@ RUN apt-get update && apt-get upgrade -y && \
 
 # Run setup script
 RUN chmod +x /app/scripts/setup.sh && \
-  DEBIAN_FRONTEND=noninteractive bash -x /app/scripts/setup.sh 2>&1 | tee /var/log/setup.log
+  DEBIAN_FRONTEND=noninteractive bash -x /app/scripts/setup.sh -c 57703d3bb8feba9cd9029674b780975d070f1cc4 2>&1 | tee /var/log/setup.log
 
 
 # Clean up
 RUN apt-get clean && \
   rm -rf /var/lib/apt/lists/*
+
+# Ensure trh-sdk binary is available in PATH inside the image
+RUN if command -v go >/dev/null 2>&1; then \
+    GOPATH=$(go env GOPATH) && \
+    if [ -f "$GOPATH/bin/trh-sdk" ]; then \
+      cp "$GOPATH/bin/trh-sdk" /usr/local/bin/trh-sdk; \
+    fi; \
+  fi
 
 # Use bash shell and source profile
 SHELL ["/bin/bash", "-c"]
