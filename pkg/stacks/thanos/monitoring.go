@@ -28,10 +28,10 @@ var (
 
 // getLogger returns a logger instance, creating a default one if nil
 func (t *ThanosStack) getLogger() *zap.SugaredLogger {
-	if t.l == nil {
+	if t.logger == nil {
 		return zap.NewExample().Sugar()
 	}
-	return t.l
+	return t.logger
 }
 
 // InstallMonitoring installs monitoring plugin using Helm

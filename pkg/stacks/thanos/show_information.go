@@ -126,6 +126,7 @@ func (t *ThanosStack) ShowInformation(ctx context.Context) (*types.ChainInformat
 
 func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, component string, isTroubleshoot bool) error {
 	if config.K8s == nil {
+		t.logger.Error("K8s configuration is not set. Please run the deploy command first")
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
@@ -134,12 +135,13 @@ func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, compon
 	)
 
 	if !SupportedLogsComponents[component] {
+		t.logger.Error("unsupported component", "component", component)
 		return fmt.Errorf("unsupported component: %s", component)
 	}
 
 	runningPods, err := t.getRunningPods(ctx)
 	if err != nil {
-		fmt.Printf("failed to get running pods: %s \n", err.Error())
+		t.logger.Error("failed to get running pods", "err", err)
 		return err
 	}
 
@@ -154,15 +156,15 @@ func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, compon
 	}
 
 	if isTroubleshoot {
-		err = utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f | grep -iE 'error|fail|panic|critical'", namespace, runningPodName))
+		err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f | grep -iE 'error|fail|panic|critical'", namespace, runningPodName))
 		if err != nil {
-			fmt.Printf("failed to show logs: %s \n", err.Error())
+			t.logger.Error("failed to show logs", "err", err)
 			return err
 		}
 	} else {
-		err = utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f", namespace, runningPodName))
+		err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("kubectl -n %s logs %s -f", namespace, runningPodName))
 		if err != nil {
-			fmt.Printf("failed to show logs: %s \n", err.Error())
+			t.logger.Error("failed to show logs", "err", err)
 			return err
 		}
 	}
@@ -172,6 +174,7 @@ func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, compon
 
 func (t *ThanosStack) getRunningPods(ctx context.Context) ([]string, error) {
 	if t.deployConfig.K8s == nil {
+		t.logger.Error("K8s configuration is not set. Please run the deploy command first")
 		return nil, fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
@@ -180,6 +183,7 @@ func (t *ThanosStack) getRunningPods(ctx context.Context) ([]string, error) {
 	// Step 2: Get pods
 	runningPods, err := utils.GetK8sPods(ctx, namespace)
 	if err != nil {
+		t.logger.Error("failed to get pods", "err", err)
 		return nil, fmt.Errorf("failed to get pods: %w", err)
 	}
 
