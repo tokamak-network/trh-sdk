@@ -48,6 +48,12 @@ func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string, inputs *Deplo
 
 				return err
 			}
+			if t.network == constants.Mainnet {
+				err = t.RegisterMetadata(ctx)
+				if err != nil {
+					return err
+				}
+			}
 			return nil
 		default:
 			t.logger.Error("infrastructure provider %s is not supported", infraOpt)

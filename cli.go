@@ -315,6 +315,11 @@ Examples:
 				},
 				Action: commands.ActionLogCollection(),
 			},
+			{
+				Name:   "register-metadata",
+				Usage:  "Register L2 Metadata",
+				Action: commands.ActionRegisterMetadata(),
+			},
 		},
 	}
 
