@@ -16,7 +16,10 @@ RUN apt-get update && \
   gnupg \
   curl \
   unzip \
-  ca-certificates && \
+  ca-certificates \
+  jq \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/* && \
   # Install Node.js v20.16.0
   curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
   apt-get install -y --no-install-recommends nodejs && \
@@ -25,7 +28,7 @@ RUN apt-get update && \
 
 # Run setup script
 RUN chmod +x /app/scripts/setup.sh && \
-  DEBIAN_FRONTEND=noninteractive bash -x /app/scripts/setup.sh -c 1d5667bba6f572452b92b9af6a2c8cf1acad793f 2>&1 | tee /var/log/setup.log
+  DEBIAN_FRONTEND=noninteractive bash -x /app/scripts/setup.sh -c c720713db10f169a634760a4474c21471ca5767b 2>&1 | tee /var/log/setup.log
 
 # Extract only the necessary binaries and files
 RUN if [ -x "/usr/local/go/bin/go" ]; then \
@@ -58,6 +61,7 @@ RUN apt-get update && \
   git-core \
   openssh-client \
   libcurl4-openssl-dev \
+  jq \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
@@ -93,11 +97,35 @@ COPY --from=builder /usr/bin/git /usr/bin/git
 COPY --from=builder /usr/bin/terraform /usr/bin/terraform
 COPY --from=builder /usr/local/bin/aws /usr/local/bin/aws
 COPY --from=builder /usr/local/aws-cli /usr/local/aws-cli
-COPY --from=builder /usr/local/aws-cli/v2/2.28.12/dist/libpython3.13.so.1.0 /usr/local/bin/libpython3.13.so.1.0
 COPY --from=builder /root/.foundry /root/.foundry
 COPY --from=builder /usr/bin/python3 /usr/bin/python3
 COPY --from=builder /usr/lib/python3* /usr/lib/
+COPY --from=builder /usr/local/bin/helm /usr/local/bin/helm
+COPY --from=builder /usr/local/bin/kubectl /usr/local/bin/kubectl
 ENV PATH=$PATH:/root/.foundry/bin
+
+# Fix AWS CLI Python library issue
+RUN if [ -d /usr/local/aws-cli/v2 ]; then \
+      # Find the actual AWS CLI version directory and create current symlink
+      aws_version_dir=$(ls -d /usr/local/aws-cli/v2/*/ 2>/dev/null | head -n1) && \
+      if [ -n "$aws_version_dir" ]; then \
+        ln -sfn "$aws_version_dir" /usr/local/aws-cli/v2/current; \
+      fi; \
+      # Create symlink for the Python library that AWS CLI expects
+      if [ -f /usr/local/aws-cli/v2/current/dist/libpython3.13.so.1.0 ]; then \
+        ln -sf /usr/local/aws-cli/v2/current/dist/libpython3.13.so.1.0 /usr/local/bin/libpython3.13.so.1.0; \
+      fi; \
+      # Create AWS CLI wrapper script with proper environment
+      echo '#!/bin/bash' > /usr/local/bin/aws && \
+      echo 'export PYTHONPATH=/usr/local/aws-cli/v2/current/dist' >> /usr/local/bin/aws && \
+      echo 'export LD_LIBRARY_PATH=/usr/local/aws-cli/v2/current/dist' >> /usr/local/bin/aws && \
+      echo 'exec /usr/local/aws-cli/v2/current/dist/aws "$@"' >> /usr/local/bin/aws && \
+      chmod +x /usr/local/bin/aws; \
+    fi
+
+# Set AWS CLI environment variables
+ENV LD_LIBRARY_PATH=/usr/local/aws-cli/v2/current/dist
+ENV PYTHONPATH=/usr/local/aws-cli/v2/current/dist
 
 # Copy scripts directory from builder stage
 COPY --from=builder /app/scripts /app/scripts

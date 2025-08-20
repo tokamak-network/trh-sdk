@@ -418,12 +418,22 @@ echo "Verifying TRH SDK installation..."
 "$(go env GOPATH)/bin/trh-sdk" version
 
 
-wget https://raw.githubusercontent.com/tokamak-network/trh-sdk/refs/heads/main/scripts/install-all-packages.sh
-chmod +x install-all-packages.sh
-./install-all-packages.sh
-
-
-rm -rf ./install-all-packages.sh
+# Download and run install-all-packages.sh using curl (more reliable in Docker)
+if command -v curl &> /dev/null; then
+    echo "Downloading install-all-packages.sh using curl..."
+    curl -fsSL -o install-all-packages.sh https://raw.githubusercontent.com/tokamak-network/trh-sdk/refs/heads/main/scripts/install-all-packages.sh
+    chmod +x install-all-packages.sh
+    ./install-all-packages.sh
+    rm -rf ./install-all-packages.sh
+elif command -v wget &> /dev/null; then
+    echo "Downloading install-all-packages.sh using wget..."
+    wget https://raw.githubusercontent.com/tokamak-network/trh-sdk/refs/heads/main/scripts/install-all-packages.sh
+    chmod +x install-all-packages.sh
+    ./install-all-packages.sh
+    rm -rf ./install-all-packages.sh
+else
+    echo "Warning: Neither curl nor wget found. Skipping install-all-packages.sh"
+fi
 
 
 echo -e "\033[1;32msource $CONFIG_FILE\033[0m to apply changes to your current shell session."
