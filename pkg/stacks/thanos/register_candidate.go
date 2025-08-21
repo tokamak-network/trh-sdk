@@ -588,8 +588,8 @@ func GetDesignatedOwnersByChainID(chainID uint64) (DesignatedOwners, error) {
 	switch chainID {
 	case constants.EthereumSepoliaChainID: // Sepolia
 		return DesignatedOwners{
-			TokamakDAO: ethCommon.HexToAddress("0xeEfb04f3A4406363b399A1c3d194d75ca81A2d1B"),
-			Foundation: ethCommon.HexToAddress("0xA2101482b28E3D99ff6ced517bA41EFf4971a386"),
+			TokamakDAO: ethCommon.HexToAddress("0xA2101482b28E3D99ff6ced517bA41EFf4971a386"),
+			Foundation: ethCommon.HexToAddress("0xeEfb04f3A4406363b399A1c3d194d75ca81A2d1B"),
 		}, nil
 	case constants.EthereumMainnetChainID: // Ethereum (TODO: need to update)
 		return DesignatedOwners{
