@@ -28,7 +28,7 @@ RUN apt-get update && \
 
 # Run setup script
 RUN chmod +x /app/scripts/setup.sh && \
-  DEBIAN_FRONTEND=noninteractive bash -x /app/scripts/setup.sh -c c720713db10f169a634760a4474c21471ca5767b 2>&1 | tee /var/log/setup.log
+  DEBIAN_FRONTEND=noninteractive bash -x /app/scripts/setup.sh -c 8164cd30b20ececfd98bc7808d25755db6f9df77 2>&1 | tee /var/log/setup.log
 
 # Extract only the necessary binaries and files
 RUN if [ -x "/usr/local/go/bin/go" ]; then \
