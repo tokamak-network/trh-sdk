@@ -155,7 +155,7 @@ type LoggingConfig struct {
 }
 
 const ConfigFileName = "settings.json"
-const MetadataInfoFileName = "metadata_info.json"
+const MetadataInfoFileName = "stack-info.json"
 
 func (c *Config) WriteToJSONFile(deploymentPath string) error {
 	data, err := json.MarshalIndent(c, "", "  ")
