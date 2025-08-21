@@ -248,7 +248,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 			return fmt.Errorf("failed to register candidate: %v", err)
 		}
 
-		t.logger.Info("Verification and register config transaction submitted", "txHash", txVerifyAndRegisterConfig.Hash().Hex())
+		t.logger.Info("Verification and register config transaction submitted ", "txHash ", txVerifyAndRegisterConfig.Hash().Hex())
 
 		// Wait for transaction confirmation
 		receiptVerifyRegisterConfig, err := bind.WaitMined(ctx, l1Client, txVerifyAndRegisterConfig)
@@ -262,7 +262,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 			return fmt.Errorf("transaction failed with status: %d", receiptVerifyRegisterConfig.Status)
 		}
 
-		t.logger.Info("Transaction confirmed in block", "blockNumber", receiptVerifyRegisterConfig.BlockNumber.Uint64())
+		t.logger.Info("Transaction confirmed in block ", "blockNumber ", receiptVerifyRegisterConfig.BlockNumber.Uint64())
 	} else if rollupType == 0 {
 		t.logger.Error("❌ Verification is not possible. Verification contract not registered as registrant")
 		return fmt.Errorf("verification is not possible. Verification contract not registered as registrant")
@@ -301,7 +301,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 		return fmt.Errorf("failed to approve TON: %v", err)
 	}
 
-	t.logger.Info("Approve TON transaction submitted", "txHash", txApprove.Hash().Hex())
+	t.logger.Info("Approve TON transaction submitted ", "txHash ", txApprove.Hash().Hex())
 
 	// Wait for transaction confirmation
 	receiptApprove, err := bind.WaitMined(ctx, l1Client, txApprove)
@@ -310,7 +310,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 		return fmt.Errorf("failed waiting for transaction confirmation: %v", err)
 	}
 
-	t.logger.Info("Transaction confirmed in block", "blockNumber", receiptApprove.BlockNumber.Uint64())
+	t.logger.Info("Transaction confirmed in block ", "blockNumber ", receiptApprove.BlockNumber.Uint64())
 
 	adminAddress, err := utils.GetAddressFromPrivateKey(t.deployConfig.AdminPrivateKey)
 	if err != nil {
@@ -356,7 +356,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 		return fmt.Errorf("failed to register candidate: %v", err)
 	}
 
-	t.logger.Info("Register Candidate transaction submitted", "txHash", txRegisterCandidate.Hash().Hex())
+	t.logger.Info("Register Candidate transaction submitted ", "txHash ", txRegisterCandidate.Hash().Hex())
 
 	// Wait for transaction confirmation
 	receiptRegisterCandidate, err := bind.WaitMined(ctx, l1Client, txRegisterCandidate)
@@ -370,7 +370,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 		return fmt.Errorf("transaction failed with status: %d", receiptRegisterCandidate.Status)
 	}
 
-	t.logger.Info("Transaction confirmed in block", "blockNumber", receiptRegisterCandidate.BlockNumber.Uint64())
+	t.logger.Info("Transaction confirmed in block ", "blockNumber ", receiptRegisterCandidate.BlockNumber.Uint64())
 
 	// Get block details to extract timestamp
 	blockNumber := receiptRegisterCandidate.BlockNumber
