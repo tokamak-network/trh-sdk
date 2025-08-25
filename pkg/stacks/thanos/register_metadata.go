@@ -331,9 +331,8 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context) error {
 		}
 	}
 
-	parsedTime, _ := time.Parse("2006-01-02 15:04:05 MST", t.deployConfig.StakingInfo.RegistrationTime)
-
 	if t.deployConfig.StakingInfo != nil {
+		parsedTime, _ := time.Parse("2006-01-02 15:04:05 MST", t.deployConfig.StakingInfo.RegistrationTime)
 		metadata.Staking = types.Staking{
 			IsCandidate:           t.deployConfig.StakingInfo.IsCandidate,
 			CandidateRegisteredAt: parsedTime.UTC().Format(time.RFC3339),
