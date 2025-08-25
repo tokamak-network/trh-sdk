@@ -305,7 +305,7 @@ func CheckPVCStatus(ctx context.Context, namespace string) (bool, error) {
 	fmt.Println("PVC statuses:", pvcStatuses)
 	for _, status := range pvcStatuses {
 		if status != "Bound" {
-			fmt.Printf("❌ Found PVC with status: %s\n", status)
+			fmt.Printf("⚠️ Found PVC with status: %s\n", status)
 			return false, nil
 		}
 	}

@@ -42,7 +42,7 @@ func ActionAlertConfig() cli.ActionFunc {
 				return handleChannelConfigure(ctx, channel)
 			}
 			// If no operation specified, show help
-			fmt.Println("❌ Please specify an operation: --disable or --configure")
+			fmt.Println("⚠️  Please specify an operation: --disable or --configure")
 			return nil
 		}
 
@@ -343,13 +343,13 @@ func configureAlertRules(ctx context.Context, ac *thanos.AlertCustomization) err
 		if strings.HasPrefix(ruleInput, "enable ") {
 			parts := strings.Fields(ruleInput)
 			if len(parts) != 2 {
-				fmt.Println("❌ Invalid command format. Use 'enable <number>'")
+				fmt.Println("⚠️  Invalid command format. Use 'enable <number>'")
 				continue
 			}
 
 			ruleNum, err := strconv.Atoi(parts[1])
 			if err != nil || ruleNum < 1 || ruleNum > 6 {
-				fmt.Println("❌ Invalid rule number. Please enter a number between 1 and 6")
+				fmt.Println("⚠️  Invalid rule number. Please enter a number between 1 and 6")
 				continue
 			}
 
@@ -381,13 +381,13 @@ func configureAlertRules(ctx context.Context, ac *thanos.AlertCustomization) err
 		if strings.HasPrefix(ruleInput, "disable ") {
 			parts := strings.Fields(ruleInput)
 			if len(parts) != 2 {
-				fmt.Println("❌ Invalid command format. Use 'disable <number>'")
+				fmt.Println("⚠️  Invalid command format. Use 'disable <number>'")
 				continue
 			}
 
 			ruleNum, err := strconv.Atoi(parts[1])
 			if err != nil || ruleNum < 1 || ruleNum > 6 {
-				fmt.Println("❌ Invalid rule number. Please enter a number between 1 and 6")
+				fmt.Println("⚠️  Invalid rule number. Please enter a number between 1 and 6")
 				continue
 			}
 
@@ -418,7 +418,7 @@ func configureAlertRules(ctx context.Context, ac *thanos.AlertCustomization) err
 		// Get rule name from number for configuration
 		ruleNum, err := strconv.Atoi(ruleInput)
 		if err != nil || ruleNum < 1 || ruleNum > 6 {
-			fmt.Printf("❌ Invalid command: %s\n", ruleInput)
+			fmt.Printf("⚠️  Invalid command: %s\n", ruleInput)
 			fmt.Println("Valid commands: rule number (1-6), enable <number>, disable <number>, quit")
 			continue
 		}
@@ -456,7 +456,7 @@ func configureAlertRules(ctx context.Context, ac *thanos.AlertCustomization) err
 				fmt.Printf("❌ Failed to configure rule: %v\n", err)
 			}
 		default:
-			fmt.Printf("❌ Unknown rule: %s\n", ruleName)
+			fmt.Printf("⚠️  Unknown rule: %s\n", ruleName)
 		}
 	}
 }
@@ -783,7 +783,7 @@ func resetAlertRules(ctx context.Context, ac *thanos.AlertCustomization) error {
 
 		fmt.Println("✅ Alert rules reset to default successfully")
 	} else {
-		fmt.Println("❌ Reset cancelled")
+		fmt.Println("⚠️  Reset cancelled")
 	}
 
 	return nil
