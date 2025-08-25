@@ -33,6 +33,28 @@ func (t *ThanosStack) clearTerraformState(ctx context.Context) error {
 		bucketExist := utils.BucketExists(ctx, t.awsProfile.S3Client, state.Backend.Config.Bucket)
 		if bucketExist {
 			t.logger.Info("Destroying thanos-stack terraform resources")
+
+			// Get lock ID from the state file
+			lockID, err := utils.GetTerraformLockID(ctx, "terraform-lock", state.Backend.Config.Bucket)
+			if err != nil {
+				t.logger.Error("Error getting terraform lock ID", "err", err)
+				return err
+			}
+
+			if lockID != "" {
+				t.logger.Info("Terraform lock ID found", "lockID", lockID)
+				t.logger.Info("To force unlock, run: terraform force-unlock " + lockID)
+				err = utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
+					"-c",
+					fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform/thanos-stack && terraform force-unlock -force %s`, t.deploymentPath, lockID),
+				}...)
+				if err != nil {
+					t.logger.Error("Error force-unlocking terraform", "err", err)
+				}
+
+				t.logger.Info("Terraform lock ID force-unlocked", "lockID", lockID)
+			}
+
 			err = t.destroyTerraform(ctx, fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", t.deploymentPath))
 			if err != nil {
 				t.logger.Error("Error running thanos-stack terraform destroy:", "err", err)
