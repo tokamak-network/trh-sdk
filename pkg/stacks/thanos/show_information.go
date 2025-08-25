@@ -15,8 +15,8 @@ var SupportedLogsComponents = map[string]bool{
 	"op-proposer":       true,
 	"op-geth":           true,
 	"op-node":           true,
-	"block-explorer-fe": true,
 	"block-explorer-be": true,
+	"block-explorer-fe": true,
 	"bridge":            true,
 }
 
@@ -61,11 +61,11 @@ func (t *ThanosStack) ShowInformation(ctx context.Context) (*types.ChainInformat
 	status := map[string]bool{
 		"chain":             false,
 		"bridge":            false,
-		"block-explorer-fe": false,
+		"block-explorer-be": false,
 	}
 
 	var (
-		l2RpcUrl, bridgeUrl, blockExplorerUrl string
+		l2RpcUrl, bridgeUrl, blockExplorerUrl, monitoringUrl string
 	)
 
 	for _, pod := range runningPods {
@@ -75,8 +75,8 @@ func (t *ThanosStack) ShowInformation(ctx context.Context) (*types.ChainInformat
 		if strings.Contains(pod, "bridge") {
 			status["bridge"] = true
 		}
-		if strings.Contains(pod, "block-explorer-fe") {
-			status["block-explorer-fe"] = true
+		if strings.Contains(pod, "block-explorer-be") {
+			status["block-explorer-be"] = true
 		}
 	}
 
@@ -97,7 +97,7 @@ func (t *ThanosStack) ShowInformation(ctx context.Context) (*types.ChainInformat
 		case strings.Contains(ingressName, "bridge") && status["bridge"]:
 			bridgeUrl = fmt.Sprintf("http://%s", ingress)
 			fmt.Printf("✅ Bridge is running on %s\n", bridgeUrl)
-		case strings.Contains(ingressName, "block-explorer-fe") && status["block-explorer-fe"]:
+		case strings.Contains(ingressName, "block-explorer-be") && status["block-explorer-be"]:
 			blockExplorerUrl = fmt.Sprintf("http://%s", ingress)
 			fmt.Printf("✅ Block Explorer is running on %s\n", blockExplorerUrl)
 		}
@@ -107,20 +107,28 @@ func (t *ThanosStack) ShowInformation(ctx context.Context) (*types.ChainInformat
 		fmt.Printf("✅ Metadata PR is available at %s\n", config.MetadataPRLink)
 	}
 
-	// Get helm release name
-	releasesNameInMonitoringNamespace, err := utils.GetHelmReleases(ctx, constants.MonitoringNamespace)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get helm releases: %w", err)
+	// Check if monitoring plugin is installed and get monitoring URL
+	if err := utils.CheckMonitoringPluginInstalled(ctx); err == nil {
+		// Monitoring plugin is installed, check for ingress
+		releasesNameInMonitoringNamespace, err := utils.GetHelmReleases(ctx, constants.MonitoringNamespace)
+		if err != nil {
+			t.logger.Warn("failed to get helm releases for monitoring", "err", err)
+		} else {
+			for _, release := range releasesNameInMonitoringNamespace {
+				if strings.Contains(release, constants.MonitoringNamespace) {
+					monitoringUrl = t.checkALBIngressStatus(ctx, &types.MonitoringConfig{
+						Namespace:       constants.MonitoringNamespace,
+						HelmReleaseName: release,
+					})
+					break
+				}
+			}
+		}
 	}
 
-	var monitoringUrl string
-	for _, release := range releasesNameInMonitoringNamespace {
-		if strings.Contains(release, constants.MonitoringNamespace) {
-			monitoringUrl = t.checkALBIngressStatus(ctx, &types.MonitoringConfig{
-				Namespace:       constants.MonitoringNamespace,
-				HelmReleaseName: release,
-			})
-		}
+	// Display monitoring URL if available
+	if monitoringUrl != "" {
+		fmt.Printf("✅ Monitoring plugin is running on %s\n", monitoringUrl)
 	}
 
 	return &types.ChainInformation{
