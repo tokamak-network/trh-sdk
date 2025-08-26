@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -23,7 +24,7 @@ const (
 )
 
 // getGitHubCredentials prompts user for GitHub username and personal access token
-func getGitHubCredentials() (*types.GitHubCredentials, error) {
+func GetGitHubCredentials() (*types.GitHubCredentials, error) {
 	fmt.Println("\n🔑 GitHub Authentication Required")
 	fmt.Println("   You'll need a Personal Access Token to push changes")
 	fmt.Println("   Create one at: https://github.com/settings/tokens/new")
@@ -94,18 +95,20 @@ func getGitHubCredentials() (*types.GitHubCredentials, error) {
 	}, nil
 }
 
-func (t *ThanosStack) RegisterMetadata(ctx context.Context) error {
+func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubCredentials) error {
+	if creds == nil {
+		return errors.New("credentials are required")
+	}
+
+	if err := creds.Validate(); err != nil {
+		return fmt.Errorf("invalid credentials: %w", err)
+	}
+
 	fmt.Println("🔄 Generating rollup metadata and submitting PR...")
 
 	stackInfo, err := t.ShowInformation(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to show stack information: %w", err)
-	}
-
-	// Get GitHub credentials first (we need them for forking)
-	creds, err := getGitHubCredentials()
-	if err != nil {
-		return fmt.Errorf("failed to get GitHub credentials: %w", err)
 	}
 
 	var contracts *types.Contracts

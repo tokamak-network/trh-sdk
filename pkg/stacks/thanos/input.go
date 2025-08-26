@@ -83,6 +83,9 @@ type DeployInfraInput struct {
 	ChainName           string
 	L1BeaconURL         string
 	IgnoreInstallBridge bool
+
+	// register metadata
+	GithubCredentials *types.GitHubCredentials
 }
 
 func (c *DeployInfraInput) Validate(ctx context.Context) error {

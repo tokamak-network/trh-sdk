@@ -48,9 +48,10 @@ func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string, inputs *Deplo
 
 				return err
 			}
-			if t.network == constants.Mainnet {
-				err = t.RegisterMetadata(ctx)
+			if inputs.GithubCredentials != nil {
+				err = t.RegisterMetadata(ctx, inputs.GithubCredentials)
 				if err != nil {
+					t.logger.Error("Failed to register metadata", "err", err)
 					return err
 				}
 			}

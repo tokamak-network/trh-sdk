@@ -39,7 +39,12 @@ func ActionRegisterMetadata() cli.ActionFunc {
 			if err != nil {
 				return fmt.Errorf("failed to create thanos stack: %v", err)
 			}
-			err = thanosStack.RegisterMetadata(ctx)
+			// Get GitHub credentials first (we need them for forking)
+			creds, err := thanos.GetGitHubCredentials()
+			if err != nil {
+				return fmt.Errorf("failed to get GitHub credentials: %w", err)
+			}
+			err = thanosStack.RegisterMetadata(ctx, creds)
 			return err
 		default:
 			return fmt.Errorf("unsupported stack: %s", config.Stack)

@@ -1,5 +1,7 @@
 package types
 
+import "errors"
+
 // TODO: Check and update these default info with team if required
 var MetadataGenericInfo = MetadataInfo{
 	Chain: ChainInfo{
@@ -211,6 +213,19 @@ type GitHubCredentials struct {
 	Username string
 	Token    string
 	Email    string
+}
+
+func (c *GitHubCredentials) Validate() error {
+	if c.Username == "" {
+		return errors.New("username is required")
+	}
+	if c.Token == "" {
+		return errors.New("token is required")
+	}
+	if c.Email == "" {
+		return errors.New("email is required")
+	}
+	return nil
 }
 
 type ChainInfo struct {

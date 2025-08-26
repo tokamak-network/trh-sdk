@@ -106,6 +106,16 @@ func ActionDeploy() cli.ActionFunc {
 				}
 			}
 
+			var creds *types.GitHubCredentials
+			if network == constants.Mainnet {
+				creds, err = thanos.GetGitHubCredentials()
+				if err != nil {
+					fmt.Println("Error getting GitHub credentials:", err)
+					return err
+				}
+				inputs.GithubCredentials = creds
+			}
+
 			err = thanosStack.Deploy(ctx, infraOpt, inputs)
 			if err != nil {
 				fmt.Println("Error deploying Thanos Stack", "err", err)
