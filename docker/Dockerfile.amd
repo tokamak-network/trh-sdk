@@ -133,7 +133,7 @@ ENV PYTHONPATH=/usr/local/aws-cli/v2/current/dist
 COPY --from=builder /app/scripts /app/scripts
 
 # Copy only the necessary binary from builder stage
-COPY --from=builder /tmp/trh-sdk /usr/local/bin/trh-sdk
+COPY --from=builder /root/go/bin/trh-sdk /usr/local/bin/trh-sdk
 
 # Set working directory
 WORKDIR /app
