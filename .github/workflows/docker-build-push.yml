@@ -3,7 +3,7 @@ name: Build and Push Docker Images
 on:
   push:
     branches:
-      - feat/update_Dockerfile-for-internal-test-202508
+      - feat/build-and-push_docker-image
   workflow_dispatch:
     inputs:
       version:
