@@ -27,7 +27,7 @@ func Run() {
 				Usage: "Manage L2 backups and restores (EFS/RDS)",
 				Description: `Examples:
     trh-sdk backup-manager --status
-    trh-sdk backup-manager --snapshot --note "pre-upgrade"
+    trh-sdk backup-manager --snapshot
     trh-sdk backup-manager --list --limit 5
     trh-sdk backup-manager --restore
     trh-sdk backup-manager --config --on --daily 03:00 --keep 35
@@ -43,7 +43,6 @@ func Run() {
 
 					// common options
 					&cli.StringFlag{Name: "limit", Usage: "Limit number of entries when listing"},
-					&cli.StringFlag{Name: "note", Usage: "Tag for manual snapshot (RDS)"},
 
 					// post-restore attach options (EFS)
 					&cli.BoolFlag{Name: "attach", Usage: "Attach workloads to a new EFS and verify (can be used after restore or standalone)"},

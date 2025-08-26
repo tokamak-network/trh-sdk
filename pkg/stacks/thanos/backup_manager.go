@@ -125,7 +125,7 @@ func (t *ThanosStack) BackupStatus(ctx context.Context) error {
 }
 
 // BackupSnapshot triggers on-demand EFS backup and RDS snapshot
-func (t *ThanosStack) BackupSnapshot(ctx context.Context, note string) error {
+func (t *ThanosStack) BackupSnapshot(ctx context.Context) error {
 	region := t.deployConfig.AWS.Region
 	namespace := t.deployConfig.K8s.Namespace
 
@@ -173,9 +173,6 @@ func (t *ThanosStack) BackupSnapshot(ctx context.Context, note string) error {
 	} else {
 		// RDS instance exists, proceed with snapshot creation
 		snapID := fmt.Sprintf("%s-manual-%d", rdsID, time.Now().Unix())
-		if strings.TrimSpace(note) != "" {
-			snapID = fmt.Sprintf("%s-%s", snapID, strings.ReplaceAll(note, " ", "-"))
-		}
 
 		// Create RDS snapshot
 		if _, err := utils.ExecuteCommand(ctx, "aws", "rds", "create-db-snapshot", "--region", region, "--db-instance-identifier", rdsID, "--db-snapshot-identifier", snapID); err != nil {
@@ -678,13 +675,22 @@ func (t *ThanosStack) monitorRDSRestore(ctx context.Context, instanceId string) 
 // getRestoreIAMRole gets appropriate IAM role for restore operations
 func (t *ThanosStack) getRestoreIAMRole(ctx context.Context) (string, error) {
 	// Try to find a suitable IAM role for restore operations
-	// First, try to get the default backup service role
 	accountID, err := utils.DetectAWSAccountID(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to detect AWS account ID: %w", err)
 	}
 
-	// Try to find a suitable IAM role for restore operations
+	namespace := t.deployConfig.K8s.Namespace
+
+	// First, try the namespace-based backup service role (same as used in backup creation)
+	namespaceRoleName := fmt.Sprintf("%s-backup-service-role", namespace)
+	namespaceRoleArn := fmt.Sprintf("arn:aws:iam::%s:role/%s", accountID, namespaceRoleName)
+
+	fmt.Printf("[DEBUG] Trying namespace-based backup service role: %s\n", namespaceRoleArn)
+	if _, err := utils.ExecuteCommand(ctx, "aws", "iam", "get-role", "--role-name", namespaceRoleName); err == nil {
+		return namespaceRoleArn, nil
+	}
+
 	// List all IAM roles and look for backup-related roles
 	rolesOutput, err := utils.ExecuteCommand(ctx, "aws", "iam", "list-roles",
 		"--query", "Roles[?contains(RoleName, 'backup') || contains(RoleName, 'Backup') || contains(RoleName, 'restore') || contains(RoleName, 'Restore')].RoleName",
@@ -696,9 +702,8 @@ func (t *ThanosStack) getRestoreIAMRole(ctx context.Context) (string, error) {
 
 		// Try roles in order of preference
 		preferredRoles := []string{
-			"theo08123-apaic-backup-service-role", // Custom backup role
-			"AWSServiceRoleForBackup",             // AWS managed backup role
-			"AWSBackupDefaultServiceRole",         // AWS backup default role
+			"AWSBackupDefaultServiceRole", // AWS backup default role
+			"AWSServiceRoleForBackup",     // AWS managed backup role
 		}
 
 		for _, preferredRole := range preferredRoles {
@@ -725,14 +730,6 @@ func (t *ThanosStack) getRestoreIAMRole(ctx context.Context) (string, error) {
 				return roleArn, nil
 			}
 		}
-	}
-
-	// Try the default backup service role pattern
-	defaultRole := fmt.Sprintf("arn:aws:iam::%s:role/service-role/AWSBackupServiceRolePolicyForRestores", accountID)
-
-	// Check if the role exists
-	if _, err := utils.ExecuteCommand(ctx, "aws", "iam", "get-role", "--role-name", "AWSBackupServiceRolePolicyForRestores"); err == nil {
-		return defaultRole, nil
 	}
 
 	// Try alternative role patterns

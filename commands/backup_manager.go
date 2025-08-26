@@ -33,7 +33,6 @@ func ActionBackupManager() cli.ActionFunc {
 		// target flags removed; manager operates on both EFS and RDS
 
 		limitStr := cmd.String("limit")
-		note := cmd.String("note")
 
 		// post-restore attach flags
 		doAttach := cmd.Bool("attach")
@@ -77,7 +76,7 @@ func ActionBackupManager() cli.ActionFunc {
 		case showStatus:
 			return thanosStack.BackupStatus(ctx)
 		case startBackup:
-			return thanosStack.BackupSnapshot(ctx, note)
+			return thanosStack.BackupSnapshot(ctx)
 		case listPoints:
 			return thanosStack.BackupList(ctx, limitStr)
 		case doAttach:
