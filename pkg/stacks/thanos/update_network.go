@@ -18,14 +18,17 @@ type UpdateNetworkParams struct {
 
 func (t *ThanosStack) UpdateNetwork(ctx context.Context, inputs *UpdateNetworkInput) error {
 	if t.deployConfig == nil || t.deployConfig.K8s == nil {
+		t.logger.Error("K8s configuration is not set. Please run the deploy command first")
 		return errors.New("your chain hasn't deployed yet. Please run 'trh-sdk deploy' first")
 	}
 
 	if inputs == nil {
+		t.logger.Error("inputs can not be empty")
 		return fmt.Errorf("inputs can not be empty")
 	}
 
 	if err := inputs.Validate(ctx); err != nil {
+		t.logger.Error("failed to validate inputs", "err", err)
 		return err
 	}
 
@@ -46,7 +49,7 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, inputs *UpdateNetworkIn
 	// Step 1. Check the network status
 	chainPods, err := utils.GetPodsByName(ctx, namespace, namespace)
 	if len(chainPods) == 0 || err != nil {
-		fmt.Printf("No pods found for chain %s in namespace %s\n", chainName, namespace)
+		t.logger.Error("No pods found for chain", "chainName", chainName, "namespace", namespace)
 		return nil
 	}
 
@@ -60,7 +63,7 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, inputs *UpdateNetworkIn
 		OpGethImageTag:      constants.DockerImageTag[t.deployConfig.Network].OpGethImageTag,
 	})
 	if err != nil {
-		fmt.Println("Error generating Terraform environment configuration:", err)
+		t.logger.Error("Error generating Terraform environment configuration:", "err", err)
 		return err
 	}
 
@@ -76,6 +79,7 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, inputs *UpdateNetworkIn
 	// Generate the values file
 	thanosStackValueFileExist := utils.CheckFileExists(thanosValuesFilePath)
 	if !thanosStackValueFileExist {
+		t.logger.Error("configuration file thanos-stack-values.yaml not found")
 		return fmt.Errorf("configuration file thanos-stack-values.yaml not found")
 	}
 
@@ -83,17 +87,17 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, inputs *UpdateNetworkIn
 	if utils.CheckFileExists(thanosValuesFilePath) {
 		err = utils.UpdateYAMLField(thanosValuesFilePath, "l1_rpc.url", t.deployConfig.L1RPCURL)
 		if err != nil {
-			fmt.Println("Error updating L1_RPC field:", err)
+			t.logger.Error("Error updating L1_RPC field:", "err", err)
 			return err
 		}
 		err = utils.UpdateYAMLField(thanosValuesFilePath, "l1_rpc.kind", t.deployConfig.L1RPCProvider)
 		if err != nil {
-			fmt.Println("Error updating L1_RPC_PROVIDER field:", err)
+			t.logger.Error("Error updating L1_RPC_PROVIDER field:", "err", err)
 			return err
 		}
 		err = utils.UpdateYAMLField(thanosValuesFilePath, "op_node.env.l1_beacon", t.deployConfig.L1BeaconURL)
 		if err != nil {
-			fmt.Println("Error updating L1_BEACON_RPC field:", err)
+			t.logger.Error("Error updating L1_BEACON_RPC field:", "err", err)
 			return err
 		}
 	}
@@ -102,7 +106,7 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, inputs *UpdateNetworkIn
 	if utils.CheckFileExists(bridgeValuesFilePath) {
 		err = utils.UpdateYAMLField(bridgeValuesFilePath, "op_bridge.env.l1_rpc", t.deployConfig.L1RPCURL)
 		if err != nil {
-			fmt.Println("Error updating L1_RPC field:", err)
+			t.logger.Error("Error updating L1_RPC field:", "err", err)
 			return err
 		}
 	}
@@ -111,26 +115,26 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, inputs *UpdateNetworkIn
 	if utils.CheckFileExists(blockExplorerValuesFilePath) {
 		err = utils.UpdateYAMLField(blockExplorerValuesFilePath, "frontend.enabled", false)
 		if err != nil {
-			fmt.Println("Error updating frontend.enabled field:", err)
+			t.logger.Error("Error updating frontend.enabled field:", "err", err)
 			return err
 		}
 
 		err = utils.UpdateYAMLField(blockExplorerValuesFilePath, "blockscout.enabled", true)
 		if err != nil {
-			fmt.Println("Error updating blockscout.enabled field:", err)
+			t.logger.Error("Error updating blockscout.enabled field:", "err", err)
 			return err
 		}
 
 		// Update the L1 RPC URL in the block-explorer-values.yaml file
 		err = utils.UpdateYAMLField(blockExplorerValuesFilePath, "blockscout.env.INDEXER_OPTIMISM_L1_RPC", t.deployConfig.L1RPCURL)
 		if err != nil {
-			fmt.Println("Error updating L1_RPC field:", err)
+			t.logger.Error("Error updating L1_RPC field:", "err", err)
 			return err
 		}
 
 		err = utils.UpdateYAMLField(blockExplorerValuesFilePath, "blockscout.env.INDEXER_BEACON_RPC_URL", t.deployConfig.L1BeaconURL)
 		if err != nil {
-			fmt.Println("Error updating L1_RPC field:", err)
+			t.logger.Error("Error updating L1_RPC field:", "err", err)
 			return err
 		}
 	}
@@ -138,7 +142,7 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, inputs *UpdateNetworkIn
 	// Step 3.3. Update the network
 	helmReleases, err := utils.GetHelmReleases(ctx, t.deployConfig.K8s.Namespace)
 	if err != nil {
-		fmt.Println("Error getting helm releases:", err)
+		t.logger.Error("Error getting helm releases:", "err", err)
 		return err
 	}
 
@@ -171,17 +175,17 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, inputs *UpdateNetworkIn
 			namespace,
 		}...)
 		if err != nil {
-			fmt.Printf("Error updating helm release: %s, err: %s, output: %s \n", release, err.Error(), output)
+			t.logger.Error("Error updating helm release", "release", release, "err", err, "output", output)
 			return err
 		}
 	}
 
 	if err = t.deployConfig.WriteToJSONFile(t.deploymentPath); err != nil {
-		fmt.Println("Error writing to settings.json", err)
+		t.logger.Error("Error writing to settings.json", "err", err)
 		return err
 	}
 
-	fmt.Println("✅ The network is updated successfully. Please wait for the ingress address to become available...")
+	t.logger.Info("✅ The network is updated successfully. Please wait for the ingress address to become available...")
 
 	return nil
 }

@@ -83,6 +83,9 @@ type DeployInfraInput struct {
 	ChainName           string
 	L1BeaconURL         string
 	IgnoreInstallBridge bool
+
+	// register metadata
+	GithubCredentials *types.GitHubCredentials
 }
 
 func (c *DeployInfraInput) Validate(ctx context.Context) error {
@@ -642,7 +645,7 @@ func InputInstallMonitoring() (*InstallMonitoringInput, error) {
 
 		// Validate admin password
 		if adminPassword == "" {
-			fmt.Println("❌ Admin password cannot be empty")
+			fmt.Println("⚠️  Admin password cannot be empty")
 			continue
 		}
 		break
@@ -719,13 +722,13 @@ func getTelegramConfigFromUser() types.TelegramConfig {
 
 		// Validate Telegram Bot API Token format
 		if apiToken == "" {
-			fmt.Println("❌ Telegram Bot API Token cannot be empty")
+			fmt.Println("⚠️  Telegram Bot API Token cannot be empty")
 			continue
 		}
 
 		// Telegram Bot API Token format: numeric:alphanumeric (e.g., 123456789:ABCdefGHIjklMNOpqrsTUVwxyz)
 		if !telegramTokenRegex.MatchString(apiToken) {
-			fmt.Println("❌ Invalid Telegram Bot API Token format")
+			fmt.Println("⚠️  Invalid Telegram Bot API Token format")
 			fmt.Println("   Expected format: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
 			fmt.Println("   Get your token from @BotFather on Telegram")
 			continue
@@ -751,7 +754,7 @@ func getTelegramConfigFromUser() types.TelegramConfig {
 		}
 
 		if chatIdsInput == "" {
-			fmt.Println("❌ At least one Chat ID is required")
+			fmt.Println("⚠️  At least one Chat ID is required")
 			continue
 		}
 
@@ -775,19 +778,19 @@ func getTelegramConfigFromUser() types.TelegramConfig {
 							fmt.Printf("✅ Valid Chat ID: %s\n", chatId)
 							hasValidId = true
 						} else {
-							fmt.Printf("❌ Chat ID out of valid range: %s\n", chatId)
+							fmt.Printf("⚠️  Chat ID out of valid range: %s\n", chatId)
 						}
 					} else {
-						fmt.Printf("❌ Invalid Chat ID format: %s (must be numeric)\n", chatId)
+						fmt.Printf("⚠️  Invalid Chat ID format: %s (must be numeric)\n", chatId)
 					}
 				} else {
-					fmt.Printf("❌ Invalid Chat ID format: %s (must be numeric)\n", chatId)
+					fmt.Printf("⚠️  Invalid Chat ID format: %s (must be numeric)\n", chatId)
 				}
 			}
 		}
 
 		if !hasValidId {
-			fmt.Println("❌ At least one valid Chat ID is required")
+			fmt.Println("⚠️  At least one valid Chat ID is required")
 			continue
 		}
 
@@ -841,13 +844,13 @@ func getEmailConfigFromUser() types.EmailConfig {
 
 		// Validate Gmail address format
 		if smtpAuthUsername == "" {
-			fmt.Println("❌ Gmail address cannot be empty")
+			fmt.Println("⚠️  Gmail address cannot be empty")
 			continue
 		}
 
 		// Basic email validation
 		if !emailRegex.MatchString(smtpAuthUsername) {
-			fmt.Println("❌ Invalid email address format")
+			fmt.Println("⚠️  Invalid email address format")
 			continue
 		}
 		break
@@ -871,7 +874,7 @@ func getEmailConfigFromUser() types.EmailConfig {
 
 		// Validate SMTP password
 		if smtpAuthPassword == "" {
-			fmt.Println("❌ SMTP password cannot be empty")
+			fmt.Println("⚠️  SMTP password cannot be empty")
 			continue
 		}
 
@@ -894,7 +897,7 @@ func getEmailConfigFromUser() types.EmailConfig {
 		}
 
 		if receiversInput == "" {
-			fmt.Println("❌ At least one email address is required")
+			fmt.Println("⚠️  At least one email address is required")
 			continue
 		}
 
@@ -915,13 +918,13 @@ func getEmailConfigFromUser() types.EmailConfig {
 					fmt.Printf("✅ Valid email receiver: %s\n", email)
 					hasValidEmail = true
 				} else {
-					fmt.Printf("❌ Invalid email format: %s\n", email)
+					fmt.Printf("⚠️  Invalid email format: %s\n", email)
 				}
 			}
 		}
 
 		if !hasValidEmail {
-			fmt.Println("❌ At least one valid email address is required")
+			fmt.Println("⚠️  At least one valid email address is required")
 			continue
 		}
 
@@ -1673,7 +1676,7 @@ func (t *ThanosStack) cloneSourcecode(ctx context.Context, repositoryName, url s
 	}
 
 	if !existingSourcecode {
-		err := utils.CloneRepo(ctx, t.l, t.deploymentPath, url, repositoryName)
+		err := utils.CloneRepo(ctx, t.logger, t.deploymentPath, url, repositoryName)
 		if err != nil {
 			fmt.Println("Error while cloning the repository")
 			return err
@@ -1682,25 +1685,25 @@ func (t *ThanosStack) cloneSourcecode(ctx context.Context, repositoryName, url s
 	}
 
 	// Case 2: Repo exists → try pulling
-	t.l.Info("Repository exists. Trying to pull latest changes...", "repo", repositoryName)
-	err = utils.PullLatestCode(ctx, t.l, t.deploymentPath, repositoryName)
+	t.logger.Info("Repository exists. Trying to pull latest changes...", "repo", repositoryName)
+	err = utils.PullLatestCode(ctx, t.logger, t.deploymentPath, repositoryName)
 	if err == nil {
-		t.l.Info("Successfully pulled latest changes", "repo", repositoryName)
+		t.logger.Info("Successfully pulled latest changes", "repo: ", repositoryName)
 		fmt.Printf("\r✅ Clone the %s repository successfully \n", repositoryName)
 		return nil
 	}
 
 	// Case 3: Pull failed → likely broken repo → remove and re-clone
-	t.l.Warn("Pull failed. Re-cloning repository...", "repo", repositoryName, "err", err)
+	t.logger.Warn("Pull failed. Re-cloning repository...", "repo", repositoryName, "err", err)
 	if removeErr := os.RemoveAll(fmt.Sprintf("%s/%s", t.deploymentPath, repositoryName)); removeErr != nil {
-		t.l.Error("Failed to remove broken repository folder", "path", t.deploymentPath, "repo", repositoryName, "err", removeErr)
+		t.logger.Error("Failed to remove broken repository folder", "path", t.deploymentPath, "repo", repositoryName, "err", removeErr)
 		return removeErr
 	}
 
-	t.l.Info("Re-cloning repository after cleanup...", "repo", repositoryName)
-	err = utils.CloneRepo(ctx, t.l, t.deploymentPath, url, repositoryName)
+	t.logger.Info("Re-cloning repository after cleanup...", "repo", repositoryName)
+	err = utils.CloneRepo(ctx, t.logger, t.deploymentPath, url, repositoryName)
 	if err != nil {
-		t.l.Error("Failed to re-clone repository", "repo", repositoryName, "err", err)
+		t.logger.Error("Failed to re-clone repository", "repo", repositoryName, "err", err)
 		return err
 	}
 

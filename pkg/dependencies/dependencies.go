@@ -42,7 +42,7 @@ func CheckDockerInstallation(ctx context.Context) bool {
 	// Check if Docker daemon is running
 	_, err = utils.ExecuteCommand(ctx, "docker", "info")
 	if err != nil {
-		fmt.Printf("❌ Docker is installed but the daemon is not running, err: %v\n", err)
+		fmt.Printf("⚠️  Docker is installed but the daemon is not running, err: %v\n", err)
 		return true
 	}
 
@@ -69,7 +69,7 @@ func GetArchitecture(ctx context.Context) (string, error) {
 	} else if strings.Contains(arch, "i386") {
 		arch = "386"
 	} else {
-		fmt.Println("❌ Unsupported architecture:", arch)
+		fmt.Println("⚠️  Unsupported architecture:", arch)
 		return "", fmt.Errorf("unsupported architecture: %s", arch)
 	}
 

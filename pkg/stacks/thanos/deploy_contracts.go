@@ -18,25 +18,29 @@ import (
 
 func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig *DeployContractsInput) error {
 	if t.network == constants.LocalDevnet {
+		t.logger.Error("network %s does not require contract deployment, please run `trh-sdk deploy` instead", constants.LocalDevnet)
 		return fmt.Errorf("network %s does not require contract deployment, please run `trh-sdk deploy` instead", constants.LocalDevnet)
 	}
 	if t.network != constants.Testnet && t.network != constants.Mainnet {
+		t.logger.Error("network %s does not support", t.network)
 		return fmt.Errorf("network %s does not support", t.network)
 	}
 
 	if deployContractsConfig == nil {
+		t.logger.Error("deployContractsConfig is required")
 		return fmt.Errorf("deployContractsConfig is required")
 	}
 
 	if deployContractsConfig.ChainConfiguration == nil {
 		l1Client, err := ethclient.DialContext(ctx, deployContractsConfig.L1RPCurl)
 		if err != nil {
+			t.logger.Error("Failed to get the L1 ChainID", "err", err)
 			return err
 		}
 
 		l1ChainID, err := l1Client.ChainID(ctx)
 		if err != nil {
-			fmt.Println("Failed to get the L1 ChainID", "err", err)
+			t.logger.Error("Failed to get the L1 ChainID", "err", err)
 			return err
 		}
 
@@ -57,7 +61,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 
 	err := deployContractsConfig.Validate(ctx, t.registerCandidate)
 	if err != nil {
-		fmt.Println("Error validating deployContractsConfig, err:", err)
+		t.logger.Error("Error validating deployContractsConfig, err:", err)
 		return err
 	}
 
@@ -74,18 +78,19 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 
 	l1Client, err := ethclient.DialContext(ctx, deployContractsConfig.L1RPCurl)
 	if err != nil {
+		t.logger.Error("Failed to get the L1 client", "err", err)
 		return err
 	}
 
 	if t.deployConfig.DeployContractState != nil {
 		switch t.deployConfig.DeployContractState.Status {
 		case types.DeployContractStatusCompleted:
-			fmt.Println("The contracts have already been deployed successfully.")
+			t.logger.Info("The contracts have already been deployed successfully.")
 			if t.usePromptInput {
 				fmt.Print("Do you want to deploy the contracts again? (y/N): ")
 				isDeployAgain, err := scanner.ScanBool(false)
 				if err != nil {
-					fmt.Println("Error reading the deploy again input:", err)
+					t.logger.Error("Error reading the deploy again input:", err)
 					return err
 				}
 
@@ -100,7 +105,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 				fmt.Print("The contracts deployment is in progress. Do you want to resume? (Y/n): ")
 				isResume, err = scanner.ScanBool(true)
 				if err != nil {
-					fmt.Println("Error reading the resume input:", err)
+					t.logger.Error("Error reading the resume input:", err)
 					return err
 				}
 			} else {
@@ -114,33 +119,36 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 	if isResume {
 		err = t.deployContracts(ctx, l1Client, true)
 		if err != nil {
-			fmt.Print("\r❌ Resume the contracts deployment failed!       \n")
+			t.logger.Error("❌ Resume the contracts deployment failed!", "err", err)
 			return err
 		}
 		if t.registerCandidate {
 			if registerCandidate == nil {
+				t.logger.Error("register candidate is required")
 				return fmt.Errorf("register candidate is required")
 			}
 
 			adminAddress, err := utils.GetAddressFromPrivateKey(t.deployConfig.AdminPrivateKey)
 			if err != nil {
+				t.logger.Error("failed to get admin address from private key", "err", err)
 				return fmt.Errorf("failed to get admin address from private key: %s", err)
 			}
 			err = t.checkAdminBalance(ctx, adminAddress, registerCandidate.Amount, l1Client)
 			if err != nil {
+				t.logger.Error("failed to check admin balance", "err", err)
 				return fmt.Errorf("failed to check admin balance: %s", err)
 			}
 		}
 	} else {
 		l2ChainID, err := utils.GenerateL2ChainId()
 		if err != nil {
-			fmt.Printf("Failed to generate L2ChainID: %s", err)
+			t.logger.Error("Failed to generate L2ChainID", "err", err)
 			return err
 		}
 
 		l1ChainId, err := l1Client.ChainID(ctx)
 		if err != nil {
-			fmt.Printf("Failed to get L1 ChainID: %s", err)
+			t.logger.Error("Failed to get L1 ChainID", "err", err)
 			return err
 		}
 
@@ -153,16 +161,19 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			operators.SequencerPrivateKey == "" ||
 			operators.BatcherPrivateKey == "" ||
 			operators.ProposerPrivateKey == "" {
+			t.logger.Error("at least 5 operators are required for deploying contracts")
 			return fmt.Errorf("at least 5 operators are required for deploying contracts")
 		}
 		adminAccount, err := utils.GetAddressFromPrivateKey(operators.AdminPrivateKey)
 		if err != nil {
+			t.logger.Error("failed to get admin address from private key", "err", err)
 			return fmt.Errorf("failed to get admin address from private key: %s", err)
 		}
 
 		if t.registerCandidate {
 			err = t.checkAdminBalance(ctx, adminAccount, registerCandidate.Amount, l1Client)
 			if err != nil {
+				t.logger.Error("failed to check admin balance", "err", err)
 				return err
 			}
 		}
@@ -171,6 +182,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			fmt.Print("🔎 The SDK is ready to deploy the contracts to the L1 network. Do you want to proceed(Y/n)? ")
 			confirmation, err := scanner.ScanBool(true)
 			if err != nil {
+				t.logger.Error("failed to read the confirmation input", "err", err)
 				return err
 			}
 			if !confirmation {
@@ -182,18 +194,19 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 
 		// Check dependencies
 		if !dependencies.CheckPnpmInstallation(ctx) {
-			fmt.Printf("Try running `source %s` to set up your environment \n", shellConfigFile)
+			t.logger.Warn("pnpm is not installed, try running `source %s` to set up your environment", shellConfigFile)
 			return nil
 		}
 
 		if !dependencies.CheckFoundryInstallation(ctx) {
-			fmt.Printf("Try running `source %s` to set up your environment \n", shellConfigFile)
+			t.logger.Warn("foundry is not installed, try running `source %s` to set up your environment", shellConfigFile)
 			return nil
 		}
 
 		// STEP 2. Clone the repository
 		err = t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
 		if err != nil {
+			t.logger.Error("failed to clone the repository", "err", err)
 			return err
 		}
 
@@ -219,50 +232,51 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 
 		err = makeDeployContractConfigJsonFile(ctx, l1Client, operators, deployContractsTemplate, deployConfigFilePath)
 		if err != nil {
+			t.logger.Error("failed to make deploy contract config json file", "err", err)
 			return err
 		}
 
 		// STEP 3. Build the contracts
-		fmt.Println("Building smart contracts...")
-		err = utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh build", t.deploymentPath))
+		t.logger.Info("Building smart contracts...")
+		err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh build", t.deploymentPath))
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				fmt.Println("Deployment canceled")
+				t.logger.Error("Deployment canceled")
 				return err
 			}
-			fmt.Print("\r❌ Build the contracts failed!       \n")
+			t.logger.Error("❌ Build the contracts failed!")
 			return err
 		}
-		fmt.Print("\r✅ Build the contracts completed!       \n")
+		t.logger.Info("✅ Build the contracts completed!")
 
 		// STEP 4. Deploy the contracts
 		// Check admin balance and estimated deployment cost
 		balance, err := l1Client.BalanceAt(ctx, adminAccount, nil)
 		if err != nil {
-			fmt.Printf("❌ Failed to retrieve admin account balance: %v\n", err)
+			t.logger.Error("❌ Failed to retrieve admin account balance", "err", err)
 			return err
 		}
-		fmt.Printf("Admin account balance: %.2f ETH\n", utils.WeiToEther(balance))
+		t.logger.Info("Admin account balance: %.2f ETH", utils.WeiToEther(balance))
 
 		// Estimate gas price
 		gasPriceWei, err := l1Client.SuggestGasPrice(ctx)
 		if err != nil {
-			fmt.Printf("❌ Failed to get gas price: %v\n", err)
+			t.logger.Error("❌ Failed to get gas price", "err", err)
 			return err
 		}
-		fmt.Printf("⛽ Current gas price: %.4f Gwei\n", new(big.Float).Quo(new(big.Float).SetInt(gasPriceWei), big.NewFloat(1e9)))
+		t.logger.Info("⛽ Current gas price: %.4f Gwei", new(big.Float).Quo(new(big.Float).SetInt(gasPriceWei), big.NewFloat(1e9)))
 
 		// Estimate deployment cost
 		estimatedCost := new(big.Int).Mul(gasPriceWei, estimatedDeployContracts)
 		estimatedCost.Mul(estimatedCost, big.NewInt(2))
-		fmt.Printf("💰 Estimated deployment cost: %.4f ETH\n", utils.WeiToEther(estimatedCost))
+		t.logger.Info("💰 Estimated deployment cost: %.4f ETH", utils.WeiToEther(estimatedCost))
 
 		// Check if balance is sufficient
 		if balance.Cmp(estimatedCost) < 0 {
-			fmt.Println("❌ Insufficient balance for deployment.")
+			t.logger.Error("❌ Insufficient balance for deployment.")
 			return fmt.Errorf("admin account balance (%.4f ETH) is less than estimated deployment cost (%.4f  ETH)", utils.WeiToEther(balance), utils.WeiToEther(estimatedCost))
 		} else {
-			fmt.Println("✅ The admin account has sufficient balance to proceed with deployment.")
+			t.logger.Info("✅ The admin account has sufficient balance to proceed with deployment.")
 		}
 
 		t.deployConfig.DeployContractState = &types.DeployContractState{
@@ -270,44 +284,45 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		}
 		err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
 		if err != nil {
-			fmt.Println("Failed to write settings file:", err)
+			t.logger.Error("Failed to write settings file", "err", err)
 			return err
 		}
 
 		err = t.deployContracts(ctx, l1Client, false)
 		if err != nil {
+			t.logger.Error("failed to deploy contracts", "err", err)
 			return err
 		}
 	}
 
 	// STEP 5: Generate the genesis and rollup files
-	err = utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh generate -e .env -c deploy-config.json", t.deploymentPath))
-	fmt.Println("Generating the rollup and genesis files...")
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh generate -e .env -c deploy-config.json", t.deploymentPath))
+	t.logger.Info("Generating the rollup and genesis files...")
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			fmt.Println("Deployment canceled")
+			t.logger.Warn("Deployment canceled")
 			return err
 		}
-		fmt.Print("\r❌ Failed to generate rollup and genesis files!       \n")
+		t.logger.Error("❌ Failed to generate rollup and genesis files!")
 		return err
 	}
-	fmt.Print("\r✅ Successfully generated rollup and genesis files!       \n")
-	fmt.Printf("\r Genesis file path: %s/tokamak-thanos/build/genesis.json\n", t.deploymentPath)
-	fmt.Printf("\r Rollup file path: %s/tokamak-thanos/build/rollup.json\n", t.deploymentPath)
+	t.logger.Info("✅ Successfully generated rollup and genesis files!")
+	t.logger.Info("Genesis file path: %s/tokamak-thanos/build/genesis.json", t.deploymentPath)
+	t.logger.Info("Rollup file path: %s/tokamak-thanos/build/rollup.json", t.deploymentPath)
 
-	fmt.Printf("✅ Configuration successfully saved to: %s/settings.json \n", t.deploymentPath)
+	t.logger.Info("✅ Configuration successfully saved to: %s/settings.json", t.deploymentPath)
 
 	// If --no-candidate flag is NOT provided, register the candidate
 	if t.registerCandidate {
 		if t.deployConfig.Network == constants.Mainnet {
 			return fmt.Errorf("register candidates verification is not supported on Mainnet")
 		}
-		fmt.Println("Setting up the safe wallet...")
+		t.logger.Info("Setting up the safe wallet...")
 
 		if err := t.setupSafeWallet(ctx, t.deploymentPath); err != nil {
 			return err
 		}
-		fmt.Println("🔍 Verifying and registering candidate...")
+		t.logger.Info("🔍 Verifying and registering candidate...")
 		verifyRegisterError := t.verifyRegisterCandidates(ctx, registerCandidate)
 		if verifyRegisterError != nil {
 			return fmt.Errorf("candidate registration failed: %v", verifyRegisterError)
@@ -316,7 +331,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		// Display additional registration information
 		t.DisplayRegistrationAdditionalInfo(ctx, registerCandidate)
 	} else {
-		fmt.Println("ℹ️ Skipping candidate registration (--no-candidate flag provided)")
+		t.logger.Info("ℹ️ Skipping candidate registration (--no-candidate flag provided)")
 	}
 
 	return nil
@@ -331,11 +346,11 @@ func (t *ThanosStack) deployContracts(ctx context.Context,
 		l1RPC           = t.deployConfig.L1RPCURL
 	)
 
-	fmt.Println("Deploying the contracts...")
+	t.logger.Info("Deploying the contracts...")
 
 	gasPriceWei, err := l1Client.SuggestGasPrice(ctx)
 	if err != nil {
-		fmt.Printf("Failed to get gas price: %v\n", err)
+		t.logger.Error("Failed to get gas price", "err", err)
 	}
 
 	envValues := fmt.Sprintf("export GS_ADMIN_PRIVATE_KEY=%s\nexport L1_RPC_URL=%s\n", adminPrivateKey, l1RPC)
@@ -352,41 +367,41 @@ func (t *ThanosStack) deployContracts(ctx context.Context,
 	)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			fmt.Println("Deployment canceled")
+			t.logger.Warn("Deployment canceled")
 			return err
 		}
-		fmt.Print("\r❌ Make .env file failed!       \n")
+		t.logger.Error("❌ Make .env file failed!")
 		return err
 	}
 
 	// STEP 4.3. Deploy contracts
 	if isResume {
-		err = utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh redeploy -e .env -c deploy-config.json", t.deploymentPath))
+		err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh redeploy -e .env -c deploy-config.json", t.deploymentPath))
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				fmt.Println("Deployment canceled")
+				t.logger.Warn("Deployment canceled")
 				return err
 			}
-			fmt.Print("\r❌ Contract deployment failed!       \n")
+			t.logger.Error("❌ Contract deployment failed!")
 			return err
 		}
 	} else {
-		err = utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh deploy -e .env -c deploy-config.json", t.deploymentPath))
+		err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh deploy -e .env -c deploy-config.json", t.deploymentPath))
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				fmt.Println("Deployment canceled")
+				t.logger.Warn("Deployment canceled")
 				return err
 			}
-			fmt.Print("\r❌ Contract deployment failed!       \n")
+			t.logger.Error("❌ Contract deployment failed!")
 			return err
 		}
 	}
-	fmt.Print("\r✅ Contract deployment completed successfully!       \n")
+	t.logger.Info("✅ Contract deployment completed successfully!")
 
 	t.deployConfig.DeployContractState.Status = types.DeployContractStatusCompleted
 	err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
 	if err != nil {
-		fmt.Println("Failed to write settings file:", err)
+		t.logger.Error("Failed to write settings file", "err", err)
 		return err
 	}
 	return nil

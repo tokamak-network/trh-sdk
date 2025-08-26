@@ -21,13 +21,12 @@ func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string, inputs *Deplo
 		err := t.deployLocalDevnet(ctx)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				fmt.Println("Deployment canceled")
 				return nil
 			}
-			fmt.Printf("Failed to deploy the devnet: %s", err)
+			t.logger.Error("Failed to deploy the devnet", "err", err)
 
 			if destroyErr := t.destroyDevnet(ctx); destroyErr != nil {
-				fmt.Println("Failed to destroy the devnet chain after deploying the chain failed", "err", destroyErr)
+				t.logger.Error("Failed to destroy the devnet chain after deploying the chain failed", "err", destroyErr)
 			}
 			return err
 		}
@@ -38,22 +37,31 @@ func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string, inputs *Deplo
 			err := t.deployNetworkToAWS(ctx, inputs)
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
-					fmt.Println("Deployment canceled")
-					return nil
+					t.logger.Warn("Deployment canceled")
+					return err
 				}
-				fmt.Println("Failed to deploy the testnet chain", "err", err)
+				t.logger.Error("Failed to deploy the testnet chain", "err", err)
 
 				if destroyErr := t.destroyInfraOnAWS(ctx); destroyErr != nil {
-					fmt.Println("Failed to destroy the testnet chain after deploying the chain failed", "err", destroyErr)
+					t.logger.Error("Failed to destroy the testnet chain after deploying the chain failed", "err", destroyErr)
 				}
 
 				return err
 			}
+			if inputs.GithubCredentials != nil {
+				_, err = t.RegisterMetadata(ctx, inputs.GithubCredentials)
+				if err != nil {
+					t.logger.Error("Failed to register metadata", "err", err)
+					return err
+				}
+			}
 			return nil
 		default:
+			t.logger.Error("infrastructure provider %s is not supported", infraOpt)
 			return fmt.Errorf("infrastructure provider %s is not supported", infraOpt)
 		}
 	default:
+		t.logger.Error("network %s is not supported", t.network)
 		return fmt.Errorf("network %s is not supported", t.network)
 	}
 
@@ -66,15 +74,15 @@ func (t *ThanosStack) deployLocalDevnet(ctx context.Context) error {
 	}
 
 	// Start the devnet
-	fmt.Println("Starting the devnet...")
+	t.logger.Info("Starting the devnet...")
 
-	err = utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos && export DEVNET_L2OO=true && make devnet-up", t.deploymentPath))
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos && export DEVNET_L2OO=true && make devnet-up", t.deploymentPath))
 	if err != nil {
-		fmt.Print("\r❌ Failed to start devnet!       \n")
+		t.logger.Error("❌ Failed to start devnet!")
 		return err
 	}
 
-	fmt.Print("\r✅ Devnet started successfully!       \n")
+	t.logger.Info("✅ Devnet started successfully!")
 
 	return nil
 }
@@ -85,22 +93,22 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	// Check dependencies
 	// STEP 1. Verify required dependencies
 	if !dependencies.CheckTerraformInstallation(ctx) {
-		fmt.Printf("Try running `source %s` to set up your environment \n", shellConfigFile)
+		t.logger.Warn("Try running `source %s` to set up your environment", shellConfigFile)
 		return nil
 	}
 
 	if !dependencies.CheckHelmInstallation(ctx) {
-		fmt.Printf("Try running `source %s` to set up your environment \n", shellConfigFile)
+		t.logger.Warn("Try running `source %s` to set up your environment", shellConfigFile)
 		return nil
 	}
 
 	if !dependencies.CheckAwsCLIInstallation(ctx) {
-		fmt.Printf("Try running `source %s` to set up your environment \n", shellConfigFile)
+		t.logger.Warn("Try running `source %s` to set up your environment", shellConfigFile)
 		return nil
 	}
 
 	if !dependencies.CheckK8sInstallation(ctx) {
-		fmt.Printf("Try running `source %s` to set up your environment \n", shellConfigFile)
+		t.logger.Warn("Try running `source %s` to set up your environment", shellConfigFile)
 		return nil
 	}
 
@@ -109,7 +117,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	}
 
 	if err := inputs.Validate(ctx); err != nil {
-		fmt.Println("Error validating inputs, err:", err)
+		t.logger.Error("Error validating inputs", "err", err)
 		return err
 	}
 
@@ -121,7 +129,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	// STEP 1. Clone the charts repository
 	err := t.cloneSourcecode(ctx, "tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git")
 	if err != nil {
-		fmt.Println("Error cloning repository:", err)
+		t.logger.Error("Error cloning repository", "err", err)
 		return err
 	}
 
@@ -134,23 +142,25 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 
 	t.deployConfig.AWS = awsLoginInputs
 	if err := t.deployConfig.WriteToJSONFile(t.deploymentPath); err != nil {
+		t.logger.Error("failed to write settings file", "err", err)
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
-	fmt.Println("⚡️Removing the previous deployment state...")
+	t.logger.Info("⚡️Removing the previous deployment state...")
 	err = t.clearTerraformState(ctx)
 	if err != nil {
-		fmt.Printf("Failed to clear the existing terraform state, err: %s", err.Error())
+		t.logger.Error("Failed to clear the existing terraform state", "err", err)
 		return err
 	}
 
-	fmt.Println("✅ Removed the previous deployment state...")
+	t.logger.Info("✅ Removed the previous deployment state...")
 
 	var (
 		chainConfiguration = t.deployConfig.ChainConfiguration
 	)
 
 	if chainConfiguration == nil {
+		t.logger.Error("chain configuration is not set")
 		return fmt.Errorf("chain configuration is not set")
 	}
 
@@ -174,7 +184,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		MaxChannelDuration:  chainConfiguration.GetMaxChannelDuration(),
 	})
 	if err != nil {
-		fmt.Println("Error generating Terraform environment configuration:", err)
+		t.logger.Error("Error generating Terraform environment configuration", "err", err)
 		return err
 	}
 
@@ -184,7 +194,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/config-files/rollup.json", t.deploymentPath),
 	)
 	if err != nil {
-		fmt.Println("Error copying rollup configuration:", err)
+		t.logger.Error("Error copying rollup configuration", "err", err)
 		return err
 	}
 
@@ -193,12 +203,12 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/config-files/genesis.json", t.deploymentPath),
 	)
 	if err != nil {
-		fmt.Println("Error copying genesis configuration:", err)
+		t.logger.Error("Error copying genesis configuration", "err", err)
 		return err
 	}
 
 	// STEP 5. Initialize Terraform backend
-	err = utils.ExecuteCommandStream(ctx, t.l, "bash", []string{
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
 		"-c",
 		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
 		source .envrc &&
@@ -209,13 +219,13 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		`, t.deploymentPath),
 	}...)
 	if err != nil {
-		fmt.Println("Error initializing Terraform backend:", err)
+		t.logger.Error("Error initializing Terraform backend", "err", err)
 		return err
 	}
 
-	fmt.Println("Deploying Thanos stack infrastructure")
+	t.logger.Info("Deploying Thanos stack infrastructure")
 	// STEP 6. Deploy Thanos stack infrastructure
-	err = utils.ExecuteCommandStream(ctx, t.l, "bash", []string{
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
 		"-c",
 		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
 		source .envrc &&
@@ -225,7 +235,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		terraform apply -auto-approve`, t.deploymentPath),
 	}...)
 	if err != nil {
-		fmt.Println("Error deploying Thanos stack infrastructure:", err)
+		t.logger.Error("Error deploying Thanos stack infrastructure", "err", err)
 		return err
 	}
 
@@ -272,18 +282,18 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	// Step 7. Configure EKS access
 	err = utils.SwitchKubernetesContext(ctx, namespace, awsLoginInputs.Region)
 	if err != nil {
-		fmt.Println("Error switching Kubernetes context:", err)
+		t.logger.Error("Error switching Kubernetes context", "err", err)
 		return err
 	}
 
 	// Step 7.1. Check if K8s cluster is ready
-	fmt.Println("Checking if K8s cluster is ready...")
+	t.logger.Info("Checking if K8s cluster is ready...")
 	k8sReady, err := utils.CheckK8sReady(ctx, namespace)
 	if err != nil {
-		fmt.Println("❌ Error checking K8s cluster readiness:", err)
+		t.logger.Error("❌ Error checking K8s cluster readiness", "err", err)
 		return err
 	}
-	fmt.Printf("✅ K8s cluster is ready: %t\n", k8sReady)
+	t.logger.Info("✅ K8s cluster is ready: %t", k8sReady)
 
 	// ---------------------------------------- Deploy chain --------------------------//
 	// Step 8. Add Helm repository
@@ -294,7 +304,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		"https://tokamak-network.github.io/tokamak-thanos-stack",
 	}...)
 	if err != nil {
-		fmt.Println("Error adding Helm repository:", err, "details:", helmAddOuput)
+		t.logger.Error("Error adding Helm repository", "err", err, "details", helmAddOuput)
 		return err
 	}
 
@@ -305,10 +315,10 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		"thanos-stack",
 	}...)
 	if err != nil {
-		fmt.Println("Error searching Helm charts:", err, "details:", helmSearchOutput)
+		t.logger.Error("Error searching Helm charts", "err", err, "details", helmSearchOutput)
 		return err
 	}
-	fmt.Println("Helm repository added successfully: \n", helmSearchOutput)
+	t.logger.Info("Helm repository added successfully: \n", helmSearchOutput)
 
 	// Step 8.2. Install Helm charts
 	helmReleaseName := fmt.Sprintf("%s-%d", namespace, time.Now().Unix())
@@ -318,41 +328,41 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	// Install the PVC first
 	err = utils.UpdateYAMLField(valueFile, "enable_vpc", true)
 	if err != nil {
-		fmt.Println("Error updating `enable_vpc` configuration:", err)
+		t.logger.Error("Error updating `enable_vpc` configuration", "err", err)
 		return err
 	}
 	err = utils.InstallHelmRelease(ctx, helmReleaseName, chartFile, valueFile, namespace)
 	if err != nil {
-		fmt.Println("Error installing Helm charts:", err)
+		t.logger.Error("Error installing Helm charts", "err", err)
 		return err
 	}
 
-	fmt.Println("Wait for the VPCs to be created...")
+	t.logger.Info("Wait for the VPCs to be created...")
 	err = utils.WaitPVCReady(ctx, namespace)
 	if err != nil {
-		fmt.Println("Error waiting for PVC to be ready:", err)
+		t.logger.Error("Error waiting for PVC to be ready", "err", err)
 		return err
 	}
 
 	// Install the rest of the charts
 	err = utils.UpdateYAMLField(valueFile, "enable_deployment", true)
 	if err != nil {
-		fmt.Println("Error updating `enable_deployment` configuration:", err)
+		t.logger.Error("Error updating `enable_deployment` configuration", "err", err)
 	}
 
 	err = utils.InstallHelmRelease(ctx, helmReleaseName, chartFile, valueFile, namespace)
 	if err != nil {
-		fmt.Println("Error installing Helm charts:", err)
+		t.logger.Error("Error installing Helm charts", "err", err)
 		return err
 	}
 
-	fmt.Println("✅ Helm charts installed successfully")
+	t.logger.Info("✅ Helm charts installed successfully")
 
 	var l2RPCUrl string
 	for {
 		k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, helmReleaseName)
 		if err != nil {
-			fmt.Println("Error retrieving ingress addresses:", err, "details:", k8sIngresses)
+			t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
 			return err
 		}
 
@@ -363,8 +373,8 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 
 		time.Sleep(15 * time.Second)
 	}
-	fmt.Printf("✅ Network deployment completed successfully!\n")
-	fmt.Printf("🌐 RPC endpoint: %s\n", l2RPCUrl)
+	t.logger.Info("✅ Network deployment completed successfully!")
+	t.logger.Info("🌐 RPC endpoint: %s", l2RPCUrl)
 
 	t.deployConfig.K8s = &types.K8sConfig{
 		Namespace: namespace,
@@ -374,22 +384,22 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 
 	err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
 	if err != nil {
-		fmt.Println("Error saving configuration file:", err)
+		t.logger.Error("Error saving configuration file", "err", err)
 		return err
 	}
-	fmt.Printf("Configuration saved successfully to: %s/settings.json \n", t.deploymentPath)
+	t.logger.Info("Configuration saved successfully to: %s/settings.json", t.deploymentPath)
 
 	// After installing the infra successfully, we install the bridge
 	if !inputs.IgnoreInstallBridge {
 		_, err = t.InstallBridge(ctx)
 		if err != nil {
-			fmt.Println("Error installing bridge:", err)
+			t.logger.Error("Error installing bridge", "err", err)
 		}
 	}
 
-	fmt.Println("🎉 Thanos Stack installation completed successfully!")
-	fmt.Println("🚀 Your network is now up and running.")
-	fmt.Println("🔧 You can start interacting with your deployed infrastructure.")
+	t.logger.Info("🎉 Thanos Stack installation completed successfully!")
+	t.logger.Info("🚀 Your network is now up and running.")
+	t.logger.Info("🔧 You can start interacting with your deployed infrastructure.")
 
 	return nil
 }

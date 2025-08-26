@@ -55,10 +55,11 @@ func (t *ThanosStack) SetRegisterCandidate(value bool) *ThanosStack {
 }
 
 func (t *ThanosStack) checkAdminBalance(ctx context.Context, adminAddress ethCommon.Address, amount float64, l1Client *ethclient.Client) error {
-	fmt.Printf("Checking admin's TON token balance... \n")
+	t.logger.Info("Checking admin's TON token balance...")
 
 	chainIDFromClient, errChainID := l1Client.ChainID(ctx)
 	if errChainID != nil {
+		t.logger.Error("failed to get L1 chain ID", "err", errChainID)
 		return fmt.Errorf("failed to get L1 chain ID: %w", errChainID)
 	}
 
@@ -67,17 +68,20 @@ func (t *ThanosStack) checkAdminBalance(ctx context.Context, adminAddress ethCom
 	tonAddress := ethCommon.HexToAddress(chainConfig.TON)
 	tokenInstance, errToken := abis.NewTON(tonAddress, l1Client)
 	if errToken != nil {
+		t.logger.Error("failed to instantiate TON token contract at %s", "err", errToken, "tonAddress", tonAddress.Hex())
 		return fmt.Errorf("failed to instantiate TON token contract at %s: %w", tonAddress.Hex(), errToken)
 	}
 
 	adminBalance, errBalance := tokenInstance.BalanceOf(&bind.CallOpts{Context: ctx}, adminAddress)
 	if errBalance != nil {
+		t.logger.Error("failed to get TON balance for admin %s from contract %s", "err", errBalance, "adminAddress", adminAddress, "tonAddress", tonAddress.Hex())
 		return fmt.Errorf("failed to get TON balance for admin %s from contract %s: %w", adminAddress, tonAddress.Hex(), errBalance)
 	}
 	amountInWei := new(big.Float).Mul(big.NewFloat(amount), big.NewFloat(1e18))
 	requiredAmountBigInt, _ := amountInWei.Int(nil)
 
 	if adminBalance.Cmp(requiredAmountBigInt) < 0 {
+		t.logger.Error("insufficient TON token balance for admin %s. Have: %s, Required: %s. Please top up the admin account", "adminAddress", adminAddress, "adminBalance", adminBalance.String(), "requiredAmountBigInt", requiredAmountBigInt.String())
 		return fmt.Errorf("insufficient TON token balance for admin %s. Have: %s, Required: %s. Please top up the admin account",
 			adminAddress,
 			adminBalance.String(),
@@ -134,24 +138,17 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 	}
 	chainID, err := l1Client.ChainID(ctx)
 	if err != nil {
-		fmt.Printf("Failed to get chain id: %s", err)
+		t.logger.Error("Failed to get chain id", "err", err)
 		return err
 	}
 
 	chainConfig := constants.L1ChainConfigurations[chainID.Uint64()]
 
-	file, err := os.Open(fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%s", t.deploymentPath, fmt.Sprintf("%d-deploy.json", chainID)))
-	if err != nil {
-		fmt.Println("Error opening deployment file:", err)
-		return err
-	}
+	var contracts *types.Contracts
 
-	// Decode JSON
-	var contracts types.Contracts
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&contracts); err != nil {
-		fmt.Println("Error decoding deployment JSON file:", err)
-		return err
+	contracts, err = utils.ReadDeployementConfigFromJSONFile(t.deploymentPath, chainID.Uint64())
+	if err != nil {
+		return fmt.Errorf("failed to read deployment config: %w", err)
 	}
 
 	privateKeyString := t.deployConfig.AdminPrivateKey
@@ -159,12 +156,14 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 	// Parse private key
 	privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKeyString, "0x"))
 	if err != nil {
+		t.logger.Error("invalid private key", "err", err)
 		return fmt.Errorf("invalid private key: %v", err)
 	}
 
 	// Create transaction auth
 	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, chainID)
 	if err != nil {
+		t.logger.Error("failed to create transaction auth", "err", err)
 		return fmt.Errorf("failed to create transaction auth: %v", err)
 	}
 
@@ -175,6 +174,7 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 	// Get contract address from environment
 	contractAddrStr := chainConfig.L1VerificationContractAddress
 	if contractAddrStr == "" {
+		t.logger.Error("L1_VERIFICATION_CONTRACT_ADDRESS not set in constant")
 		return fmt.Errorf("L1_VERIFICATION_CONTRACT_ADDRESS not set in constant")
 	}
 	contractAddr := ethCommon.HexToAddress(contractAddrStr)
@@ -182,47 +182,55 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 	// Create contract instance
 	contract, err := abis.NewL1ContractVerification(contractAddr, l1Client)
 	if err != nil {
+		t.logger.Error("failed to create contract instance", "err", err)
 		return fmt.Errorf("failed to create contract instance: %v", err)
 	}
 
 	systemConfigProxy := contracts.SystemConfigProxy
 	if systemConfigProxy == "" {
+		t.logger.Error("SystemConfigProxy is not set")
 		return fmt.Errorf("SystemConfigProxy is not set")
 	}
 
 	proxyAdmin := contracts.ProxyAdmin
 	if proxyAdmin == "" {
+		t.logger.Error("ProxyAdmin is not set")
 		return fmt.Errorf("ProxyAdmin is not set")
 	}
 
 	safeWalletAddress := contracts.SystemOwnerSafe
 	if safeWalletAddress == "" {
+		t.logger.Error("SafeWallet addresss is not set")
 		return fmt.Errorf("SafeWallet addresss is not set")
 	}
 
 	isVerificationPossible, err := contract.IsVerificationPossible(callOpts)
 	if err != nil {
+		t.logger.Error("failed to check if verification is possible", "err", err)
 		return fmt.Errorf("failed to check if verification is possible: %v", err)
 	}
 
 	contractAddrStrBridgeRegistry := chainConfig.L1BridgeRegistry
 	if contractAddrStrBridgeRegistry == "" {
+		t.logger.Error("L1BridgeRegistry variable not set in constant")
 		return fmt.Errorf("L1BridgeRegistry variable not set in constant")
 	}
 	contractAddressBridgeRegistry := ethCommon.HexToAddress(contractAddrStrBridgeRegistry)
 	// Create contract instance
 	bridgeRegistryContract, err := abis.NewL1BridgeRegistry(contractAddressBridgeRegistry, l1Client)
 	if err != nil {
+		t.logger.Error("failed to create contract instance", "err", err)
 		return fmt.Errorf("failed to create contract instance: %v", err)
 	}
 
 	rollupType, err := bridgeRegistryContract.RollupType(callOpts, ethCommon.HexToAddress(systemConfigProxy))
 	if err != nil {
+		t.logger.Error("failed to get rollup type", "err", err)
 		return fmt.Errorf("failed to get rollup type: %v", err)
 	}
 
 	if rollupType != 0 {
-		fmt.Println("✅ Rollup config is already registered.")
+		t.logger.Info("✅ Rollup config is already registered.")
 		return nil
 	}
 
@@ -232,28 +240,31 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 			auth,
 			ethCommon.HexToAddress(systemConfigProxy),
 			ethCommon.HexToAddress(proxyAdmin),
-			registerCandidate.NameInfo,
 			ethCommon.HexToAddress(safeWalletAddress),
+			registerCandidate.NameInfo,
 		)
 		if err != nil {
+			t.logger.Error("failed to register candidate", "err", err)
 			return fmt.Errorf("failed to register candidate: %v", err)
 		}
 
-		fmt.Printf("Verification and register config transaction submitted: %s\n", txVerifyAndRegisterConfig.Hash().Hex())
+		t.logger.Info("Verification and register config transaction submitted ", "txHash ", txVerifyAndRegisterConfig.Hash().Hex())
 
 		// Wait for transaction confirmation
 		receiptVerifyRegisterConfig, err := bind.WaitMined(ctx, l1Client, txVerifyAndRegisterConfig)
 		if err != nil {
+			t.logger.Error("failed waiting for transaction confirmation", "err", err)
 			return fmt.Errorf("failed waiting for transaction confirmation: %v", err)
 		}
 
 		if receiptVerifyRegisterConfig.Status != 1 {
+			t.logger.Error("transaction failed with status", "status", receiptVerifyRegisterConfig.Status)
 			return fmt.Errorf("transaction failed with status: %d", receiptVerifyRegisterConfig.Status)
 		}
 
-		fmt.Printf("Transaction confirmed in block %d\n", receiptVerifyRegisterConfig.BlockNumber.Uint64())
+		t.logger.Info("Transaction confirmed in block ", "blockNumber ", receiptVerifyRegisterConfig.BlockNumber.Uint64())
 	} else if rollupType == 0 {
-		fmt.Println("❌ Verification is not possible. Verification contract not registered as registrant")
+		t.logger.Error("❌ Verification is not possible. Verification contract not registered as registrant")
 		return fmt.Errorf("verification is not possible. Verification contract not registered as registrant")
 	}
 
@@ -264,12 +275,14 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 	// Get contract address from environment
 	l2ManagerAddressStr := chainConfig.L2ManagerAddress
 	if l2ManagerAddressStr == "" {
+		t.logger.Error("L2_MANAGER_ADDRESS variable is not set")
 		return fmt.Errorf("L2_MANAGER_ADDRESS variable is not set")
 	}
 	l2ManagerAddress := ethCommon.HexToAddress(l2ManagerAddressStr)
 
 	tonAddressStr := chainConfig.TON
 	if tonAddressStr == "" {
+		t.logger.Error("TON variable is not set")
 		return fmt.Errorf("TON variable is not set")
 	}
 	tonAddress := ethCommon.HexToAddress(tonAddressStr)
@@ -277,27 +290,31 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 	// Create TON contract instance
 	tonContract, err := abis.NewTON(tonAddress, l1Client)
 	if err != nil {
+		t.logger.Error("failed to create TON contract instance", "err", err)
 		return fmt.Errorf("failed to create TON contract instance: %v", err)
 	}
 
 	// Approve transaction
 	txApprove, err := tonContract.Approve(auth, l2ManagerAddress, amountBigInt)
 	if err != nil {
+		t.logger.Error("failed to approve TON", "err", err)
 		return fmt.Errorf("failed to approve TON: %v", err)
 	}
 
-	fmt.Printf("Approve TON transaction submitted: %s\n", txApprove.Hash().Hex())
+	t.logger.Info("Approve TON transaction submitted ", "txHash ", txApprove.Hash().Hex())
 
 	// Wait for transaction confirmation
 	receiptApprove, err := bind.WaitMined(ctx, l1Client, txApprove)
 	if err != nil {
+		t.logger.Error("failed waiting for transaction confirmation", "err", err)
 		return fmt.Errorf("failed waiting for transaction confirmation: %v", err)
 	}
 
-	fmt.Printf("Transaction confirmed in block %d\n", receiptApprove.BlockNumber.Uint64())
+	t.logger.Info("Transaction confirmed in block ", "blockNumber ", receiptApprove.BlockNumber.Uint64())
 
 	adminAddress, err := utils.GetAddressFromPrivateKey(t.deployConfig.AdminPrivateKey)
 	if err != nil {
+		t.logger.Error("failed to get admin address", "err", err)
 		return err
 	}
 
@@ -307,18 +324,21 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 	// Create contract instance
 	l2ManagerContract, err := abis.NewLayer2ManagerV1(l2ManagerAddress, l1Client)
 	if err != nil {
+		t.logger.Error("failed to create contract instance", "err", err)
 		return fmt.Errorf("failed to create contract instance: %v", err)
 	}
 
-	fmt.Println("Initiating transaction to register DAO candidate...")
+	t.logger.Info("Initiating transaction to register DAO candidate...")
 
 	// Final balance check before transfer
 	currentBalance, err := tonContract.BalanceOf(&bind.CallOpts{Context: ctx}, adminAddress)
 	if err != nil {
+		t.logger.Error("failed to get current balance", "err", err)
 		return fmt.Errorf("failed to get current balance: %v", err)
 	}
 
 	if currentBalance.Cmp(amountBigInt) < 0 {
+		t.logger.Error("insufficient balance at transfer time", "currentBalance", currentBalance.String(), "amountBigInt", amountBigInt.String())
 		return fmt.Errorf("insufficient balance at transfer time: have %s, required %s",
 			currentBalance.String(), amountBigInt.String())
 	}
@@ -332,22 +352,71 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 		registerCandidate.Memo,
 	)
 	if err != nil {
+		t.logger.Error("failed to register candidate", "err", err)
 		return fmt.Errorf("failed to register candidate: %v", err)
 	}
 
-	fmt.Printf("Register Candidate transaction submitted: %s\n", txRegisterCandidate.Hash().Hex())
+	t.logger.Info("Register Candidate transaction submitted ", "txHash ", txRegisterCandidate.Hash().Hex())
 
 	// Wait for transaction confirmation
 	receiptRegisterCandidate, err := bind.WaitMined(ctx, l1Client, txRegisterCandidate)
 	if err != nil {
+		t.logger.Error("failed waiting for transaction confirmation", "err", err)
 		return fmt.Errorf("failed waiting for transaction confirmation: %v", err)
 	}
 
 	if receiptRegisterCandidate.Status != 1 {
+		t.logger.Error("transaction failed with status", "status", receiptRegisterCandidate.Status)
 		return fmt.Errorf("transaction failed with status: %d", receiptRegisterCandidate.Status)
 	}
 
-	fmt.Printf("Transaction confirmed in block %d\n", receiptRegisterCandidate.BlockNumber.Uint64())
+	t.logger.Info("Transaction confirmed in block ", "blockNumber ", receiptRegisterCandidate.BlockNumber.Uint64())
+
+	// Get block details to extract timestamp
+	blockNumber := receiptRegisterCandidate.BlockNumber
+	block, err := l1Client.BlockByNumber(ctx, blockNumber)
+	if err != nil {
+		return fmt.Errorf("failed to get block details: %v", err)
+	}
+
+	// Convert block timestamp to the required format
+	blockTime := time.Unix(int64(block.Time()), 0)
+	formattedTime := blockTime.Format("2006-01-02 15:04:05 MST")
+
+	// Extract candidateAddOn address from event logs
+	var candidateAddress string
+
+	for _, vLog := range receiptRegisterCandidate.Logs {
+		// Check if this log is from the L2Manager contract
+		if vLog.Address == l2ManagerAddress {
+			// Try to parse as RegisteredCandidateAddOn event
+			event, err := l2ManagerContract.ParseRegisteredCandidateAddOn(*vLog)
+			if err == nil {
+				// Successfully parsed the event
+				candidateAddress = event.CandidateAddOn.Hex()
+				fmt.Printf("✅ Successfully extracted Candidate address: %s\n", candidateAddress)
+				break
+			}
+		}
+	}
+
+	t.deployConfig.StakingInfo = &types.StakingInfo{
+		IsCandidate:         true,
+		StakingAmount:       registerCandidate.Amount,
+		RollupConfigAddress: contracts.SystemConfigProxy,
+		CandidateName:       registerCandidate.NameInfo,
+		CandidateMemo:       registerCandidate.Memo,
+		RegistrationTime:    formattedTime,
+		RegistrationTxHash:  txRegisterCandidate.Hash().Hex(),
+		CandidateAddress:    candidateAddress,
+	}
+
+	err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
+	if err != nil {
+		fmt.Println("Failed to write settings file:", err)
+		return err
+	}
+	fmt.Println("✅ Settings file updated successfully with StakingInfo")
 
 	return nil
 }
@@ -358,34 +427,40 @@ func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, registerCand
 	}
 
 	var err error
-	fmt.Println("Starting candidate registration process...")
-	fmt.Println("💲 Admin account will be used to register the candidate. Please ensure it has sufficient TON token balance.")
+	t.logger.Info("Starting candidate registration process...")
+	t.logger.Info("💲 Admin account will be used to register the candidate. Please ensure it has sufficient TON token balance.")
 
 	if err := registerCandidate.Validate(ctx); err != nil {
+		t.logger.Error("failed to validate register candidate", "err", err)
 		return err
 	}
 
 	l1Client, err := ethclient.DialContext(ctx, t.deployConfig.L1RPCURL)
 	if err != nil {
+		t.logger.Error("failed to get L1 client", "err", err)
 		return err
 	}
 	adminAddress, err := utils.GetAddressFromPrivateKey(t.deployConfig.AdminPrivateKey)
 	if err != nil {
+		t.logger.Error("failed to get admin address", "err", err)
 		return err
 	}
 	err = t.checkAdminBalance(ctx, adminAddress, registerCandidate.Amount, l1Client)
 	if err != nil {
+		t.logger.Error("failed to check admin balance", "err", err)
 		return err
 	}
 	err = t.setupSafeWallet(ctx, t.deploymentPath)
 	if err != nil {
+		t.logger.Error("failed to set up Safe Wallet", "err", err)
 		return fmt.Errorf("❌ failed to set up Safe Wallet: %w", err)
 	}
 	err = t.verifyRegisterCandidates(ctx, registerCandidate)
 	if err != nil {
+		t.logger.Error("❌ candidate verification failed", "err", err)
 		return fmt.Errorf("❌ candidate verification failed: %w", err)
 	}
-	fmt.Println("✅ Candidate registration completed successfully!")
+	t.logger.Info("✅ Candidate registration completed successfully!")
 	return nil
 }
 
@@ -394,30 +469,35 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, cwd string) error {
 	deployJSONPath := filepath.Join(cwd, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "deployments", fmt.Sprintf("%d-deploy.json", t.deployConfig.L1ChainID))
 	deployData, err := os.ReadFile(deployJSONPath)
 	if err != nil {
+		t.logger.Error("failed to read deployment file", "err", err)
 		return fmt.Errorf("failed to read deployment file: %v", err)
 	}
 
 	var deployMap map[string]interface{}
 	if err := json.Unmarshal(deployData, &deployMap); err != nil {
+		t.logger.Error("failed to parse deployment file", "err", err)
 		return fmt.Errorf("failed to parse deployment file: %v", err)
 	}
 
 	safeWalletAddress, ok := deployMap["SystemOwnerSafe"].(string)
 	if !ok {
+		t.logger.Error("failed to get the value of 'SystemOwnerSafe' field in the deployment file")
 		return fmt.Errorf("failed to get the value of 'SystemOwnerSafe' field in the deployment file")
 	}
 
-	fmt.Println("Checking if safe wallet is set up properly...")
+	t.logger.Info("Checking if safe wallet is set up properly...")
 
 	// Connect to the L1
 	l1Client, err := ethclient.Dial(t.deployConfig.L1RPCURL)
 	if err != nil {
+		t.logger.Error("failed to connect to Ethereum client", "err", err)
 		return fmt.Errorf("failed to connect to Ethereum client: %v", err)
 	}
 
 	// Create the signer from the private key
 	adminAddress, err := utils.GetAddressFromPrivateKey(t.deployConfig.AdminPrivateKey)
 	if err != nil {
+		t.logger.Error("failed to get admin address", "err", err)
 		return fmt.Errorf("failed to get admin address: %v", err)
 	}
 
@@ -428,22 +508,26 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, cwd string) error {
 
 	contract, err := abis.NewSafeExtender(ethCommon.HexToAddress(safeWalletAddress), l1Client)
 	if err != nil {
+		t.logger.Error("failed to create contract instance", "err", err)
 		return fmt.Errorf("failed to create contract instance: %v", err)
 	}
 
 	// Call getThreshold() function
 	threshold, err := contract.GetThreshold(callOpts)
 	if err != nil {
+		t.logger.Error("failed to call getThreshold", "err", err)
 		return fmt.Errorf("failed to call getThreshold: %v", err)
 	}
 
 	owners, err := contract.GetOwners(callOpts)
 	if err != nil {
+		t.logger.Error("failed to call getOwners", "err", err)
 		return fmt.Errorf("failed to call getOwners: %v", err)
 	}
 
 	ownersInfo, err := GetDesignatedOwnersByChainID(t.deployConfig.L1ChainID)
 	if err != nil {
+		t.logger.Error("failed to get designated owners", "err", err)
 		return fmt.Errorf("failed to get designated owners: %v", err)
 	}
 
@@ -469,31 +553,31 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, cwd string) error {
 		}
 	}
 	if ownersMatch {
-		fmt.Println("✅ All required owners are present in the Safe wallet.")
+		t.logger.Info("✅ All required owners are present in the Safe wallet.")
 	} else {
-		fmt.Println("❌ Required owners do not match the Safe wallet.")
+		fmt.Println("Required owners do not match the Safe wallet.")
 	}
 
 	// Check if the threshold is 3
 	thresholdMatch := threshold.Cmp(big.NewInt(3)) == 0
 
 	if thresholdMatch {
-		fmt.Println("✅ All required threshold are present in the Safe wallet.")
+		t.logger.Info("✅ All required threshold are present in the Safe wallet.")
 	} else {
-		fmt.Println("❌ Required threshold do not match the Safe wallet.")
+		fmt.Println("Required threshold do not match the Safe wallet.")
 	}
 
 	// Skip execution if owners and threshold match
 	if ownersMatch && thresholdMatch {
-		fmt.Println("Owners and threshold are already correct. Skipping hardhat task.")
+		t.logger.Info("Owners and threshold are already correct. Skipping hardhat task.")
 		return nil
 	}
 
 	// Run hardhat task
 	sdkPath := filepath.Join(cwd, "tokamak-thanos", "packages", "tokamak", "sdk")
 	cmdStr := fmt.Sprintf("cd %s && L1_URL=%s PRIVATE_KEY=%s SAFE_WALLET_ADDRESS=%s npx hardhat set-safe-wallet", sdkPath, t.deployConfig.L1RPCURL, t.deployConfig.AdminPrivateKey, safeWalletAddress)
-	if err := utils.ExecuteCommandStream(ctx, t.l, "bash", "-c", cmdStr); err != nil {
-		fmt.Print("\rfailed to setup the Safe wallet!\n")
+	if err := utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", cmdStr); err != nil {
+		t.logger.Error("failed to setup the Safe wallet!")
 		return err
 	}
 
@@ -504,8 +588,8 @@ func GetDesignatedOwnersByChainID(chainID uint64) (DesignatedOwners, error) {
 	switch chainID {
 	case constants.EthereumSepoliaChainID: // Sepolia
 		return DesignatedOwners{
-			TokamakDAO: ethCommon.HexToAddress("0x0Fd5632f3b52458C31A2C3eE1F4b447001872Be9"),
-			Foundation: ethCommon.HexToAddress("0x61dc95E5f27266b94805ED23D95B4C9553A3D049"),
+			TokamakDAO: ethCommon.HexToAddress("0xA2101482b28E3D99ff6ced517bA41EFf4971a386"),
+			Foundation: ethCommon.HexToAddress("0xeEfb04f3A4406363b399A1c3d194d75ca81A2d1B"),
 		}, nil
 	case constants.EthereumMainnetChainID: // Ethereum (TODO: need to update)
 		return DesignatedOwners{
@@ -531,18 +615,11 @@ func (t *ThanosStack) GetRegistrationAdditionalInfo(ctx context.Context, registe
 		return nil, fmt.Errorf("failed to get chain ID: %w", err)
 	}
 
-	// Read deployment file to get contract addresses
-	deploymentFile := fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", t.deploymentPath, chainID)
-	file, err := os.Open(deploymentFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open deployment file: %w", err)
-	}
-	defer file.Close()
+	var contracts *types.Contracts
 
-	var contracts types.Contracts
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&contracts); err != nil {
-		return nil, fmt.Errorf("failed to decode deployment JSON: %w", err)
+	contracts, err = utils.ReadDeployementConfigFromJSONFile(t.deploymentPath, chainID.Uint64())
+	if err != nil {
+		return nil, fmt.Errorf("failed to read deployment config: %w", err)
 	}
 
 	result := &types.RegistrationAdditionalInfo{
@@ -594,17 +671,17 @@ func (t *ThanosStack) DisplayRegistrationAdditionalInfo(ctx context.Context, reg
 	// Get and display additional registration information
 	additionalInfo, err := t.GetRegistrationAdditionalInfo(ctx, registerCandidate)
 	if err != nil {
-		fmt.Printf("⚠️  Warning: Failed to retrieve additional information: %v\n", err)
+		t.logger.Error("⚠️  Warning: Failed to retrieve additional information", "err", err)
 		return
 	}
 
 	// Pretty print the additional information
-	fmt.Println("\n📋 Registration Summary:")
+	t.logger.Info("📋 Registration Summary:")
 	prettyJSON, err := json.MarshalIndent(additionalInfo, "", "  ")
 	if err != nil {
-		fmt.Printf("Failed to format additional info: %v\n", err)
-		fmt.Printf("Raw data: %+v\n", additionalInfo)
+		t.logger.Error("Failed to format additional info", "err", err)
+		t.logger.Error("Raw data", "additionalInfo", additionalInfo)
 	} else {
-		fmt.Println(string(prettyJSON))
+		t.logger.Info("Registration Summary", "additionalInfo", string(prettyJSON))
 	}
 }

@@ -11,23 +11,16 @@ func PrefixEnvVars(prefix, name string) []string {
 var (
 	StackFlag = &cli.StringFlag{
 		Name:     "stack",
-		Usage:    "Select stack",
+		Usage:    "Select stack(thanos)",
 		Value:    "thanos",
 		Sources:  cli.EnvVars(PrefixEnvVars(envPrefix, "STACK")...),
 		Required: true,
 	}
 
-	SaveConfigFlag = &cli.BoolFlag{
-		Name:    "saveconfig",
-		Usage:   "Save the config file",
-		Value:   false,
-		Sources: cli.EnvVars(PrefixEnvVars(envPrefix, "SAVE_CONFIG")...),
-	}
-
 	NetworkFlag = &cli.StringFlag{
 		Name:    "network",
-		Usage:   "Select Network Environment [localhost, testnet, mainnet]",
-		Value:   "localhost",
+		Usage:   "Select Network Environment [testnet, mainnet]",
+		Value:   "testnet",
 		Sources: cli.EnvVars(PrefixEnvVars(envPrefix, "NETWORK")...),
 	}
 
@@ -42,6 +35,5 @@ var (
 var DeployContractsFlag = []cli.Flag{
 	StackFlag,
 	NetworkFlag,
-	SaveConfigFlag,
 	NoCandidateFlag,
 }

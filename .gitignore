@@ -30,9 +30,16 @@ go.work.sum
 main
 trh-sdk
 
+tokamak-thanos
+tokamak-thanos-stack
+tokamak-rollup-metadata-repository
+
+deploy-config.json
+settings.json
+
+nam@tokamak.network_accessKeys.csv
 logs/
 *.log
 
-settings.json
-tokamak-thanos
-tokamak-thanos-stack
+stack-info.json
+crossTrade

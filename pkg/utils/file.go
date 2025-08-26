@@ -114,3 +114,51 @@ func ReadConfigFromJSONFile(deploymentPath string) (*types.Config, error) {
 
 	return &config, nil
 }
+
+func ReadDeployementConfigFromJSONFile(deploymentPath string, chainId uint64) (*types.Contracts, error) {
+	filePath := fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%s", deploymentPath, fmt.Sprintf("%d-deploy.json", chainId))
+
+	fileExist := CheckFileExists(filePath)
+	if !fileExist {
+		return nil, fmt.Errorf("deployment file does not exist: %s", filePath)
+	}
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		fmt.Println("Error opening deployment file:", err)
+		return nil, err
+	}
+	defer file.Close()
+
+	var contracts types.Contracts
+	decoder := json.NewDecoder(file)
+	if err := decoder.Decode(&contracts); err != nil {
+		fmt.Println("Error decoding deployment JSON file:", err)
+		return nil, err
+	}
+	return &contracts, nil
+}
+
+func ReadMetadataInfoFromJSONFile(deploymentPath string, chainId uint64) (*types.MetadataInfo, error) {
+	filePath := fmt.Sprintf("%s/%s", deploymentPath, types.MetadataInfoFileName)
+
+	fileExist := CheckFileExists(filePath)
+	if !fileExist {
+		return &types.MetadataGenericInfo, nil
+	}
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		fmt.Println("Error opening metadata info file:", err)
+		return nil, err
+	}
+	defer file.Close()
+
+	var metadataInfo types.MetadataInfo
+	decoder := json.NewDecoder(file)
+	if err := decoder.Decode(&metadataInfo); err != nil {
+		fmt.Println("Error decoding metadata info JSON file:", err)
+		return nil, err
+	}
+	return &metadataInfo, nil
+}

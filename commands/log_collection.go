@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
@@ -306,8 +307,8 @@ func UpdateLoggingConfig(ctx context.Context, thanosStack *thanos.ThanosStack, l
 	// Generate new values file with updated logging configuration
 	// Note: config parameter was removed from UpdateLoggingConfig, so we need to create a minimal config
 	monitoringConfig := &types.MonitoringConfig{
-		Namespace:       "monitoring", // Default namespace
-		HelmReleaseName: "monitoring",
+		Namespace:       constants.MonitoringNamespace, // Default namespace
+		HelmReleaseName: constants.MonitoringNamespace,
 		ChainName:       "thanos-stack",
 		LoggingEnabled:  loggingConfig.Enabled,
 	}

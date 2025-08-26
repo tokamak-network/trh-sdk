@@ -28,14 +28,14 @@ func ActionDeployContracts() cli.ActionFunc {
 
 		// Initialize the logger
 		fileName := fmt.Sprintf("%s/logs/deploy_contracts_%s_%s_%d.log", deploymentPath, stack, network, now)
-		l, err := logging.InitLogger(fileName)
+		logger, err := logging.InitLogger(fileName)
 		if err != nil {
 			return fmt.Errorf("failed to initialize logger: %w", err)
 		}
 
 		switch stack {
 		case constants.ThanosStack:
-			thanosStack, err := thanos.NewThanosStack(ctx, l, network, true, deploymentPath, nil)
+			thanosStack, err := thanos.NewThanosStack(ctx, logger, network, true, deploymentPath, nil)
 			if err != nil {
 				fmt.Println("Failed to initialize thanos stack", "err", err)
 				return err

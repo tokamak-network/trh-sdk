@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"go.uber.org/zap"
@@ -27,15 +28,20 @@ var (
 
 // getLogger returns a logger instance, creating a default one if nil
 func (t *ThanosStack) getLogger() *zap.SugaredLogger {
-	if t.l == nil {
+	if t.logger == nil {
 		return zap.NewExample().Sugar()
 	}
-	return t.l
+	return t.logger
 }
 
 // InstallMonitoring installs monitoring plugin using Helm
 func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *types.MonitoringConfig) (*types.MonitoringInfo, error) {
 	logger := t.getLogger()
+
+	if t.deployConfig == nil || t.deployConfig.K8s == nil {
+		logger.Warn("Deploy configuration is not initialized, skip monitoring installation")
+		return nil, nil
+	}
 
 	logger.Info("🚀 Starting monitoring installation...")
 
@@ -195,7 +201,7 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 	}
 
 	config := &types.MonitoringConfig{
-		Namespace:         "monitoring",
+		Namespace:         constants.MonitoringNamespace,
 		HelmReleaseName:   helmReleaseName,
 		AdminPassword:     adminPassword,
 		L1RpcUrl:          t.deployConfig.L1RPCURL,
@@ -216,7 +222,12 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 	logger := t.getLogger()
 	logger.Info("Starting monitoring uninstallation...")
-	monitoringNamespace := "monitoring"
+	monitoringNamespace := constants.MonitoringNamespace
+
+	if t.deployConfig == nil || t.deployConfig.K8s == nil {
+		logger.Warn("Deploy configuration is not initialized, skip monitoring uninstallation")
+		return nil
+	}
 
 	if t.deployConfig == nil {
 		logger.Warnw("DeployConfig is nil, skipping namespace-specific cleanup")
@@ -244,7 +255,7 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 		}
 	}
 
-	releases, err := utils.FilterHelmReleases(ctx, monitoringNamespace, "monitoring")
+	releases, err := utils.FilterHelmReleases(ctx, monitoringNamespace, constants.MonitoringNamespace)
 	if err != nil {
 		logger.Errorw("Failed to filter Helm releases", "err", err)
 		return err

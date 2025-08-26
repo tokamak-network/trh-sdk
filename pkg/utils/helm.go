@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 )
 
 // GetHelmReleases fetches the list of Helm releases in the given namespace
@@ -101,7 +103,7 @@ func UninstallHelmRelease(ctx context.Context, namespace string, releaseName str
 // CheckMonitoringPluginInstalled checks if monitoring plugin is installed
 func CheckMonitoringPluginInstalled(ctx context.Context) error {
 	// Check if monitoring namespace exists
-	exists, err := CheckNamespaceExists(ctx, "monitoring")
+	exists, err := CheckNamespaceExists(ctx, constants.MonitoringNamespace)
 	if err != nil {
 		return fmt.Errorf("failed to check monitoring namespace: %w", err)
 	}
@@ -110,7 +112,7 @@ func CheckMonitoringPluginInstalled(ctx context.Context) error {
 	}
 
 	// Check if monitoring release exists
-	releases, err := GetHelmReleases(ctx, "monitoring")
+	releases, err := GetHelmReleases(ctx, constants.MonitoringNamespace)
 	if err != nil {
 		return fmt.Errorf("failed to check monitoring releases: %w", err)
 	}
