@@ -45,9 +45,7 @@ func ActionBackupManager() cli.ActionFunc {
 		cfgDaily := cmd.String("daily")
 		cfgKeep := cmd.String("keep")
 		cfgReset := cmd.Bool("reset")
-		// RDS
-		cfgRdsKeep := cmd.String("keep-rds")
-		cfgRdsWindow := cmd.String("backup-window")
+		// RDS flags removed
 
 		// Load settings.json (needed before logger for stack/network naming)
 		config, err := utils.ReadConfigFromJSONFile(deploymentPath)
@@ -92,9 +90,7 @@ func ActionBackupManager() cli.ActionFunc {
 			daily := cfgDaily
 			keep := cfgKeep
 			rst := cfgReset
-			rdsKeep := cfgRdsKeep
-			win := cfgRdsWindow
-			return thanosStack.BackupConfigure(ctx, nil, nil, &daily, &keep, nil, &rst, &rdsKeep, &win)
+			return thanosStack.BackupConfigure(ctx, nil, nil, &daily, &keep, nil, &rst, nil, nil)
 		default:
 			return errors.New("no action specified. Try --status, --snapshot, --list, --restore, or --config")
 		}

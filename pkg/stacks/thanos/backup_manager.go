@@ -27,7 +27,6 @@ func (t *ThanosStack) BackupStatus(ctx context.Context) error {
 	if efsID, err := utils.DetectEFSId(ctx, namespace); err == nil && efsID != "" {
 		arn := utils.BuildEFSArn(region, accountID, efsID)
 		fmt.Printf("📁 EFS Backup Status\n")
-		fmt.Printf("   FileSystemId: %s\n", efsID)
 		fmt.Printf("   ARN: %s\n", arn)
 
 		// Check if EFS is protected
@@ -71,15 +70,34 @@ func (t *ThanosStack) BackupStatus(ctx context.Context) error {
 		}
 
 		// Check backup vaults (simplified query)
-		vaults, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-recovery-points-by-resource", "--region", region, "--resource-arn", arn, "--query", "RecoveryPoints[].BackupVaultName", "--output", "text")
+		vaultsJSON, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-recovery-points-by-resource", "--region", region, "--resource-arn", arn, "--query", "RecoveryPoints[].BackupVaultName", "--output", "json")
 		if err != nil {
 			fmt.Printf("   Vaults: ❌ Error checking vaults: %v\n", err)
 		} else {
-			vaultsTrimmed := strings.TrimSpace(vaults)
-			if vaultsTrimmed == "None" || vaultsTrimmed == "" {
+			vaultsJSON = strings.TrimSpace(vaultsJSON)
+			if vaultsJSON == "" || vaultsJSON == "null" || vaultsJSON == "[]" {
 				fmt.Printf("   Vaults: ⚠️  None (no backups found)\n")
 			} else {
-				fmt.Printf("   Vaults: ✅ %s\n", vaultsTrimmed)
+				var names []string
+				if err := json.Unmarshal([]byte(vaultsJSON), &names); err == nil && len(names) > 0 {
+					seen := map[string]struct{}{}
+					unique := ""
+					for _, n := range names {
+						if _, ok := seen[n]; ok {
+							continue
+						}
+						seen[n] = struct{}{}
+						unique = n
+						break
+					}
+					if unique != "" {
+						fmt.Printf("   Vaults: ✅ %s\n", unique)
+					} else {
+						fmt.Printf("   Vaults: ⚠️  None (no backups found)\n")
+					}
+				} else {
+					fmt.Printf("   Vaults: ⚠️  None (no backups found)\n")
+				}
 			}
 		}
 	} else {
@@ -88,38 +106,6 @@ func (t *ThanosStack) BackupStatus(ctx context.Context) error {
 	}
 
 	fmt.Println("")
-
-	rdsID := utils.RDSIdentifierFromNamespace(namespace)
-	fmt.Printf("🗄️  RDS Backup Status\n")
-	fmt.Printf("   Instance ID: %s\n", rdsID)
-
-	// Check RDS instance status
-	q := "DBInstances[0].{Id:DBInstanceIdentifier,Retention:BackupRetentionPeriod,Window:PreferredBackupWindow,Status:DBInstanceStatus}"
-	info, err := utils.ExecuteCommand(ctx, "aws", "rds", "describe-db-instances", "--region", region, "--db-instance-identifier", rdsID, "--query", q, "--output", "table")
-	if err != nil {
-		fmt.Printf("   Instance Status: ❌ Error checking instance status: %v\n", err)
-		fmt.Printf("   Instance may not exist or you may not have permission to access it\n")
-	} else {
-		infoTrimmed := strings.TrimSpace(info)
-		if infoTrimmed == "" {
-			fmt.Printf("   Instance Status: ⚠️  No instance information found\n")
-		} else {
-			fmt.Printf("   Instance Status:\n%s\n", infoTrimmed)
-		}
-	}
-
-	// Check RDS snapshots
-	lastSnap, err := utils.ExecuteCommand(ctx, "aws", "rds", "describe-db-snapshots", "--region", region, "--db-instance-identifier", rdsID, "--snapshot-type", "automated", "--query", "max_by(DBSnapshots,&SnapshotCreateTime).{Id:DBSnapshotIdentifier,Time:SnapshotCreateTime}", "--output", "table")
-	if err != nil {
-		fmt.Printf("   Latest Snapshot: ❌ Error checking snapshots: %v\n", err)
-	} else {
-		lastSnapTrimmed := strings.TrimSpace(lastSnap)
-		if lastSnapTrimmed == "" {
-			fmt.Printf("   Latest Snapshot: ⚠️  No automated snapshots found\n")
-		} else {
-			fmt.Printf("   Latest Snapshot:\n%s\n", lastSnapTrimmed)
-		}
-	}
 
 	return nil
 }
@@ -162,29 +148,6 @@ func (t *ThanosStack) BackupSnapshot(ctx context.Context) error {
 		fmt.Printf("📁 EFS: ❌ Not detected in cluster PVs: %v\n", err)
 	}
 
-	rdsID := utils.RDSIdentifierFromNamespace(namespace)
-
-	// Check if RDS instance exists before attempting to create snapshot
-	_, err = utils.ExecuteCommand(ctx, "aws", "rds", "describe-db-instances", "--region", region, "--db-instance-identifier", rdsID, "--query", "DBInstances[0].DBInstanceIdentifier", "--output", "text")
-	if err != nil {
-		fmt.Printf("🗄️  RDS: ⚠️  Instance not found, skipping RDS snapshot\n")
-		fmt.Printf("   Instance ID: %s\n", rdsID)
-		fmt.Printf("   Reason: RDS instance does not exist in this deployment\n")
-	} else {
-		// RDS instance exists, proceed with snapshot creation
-		snapID := fmt.Sprintf("%s-manual-%d", rdsID, time.Now().Unix())
-
-		// Create RDS snapshot
-		if _, err := utils.ExecuteCommand(ctx, "aws", "rds", "create-db-snapshot", "--region", region, "--db-instance-identifier", rdsID, "--db-snapshot-identifier", snapID); err != nil {
-			fmt.Printf("🗄️  RDS: ❌ Failed to create snapshot: %v\n", err)
-			fmt.Printf("   Instance ID: %s\n", rdsID)
-			fmt.Printf("   Snapshot ID: %s\n", snapID)
-		} else {
-			fmt.Printf("🗄️  RDS: ✅ Manual snapshot started successfully\n")
-			fmt.Printf("   Instance ID: %s\n", rdsID)
-			fmt.Printf("   Snapshot ID: %s\n", snapID)
-		}
-	}
 	return nil
 }
 
@@ -286,39 +249,6 @@ func (t *ThanosStack) BackupList(ctx context.Context, limit string) error {
 	}
 
 	fmt.Println("")
-
-	rdsID := utils.RDSIdentifierFromNamespace(namespace)
-	fmt.Printf("🗄️  RDS Snapshots (Instance ID: %s)\n", rdsID)
-
-	q := "reverse(sort_by(DBSnapshots,&SnapshotCreateTime))[:10].{Id:DBSnapshotIdentifier,Time:SnapshotCreateTime,Type:SnapshotType}"
-	if limit != "" {
-		q = fmt.Sprintf("reverse(sort_by(DBSnapshots,&SnapshotCreateTime))[:%s].{Id:DBSnapshotIdentifier,Time:SnapshotCreateTime,Type:SnapshotType}", limit)
-	}
-	out, err := utils.ExecuteCommand(ctx, "aws", "rds", "describe-db-snapshots", "--region", region, "--db-instance-identifier", rdsID, "--query", q, "--output", "table")
-	if err != nil {
-		fmt.Printf("   ❌ Error retrieving snapshots: %v\n", err)
-	} else {
-		outTrimmed := strings.TrimSpace(out)
-		if outTrimmed == "" {
-			fmt.Printf("   ⚠️  No snapshots found\n")
-		} else {
-			// Add indentation to the table output and replace the header
-			lines := strings.Split(outTrimmed, "\n")
-			for i, line := range lines {
-				if i == 0 {
-					// Replace the AWS CLI generated header with a custom one
-					fmt.Printf("   -------------------------------------------------\n")
-					fmt.Printf("   |                RDS Snapshots                    |\n")
-					fmt.Printf("   +---------+-------------------------------------+\n")
-				} else if i == 1 {
-					// Skip the original header line
-					continue
-				} else {
-					fmt.Printf("   %s\n", line) // Data rows
-				}
-			}
-		}
-	}
 
 	return nil
 }
@@ -478,8 +408,48 @@ func (t *ThanosStack) restoreEFS(ctx context.Context, recoveryPointArn string) (
 	}
 
 	// Start restore job
-	// For EFS restore, we need to specify that we want a new filesystem
-	meta := `{"newfilesystem": "true"}`
+	// For EFS restore, we need to get the required metadata from the recovery point
+	// and specify that we want a new filesystem
+	recoveryPointMetadata, err := utils.ExecuteCommand(ctx, "aws", "backup", "get-recovery-point-restore-metadata",
+		"--backup-vault-name", vaultName,
+		"--recovery-point-arn", recoveryPointArn,
+		"--region", t.deployConfig.AWS.Region,
+		"--query", "RestoreMetadata",
+		"--output", "json")
+	if err != nil {
+		return "", fmt.Errorf("failed to get recovery point metadata: %w", err)
+	}
+
+	// Parse the metadata to get the file-system-id
+	var metadata map[string]interface{}
+	if err := json.Unmarshal([]byte(recoveryPointMetadata), &metadata); err != nil {
+		return "", fmt.Errorf("failed to parse recovery point metadata: %w", err)
+	}
+
+	// Add the newfilesystem flag to create a new EFS
+	// Add required EFS restore metadata
+	metadata["newfilesystem"] = "true"
+	metadata["performancemode"] = "generalPurpose"
+	metadata["creationtoken"] = fmt.Sprintf("%s-restore-%d", t.deployConfig.K8s.Namespace, time.Now().Unix())
+	metadata["encrypted"] = "true"
+
+	// Get KMS key ID from original EFS
+	efsInfo, err := utils.ExecuteCommand(ctx, "aws", "efs", "describe-file-systems",
+		"--region", t.deployConfig.AWS.Region,
+		"--file-system-id", metadata["file-system-id"].(string),
+		"--query", "FileSystems[0].KmsKeyId",
+		"--output", "text")
+	if err == nil && strings.TrimSpace(efsInfo) != "" {
+		metadata["kmskeyid"] = strings.TrimSpace(efsInfo)
+	}
+
+	// Convert back to JSON
+	metaBytes, err := json.Marshal(metadata)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal restore metadata: %w", err)
+	}
+	meta := string(metaBytes)
+
 	fmt.Printf("[DEBUG] Starting restore job with:\n")
 	fmt.Printf("[DEBUG]   Region: %s\n", t.deployConfig.AWS.Region)
 	fmt.Printf("[DEBUG]   Recovery Point ARN: %s\n", recoveryPointArn)
@@ -518,38 +488,6 @@ func (t *ThanosStack) restoreEFS(ctx context.Context, recoveryPointArn string) (
 
 	// Monitor restore job progress
 	return t.monitorEFSRestoreJob(ctx, jobId)
-}
-
-// restoreRDS handles RDS restore from snapshot
-func (t *ThanosStack) restoreRDS(ctx context.Context, snapshotId, targetInstanceId string) error {
-	fmt.Printf("[RDS] Starting restore from snapshot: %s to instance: %s\n", snapshotId, targetInstanceId)
-
-	// Validate snapshot exists
-	if _, err := utils.ExecuteCommand(ctx, "aws", "rds", "describe-db-snapshots",
-		"--region", t.deployConfig.AWS.Region,
-		"--db-snapshot-identifier", snapshotId); err != nil {
-		return fmt.Errorf("snapshot not found or not accessible: %w", err)
-	}
-
-	// Check if target instance already exists
-	if _, err := utils.ExecuteCommand(ctx, "aws", "rds", "describe-db-instances",
-		"--region", t.deployConfig.AWS.Region,
-		"--db-instance-identifier", targetInstanceId); err == nil {
-		return fmt.Errorf("target RDS instance already exists: %s", targetInstanceId)
-	}
-
-	// Start RDS restore
-	if _, err := utils.ExecuteCommand(ctx, "aws", "rds", "restore-db-instance-from-db-snapshot",
-		"--region", t.deployConfig.AWS.Region,
-		"--db-snapshot-identifier", snapshotId,
-		"--db-instance-identifier", targetInstanceId); err != nil {
-		return fmt.Errorf("failed to start RDS restore: %w", err)
-	}
-
-	fmt.Printf("[RDS] Restore started for instance: %s\n", targetInstanceId)
-
-	// Monitor RDS restore progress
-	return t.monitorRDSRestore(ctx, targetInstanceId)
 }
 
 // monitorEFSRestoreJob monitors EFS restore job progress
@@ -624,57 +562,33 @@ func (t *ThanosStack) handleEFSRestoreCompletion(ctx context.Context, jobId stri
 			newFsId = parts[len(parts)-1]
 			fmt.Printf("[EFS] New FileSystemId: %s\n", newFsId)
 			fmt.Printf("[TIP] You can now attach with: trh-sdk backup-manager --attach --efs-id %s --pvc op-geth,op-node --sts op-geth,op-node\n", newFsId)
+
+			// Ensure throughput mode is elastic on the restored EFS
+			if err := t.setEFSThroughputElastic(ctx, newFsId); err != nil {
+				fmt.Printf("[WARNING] Failed to set EFS ThroughputMode to elastic: %v\n", err)
+			} else {
+				fmt.Println("[EFS] ✅ ThroughputMode set to elastic")
+			}
 		}
 	}
 
 	return newFsId, nil
 }
 
-// monitorRDSRestore monitors RDS restore progress
-func (t *ThanosStack) monitorRDSRestore(ctx context.Context, instanceId string) error {
-	fmt.Printf("[RDS] Monitoring restore progress for instance: %s\n", instanceId)
-
-	const maxAttempts = 120 // 60 minutes with 30-second intervals
-	for i := 0; i < maxAttempts; i++ {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("RDS restore monitoring cancelled: %w", ctx.Err())
-		default:
-		}
-
-		status, err := utils.ExecuteCommand(ctx, "aws", "rds", "describe-db-instances",
-			"--region", t.deployConfig.AWS.Region,
-			"--db-instance-identifier", instanceId,
-			"--query", "DBInstances[0].DBInstanceStatus",
-			"--output", "text")
-		if err != nil {
-			return fmt.Errorf("failed to get RDS instance status: %w", err)
-		}
-
-		status = strings.TrimSpace(status)
-		fmt.Printf("[RDS] Instance status: %s (attempt %d/%d)\n", status, i+1, maxAttempts)
-
-		switch status {
-		case "available":
-			fmt.Printf("[RDS] ✅ Restore completed successfully for instance: %s\n", instanceId)
-			return nil
-		case "failed", "deleted":
-			return fmt.Errorf("RDS instance restore failed with status: %s", status)
-		case "creating", "restoring":
-			// Continue monitoring
-		default:
-			fmt.Printf("[RDS] Unknown status: %s, continuing to monitor...\n", status)
-		}
-
-		time.Sleep(30 * time.Second)
+// setEFSThroughputElastic updates an EFS to elastic throughput mode
+func (t *ThanosStack) setEFSThroughputElastic(ctx context.Context, fsId string) error {
+	if strings.TrimSpace(fsId) == "" {
+		return fmt.Errorf("empty file system id")
 	}
-
-	return fmt.Errorf("RDS restore monitoring timed out after %d minutes", maxAttempts/2)
+	_, err := utils.ExecuteCommand(ctx, "aws", "efs", "update-file-system",
+		"--region", t.deployConfig.AWS.Region,
+		"--file-system-id", fsId,
+		"--throughput-mode", "elastic")
+	return err
 }
 
 // getRestoreIAMRole gets appropriate IAM role for restore operations
 func (t *ThanosStack) getRestoreIAMRole(ctx context.Context) (string, error) {
-	// Try to find a suitable IAM role for restore operations
 	accountID, err := utils.DetectAWSAccountID(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to detect AWS account ID: %w", err)
@@ -687,73 +601,30 @@ func (t *ThanosStack) getRestoreIAMRole(ctx context.Context) (string, error) {
 	namespaceRoleArn := fmt.Sprintf("arn:aws:iam::%s:role/%s", accountID, namespaceRoleName)
 
 	fmt.Printf("[DEBUG] Trying namespace-based backup service role: %s\n", namespaceRoleArn)
+
+	// Check if the namespace-based role exists and is accessible
 	if _, err := utils.ExecuteCommand(ctx, "aws", "iam", "get-role", "--role-name", namespaceRoleName); err == nil {
 		return namespaceRoleArn, nil
 	}
 
-	// List all IAM roles and look for backup-related roles
-	rolesOutput, err := utils.ExecuteCommand(ctx, "aws", "iam", "list-roles",
-		"--query", "Roles[?contains(RoleName, 'backup') || contains(RoleName, 'Backup') || contains(RoleName, 'restore') || contains(RoleName, 'Restore')].RoleName",
-		"--output", "text")
-
-	if err == nil {
-		roleNames := strings.Fields(strings.TrimSpace(rolesOutput))
-		fmt.Printf("[DEBUG] Found backup-related roles: %v\n", roleNames)
-
-		// Try roles in order of preference
-		preferredRoles := []string{
-			"AWSBackupDefaultServiceRole", // AWS backup default role
-			"AWSServiceRoleForBackup",     // AWS managed backup role
-		}
-
-		for _, preferredRole := range preferredRoles {
-			for _, roleName := range roleNames {
-				if roleName == preferredRole {
-					roleArn := fmt.Sprintf("arn:aws:iam::%s:role/%s", accountID, roleName)
-					fmt.Printf("[DEBUG] Trying preferred role: %s\n", roleArn)
-
-					// Check if this role has the necessary permissions
-					if _, err := utils.ExecuteCommand(ctx, "aws", "iam", "get-role", "--role-name", roleName); err == nil {
-						return roleArn, nil
-					}
-				}
-			}
-		}
-
-		// If no preferred role found, try any backup-related role
-		for _, roleName := range roleNames {
-			roleArn := fmt.Sprintf("arn:aws:iam::%s:role/%s", accountID, roleName)
-			fmt.Printf("[DEBUG] Trying role: %s\n", roleArn)
-
-			// Check if this role has the necessary permissions
-			if _, err := utils.ExecuteCommand(ctx, "aws", "iam", "get-role", "--role-name", roleName); err == nil {
-				return roleArn, nil
-			}
-		}
+	// If namespace-based role not found, try AWS managed roles
+	awsManagedRoles := []string{
+		"AWSBackupDefaultServiceRole",
+		"AWSServiceRoleForBackup",
 	}
 
-	// Try alternative role patterns
-	alternativeRoles := []string{
-		fmt.Sprintf("arn:aws:iam::%s:role/AWSBackupServiceRolePolicyForRestores", accountID),
-		fmt.Sprintf("arn:aws:iam::%s:role/backup-restore-role", accountID),
-		fmt.Sprintf("arn:aws:iam::%s:role/aws-backup-restore-role", accountID),
-	}
+	for _, roleName := range awsManagedRoles {
+		roleArn := fmt.Sprintf("arn:aws:iam::%s:role/%s", accountID, roleName)
+		fmt.Printf("[DEBUG] Trying AWS managed role: %s\n", roleArn)
 
-	for _, role := range alternativeRoles {
-		roleName := strings.Split(role, "/")[len(strings.Split(role, "/"))-1]
 		if _, err := utils.ExecuteCommand(ctx, "aws", "iam", "get-role", "--role-name", roleName); err == nil {
-			return role, nil
+			return roleArn, nil
 		}
 	}
 
-	// If no suitable role found, try to use the AWS Backup default service role
-	// This is the role that AWS Backup uses by default
-	awsBackupDefaultRole := fmt.Sprintf("arn:aws:iam::%s:role/service-role/AWSBackupDefaultServiceRole", accountID)
-	fmt.Printf("[DEBUG] Trying AWS Backup default service role: %s\n", awsBackupDefaultRole)
-
-	// If no suitable role found, return the default and let AWS handle the error
-	fmt.Println("[WARNING] No suitable IAM role found, using default role (may fail if not configured)")
-	return awsBackupDefaultRole, nil
+	// If no suitable role found, return the namespace-based role and let AWS handle the error
+	fmt.Printf("[WARNING] No suitable IAM role found, using namespace-based role: %s\n", namespaceRoleArn)
+	return namespaceRoleArn, nil
 }
 
 // BackupAttach switches workloads to use the new EFS and verifies readiness
@@ -780,6 +651,9 @@ func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *str
 	if err := t.verifyEFSData(ctx, namespace); err != nil {
 		fmt.Printf("[WARNING] EFS data verification failed: %v\n", err)
 	}
+
+	// Ensure verify pod is removed before proceeding to health check
+	_, _ = utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "delete", "pod", "verify-efs", "--ignore-not-found=true")
 
 	// Update PV volumeHandle if EFS ID provided
 	if newEfs != "" {
@@ -842,6 +716,26 @@ func (t *ThanosStack) verifyEFSData(ctx context.Context, namespace string) error
 	// Wait for cleanup
 	time.Sleep(2 * time.Second)
 
+	// Find the correct PVC name for op-geth
+	pvcsList, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", "-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")
+	if err != nil {
+		return fmt.Errorf("failed to list PVCs: %w", err)
+	}
+
+	var opGethPVC string
+	for _, pvc := range strings.Fields(pvcsList) {
+		if strings.Contains(pvc, "op-geth") {
+			opGethPVC = pvc
+			break
+		}
+	}
+
+	if opGethPVC == "" {
+		return fmt.Errorf("no op-geth PVC found in namespace %s", namespace)
+	}
+
+	fmt.Printf("[VERIFY] Using PVC: %s\n", opGethPVC)
+
 	// Create verify pod
 	podYaml := fmt.Sprintf(`apiVersion: v1
 kind: Pod
@@ -860,8 +754,8 @@ spec:
   volumes:
   - name: efs-volume
     persistentVolumeClaim:
-      claimName: %s-op-geth
-  restartPolicy: Never`, namespace, namespace)
+      claimName: %s
+  restartPolicy: Never`, namespace, opGethPVC)
 
 	// Create pod using kubectl apply
 	tempFile := fmt.Sprintf("/tmp/verify-efs-%s.yaml", namespace)
@@ -876,96 +770,247 @@ spec:
 
 	// Wait for pod to complete
 	fmt.Println("[VERIFY] Waiting for verification pod to complete...")
-	for i := 0; i < 30; i++ {
-		status, _ := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pod", "verify-efs", "-o", "jsonpath={.status.phase}")
-		if strings.TrimSpace(status) == "Succeeded" {
+	for i := 0; i < 60; i++ { // Increased timeout to 2 minutes
+		status, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pod", "verify-efs", "-o", "jsonpath={.status.phase}")
+		if err != nil {
+			fmt.Printf("[VERIFY] Pod status check failed: %v\n", err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		status = strings.TrimSpace(status)
+		if status == "Succeeded" {
 			fmt.Println("[VERIFY] ✅ EFS data verification completed successfully")
 			return nil
 		}
-		if strings.TrimSpace(status) == "Failed" {
+		if status == "Failed" {
+			// Get pod logs for debugging
+			logs, _ := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "logs", "verify-efs")
+			fmt.Printf("[VERIFY] Pod failed. Logs: %s\n", logs)
 			return fmt.Errorf("verification pod failed")
+		}
+		if status == "Pending" {
+			fmt.Printf("[VERIFY] Pod is pending... (attempt %d/60)\n", i+1)
+		}
+		if status == "Running" {
+			fmt.Printf("[VERIFY] Pod is running... (attempt %d/60)\n", i+1)
 		}
 		time.Sleep(2 * time.Second)
 	}
 
-	return fmt.Errorf("verification pod timed out")
+	// Clean up the pod
+	utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "delete", "pod", "verify-efs", "--ignore-not-found=true")
+	return fmt.Errorf("verification pod timed out after 2 minutes")
 }
 
 // updatePVVolumeHandles updates PV volume handles to point to new EFS
 func (t *ThanosStack) updatePVVolumeHandles(ctx context.Context, namespace, newEfs string, pvcs *string) error {
 	fmt.Printf("[ATTACH] Updating PV volume handles to EFS: %s\n", newEfs)
 
-	var targetPVs []string
+	var targetPVCs []string
 
 	// Get target PVCs
 	if pvcs != nil && strings.TrimSpace(*pvcs) != "" {
-		for _, pvc := range strings.Split(strings.TrimSpace(*pvcs), ",") {
-			pvc = strings.TrimSpace(pvc)
-			if pvc == "" {
+		// List all PVC names once for fuzzy matching
+		allPVCsOut, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", "-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")
+		if err != nil {
+			return fmt.Errorf("failed to list PVCs for matching: %w", err)
+		}
+		allPVCs := strings.Fields(allPVCsOut)
+
+		for _, input := range strings.Split(strings.TrimSpace(*pvcs), ",") {
+			alias := strings.TrimSpace(input)
+			if alias == "" {
 				continue
 			}
 
-			// Validate PVC exists
-			if _, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", pvc); err != nil {
-				fmt.Printf("[WARNING] PVC %s not found, skipping\n", pvc)
+			// Try exact match first
+			resolvedPVC := ""
+			for _, name := range allPVCs {
+				if name == alias {
+					resolvedPVC = name
+					break
+				}
+			}
+
+			// Fallback: fuzzy match (contains alias)
+			if resolvedPVC == "" {
+				for _, name := range allPVCs {
+					if strings.Contains(name, alias) {
+						resolvedPVC = name
+						break
+					}
+				}
+			}
+
+			if resolvedPVC == "" {
+				fmt.Printf("[WARNING] PVC alias '%s' did not match any PVC in namespace %s\n", alias, namespace)
 				continue
 			}
 
-			pvName, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", pvc, "-o", "jsonpath={.spec.volumeName}")
-			if err != nil {
-				fmt.Printf("[WARNING] Failed to get PV name for PVC %s: %v\n", pvc, err)
+			// Validate resolved PVC exists
+			if _, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", resolvedPVC); err != nil {
+				fmt.Printf("[WARNING] PVC %s not found after resolution, skipping\n", resolvedPVC)
 				continue
 			}
 
-			pvName = strings.TrimSpace(pvName)
-			if pvName != "" {
-				targetPVs = append(targetPVs, pvName)
-			}
+			fmt.Printf("[ATTACH] Resolved PVC alias '%s' -> '%s'\n", alias, resolvedPVC)
+			targetPVCs = append(targetPVCs, resolvedPVC)
 		}
 	} else {
-		// If no PVCs specified, get all PVCs in namespace
+		// If no PVCs specified, get all PVCs in namespace that match EFS patterns
 		pvcsList, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", "-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")
 		if err != nil {
 			return fmt.Errorf("failed to list PVCs: %w", err)
 		}
 
+		// Look for PVCs that contain op-geth or op-node in their names
 		for _, pvc := range strings.Fields(pvcsList) {
-			pvName, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", pvc, "-o", "jsonpath={.spec.volumeName}")
-			if err == nil {
-				pvName = strings.TrimSpace(pvName)
-				if pvName != "" {
-					targetPVs = append(targetPVs, pvName)
-				}
+			if strings.Contains(pvc, "op-geth") || strings.Contains(pvc, "op-node") {
+				targetPVCs = append(targetPVCs, pvc)
+				fmt.Printf("[ATTACH] Found PVC: %s\n", pvc)
 			}
 		}
 	}
 
-	if len(targetPVs) == 0 {
-		return fmt.Errorf("no target PVs found to update")
+	if len(targetPVCs) == 0 {
+		return fmt.Errorf("no target PVCs found to update")
 	}
 
-	// Update each PV
+	// Since PV volumeHandle is immutable, we need to delete and recreate PVs
+	fmt.Printf("[ATTACH] PV volumeHandle is immutable, deleting and recreating PVs with new EFS...\n")
+
 	successCount := 0
-	for _, pv := range targetPVs {
-		pv = strings.TrimSpace(pv)
-		if pv == "" {
+	for _, pvcName := range targetPVCs {
+		pvcName = strings.TrimSpace(pvcName)
+		if pvcName == "" {
 			continue
 		}
 
-		patch := fmt.Sprintf(`{"spec":{"csi":{"volumeHandle":"%s"}}}`, newEfs)
-		if _, err := utils.ExecuteCommand(ctx, "kubectl", "patch", "pv", pv, "--type=merge", "-p", patch); err != nil {
-			fmt.Printf("[ERROR] Failed to patch PV %s: %v\n", pv, err)
-		} else {
-			fmt.Printf("[ATTACH] ✅ PV %s volumeHandle updated -> %s\n", pv, newEfs)
-			successCount++
+		// Get current PV name from PVC
+		pvName, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", pvcName, "-o", "jsonpath={.spec.volumeName}")
+		if err != nil {
+			fmt.Printf("[ERROR] Failed to get PV name for PVC %s: %v\n", pvcName, err)
+			continue
 		}
+		pvName = strings.TrimSpace(pvName)
+		if pvName == "" {
+			fmt.Printf("[WARNING] PVC %s has no volumeName, skipping\n", pvcName)
+			continue
+		}
+
+		fmt.Printf("[ATTACH] Processing PVC: %s (PV: %s)\n", pvcName, pvName)
+
+		// Delete the PVC first (this will also delete the PV if it's dynamically provisioned)
+		fmt.Printf("[ATTACH] Deleting PVC %s...\n", pvcName)
+
+		// First, delete pods that use this PVC
+		podsUsingPVC, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pods", "-o", "jsonpath={range .items[?(@.spec.volumes[*].persistentVolumeClaim.claimName=='"+pvcName+"')]}{.metadata.name}{\"\\n\"}{end}")
+		if err == nil && strings.TrimSpace(podsUsingPVC) != "" {
+			for _, podName := range strings.Fields(podsUsingPVC) {
+				fmt.Printf("[ATTACH] Deleting pod %s that uses PVC %s...\n", podName, pvcName)
+				utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "delete", "pod", podName, "--ignore-not-found=true")
+			}
+			// Wait for pods to be deleted
+			time.Sleep(5 * time.Second)
+		}
+
+		// Delete PVC
+		if _, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "delete", "pvc", pvcName); err != nil {
+			fmt.Printf("[ERROR] Failed to delete PVC %s: %v\n", pvcName, err)
+			continue
+		}
+
+		// Delete the old PV
+		fmt.Printf("[ATTACH] Deleting old PV %s...\n", pvName)
+		if _, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "pv", pvName, "--ignore-not-found=true"); err != nil {
+			fmt.Printf("[WARNING] Failed to delete PV %s: %v\n", pvName, err)
+		}
+
+		// Wait a moment for deletion to complete
+		time.Sleep(2 * time.Second)
+
+		// Create new PV with new EFS ID (following infrastructure pattern)
+		newPVYaml := fmt.Sprintf(`apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: %s
+  labels:
+    app: %s
+spec:
+  capacity:
+    storage: 500Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: efs-sc
+  csi:
+    driver: efs.csi.aws.com
+    volumeHandle: %s`, pvName, pvName, newEfs)
+
+		tempPVFile := fmt.Sprintf("/tmp/new-pv-%s.yaml", pvName)
+		if err := os.WriteFile(tempPVFile, []byte(newPVYaml), 0644); err != nil {
+			fmt.Printf("[ERROR] Failed to create temporary PV YAML file: %v\n", err)
+			continue
+		}
+		defer os.Remove(tempPVFile)
+
+		if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempPVFile); err != nil {
+			fmt.Printf("[ERROR] Failed to create new PV %s: %v\n", pvName, err)
+			continue
+		}
+
+		// Create new PVC following infrastructure pattern (with selector and storage class)
+		newPVCYaml := fmt.Sprintf(`apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  storageClassName: efs-sc
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 500Gi
+  selector:
+    matchLabels:
+      app: %s
+  volumeMode: Filesystem
+  volumeName: %s`, pvcName, namespace, pvName, pvName)
+
+		tempPVCFile := fmt.Sprintf("/tmp/new-pvc-%s.yaml", pvcName)
+		if err := os.WriteFile(tempPVCFile, []byte(newPVCYaml), 0644); err != nil {
+			fmt.Printf("[ERROR] Failed to create temporary PVC YAML file: %v\n", err)
+			continue
+		}
+		defer os.Remove(tempPVCFile)
+
+		if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempPVCFile); err != nil {
+			fmt.Printf("[ERROR] Failed to create new PVC %s: %v\n", pvcName, err)
+			continue
+		}
+
+		// Wait for PVC to be bound
+		fmt.Printf("[ATTACH] Waiting for PVC %s to be bound...\n", pvcName)
+		for i := 0; i < 30; i++ { // Wait up to 30 seconds
+			status, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", pvcName, "-o", "jsonpath={.status.phase}")
+			if err == nil && strings.TrimSpace(status) == "Bound" {
+				break
+			}
+			time.Sleep(1 * time.Second)
+		}
+
+		fmt.Printf("[ATTACH] ✅ PVC %s and PV %s recreated successfully with new EFS\n", pvcName, pvName)
+		successCount++
 	}
 
 	if successCount == 0 {
-		return fmt.Errorf("failed to update any PV volume handles")
+		return fmt.Errorf("failed to recreate any PVCs/PVs")
 	}
 
-	fmt.Printf("[ATTACH] ✅ Successfully updated %d/%d PV volume handles\n", successCount, len(targetPVs))
+	fmt.Printf("[ATTACH] ✅ Successfully recreated %d/%d PVCs with new EFS\n", successCount, len(targetPVCs))
 	return nil
 }
 
@@ -974,22 +1019,48 @@ func (t *ThanosStack) restartStatefulSets(ctx context.Context, namespace, stss s
 	fmt.Printf("[RESTART] Restarting StatefulSets: %s\n", stss)
 
 	successCount := 0
+
+	// Fetch all StatefulSet names in namespace for alias resolution
+	allSTSOut, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "statefulset", "-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")
+	if err != nil {
+		return fmt.Errorf("failed to list StatefulSets: %w", err)
+	}
+	allSTS := strings.Fields(allSTSOut)
+
 	for _, sts := range strings.Split(stss, ",") {
 		sts = strings.TrimSpace(sts)
 		if sts == "" {
 			continue
 		}
 
-		// Validate StatefulSet exists
-		if _, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "statefulset", sts); err != nil {
-			fmt.Printf("[WARNING] StatefulSet %s not found, skipping\n", sts)
+		// Resolve alias to actual StatefulSet name
+		resolved := ""
+		// exact match first
+		for _, name := range allSTS {
+			if name == sts {
+				resolved = name
+				break
+			}
+		}
+		// fallback contains match
+		if resolved == "" {
+			for _, name := range allSTS {
+				if strings.Contains(name, sts) {
+					resolved = name
+					break
+				}
+			}
+		}
+
+		if resolved == "" {
+			fmt.Printf("[WARNING] StatefulSet alias '%s' not found in namespace %s, skipping\n", sts, namespace)
 			continue
 		}
 
-		if _, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "rollout", "restart", fmt.Sprintf("statefulset/%s", sts)); err != nil {
-			fmt.Printf("[ERROR] Failed to restart StatefulSet %s: %v\n", sts, err)
+		if _, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "rollout", "restart", fmt.Sprintf("statefulset/%s", resolved)); err != nil {
+			fmt.Printf("[ERROR] Failed to restart StatefulSet %s: %v\n", resolved, err)
 		} else {
-			fmt.Printf("[RESTART] ✅ StatefulSet %s restarted successfully\n", sts)
+			fmt.Printf("[RESTART] ✅ StatefulSet %s restarted successfully\n", resolved)
 			successCount++
 		}
 	}
@@ -1006,34 +1077,137 @@ func (t *ThanosStack) restartStatefulSets(ctx context.Context, namespace, stss s
 func (t *ThanosStack) performHealthCheck(ctx context.Context, namespace string) error {
 	fmt.Println("[HEALTH] Performing health check...")
 
-	// Check multiple labels for better coverage
-	labels := []string{
-		"app.kubernetes.io/name=thanos-stack-op-geth",
-		"app.kubernetes.io/name=thanos-stack-op-node",
-		"app.kubernetes.io/name=thanos-stack-op-batcher",
+	// 1) Check op-geth and op-node restarted
+	labels := map[string]string{
+		"op-geth": "app.kubernetes.io/name=thanos-stack-op-geth",
+		"op-node": "app.kubernetes.io/name=thanos-stack-op-node",
 	}
 
-	const maxAttempts = 30 // 5 minutes with 10-second intervals
-	for i := 0; i < maxAttempts; i++ {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("health check cancelled: %w", ctx.Err())
-		default:
+	restarted := map[string]bool{"op-geth": false, "op-node": false}
+	for comp, label := range labels {
+		pods, err := utils.GetPodNamesByLabel(ctx, namespace, label)
+		if err != nil || len(pods) == 0 {
+			return fmt.Errorf("%s pods not found: %w", comp, err)
 		}
-
-		for _, label := range labels {
-			out, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pods", "-l", label, "-o", "jsonpath={.items[*].status.containerStatuses[*].ready}")
-			if err == nil && strings.Contains(out, "true") {
-				fmt.Printf("[HEALTH] ✅ Ready containers detected by label: %s\n", label)
-				return nil
+		pod := pods[0]
+		restCounts, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pod", pod, "-o", "jsonpath={.status.containerStatuses[*].restartCount}")
+		if err == nil && strings.TrimSpace(restCounts) != "" {
+			for _, v := range strings.Fields(strings.TrimSpace(restCounts)) {
+				if v != "0" {
+					restarted[comp] = true
+					break
+				}
 			}
 		}
-
-		fmt.Printf("[HEALTH] Waiting for ready containers... (attempt %d/%d)\n", i+1, maxAttempts)
-		time.Sleep(10 * time.Second)
+		if restarted[comp] {
+			fmt.Printf("[HEALTH] ✅ %s restarted (pod: %s)\n", comp, pod)
+		} else {
+			fmt.Printf("[HEALTH] ℹ️ %s shows no container restarts (pod: %s)\n", comp, pod)
+		}
 	}
 
-	return fmt.Errorf("health check timed out after %d minutes", maxAttempts/6)
+	if !restarted["op-geth"] || !restarted["op-node"] {
+		fmt.Println("[HEALTH] Warning: One or more components did not report a container restart.")
+	}
+
+	// 2) Fetch and print L1 and L2 block numbers
+	// L2 RPC: try ingress that contains namespace (same heuristic as ShowInformation)
+	l2URL := ""
+	if ing, err := utils.GetIngresses(ctx, namespace); err == nil {
+		for name, addrs := range ing {
+			if strings.Contains(name, namespace) && len(addrs) > 0 {
+				l2URL = fmt.Sprintf("http://%s", addrs[0])
+				break
+			}
+		}
+	}
+
+	// Fallback: try service address discovery for op-geth rpc service
+	if l2URL == "" {
+		if svcs, err := utils.GetServiceNames(ctx, namespace, "op-geth"); err == nil && len(svcs) > 0 {
+			// Typical service port for geth RPC is 8545
+			l2URL = fmt.Sprintf("http://%s.%s.svc.cluster.local:8545", svcs[0], namespace)
+		}
+	}
+
+	// L1 RPC: read from op-node env var OP_NODE__L1_ETH_RPC
+	l1URL := ""
+	if pods, err := utils.GetPodNamesByLabel(ctx, namespace, labels["op-node"]); err == nil && len(pods) > 0 {
+		pod := pods[0]
+		val, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pod", pod, "-o", "jsonpath={.spec.containers[0].env[?(@.name=='OP_NODE__L1_ETH_RPC')].value}")
+		if err == nil {
+			l1URL = strings.TrimSpace(val)
+		}
+	}
+
+	// Query JSON-RPC eth_blockNumber
+	queryBlock := func(url string) (string, error) {
+		if strings.TrimSpace(url) == "" {
+			return "", fmt.Errorf("empty rpc url")
+		}
+		payload := `{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}`
+		out, err := utils.ExecuteCommand(ctx, "bash", "-c", fmt.Sprintf("curl -s -X POST -H 'Content-Type: application/json' --data '%s' %s | jq -r .result", payload, url))
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(out), nil
+	}
+
+	l2Block, l2Err := queryBlock(l2URL)
+	if l2Err != nil {
+		fmt.Printf("[HEALTH] ❌ Failed to fetch L2 block: %v\n", l2Err)
+	} else {
+		fmt.Printf("[HEALTH] L2 latest block: %s (via %s)\n", l2Block, l2URL)
+	}
+
+	l1Block, l1Err := queryBlock(l1URL)
+	if l1Err != nil {
+		fmt.Printf("[HEALTH] ❌ Failed to fetch L1 block: %v\n", l1Err)
+	} else {
+		fmt.Printf("[HEALTH] L1 latest block (on-chain): %s (via %s)\n", l1Block, l1URL)
+	}
+
+	// Additionally, fetch L1 block height as seen by op-node (synced view)
+	opNodeSynced := ""
+	if svcs, err := utils.GetServiceNames(ctx, namespace, "op-node"); err == nil && len(svcs) > 0 {
+		metricsURL := fmt.Sprintf("http://%s.%s.svc.cluster.local:7300/metrics", svcs[0], namespace)
+		val, err := utils.ExecuteCommand(ctx, "bash", "-c", fmt.Sprintf("curl -s %s | grep -m1 '^op_node_l1_head' | awk '{print $NF}'", metricsURL))
+		if err == nil && strings.TrimSpace(val) != "" {
+			opNodeSynced = strings.TrimSpace(val)
+			fmt.Printf("[HEALTH] L1 latest block (op-node synced): %s (via %s)\n", opNodeSynced, metricsURL)
+		} else {
+			// Fallback: try rollup_getInfo on op-node RPC (default 8547)
+			opNodeRPC := fmt.Sprintf("http://%s.%s.svc.cluster.local:8547", svcs[0], namespace)
+			payload := `{"jsonrpc":"2.0","method":"rollup_getInfo","params":[],"id":1}`
+			res, err := utils.ExecuteCommand(ctx, "bash", "-c", fmt.Sprintf("curl -s -X POST -H 'Content-Type: application/json' --data '%s' %s", payload, opNodeRPC))
+			if err == nil && strings.TrimSpace(res) != "" {
+				// Try to extract a few common paths for the L1 head number
+				tryPaths := []string{
+					".result.l1.head.number",
+					".result.l1.head.current.number",
+				}
+				for _, p := range tryPaths {
+					v, jqErr := utils.ExecuteCommand(ctx, "bash", "-c", fmt.Sprintf(`echo %s | jq -r '%s'`, strings.ReplaceAll(strings.TrimSpace(res), "'", "\\'"), p))
+					if jqErr == nil && strings.TrimSpace(v) != "" && strings.TrimSpace(v) != "null" {
+						opNodeSynced = strings.TrimSpace(v)
+						fmt.Printf("[HEALTH] L1 latest block (op-node synced): %s (via %s rollup_getInfo)\n", opNodeSynced, opNodeRPC)
+						break
+					}
+				}
+				if opNodeSynced == "" {
+					fmt.Printf("[HEALTH] ℹ️ Could not parse op-node synced L1 block from rollup_getInfo\n")
+				}
+			} else {
+				fmt.Printf("[HEALTH] ℹ️ Could not reach op-node metrics or RPC for synced L1 block\n")
+			}
+		}
+	}
+
+	if l2Err != nil {
+		return fmt.Errorf("health check failed: L2 block unavailable")
+	}
+	// L1 is optional; do not fail if unavailable
+	return nil
 }
 
 // printAttachSummary prints a summary of the attach operation
@@ -1166,27 +1340,17 @@ func (t *ThanosStack) selectRecoveryPoint(ctx context.Context) (string, error) {
 	region := t.deployConfig.AWS.Region
 	namespace := t.deployConfig.K8s.Namespace
 
-	// Detect EFS ID
-	efsID, err := utils.DetectEFSId(ctx, namespace)
-	if err != nil {
-		return "", fmt.Errorf("failed to detect EFS ID: %w", err)
-	}
+	// Get backup vault name from namespace
+	vaultName := fmt.Sprintf("%s-backup-vault", namespace)
 
-	accountID, err := utils.DetectAWSAccountID(ctx)
-	if err != nil {
-		return "", fmt.Errorf("failed to detect AWS account ID: %w", err)
-	}
-
-	arn := utils.BuildEFSArn(region, accountID, efsID)
-
-	fmt.Printf("\n[SELECTION] Available EFS Recovery Points (FileSystemId: %s)\n", efsID)
+	fmt.Printf("\n[SELECTION] Available EFS Recovery Points from Backup Vault: %s\n", vaultName)
 	fmt.Println("   -------------------------------------------------")
 
-	// Get recent recovery points (max 3)
-	query := "reverse(sort_by(RecoveryPoints,&CreationDate))[:3].{RecoveryPointArn:RecoveryPointArn,BackupVaultName:BackupVaultName,CreationDate:CreationDate,Status:Status,Lifecycle:Lifecycle}"
-	jsonOut, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-recovery-points-by-resource",
+	// Get recent recovery points from backup vault (max 5, EFS only)
+	query := "reverse(sort_by(RecoveryPoints[?ResourceType=='EFS'],&CreationDate))[:5].{RecoveryPointArn:RecoveryPointArn,ResourceArn:ResourceArn,BackupVaultName:BackupVaultName,CreationDate:CreationDate,Status:Status,Lifecycle:Lifecycle}"
+	jsonOut, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-recovery-points-by-backup-vault",
 		"--region", region,
-		"--resource-arn", arn,
+		"--backup-vault-name", vaultName,
 		"--query", query,
 		"--output", "json")
 
@@ -1261,9 +1425,21 @@ func (t *ThanosStack) selectRecoveryPoint(ctx context.Context) (string, error) {
 			availability = "❌ Not Available"
 		}
 
+		// Extract EFS ID from ResourceArn
+		efsID := "Unknown"
+		if resourceArn, ok := point["ResourceArn"].(string); ok {
+			if strings.Contains(resourceArn, "file-system/") {
+				parts := strings.Split(resourceArn, "file-system/")
+				if len(parts) > 1 {
+					efsID = parts[1]
+				}
+			}
+		}
+
 		// Display in a clean list format
 		fmt.Printf("   %d. %s\n", i+1, displayDate)
 		fmt.Printf("      📁 Vault: %s\n", vaultName)
+		fmt.Printf("      🗂️  EFS ID: %s\n", efsID)
 		fmt.Printf("      📊 Status: %s\n", availability)
 		fmt.Printf("      🔗 ARN: %s\n", recoveryPointArn)
 		fmt.Println()
@@ -1291,146 +1467,13 @@ func (t *ThanosStack) selectRecoveryPoint(ctx context.Context) (string, error) {
 	return selectedArn, nil
 }
 
-// selectRDSSnapshot shows a menu of recent RDS snapshots and allows user selection
-func (t *ThanosStack) selectRDSSnapshot(ctx context.Context) (string, error) {
-	region := t.deployConfig.AWS.Region
-	namespace := t.deployConfig.K8s.Namespace
-
-	rdsID := utils.RDSIdentifierFromNamespace(namespace)
-
-	fmt.Printf("\n[SELECTION] Available RDS Snapshots (Instance: %s)\n", rdsID)
-	fmt.Println("   -------------------------------------------------")
-
-	// Get recent snapshots (max 5)
-	query := "reverse(sort_by(DBSnapshots,&SnapshotCreateTime))[:5].{DBSnapshotIdentifier:DBSnapshotIdentifier,SnapshotCreateTime:SnapshotCreateTime,Status:Status,Engine:Engine}"
-	jsonOut, err := utils.ExecuteCommand(ctx, "aws", "rds", "describe-db-snapshots",
-		"--region", region,
-		"--db-instance-identifier", rdsID,
-		"--query", query,
-		"--output", "json")
-
-	if err != nil {
-		return "", fmt.Errorf("failed to retrieve RDS snapshots: %w", err)
-	}
-
-	jsonOutTrimmed := strings.TrimSpace(jsonOut)
-	if jsonOutTrimmed == "" || jsonOutTrimmed == "[]" {
-		return "", fmt.Errorf("no RDS snapshots found for instance: %s", rdsID)
-	}
-
-	// Parse JSON to extract snapshots
-	var snapshots []map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonOutTrimmed), &snapshots); err != nil {
-		return "", fmt.Errorf("failed to parse RDS snapshots: %w", err)
-	}
-
-	if len(snapshots) == 0 {
-		return "", fmt.Errorf("no RDS snapshots found")
-	}
-
-	// Display snapshots in a simple list format
-	fmt.Println("   Available RDS Snapshots:")
-	fmt.Println("   " + strings.Repeat("─", 80))
-
-	var options []string
-	for i, snapshot := range snapshots {
-		snapshotID, _ := snapshot["DBSnapshotIdentifier"].(string)
-		createTime, _ := snapshot["SnapshotCreateTime"].(string)
-		status, _ := snapshot["Status"].(string)
-		engine, _ := snapshot["Engine"].(string)
-
-		// Format creation date for display
-		displayDate := createTime
-		if createTime != "" {
-			// Try to parse and format the date with various formats
-			dateFormats := []string{
-				"2006-01-02T15:04:05.000000-07:00",
-				"2006-01-02T15:04:05.000000+09:00",
-				"2006-01-02T15:04:05.000000Z",
-				"2006-01-02T15:04:05Z",
-				"2006-01-02T15:04:05",
-			}
-
-			parsed := false
-			for _, format := range dateFormats {
-				if t, err := time.Parse(format, createTime); err == nil {
-					displayDate = t.Format("2006-01-02 15:04:05")
-					parsed = true
-					break
-				}
-			}
-
-			// If parsing failed, try RFC3339 format
-			if !parsed {
-				if t, err := time.Parse(time.RFC3339, createTime); err == nil {
-					displayDate = t.Format("2006-01-02 15:04:05")
-				} else {
-					// Debug: print the original date format
-					fmt.Printf("[DEBUG] Failed to parse date: %s\n", createTime)
-				}
-			}
-		}
-
-		// Display in a clean list format
-		fmt.Printf("   %d. %s\n", i+1, displayDate)
-		fmt.Printf("      🗄️  Engine: %s\n", engine)
-		fmt.Printf("      📊 Status: %s\n", status)
-		fmt.Printf("      🔗 Snapshot ID: %s\n", snapshotID)
-		fmt.Println()
-
-		options = append(options, snapshotID)
-	}
-
-	fmt.Println("   " + strings.Repeat("─", 80))
-
-	// Get user selection
-	fmt.Print("\n   Enter your choice (1-", len(options), "): ")
-
-	// Read user input
-	var choice int
-	fmt.Scanf("%d", &choice)
-
-	// Validate choice
-	if choice < 1 || choice > len(options) {
-		return "", fmt.Errorf("invalid choice: %d", choice)
-	}
-
-	selectedSnapshot := options[choice-1]
-	fmt.Printf("\n   ✅ Selected snapshot: %s\n", selectedSnapshot)
-
-	return selectedSnapshot, nil
-}
-
 // interactiveRestore provides a fully interactive restore experience for EFS and RDS
 func (t *ThanosStack) interactiveRestore(ctx context.Context) error {
 	fmt.Println("\n🔄 Starting Interactive Restore")
 	fmt.Println("================================")
 
-	// Step 1: Choose what to restore
-	fmt.Println("\n📋 Step 1: Choose Restore Type")
-	fmt.Println("   What would you like to restore?")
-	fmt.Println("   1. EFS (Elastic File System)")
-	fmt.Println("   2. RDS (Database)")
-	fmt.Println("   3. Both EFS and RDS")
-	fmt.Println("   0. Cancel")
-	fmt.Print("   Enter your choice (0-3): ")
-
-	var restoreType int
-	fmt.Scanf("%d", &restoreType)
-
-	switch restoreType {
-	case 0:
-		fmt.Println("   ↩️  Restore cancelled. Returning to main menu...")
-		return nil // Return to main menu instead of error
-	case 1:
-		return t.interactiveEFSRestore(ctx)
-	case 2:
-		return t.interactiveRDSRestore(ctx)
-	case 3:
-		return t.interactiveFullRestore(ctx)
-	default:
-		return fmt.Errorf("invalid choice: %d", restoreType)
-	}
+	// EFS-only flow
+	return t.interactiveEFSRestore(ctx)
 }
 
 // interactiveEFSRestore handles EFS-only restore
@@ -1489,7 +1532,7 @@ func (t *ThanosStack) interactiveEFSRestore(ctx context.Context) error {
 			sts := "op-geth,op-node"
 
 			if err := t.BackupAttach(ctx, efsID, &pvcs, &sts); err != nil {
-				fmt.Printf("   ⚠️  Attach failed: %v\n", err)
+				fmt.Printf("   ❌ Attach failed: %v\n", err)
 				fmt.Printf("   You can try attaching manually later using: ./trh-sdk backup-manager --attach --efs-id %s --pvc op-geth,op-node --sts op-geth,op-node\n", newEfsID)
 			} else {
 				fmt.Println("   ✅ Attach completed successfully!")
@@ -1506,106 +1549,6 @@ func (t *ThanosStack) interactiveEFSRestore(ctx context.Context) error {
 	return fmt.Errorf("completed") // Special marker for successful completion
 }
 
-// interactiveRDSRestore handles RDS-only restore
-func (t *ThanosStack) interactiveRDSRestore(ctx context.Context) error {
-	fmt.Println("\n🗄️  RDS Restore")
-	fmt.Println("==============")
-
-	// Step 1: Select snapshot
-	fmt.Println("\n📋 Step 1: Select RDS Snapshot")
-	selectedSnapshot, err := t.selectRDSSnapshot(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to select RDS snapshot: %w", err)
-	}
-
-	// Step 2: Enter target instance name
-	fmt.Println("\n📋 Step 2: Target Instance")
-	fmt.Println("   Enter the name for the new RDS instance:")
-	fmt.Print("   Instance name: ")
-
-	var targetInstance string
-	fmt.Scanf("%s", &targetInstance)
-	targetInstance = strings.TrimSpace(targetInstance)
-
-	if targetInstance == "" {
-		namespace := t.deployConfig.K8s.Namespace
-		rdsID := utils.RDSIdentifierFromNamespace(namespace)
-		targetInstance = fmt.Sprintf("%s-restore-%d", rdsID, time.Now().Unix())
-		fmt.Printf("   Using default name: %s\n", targetInstance)
-	}
-
-	// Step 3: Execute restore
-	fmt.Println("\n🚀 Starting RDS Restore...")
-	if err := t.restoreRDS(ctx, selectedSnapshot, targetInstance); err != nil {
-		return fmt.Errorf("RDS restore failed: %w", err)
-	}
-
-	fmt.Println("\n📋 Step 4: Post-Restore Actions")
-	fmt.Println("   ✅ RDS restore completed successfully!")
-	fmt.Printf("   New RDS Instance: %s\n", targetInstance)
-
-	// Verify the restore
-	if err := t.verifyRDSRestore(ctx, targetInstance); err != nil {
-		fmt.Printf("   ⚠️  Verification warning: %v\n", err)
-	}
-
-	fmt.Println("   ")
-	fmt.Println("   Next steps:")
-	fmt.Println("   1. Update your application configuration to use the new RDS instance")
-	fmt.Println("   2. Test the connection to ensure it's working properly")
-	fmt.Println("   3. Update DNS or connection strings if necessary")
-
-	fmt.Println("\n🎉 RDS restore completed!")
-	return fmt.Errorf("completed") // Special marker for successful completion
-}
-
-// interactiveFullRestore handles both EFS and RDS restore
-func (t *ThanosStack) interactiveFullRestore(ctx context.Context) error {
-	fmt.Println("\n🔄 Full Restore (EFS + RDS)")
-	fmt.Println("============================")
-
-	// Restore EFS first
-	fmt.Println("\n📁 Step 1: EFS Restore")
-	efsErr := t.interactiveEFSRestore(ctx)
-	if efsErr != nil {
-		if efsErr.Error() == "completed" {
-			// EFS restore completed successfully, continue with RDS
-		} else {
-			return fmt.Errorf("EFS restore failed: %w", efsErr)
-		}
-	} else {
-		// User went back from EFS restore
-		fmt.Println("   ℹ️  EFS restore was cancelled")
-		fmt.Println("   Do you want to continue with RDS restore? (y/n): ")
-
-		var continueChoice string
-		fmt.Scanf("%s", &continueChoice)
-		continueChoice = strings.ToLower(strings.TrimSpace(continueChoice))
-
-		if continueChoice != "y" && continueChoice != "yes" {
-			fmt.Println("   ↩️  Going back to main menu...")
-			return nil
-		}
-	}
-
-	// Then restore RDS
-	fmt.Println("\n🗄️  Step 2: RDS Restore")
-	rdsErr := t.interactiveRDSRestore(ctx)
-	if rdsErr != nil {
-		if rdsErr.Error() == "completed" {
-			// RDS restore completed successfully
-		} else {
-			return fmt.Errorf("RDS restore failed: %w", rdsErr)
-		}
-	} else {
-		// User went back from RDS restore
-		fmt.Println("   ℹ️  RDS restore was cancelled")
-	}
-
-	fmt.Println("\n🎉 Full restore completed successfully!")
-	return nil
-}
-
 // verifyEFSRestore verifies that the EFS restore was successful
 func (t *ThanosStack) verifyEFSRestore(ctx context.Context, efsID string) error {
 	fmt.Println("\n🔍 Verifying EFS Restore...")
@@ -1613,7 +1556,7 @@ func (t *ThanosStack) verifyEFSRestore(ctx context.Context, efsID string) error 
 	// Check EFS status
 	status, err := utils.ExecuteCommand(ctx, "aws", "efs", "describe-file-systems",
 		"--region", t.deployConfig.AWS.Region,
-		"--file-system-ids", efsID,
+		"--file-system-id", efsID,
 		"--query", "FileSystems[0].LifeCycleState",
 		"--output", "text")
 
@@ -1649,7 +1592,7 @@ func (t *ThanosStack) verifyEFSRestore(ctx context.Context, efsID string) error 
 	// Get EFS details for user reference
 	efsDetails, err := utils.ExecuteCommand(ctx, "aws", "efs", "describe-file-systems",
 		"--region", t.deployConfig.AWS.Region,
-		"--file-system-ids", efsID,
+		"--file-system-id", efsID,
 		"--query", "FileSystems[0].{Name:Name,SizeInBytes:SizeInBytes.Value,Encrypted:Encrypted}",
 		"--output", "json")
 
@@ -1663,70 +1606,5 @@ func (t *ThanosStack) verifyEFSRestore(ctx context.Context, efsID string) error 
 	fmt.Printf("   🔗 AWS Console: %s\n", consoleLink)
 
 	fmt.Println("   ✅ EFS restore verification completed!")
-	return nil
-}
-
-// verifyRDSRestore verifies that the RDS restore was successful
-func (t *ThanosStack) verifyRDSRestore(ctx context.Context, instanceID string) error {
-	fmt.Println("\n🔍 Verifying RDS Restore...")
-
-	// Check RDS instance status
-	status, err := utils.ExecuteCommand(ctx, "aws", "rds", "describe-db-instances",
-		"--region", t.deployConfig.AWS.Region,
-		"--db-instance-identifier", instanceID,
-		"--query", "DBInstances[0].DBInstanceStatus",
-		"--output", "text")
-
-	if err != nil {
-		return fmt.Errorf("failed to check RDS status: %w", err)
-	}
-
-	status = strings.TrimSpace(status)
-	fmt.Printf("   📊 RDS Status: %s\n", status)
-
-	if status != "available" {
-		return fmt.Errorf("RDS is not in available state: %s", status)
-	}
-
-	// Get connection information
-	endpoint, err := utils.ExecuteCommand(ctx, "aws", "rds", "describe-db-instances",
-		"--region", t.deployConfig.AWS.Region,
-		"--db-instance-identifier", instanceID,
-		"--query", "DBInstances[0].Endpoint.Address",
-		"--output", "text")
-
-	if err == nil {
-		endpoint = strings.TrimSpace(endpoint)
-		fmt.Printf("   🌐 Endpoint: %s\n", endpoint)
-	}
-
-	port, err := utils.ExecuteCommand(ctx, "aws", "rds", "describe-db-instances",
-		"--region", t.deployConfig.AWS.Region,
-		"--db-instance-identifier", instanceID,
-		"--query", "DBInstances[0].Endpoint.Port",
-		"--output", "text")
-
-	if err == nil {
-		port = strings.TrimSpace(port)
-		fmt.Printf("   🔌 Port: %s\n", port)
-	}
-
-	// Get RDS details
-	rdsDetails, err := utils.ExecuteCommand(ctx, "aws", "rds", "describe-db-instances",
-		"--region", t.deployConfig.AWS.Region,
-		"--db-instance-identifier", instanceID,
-		"--query", "DBInstances[0].{Engine:Engine,EngineVersion:EngineVersion,DBInstanceClass:DBInstanceClass,AllocatedStorage:AllocatedStorage}",
-		"--output", "json")
-
-	if err == nil {
-		fmt.Printf("   📋 RDS Details: %s\n", rdsDetails)
-	}
-
-	// Provide AWS Console link
-	region := t.deployConfig.AWS.Region
-	consoleLink := fmt.Sprintf("https://%s.console.aws.amazon.com/rds/home?region=%s#database:id=%s;is-cluster=false", region, region, instanceID)
-	fmt.Printf("   🔗 AWS Console: %s\n", consoleLink)
-
-	fmt.Println("   ✅ RDS restore verification completed!")
 	return nil
 }
