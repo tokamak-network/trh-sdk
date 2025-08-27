@@ -76,7 +76,8 @@ func GetTerraformLockID(ctx context.Context, table string, bucketName string) (s
 	}
 
 	for _, item := range result.Items {
-		if strings.Contains(item.LockID.S, bucketName) {
+		if strings.Contains(item.LockID.S, bucketName) &&
+			item.Info.S != "" {
 			var lockInfo LockInfo
 			if err := json.Unmarshal([]byte(item.Info.S), &lockInfo); err != nil {
 				return "", fmt.Errorf("failed to parse JSON: %w", err)
