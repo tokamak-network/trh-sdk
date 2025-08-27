@@ -189,7 +189,11 @@ func createDynamoDBTable(region, tableName string) error {
 	return nil
 }
 
-func getAvailableRegions() ([]string, error) {
+func GetAvailableRegions(accessKey string, secretKey string, region string) ([]string, error) {
+	configureAWS("aws", "configure", "set", "region", region)
+	configureAWS("aws", "configure", "set", "aws_access_key_id", accessKey)
+	configureAWS("aws", "configure", "set", "aws_secret_access_key", secretKey)
+
 	cmd := exec.Command("aws", "ec2", "describe-regions", "--query", "Regions[].RegionName", "--output", "json")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -208,10 +212,7 @@ func getAvailableRegions() ([]string, error) {
 }
 
 func IsAvailableRegion(accessKey, secretKey, region string) bool {
-	configureAWS("aws", "configure", "set", "aws_access_key_id", accessKey)
-	configureAWS("aws", "configure", "set", "aws_secret_access_key", secretKey)
-	configureAWS("aws", "configure", "set", "region", region)
-	availableRegions, err := getAvailableRegions()
+	availableRegions, err := GetAvailableRegions(accessKey, secretKey, region)
 	if err != nil {
 		return false
 	}
