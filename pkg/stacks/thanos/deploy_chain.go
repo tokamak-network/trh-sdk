@@ -48,8 +48,9 @@ func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string, inputs *Deplo
 
 				return err
 			}
-			if inputs.GithubCredentials != nil {
-				_, err = t.RegisterMetadata(ctx, inputs.GithubCredentials)
+
+			if inputs.GithubCredentials != nil && inputs.MetadataInfo != nil {
+				_, err = t.RegisterMetadata(ctx, inputs.GithubCredentials, inputs.MetadataInfo)
 				if err != nil {
 					t.logger.Error("Failed to register metadata", "err", err)
 					return err

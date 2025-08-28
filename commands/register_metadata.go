@@ -44,7 +44,11 @@ func ActionRegisterMetadata() cli.ActionFunc {
 			if err != nil {
 				return fmt.Errorf("failed to get GitHub credentials: %w", err)
 			}
-			_, err = thanosStack.RegisterMetadata(ctx, creds)
+			metadataInfo, err := utils.ReadMetadataInfoFromJSONFile(deploymentPath, config.L1ChainID)
+			if err != nil {
+				return fmt.Errorf("failed to read metadata info: %w", err)
+			}
+			_, err = thanosStack.RegisterMetadata(ctx, creds, metadataInfo)
 			return err
 		default:
 			return fmt.Errorf("unsupported stack: %s", config.Stack)

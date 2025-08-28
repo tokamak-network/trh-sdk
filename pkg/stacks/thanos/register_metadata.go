@@ -95,7 +95,7 @@ func GetGitHubCredentials() (*types.GitHubCredentials, error) {
 	}, nil
 }
 
-func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubCredentials) (*types.RegisterMetadataDaoResult, error) {
+func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubCredentials, metadataInfo *types.MetadataInfo) (*types.RegisterMetadataDaoResult, error) {
 	if creds == nil {
 		return nil, errors.New("credentials are required")
 	}
@@ -118,17 +118,11 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 	}
 
 	var contracts *types.Contracts
-	var metadataInfo *types.MetadataInfo
 	var newMetadataEntry bool
 
 	contracts, err = utils.ReadDeployementConfigFromJSONFile(t.deploymentPath, t.deployConfig.L1ChainID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read deployment config: %w", err)
-	}
-
-	metadataInfo, err = utils.ReadMetadataInfoFromJSONFile(t.deploymentPath, t.deployConfig.L1ChainID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read metadata info: %w", err)
 	}
 
 	systemConfigAddress := strings.ToLower(contracts.SystemConfigProxy)
