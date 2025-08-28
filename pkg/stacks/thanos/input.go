@@ -24,8 +24,8 @@ import (
 )
 
 var (
-	// Chain name must be 10 characters or less, and can only contain letters, numbers, and spaces
-	chainNameRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9 ]{0,15}$`)
+	// Chain name must be 14 characters or less, and can only contain letters, numbers, and spaces
+	chainNameRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9 ]{0,13}$`)
 	// Pre-compiled regex patterns for validation
 	telegramTokenRegex = regexp.MustCompile(`^\d+:[A-Za-z0-9_-]+$`)
 	chatIdRegex        = regexp.MustCompile(`^-?\d+$`)
@@ -98,7 +98,7 @@ func (c *DeployInfraInput) Validate(ctx context.Context) error {
 	}
 
 	if !chainNameRegex.MatchString(c.ChainName) {
-		return errors.New("invalid chain name, chain name must contain only letters (a-z, A-Z), numbers (0-9), spaces with 15 characters or less. Special characters are not allowed")
+		return errors.New("invalid chain name, chain name must contain only letters (a-z, A-Z), numbers (0-9), spaces with 14 characters or less. Special characters are not allowed")
 	}
 
 	return nil
@@ -471,7 +471,7 @@ func InputDeployInfra() (*DeployInfraInput, error) {
 		}
 
 		if !chainNameRegex.MatchString(chainName) {
-			fmt.Println("Input must contain only letters (a-z, A-Z), numbers (0-9), spaces with 15 characters or less. Special characters are not allowed")
+			fmt.Println("Input must contain only letters (a-z, A-Z), numbers (0-9), spaces with 14 characters or less. Special characters are not allowed")
 			continue
 		}
 
