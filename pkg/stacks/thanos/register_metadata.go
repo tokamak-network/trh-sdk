@@ -106,6 +106,12 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 
 	fmt.Println("🔄 Generating rollup metadata and submitting PR...")
 
+	// Change directory to the deployment path
+	err := os.Chdir(t.deploymentPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to change directory: %w", err)
+	}
+
 	stackInfo, err := t.ShowInformation(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to show stack information: %w", err)
