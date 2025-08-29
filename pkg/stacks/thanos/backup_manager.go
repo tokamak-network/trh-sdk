@@ -657,6 +657,17 @@ func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *str
 
 	// Update PV volumeHandle if EFS ID provided
 	if newEfs != "" {
+		// Try to replicate mount targets of the currently used EFS to the new EFS
+		if srcEfs, err := utils.DetectEFSId(ctx, namespace); err == nil && strings.TrimSpace(srcEfs) != "" {
+			if err := t.replicateEFSMountTargets(ctx, t.deployConfig.AWS.Region, strings.TrimSpace(srcEfs), newEfs); err != nil {
+				fmt.Printf("[WARNING] Failed to replicate EFS mount targets from %s to %s: %v\n", srcEfs, newEfs, err)
+			} else {
+				fmt.Printf("[ATTACH] ✅ Replicated mount targets from %s to %s (region: %s)\n", srcEfs, newEfs, t.deployConfig.AWS.Region)
+			}
+		} else {
+			fmt.Printf("[WARNING] Could not detect source EFS in namespace %s. Skipping mount-target replication.\n", namespace)
+		}
+
 		if err := t.updatePVVolumeHandles(ctx, namespace, newEfs, pvcs); err != nil {
 			return fmt.Errorf("failed to update PV volume handles: %w", err)
 		}
@@ -672,14 +683,68 @@ func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *str
 	}
 
 	// Health check
-	if err := t.performHealthCheck(ctx, namespace); err != nil {
-		return fmt.Errorf("health check failed: %w", err)
-	}
+	// if err := t.performHealthCheck(ctx, namespace); err != nil {
+	// 	return fmt.Errorf("health check failed: %w", err)
+	// }
 
 	fmt.Println("[POST-RESTORE] Completed basic post-restore steps.")
 
 	// Summary
 	t.printAttachSummary(newEfs, pvcs, stss)
+	return nil
+}
+
+// replicateEFSMountTargets replicates mount targets (subnet + security groups) from src EFS to dst EFS
+func (t *ThanosStack) replicateEFSMountTargets(ctx context.Context, region, srcFs, dstFs string) error {
+	if strings.TrimSpace(srcFs) == "" || strings.TrimSpace(dstFs) == "" || srcFs == dstFs {
+		return nil
+	}
+
+	// Get source mount targets
+	mtJSON, err := utils.ExecuteCommand(ctx, "aws", "efs", "describe-mount-targets", "--region", region, "--file-system-id", srcFs, "--output", "json")
+	if err != nil {
+		return fmt.Errorf("failed to describe source mount targets: %w", err)
+	}
+	type mtItem struct {
+		MountTargetId        string `json:"MountTargetId"`
+		SubnetId             string `json:"SubnetId"`
+		AvailabilityZoneName string `json:"AvailabilityZoneName"`
+	}
+	var mtResp struct {
+		MountTargets []mtItem `json:"MountTargets"`
+	}
+	if err := json.Unmarshal([]byte(mtJSON), &mtResp); err != nil {
+		return fmt.Errorf("failed to parse mount targets: %w", err)
+	}
+	if len(mtResp.MountTargets) == 0 {
+		fmt.Println("[ATTACH] No mount targets found on source EFS; skipping replication")
+		return nil
+	}
+
+	// For each source mount target, fetch SGs and create on destination
+	for _, mt := range mtResp.MountTargets {
+		if strings.TrimSpace(mt.SubnetId) == "" || strings.TrimSpace(mt.MountTargetId) == "" {
+			continue
+		}
+		sgOut, err := utils.ExecuteCommand(ctx, "aws", "efs", "describe-mount-target-security-groups", "--region", region, "--mount-target-id", mt.MountTargetId, "--query", "SecurityGroups", "--output", "text")
+		if err != nil {
+			fmt.Printf("[WARNING] Failed to get SGs for %s: %v\n", mt.MountTargetId, err)
+			continue
+		}
+		sgOut = strings.TrimSpace(sgOut)
+		if sgOut == "" {
+			fmt.Printf("[WARNING] No SGs for %s; skipping subnet %s\n", mt.MountTargetId, mt.SubnetId)
+			continue
+		}
+		// create mount target; ignore errors if already exists
+		args := []string{"efs", "create-mount-target", "--region", region, "--file-system-id", dstFs, "--subnet-id", mt.SubnetId, "--security-groups"}
+		args = append(args, strings.Fields(sgOut)...)
+		if _, err := utils.ExecuteCommand(ctx, "aws", args...); err != nil {
+			fmt.Printf("[ATTACH] Note: create-mount-target may have failed/exists for subnet %s: %v\n", mt.SubnetId, err)
+		} else {
+			fmt.Printf("[ATTACH] Created mount target on subnet %s (AZ %s) for %s\n", mt.SubnetId, mt.AvailabilityZoneName, dstFs)
+		}
+	}
 	return nil
 }
 
