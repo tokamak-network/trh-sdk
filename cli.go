@@ -30,8 +30,8 @@ func Run() {
     trh-sdk backup-manager --snapshot
     trh-sdk backup-manager --list --limit 5
     trh-sdk backup-manager --restore
-    trh-sdk backup-manager --config --on --daily 03:00 --keep 35
-    trh-sdk backup-manager --config --keep-rds 14 --backup-window 03:00-04:00
+    trh-sdk backup-manager --config --daily 03:00 --keep 35
+    trh-sdk backup-manager --attach --efs-id fs-1234567890abcdef0 --pvc op-geth,op-node --sts op-geth,op-node
     `,
 				Flags: []cli.Flag{
 					// primary actions
@@ -50,21 +50,10 @@ func Run() {
 					&cli.StringFlag{Name: "pvc", Usage: "Comma-separated PVC names to switch (e.g., op-geth,op-node)"},
 					&cli.StringFlag{Name: "sts", Usage: "Comma-separated StatefulSet names to restart and verify"},
 
-					// config options (simplified + legacy hidden)
+					// config options
 					&cli.StringFlag{Name: "daily", Usage: "Daily time (UTC) e.g. 03:00 (converted to cron)"},
 					&cli.StringFlag{Name: "keep", Usage: "EFS keep days (retention)"},
-					&cli.BoolFlag{Name: "reset", Usage: "Reset to defaults (EFS daily 03:00, keep 35; RDS keep 14, window 03:00-04:00)"},
-					&cli.StringFlag{Name: "keep-rds", Usage: "RDS keep days (retention)"},
-					&cli.StringFlag{Name: "backup-window", Usage: "RDS backup window, e.g. 03:00-04:00"},
-					&cli.BoolFlag{Name: "on", Hidden: true},
-					&cli.BoolFlag{Name: "off", Hidden: true},
-					&cli.StringFlag{Name: "vault", Hidden: true},
-					&cli.BoolFlag{Name: "enable", Hidden: true},
-					&cli.BoolFlag{Name: "disable", Hidden: true},
-					&cli.StringFlag{Name: "cron", Hidden: true},
-					&cli.StringFlag{Name: "retention", Hidden: true},
-					&cli.StringFlag{Name: "rds-retention", Hidden: true},
-					&cli.StringFlag{Name: "window", Hidden: true},
+					&cli.BoolFlag{Name: "reset", Usage: "Reset to defaults (EFS daily 03:00, keep 35)"},
 				},
 				Action: commands.ActionBackupManager(),
 			},
