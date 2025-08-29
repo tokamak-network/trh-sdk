@@ -221,8 +221,21 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 // UninstallMonitoring removes monitoring plugin
 func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 	logger := t.getLogger()
-	logger.Info("Starting monitoring uninstallation...")
 	monitoringNamespace := constants.MonitoringNamespace
+
+	// Check if monitoring namespace exists first
+	exists, err := utils.CheckNamespaceExists(ctx, monitoringNamespace)
+	if err != nil {
+		logger.Errorw("Failed to check monitoring namespace existence", "err", err)
+		return err
+	}
+
+	if !exists {
+		// Monitoring namespace doesn't exist, skip uninstallation silently
+		return nil
+	}
+
+	logger.Info("Starting monitoring uninstallation...")
 
 	if t.deployConfig == nil || t.deployConfig.K8s == nil {
 		logger.Warn("Deploy configuration is not initialized, skip monitoring uninstallation")
