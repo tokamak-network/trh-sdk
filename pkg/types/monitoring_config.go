@@ -48,7 +48,6 @@ type EmailConfig struct {
 	Enabled          bool
 	SmtpSmarthost    string
 	SmtpFrom         string
-	SmtpAuthUsername string
 	SmtpAuthPassword string
 	AlertReceivers   []string
 }

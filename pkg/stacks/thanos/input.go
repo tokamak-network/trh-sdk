@@ -151,10 +151,6 @@ func (i *InstallMonitoringInput) Validate() error {
 
 	if i.AlertManager.Email.Enabled {
 		if i.AlertManager.Email.SmtpFrom == "" {
-			return errors.New("from email address is required when Email is enabled")
-		}
-
-		if i.AlertManager.Email.SmtpAuthUsername == "" {
 			return errors.New("gmail address is required when Email is enabled")
 		}
 
@@ -166,9 +162,9 @@ func (i *InstallMonitoringInput) Validate() error {
 			return errors.New("at least one email receiver is required when Email is enabled")
 		}
 
-		// Validate from email
+		// Validate gmail address
 		if !emailRegex.MatchString(i.AlertManager.Email.SmtpFrom) {
-			return fmt.Errorf("invalid from email address format: %s", i.AlertManager.Email.SmtpFrom)
+			return fmt.Errorf("invalid gmail address format: %s", i.AlertManager.Email.SmtpFrom)
 		}
 
 		// Validate receiver emails
@@ -834,31 +830,29 @@ func getEmailConfigFromUser() types.EmailConfig {
 	fmt.Printf("✅ Using Gmail SMTP: %s\n", smtpSmarthost)
 
 	// Get Gmail address
-	var smtpAuthUsername string
+	var smtpFrom string
 	for {
 		fmt.Print("Enter Gmail Address: ")
-		smtpAuthUsername, err = scanner.ScanString()
+		smtpFrom, err = scanner.ScanString()
 		if err != nil {
 			fmt.Printf("Error while reading Gmail Address: %s\n", err)
 			return types.EmailConfig{Enabled: false}
 		}
 
 		// Validate Gmail address format
-		if smtpAuthUsername == "" {
+		if smtpFrom == "" {
 			fmt.Println("⚠️  Gmail address cannot be empty")
 			continue
 		}
 
 		// Basic email validation
-		if !emailRegex.MatchString(smtpAuthUsername) {
+		if !emailRegex.MatchString(smtpFrom) {
 			fmt.Println("⚠️  Invalid email address format")
 			continue
 		}
 		break
 	}
 
-	// Set from address same as Gmail address
-	smtpFrom := smtpAuthUsername
 	fmt.Printf("✅ From Email Address: %s\n", smtpFrom)
 
 	var smtpAuthPassword string
@@ -938,7 +932,6 @@ func getEmailConfigFromUser() types.EmailConfig {
 		Enabled:          enabled,
 		SmtpSmarthost:    smtpSmarthost,
 		SmtpFrom:         smtpFrom,
-		SmtpAuthUsername: smtpAuthUsername,
 		SmtpAuthPassword: smtpAuthPassword,
 		AlertReceivers:   receivers,
 	}

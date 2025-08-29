@@ -1367,7 +1367,7 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *types.MonitoringC
 		alertManagerConfig["global"] = map[string]interface{}{
 			"smtp_smarthost":     config.AlertManager.Email.SmtpSmarthost,
 			"smtp_from":          config.AlertManager.Email.SmtpFrom,
-			"smtp_auth_username": config.AlertManager.Email.SmtpAuthUsername,
+			"smtp_auth_username": config.AlertManager.Email.SmtpFrom,
 			"smtp_auth_password": config.AlertManager.Email.SmtpAuthPassword,
 		}
 	}
