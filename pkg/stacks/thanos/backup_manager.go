@@ -657,15 +657,46 @@ func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *str
 
 	// Update PV volumeHandle if EFS ID provided
 	if newEfs != "" {
+		// 0) Validate StorageClass configuration (efs-sc -> efs.csi.aws.com)
+		if err := t.validateStorageClass(ctx); err != nil {
+			return fmt.Errorf("storage class validation failed: %w", err)
+		}
+
 		// Try to replicate mount targets of the currently used EFS to the new EFS
 		if srcEfs, err := utils.DetectEFSId(ctx, namespace); err == nil && strings.TrimSpace(srcEfs) != "" {
 			if err := t.replicateEFSMountTargets(ctx, t.deployConfig.AWS.Region, strings.TrimSpace(srcEfs), newEfs); err != nil {
 				fmt.Printf("[WARNING] Failed to replicate EFS mount targets from %s to %s: %v\n", srcEfs, newEfs, err)
 			} else {
 				fmt.Printf("[ATTACH] ✅ Replicated mount targets from %s to %s (region: %s)\n", srcEfs, newEfs, t.deployConfig.AWS.Region)
+				// Validate destination EFS mount targets and security groups before moving on
+				if vErr := t.validateEFSMountTargets(ctx, t.deployConfig.AWS.Region, newEfs); vErr != nil {
+					fmt.Printf("[WARNING] Mount target validation for %s reported issues: %v\n", newEfs, vErr)
+				} else {
+					fmt.Printf("[ATTACH] ✅ Mount targets validated for %s\n", newEfs)
+				}
 			}
 		} else {
 			fmt.Printf("[WARNING] Could not detect source EFS in namespace %s. Skipping mount-target replication.\n", namespace)
+		}
+
+		// 1) Preflight DNS/NFS connectivity test from inside the namespace
+		if err := t.preflightEFSConnectivity(ctx, namespace, newEfs, t.deployConfig.AWS.Region); err != nil {
+			return fmt.Errorf("preflight connectivity failed: %w", err)
+		}
+
+		// 2) Backup PV/PVC definitions before destructive changes
+		{
+			choice := "y"
+			fmt.Print("[BACKUP] Run PV/PVC backup before changes? (y/n): ")
+			fmt.Scanf("%s", &choice)
+			choice = strings.ToLower(strings.TrimSpace(choice))
+			if choice == "y" || choice == "yes" {
+				if err := t.backupPvPvc(ctx, namespace); err != nil {
+					fmt.Printf("[WARNING] Failed to run PV/PVC backup script: %v\n", err)
+				}
+			} else {
+				fmt.Println("[BACKUP] Skipped PV/PVC backup by user choice")
+			}
 		}
 
 		if err := t.updatePVVolumeHandles(ctx, namespace, newEfs, pvcs); err != nil {
@@ -746,6 +777,208 @@ func (t *ThanosStack) replicateEFSMountTargets(ctx context.Context, region, srcF
 		}
 	}
 	return nil
+}
+
+// validateEFSMountTargets verifies that an EFS has mount targets with security groups that allow NFS (TCP 2049)
+// and the referenced subnets are available. It logs detailed findings and returns an error if any critical
+// validation fails. Non-critical findings are emitted as warnings.
+func (t *ThanosStack) validateEFSMountTargets(ctx context.Context, region, fsId string) error {
+	if strings.TrimSpace(fsId) == "" {
+		return fmt.Errorf("empty file system id")
+	}
+
+	// Describe mount targets for the destination EFS
+	mtJSON, err := utils.ExecuteCommand(ctx, "aws", "efs", "describe-mount-targets", "--region", region, "--file-system-id", fsId, "--output", "json")
+	if err != nil {
+		return fmt.Errorf("failed to describe mount targets for %s: %w", fsId, err)
+	}
+
+	type mtItem struct {
+		MountTargetId string `json:"MountTargetId"`
+		SubnetId      string `json:"SubnetId"`
+	}
+	var mtResp struct {
+		MountTargets []mtItem `json:"MountTargets"`
+	}
+	if jErr := json.Unmarshal([]byte(mtJSON), &mtResp); jErr != nil {
+		return fmt.Errorf("failed to parse mount targets for %s: %w", fsId, jErr)
+	}
+	if len(mtResp.MountTargets) == 0 {
+		return fmt.Errorf("no mount targets found on EFS %s", fsId)
+	}
+
+	criticalIssues := []string{}
+
+	for _, mt := range mtResp.MountTargets {
+		subnetId := strings.TrimSpace(mt.SubnetId)
+		if subnetId == "" || strings.TrimSpace(mt.MountTargetId) == "" {
+			criticalIssues = append(criticalIssues, fmt.Sprintf("invalid mount target entry (id=%s subnet=%s)", mt.MountTargetId, mt.SubnetId))
+			continue
+		}
+
+		// 1) Check subnet availability
+		state, sErr := utils.ExecuteCommand(ctx, "aws", "ec2", "describe-subnets", "--region", region, "--subnet-ids", subnetId, "--query", "Subnets[0].State", "--output", "text")
+		if sErr != nil {
+			fmt.Printf("[VALIDATE] ⚠️  Failed to check subnet state for %s: %v\n", subnetId, sErr)
+		} else if strings.TrimSpace(state) != "available" {
+			criticalIssues = append(criticalIssues, fmt.Sprintf("subnet %s state is %s (expected available)", subnetId, strings.TrimSpace(state)))
+		} else {
+			fmt.Printf("[VALIDATE] ✅ Subnet %s is available\n", subnetId)
+		}
+
+		// 2) Check SGs allow TCP 2049
+		sgText, gErr := utils.ExecuteCommand(ctx, "aws", "efs", "describe-mount-target-security-groups", "--region", region, "--mount-target-id", mt.MountTargetId, "--query", "SecurityGroups", "--output", "text")
+		if gErr != nil {
+			criticalIssues = append(criticalIssues, fmt.Sprintf("failed to get security groups for mount target %s: %v", mt.MountTargetId, gErr))
+			continue
+		}
+		sgText = strings.TrimSpace(sgText)
+		if sgText == "" {
+			criticalIssues = append(criticalIssues, fmt.Sprintf("no security groups attached to mount target %s", mt.MountTargetId))
+			continue
+		}
+		sgs := strings.Fields(sgText)
+
+		sgAllowsNFS := false
+		for _, sg := range sgs {
+			// Query SG ingress rules for TCP 2049
+			permJSON, pErr := utils.ExecuteCommand(ctx, "aws", "ec2", "describe-security-groups", "--region", region, "--group-ids", sg, "--query", "SecurityGroups[0].IpPermissions", "--output", "json")
+			if pErr != nil {
+				fmt.Printf("[VALIDATE] ⚠️  Failed to read SG %s permissions: %v\n", sg, pErr)
+				continue
+			}
+
+			var perms []struct {
+				IpProtocol string `json:"IpProtocol"`
+				FromPort   *int   `json:"FromPort"`
+				ToPort     *int   `json:"ToPort"`
+			}
+			if uErr := json.Unmarshal([]byte(permJSON), &perms); uErr != nil {
+				fmt.Printf("[VALIDATE] ⚠️  Failed to parse SG %s permissions: %v\n", sg, uErr)
+				continue
+			}
+			for _, ip := range perms {
+				if strings.ToLower(strings.TrimSpace(ip.IpProtocol)) != "tcp" {
+					continue
+				}
+				if ip.FromPort != nil && ip.ToPort != nil && *ip.FromPort <= 2049 && 2049 <= *ip.ToPort {
+					sgAllowsNFS = true
+					break
+				}
+			}
+			if sgAllowsNFS {
+				fmt.Printf("[VALIDATE] ✅ SG %s allows TCP 2049\n", sg)
+				break
+			} else {
+				fmt.Printf("[VALIDATE] ℹ️  SG %s has no explicit TCP 2049 rule\n", sg)
+			}
+		}
+
+		if !sgAllowsNFS {
+			criticalIssues = append(criticalIssues, fmt.Sprintf("no attached SG on mount target %s allows TCP 2049", mt.MountTargetId))
+		}
+	}
+
+	if len(criticalIssues) > 0 {
+		return fmt.Errorf("mount target validation failed: %s", strings.Join(criticalIssues, "; "))
+	}
+
+	return nil
+}
+
+// validateStorageClass ensures that the efs-sc storageclass uses the AWS EFS CSI driver
+func (t *ThanosStack) validateStorageClass(ctx context.Context) error {
+	// Query storageclass efs-sc and check provisioner/parameters
+	out, err := utils.ExecuteCommand(ctx, "kubectl", "get", "storageclass", "efs-sc", "-o", "jsonpath={.provisioner}")
+	if err != nil {
+		return fmt.Errorf("failed to get storageclass efs-sc: %w", err)
+	}
+	prov := strings.TrimSpace(out)
+	if prov != "efs.csi.aws.com" {
+		return fmt.Errorf("storageclass efs-sc provisioner mismatch: got '%s', want 'efs.csi.aws.com'", prov)
+	}
+
+	// Sanity check access mode and reclaim policy via a template PV we create anyway in code
+	fmt.Println("[VALIDATE] ✅ StorageClass efs-sc uses efs.csi.aws.com")
+	return nil
+}
+
+// preflightEFSConnectivity validates that DNS name resolves and NFS port is reachable from the namespace
+func (t *ThanosStack) preflightEFSConnectivity(ctx context.Context, namespace, fsId, region string) error {
+	if strings.TrimSpace(fsId) == "" {
+		return fmt.Errorf("empty file system id")
+	}
+	dns := fmt.Sprintf("%s.efs.%s.amazonaws.com", strings.TrimSpace(fsId), strings.TrimSpace(region))
+
+	// Discover one mount target IP to test 2049 connectivity
+	ipOut, err := utils.ExecuteCommand(ctx, "aws", "efs", "describe-mount-targets", "--region", region, "--file-system-id", fsId, "--query", "MountTargets[0].IpAddress", "--output", "text")
+	if err != nil || strings.TrimSpace(ipOut) == "None" || strings.TrimSpace(ipOut) == "" {
+		return fmt.Errorf("failed to get mount target IP for %s: %v", fsId, err)
+	}
+	mtIP := strings.TrimSpace(ipOut)
+
+	// Create a short-lived pod to run DNS and TCP checks
+	podName := "preflight-efs"
+	_, _ = utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "delete", "pod", podName, "--ignore-not-found=true")
+
+	yaml := fmt.Sprintf(`apiVersion: v1
+kind: Pod
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  containers:
+  - name: check
+    image: nicolaka/netshoot
+    command: ["/bin/sh","-c"]
+    args: ["set -e; echo DNS:%s; getent hosts %s; nslookup %s || true; nc -vz -w3 %s 2049; echo OK; sleep 1"]
+  restartPolicy: Never`, podName, namespace, dns, dns, dns, mtIP)
+
+	tmp := fmt.Sprintf("/tmp/%s.yaml", podName)
+	if err := os.WriteFile(tmp, []byte(yaml), 0644); err != nil {
+		return fmt.Errorf("failed to write preflight pod yaml: %w", err)
+	}
+	defer os.Remove(tmp)
+
+	if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tmp); err != nil {
+		return fmt.Errorf("failed to create preflight pod: %w", err)
+	}
+
+	// Wait briefly and check completion/logs
+	for i := 0; i < 30; i++ {
+		phase, _ := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pod", podName, "-o", "jsonpath={.status.phase}")
+		if strings.TrimSpace(phase) == "Succeeded" || strings.TrimSpace(phase) == "Failed" {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	logs, _ := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "logs", podName)
+	fmt.Printf("[PREFLIGHT] %s\n", strings.TrimSpace(logs))
+	_, _ = utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "delete", "pod", podName, "--ignore-not-found=true")
+
+	if !strings.Contains(strings.ToLower(logs), "ok") {
+		return fmt.Errorf("preflight checks did not complete successfully; see logs above")
+	}
+	fmt.Println("[PREFLIGHT] ✅ DNS and NFS connectivity OK")
+	return nil
+}
+
+// backupPvPvc runs the helper script to back up PV/PVC definitions before changes
+func (t *ThanosStack) backupPvPvc(ctx context.Context, namespace string) error {
+	// Ensure local backup script exists; if not, download into current directory
+	local := "./backup_pv_pvc.sh"
+	if _, err := os.Stat(local); err != nil {
+		_ = os.MkdirAll("./scripts", 0755)
+		url := "https://raw.githubusercontent.com/tokamak-network/trh-sdk/main/scripts/backup_pv_pvc.sh"
+		fmt.Printf("[BACKUP] Downloading backup script to %s...\n", local)
+		if _, dErr := utils.ExecuteCommand(ctx, "bash", "-lc", fmt.Sprintf("curl -fsSL %s -o %s && chmod +x %s", url, local, local)); dErr != nil {
+			return fmt.Errorf("failed to download backup script: %w", dErr)
+		}
+	}
+	cmd := fmt.Sprintf("NAMESPACE=%s BACKUP_DIR=./k8s-efs-backup bash %s", namespace, local)
+	_, err := utils.ExecuteCommand(ctx, "bash", "-lc", cmd)
+	return err
 }
 
 // validateAttachPrerequisites checks if required tools and cluster access are available
@@ -1583,7 +1816,7 @@ func (t *ThanosStack) interactiveEFSRestore(ctx context.Context) error {
 		fmt.Println("   2. Run the following command to attach the new EFS:")
 		fmt.Printf("      ./trh-sdk backup-manager --attach --efs-id %s --pvc op-geth,op-node --sts op-geth,op-node\n", newEfsID)
 		fmt.Println("   ")
-		fmt.Println("   Would you like to proceed with attach now? (y/n): ")
+		fmt.Print("   Would you like to proceed with attach now? (y/n): ")
 
 		var attachChoice string
 		fmt.Scanf("%s", &attachChoice)
