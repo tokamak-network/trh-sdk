@@ -155,14 +155,14 @@ func (i *InstallMonitoringInput) Validate() error {
 		}
 
 		if i.AlertManager.Email.SmtpAuthUsername == "" {
-			return errors.New("Gmail address is required when Email is enabled")
+			return errors.New("gmail address is required when Email is enabled")
 		}
 
 		if i.AlertManager.Email.SmtpAuthPassword == "" {
-			return errors.New("Gmail app password is required when Email is enabled")
+			return errors.New("gmail app password is required when Email is enabled")
 		}
 
-		if len(i.AlertManager.Email.CriticalReceivers) == 0 {
+		if len(i.AlertManager.Email.AlertReceivers) == 0 {
 			return errors.New("at least one email receiver is required when Email is enabled")
 		}
 
@@ -172,7 +172,7 @@ func (i *InstallMonitoringInput) Validate() error {
 		}
 
 		// Validate receiver emails
-		for _, receiver := range i.AlertManager.Email.CriticalReceivers {
+		for _, receiver := range i.AlertManager.Email.AlertReceivers {
 			if !emailRegex.MatchString(receiver) {
 				return fmt.Errorf("invalid email receiver format: %s", receiver)
 			}
@@ -935,13 +935,12 @@ func getEmailConfigFromUser() types.EmailConfig {
 	}
 
 	return types.EmailConfig{
-		Enabled:           enabled,
-		SmtpSmarthost:     smtpSmarthost,
-		SmtpFrom:          smtpFrom,
-		SmtpAuthUsername:  smtpAuthUsername,
-		SmtpAuthPassword:  smtpAuthPassword,
-		DefaultReceivers:  receivers,
-		CriticalReceivers: receivers,
+		Enabled:          enabled,
+		SmtpSmarthost:    smtpSmarthost,
+		SmtpFrom:         smtpFrom,
+		SmtpAuthUsername: smtpAuthUsername,
+		SmtpAuthPassword: smtpAuthPassword,
+		AlertReceivers:   receivers,
 	}
 }
 
@@ -965,7 +964,7 @@ func getEmailConfigSummary(config types.EmailConfig) string {
 		return "Disabled"
 	}
 
-	receiverCount := len(config.CriticalReceivers)
+	receiverCount := len(config.AlertReceivers)
 	if receiverCount == 0 {
 		return "Enabled (no receivers configured)"
 	}

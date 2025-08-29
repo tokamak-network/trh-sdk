@@ -1304,7 +1304,7 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *types.MonitoringC
 	if config.AlertManager.Email.Enabled {
 		emailConfigs := []map[string]interface{}{}
 		templates := t.generateAlertTemplates(grafanaURL)
-		for _, email := range config.AlertManager.Email.CriticalReceivers {
+		for _, email := range config.AlertManager.Email.AlertReceivers {
 			if email != "" {
 				emailConfigs = append(emailConfigs, map[string]interface{}{
 					"to": email,
