@@ -270,7 +270,7 @@ func (t *ThanosStack) BackupRestore(ctx context.Context, point *string, newFS *b
 
 // validateRestorePrerequisites checks if required tools and dependencies are available
 func (t *ThanosStack) validateRestorePrerequisites(ctx context.Context) error {
-	t.logger.Info("[VALIDATION] Checking prerequisites...")
+	t.logger.Info("Checking prerequisites...")
 
 	// Check AWS CLI
 	if _, err := utils.ExecuteCommand(ctx, "aws", "--version"); err != nil {
@@ -287,13 +287,13 @@ func (t *ThanosStack) validateRestorePrerequisites(ctx context.Context) error {
 		return fmt.Errorf("cannot access Kubernetes cluster: %w", err)
 	}
 
-	t.logger.Info("[VALIDATION] ✅ Prerequisites check passed")
+	t.logger.Info("✅ Prerequisites check passed")
 	return nil
 }
 
 // validateAWSCredentials validates AWS credentials and permissions
 func (t *ThanosStack) validateAWSCredentials(ctx context.Context) error {
-	t.logger.Info("[VALIDATION] Checking AWS credentials and permissions...")
+	t.logger.Info("Checking AWS credentials and permissions...")
 
 	// Check AWS credentials
 	accountID, err := utils.DetectAWSAccountID(ctx)
@@ -311,13 +311,13 @@ func (t *ThanosStack) validateAWSCredentials(ctx context.Context) error {
 		return fmt.Errorf("insufficient RDS permissions: %w", err)
 	}
 
-	t.logger.Infof("[VALIDATION] ✅ AWS credentials valid (Account: %s)", accountID)
+	t.logger.Infof("✅ AWS credentials valid (Account: %s)", accountID)
 	return nil
 }
 
 // restoreEFS handles EFS restore from recovery point
 func (t *ThanosStack) restoreEFS(ctx context.Context, recoveryPointArn string) (string, error) {
-	t.logger.Infof("[EFS] Starting restore from recovery point: %s", recoveryPointArn)
+	t.logger.Infof("Starting restore from recovery point: %s", recoveryPointArn)
 
 	// Validate recovery point ARN format
 	if !strings.Contains(recoveryPointArn, "arn:aws:backup:") {
@@ -466,7 +466,7 @@ func (t *ThanosStack) restoreEFS(ctx context.Context, recoveryPointArn string) (
 		return "", fmt.Errorf("restore job ID is empty")
 	}
 
-	t.logger.Infof("[EFS] Restore job started, JobId: %s", jobId)
+	t.logger.Infof("Restore job started, JobId: %s", jobId)
 
 	// Monitor restore job progress
 	return t.monitorEFSRestoreJob(ctx, jobId)
@@ -474,7 +474,7 @@ func (t *ThanosStack) restoreEFS(ctx context.Context, recoveryPointArn string) (
 
 // monitorEFSRestoreJob monitors EFS restore job progress
 func (t *ThanosStack) monitorEFSRestoreJob(ctx context.Context, jobId string) (string, error) {
-	t.logger.Info("[EFS] Monitoring restore job progress...")
+	t.logger.Info("Monitoring restore job progress...")
 
 	const maxAttempts = 120 // 60 minutes with 30-second intervals
 	for i := 0; i < maxAttempts; i++ {
@@ -494,7 +494,7 @@ func (t *ThanosStack) monitorEFSRestoreJob(ctx context.Context, jobId string) (s
 		}
 
 		status = strings.TrimSpace(status)
-		t.logger.Infof("[EFS] Job status: %s (attempt %d/%d)", status, i+1, maxAttempts)
+		t.logger.Infof("Job status: %s (attempt %d/%d)", status, i+1, maxAttempts)
 
 		switch status {
 		case "COMPLETED":
@@ -514,7 +514,7 @@ func (t *ThanosStack) monitorEFSRestoreJob(ctx context.Context, jobId string) (s
 		case "RUNNING", "PENDING":
 			// Continue monitoring
 		default:
-			t.logger.Infof("[EFS] Unknown status: %s, continuing to monitor...", status)
+			t.logger.Infof("Unknown status: %s, continuing to monitor...", status)
 		}
 
 		time.Sleep(30 * time.Second)
@@ -535,7 +535,7 @@ func (t *ThanosStack) handleEFSRestoreCompletion(ctx context.Context, jobId stri
 	}
 
 	createdArn = strings.TrimSpace(createdArn)
-	t.logger.Infof("[EFS] Restore completed. CreatedResourceArn: %s", createdArn)
+	t.logger.Infof("Restore completed. CreatedResourceArn: %s", createdArn)
 
 	var newFsId string
 	if strings.Contains(createdArn, ":file-system/") {
@@ -545,9 +545,9 @@ func (t *ThanosStack) handleEFSRestoreCompletion(ctx context.Context, jobId stri
 
 			// Ensure throughput mode is elastic on the restored EFS
 			if err := t.setEFSThroughputElastic(ctx, newFsId); err != nil {
-				t.logger.Warnf("[WARNING] Failed to set EFS ThroughputMode to elastic: %v", err)
+				t.logger.Warnf("Failed to set EFS ThroughputMode to elastic: %v", err)
 			} else {
-				t.logger.Info("[EFS] ✅ ThroughputMode set to elastic")
+				t.logger.Info("✅ ThroughputMode set to elastic")
 			}
 		}
 	}
@@ -600,7 +600,7 @@ func (t *ThanosStack) getRestoreIAMRole(ctx context.Context) (string, error) {
 	}
 
 	// If no suitable role found, return the namespace-based role and let AWS handle the error
-	t.logger.Warnf("[WARNING] No suitable IAM role found, using namespace-based role: %s", namespaceRoleArn)
+	t.logger.Warnf("No suitable IAM role found, using namespace-based role: %s", namespaceRoleArn)
 	return namespaceRoleArn, nil
 }
 
@@ -608,7 +608,7 @@ func (t *ThanosStack) getRestoreIAMRole(ctx context.Context) (string, error) {
 func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *string, stss *string) error {
 	namespace := t.deployConfig.K8s.Namespace
 
-	t.logger.Info("[POST-RESTORE] Verifying restored data and switching workloads...")
+	t.logger.Info("Verifying restored data and switching workloads...")
 
 	// Validate prerequisites
 	if err := t.validateAttachPrerequisites(ctx); err != nil {
@@ -632,18 +632,18 @@ func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *str
 		// 1) Try to replicate mount targets of the currently used EFS to the new EFS FIRST
 		if srcEfs, err := utils.DetectEFSId(ctx, namespace); err == nil && strings.TrimSpace(srcEfs) != "" {
 			if err := t.replicateEFSMountTargets(ctx, t.deployConfig.AWS.Region, strings.TrimSpace(srcEfs), newEfs); err != nil {
-				t.logger.Warnf("[WARNING] Failed to replicate EFS mount targets from %s to %s: %v", srcEfs, newEfs, err)
+				t.logger.Warnf("Failed to replicate EFS mount targets from %s to %s: %v", srcEfs, newEfs, err)
 			} else {
-				t.logger.Infof("[ATTACH] ✅ Replicated mount targets from %s to %s (region: %s)", srcEfs, newEfs, t.deployConfig.AWS.Region)
+				t.logger.Infof("✅ Replicated mount targets from %s to %s (region: %s)", srcEfs, newEfs, t.deployConfig.AWS.Region)
 				// Validate destination EFS mount targets and security groups before moving on
 				if vErr := t.validateEFSMountTargets(ctx, t.deployConfig.AWS.Region, newEfs); vErr != nil {
-					t.logger.Warnf("[WARNING] Mount target validation for %s reported issues: %v", newEfs, vErr)
+					t.logger.Warnf("Mount target validation for %s reported issues: %v", newEfs, vErr)
 				} else {
-					t.logger.Infof("[ATTACH] ✅ Mount targets validated for %s", newEfs)
+					t.logger.Infof("✅ Mount targets validated for %s", newEfs)
 				}
 			}
 		} else {
-			t.logger.Warnf("[WARNING] Could not detect source EFS in namespace %s. Skipping mount-target replication.", namespace)
+			t.logger.Warnf("Could not detect source EFS in namespace %s. Skipping mount-target replication.", namespace)
 		}
 
 		// 2) Preflight DNS/NFS connectivity test from inside the namespace
@@ -653,7 +653,7 @@ func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *str
 
 		// 3) Now verify data via temporary pod (after mount targets are ready)
 		if err := t.verifyEFSData(ctx, namespace); err != nil {
-			t.logger.Warnf("[WARNING] EFS data verification failed: %v", err)
+			t.logger.Warnf("EFS data verification failed: %v", err)
 		}
 
 		// Ensure verify pod is removed before proceeding to destructive changes
@@ -662,15 +662,15 @@ func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *str
 		// 2) Backup PV/PVC definitions before destructive changes
 		{
 			choice := "y"
-			fmt.Print("[BACKUP] Run PV/PVC backup before changes? (y/n): ")
+			fmt.Print("Run PV/PVC backup before changes? (y/n): ")
 			fmt.Scanf("%s", &choice)
 			choice = strings.ToLower(strings.TrimSpace(choice))
 			if choice == "y" || choice == "yes" {
 				if err := t.backupPvPvc(ctx, namespace); err != nil {
-					t.logger.Warnf("[WARNING] Failed to run PV/PVC backup script: %v", err)
+					t.logger.Warnf("Failed to run PV/PVC backup script: %v", err)
 				}
 			} else {
-				t.logger.Info("[BACKUP] Skipped PV/PVC backup by user choice")
+				t.logger.Info("Skipped PV/PVC backup by user choice")
 			}
 		}
 
@@ -678,11 +678,11 @@ func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *str
 			return fmt.Errorf("failed to update PV volume handles: %w", err)
 		}
 	} else {
-		t.logger.Info("[ATTACH] Skipped PV update (no --efs-id provided).")
+		t.logger.Info("Skipped PV update (no --efs-id provided).")
 
 		// Still verify current EFS data even when not switching to new EFS
 		if err := t.verifyEFSData(ctx, namespace); err != nil {
-			t.logger.Warnf("[WARNING] Current EFS data verification failed: %v", err)
+			t.logger.Warnf("Current EFS data verification failed: %v", err)
 		}
 
 		// Ensure verify pod is removed
@@ -698,16 +698,16 @@ func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *str
 
 	// Post-attach verification: Verify EFS data integrity through actual service restart
 	if newEfs != "" {
-		t.logger.Info("[VERIFICATION] Starting post-attach verification...")
+		t.logger.Info("Starting post-attach verification...")
 		if err := t.verifyPostAttach(ctx, namespace); err != nil {
-			t.logger.Warnf("[WARNING] Post-attach verification failed: %v", err)
-			t.logger.Warn("[WARNING] This may indicate data corruption or incomplete restore")
+			t.logger.Warnf("Post-attach verification failed: %v", err)
+			t.logger.Warn("This may indicate data corruption or incomplete restore")
 		} else {
-			t.logger.Info("[VERIFICATION] ✅ Post-attach verification completed successfully")
+			t.logger.Info("✅ Post-attach verification completed successfully")
 		}
 	}
 
-	t.logger.Info("[POST-RESTORE] Completed basic post-restore steps.")
+	t.logger.Info("Completed basic post-restore steps.")
 
 	// Summary
 	t.printAttachSummary(newEfs, pvcs, stss)
@@ -716,7 +716,7 @@ func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *str
 
 // verifyPostAttach performs post-attach verification by monitoring op-geth and op-node pods
 func (t *ThanosStack) verifyPostAttach(ctx context.Context, namespace string) error {
-	t.logger.Info("[VERIFY] Checking pod status after EFS attach...")
+	t.logger.Info("Checking pod status after EFS attach...")
 
 	components := []string{"op-geth", "op-node"}
 	var errors []string
@@ -728,11 +728,11 @@ func (t *ThanosStack) verifyPostAttach(ctx context.Context, namespace string) er
 	}
 
 	if len(errors) > 0 {
-		t.logger.Infof("[VERIFY] ❌ Failed: %s", strings.Join(errors, ", "))
+		t.logger.Infof("❌ Failed: %s", strings.Join(errors, ", "))
 		return fmt.Errorf("verification failed")
 	}
 
-	t.logger.Info("[VERIFY] ✅ All components ready")
+	t.logger.Info("✅ All components ready")
 	return nil
 }
 
@@ -747,7 +747,7 @@ func (t *ThanosStack) monitorComponentPod(ctx context.Context, namespace, compon
 	t.logger.Infof("[MONITOR-%s] Found pod: %s", strings.ToUpper(component), podName)
 
 	// Wait for pod to be ready (up to 5 minutes)
-	t.logger.Infof("[MONITOR] Checking %s pod status...", component)
+	t.logger.Infof("Checking %s pod status...", component)
 	maxWaitTime := 60 // 60 * 5s = 5 minutes
 
 	for i := 0; i < maxWaitTime; i++ {
@@ -760,7 +760,7 @@ func (t *ThanosStack) monitorComponentPod(ctx context.Context, namespace, compon
 
 		// Check for success condition
 		if phase == "Running" && ready == "true" {
-			t.logger.Infof("[MONITOR] ✅ %s is ready", component)
+			t.logger.Infof("✅ %s is ready", component)
 			return nil
 		}
 
@@ -771,14 +771,14 @@ func (t *ThanosStack) monitorComponentPod(ctx context.Context, namespace, compon
 
 		// Print status every 30 seconds
 		if i%6 == 0 {
-			t.logger.Infof("[MONITOR] %s status: %s/%s", component, phase, ready)
+			t.logger.Infof("%s status: %s/%s", component, phase, ready)
 		}
 
 		time.Sleep(5 * time.Second)
 	}
 
 	// Timeout - pod not ready
-	t.logger.Infof("[MONITOR] ❌ %s timeout after 5 minutes", component)
+	t.logger.Infof("❌ %s timeout after 5 minutes", component)
 	return fmt.Errorf("%s pod timeout", component)
 }
 
@@ -803,12 +803,12 @@ func (t *ThanosStack) findComponentPod(ctx context.Context, namespace, component
 
 // handlePodError handles pod error conditions with essential diagnostics
 func (t *ThanosStack) handlePodError(ctx context.Context, namespace, component, podName, errorType string) error {
-	t.logger.Errorf("[ERROR] %s pod failed: %s", component, errorType)
+	t.logger.Errorf("%s pod failed: %s", component, errorType)
 
 	// Get recent logs for diagnosis
 	logs, err := utils.ExecuteCommand(ctx, "kubectl", "logs", podName, "-n", namespace, "--tail=20")
 	if err == nil && strings.TrimSpace(logs) != "" {
-		t.logger.Errorf("[ERROR] Recent logs:\n%s", logs)
+		t.logger.Errorf("Recent logs:\n%s", logs)
 	}
 
 	// Get critical events
@@ -816,7 +816,7 @@ func (t *ThanosStack) handlePodError(ctx context.Context, namespace, component, 
 		"--field-selector", fmt.Sprintf("involvedObject.name=%s", podName),
 		"--sort-by", ".lastTimestamp", "-o", "custom-columns=REASON:.reason,MESSAGE:.message", "--no-headers")
 	if err == nil && strings.TrimSpace(events) != "" {
-		t.logger.Errorf("[ERROR] Events: %s", strings.TrimSpace(events))
+		t.logger.Errorf("Events: %s", strings.TrimSpace(events))
 	}
 
 	return fmt.Errorf("%s pod error: %s", component, errorType)
@@ -834,7 +834,7 @@ func (t *ThanosStack) verifyComponentHealth(ctx context.Context, namespace, comp
 
 // verifyGethHealth performs op-geth specific health checks
 func (t *ThanosStack) verifyGethHealth(ctx context.Context, namespace, podName string) error {
-	t.logger.Info("[GETH-HEALTH] Attempting Geth RPC health check...")
+	t.logger.Info("Attempting Geth RPC health check...")
 
 	// Try to execute a simple RPC call inside the pod
 	rpcResult, err := utils.ExecuteCommand(ctx, "kubectl", "exec", podName, "-n", namespace, "--",
@@ -846,7 +846,7 @@ func (t *ThanosStack) verifyGethHealth(ctx context.Context, namespace, podName s
 
 	blockNum := strings.TrimSpace(rpcResult)
 	if blockNum != "" && blockNum != "null" && blockNum != "0" {
-		t.logger.Infof("[GETH-HEALTH] ✅ Successfully retrieved block number: %s", blockNum)
+		t.logger.Infof("✅ Successfully retrieved block number: %s", blockNum)
 
 		// Additional check: Get chain ID
 		chainIdResult, err := utils.ExecuteCommand(ctx, "kubectl", "exec", podName, "-n", namespace, "--",
@@ -855,7 +855,7 @@ func (t *ThanosStack) verifyGethHealth(ctx context.Context, namespace, podName s
 		if err == nil {
 			chainId := strings.TrimSpace(chainIdResult)
 			if chainId != "" && chainId != "null" {
-				t.logger.Infof("[GETH-HEALTH] ✅ Chain ID: %s", chainId)
+				t.logger.Infof("✅ Chain ID: %s", chainId)
 			}
 		}
 
@@ -867,7 +867,7 @@ func (t *ThanosStack) verifyGethHealth(ctx context.Context, namespace, podName s
 
 // verifyOpNodeHealth performs op-node specific health checks
 func (t *ThanosStack) verifyOpNodeHealth(ctx context.Context, namespace, podName string) error {
-	t.logger.Info("[NODE-HEALTH] Attempting op-node health check...")
+	t.logger.Info("Attempting op-node health check...")
 
 	// Check if op-node is responding to basic queries
 	// Try to get sync status or version info
@@ -886,7 +886,7 @@ func (t *ThanosStack) verifyOpNodeHealth(ctx context.Context, namespace, podName
 		}
 
 		if strings.TrimSpace(processCheck) != "" {
-			t.logger.Infof("[NODE-HEALTH] ✅ op-node process is running (PID: %s)", strings.TrimSpace(processCheck))
+			t.logger.Infof("✅ op-node process is running (PID: %s)", strings.TrimSpace(processCheck))
 			return nil
 		}
 
@@ -895,7 +895,7 @@ func (t *ThanosStack) verifyOpNodeHealth(ctx context.Context, namespace, podName
 
 	// Parse JSON response to check if it's valid
 	if strings.Contains(versionResult, "jsonrpc") || strings.Contains(versionResult, "result") {
-		t.logger.Infof("[NODE-HEALTH] ✅ op-node RPC is responding")
+		t.logger.Infof("✅ op-node RPC is responding")
 		return nil
 	}
 
@@ -925,7 +925,7 @@ func (t *ThanosStack) replicateEFSMountTargets(ctx context.Context, region, srcF
 		return fmt.Errorf("failed to parse mount targets: %w", err)
 	}
 	if len(mtResp.MountTargets) == 0 {
-		t.logger.Info("[ATTACH] No mount targets found on source EFS; skipping replication")
+		t.logger.Info("No mount targets found on source EFS; skipping replication")
 		return nil
 	}
 
@@ -936,21 +936,21 @@ func (t *ThanosStack) replicateEFSMountTargets(ctx context.Context, region, srcF
 		}
 		sgOut, err := utils.ExecuteCommand(ctx, "aws", "efs", "describe-mount-target-security-groups", "--region", region, "--mount-target-id", mt.MountTargetId, "--query", "SecurityGroups", "--output", "text")
 		if err != nil {
-			t.logger.Warnf("[WARNING] Failed to get SGs for %s: %v", mt.MountTargetId, err)
+			t.logger.Warnf("Failed to get SGs for %s: %v", mt.MountTargetId, err)
 			continue
 		}
 		sgOut = strings.TrimSpace(sgOut)
 		if sgOut == "" {
-			t.logger.Warnf("[WARNING] No SGs for %s; skipping subnet %s", mt.MountTargetId, mt.SubnetId)
+			t.logger.Warnf("No SGs for %s; skipping subnet %s", mt.MountTargetId, mt.SubnetId)
 			continue
 		}
 		// create mount target; ignore errors if already exists
 		args := []string{"efs", "create-mount-target", "--region", region, "--file-system-id", dstFs, "--subnet-id", mt.SubnetId, "--security-groups"}
 		args = append(args, strings.Fields(sgOut)...)
 		if _, err := utils.ExecuteCommand(ctx, "aws", args...); err != nil {
-			t.logger.Infof("[ATTACH] Note: create-mount-target may have failed/exists for subnet %s: %v", mt.SubnetId, err)
+			t.logger.Infof("Note: create-mount-target may have failed/exists for subnet %s: %v", mt.SubnetId, err)
 		} else {
-			t.logger.Infof("[ATTACH] Created mount target on subnet %s (AZ %s) for %s", mt.SubnetId, mt.AvailabilityZoneName, dstFs)
+			t.logger.Infof("Created mount target on subnet %s (AZ %s) for %s", mt.SubnetId, mt.AvailabilityZoneName, dstFs)
 		}
 	}
 	return nil
@@ -996,11 +996,11 @@ func (t *ThanosStack) validateEFSMountTargets(ctx context.Context, region, fsId 
 		// 1) Check subnet availability
 		state, sErr := utils.ExecuteCommand(ctx, "aws", "ec2", "describe-subnets", "--region", region, "--subnet-ids", subnetId, "--query", "Subnets[0].State", "--output", "text")
 		if sErr != nil {
-			t.logger.Infof("[VALIDATE] ⚠️  Failed to check subnet state for %s: %v", subnetId, sErr)
+			t.logger.Infof("⚠️  Failed to check subnet state for %s: %v", subnetId, sErr)
 		} else if strings.TrimSpace(state) != "available" {
 			criticalIssues = append(criticalIssues, fmt.Sprintf("subnet %s state is %s (expected available)", subnetId, strings.TrimSpace(state)))
 		} else {
-			t.logger.Infof("[VALIDATE] ✅ Subnet %s is available", subnetId)
+			t.logger.Infof("✅ Subnet %s is available", subnetId)
 		}
 
 		// 2) Check SGs allow TCP 2049
@@ -1021,7 +1021,7 @@ func (t *ThanosStack) validateEFSMountTargets(ctx context.Context, region, fsId 
 			// Query SG ingress rules for TCP 2049
 			permJSON, pErr := utils.ExecuteCommand(ctx, "aws", "ec2", "describe-security-groups", "--region", region, "--group-ids", sg, "--query", "SecurityGroups[0].IpPermissions", "--output", "json")
 			if pErr != nil {
-				t.logger.Infof("[VALIDATE] ⚠️  Failed to read SG %s permissions: %v", sg, pErr)
+				t.logger.Infof("⚠️  Failed to read SG %s permissions: %v", sg, pErr)
 				continue
 			}
 
@@ -1031,7 +1031,7 @@ func (t *ThanosStack) validateEFSMountTargets(ctx context.Context, region, fsId 
 				ToPort     *int   `json:"ToPort"`
 			}
 			if uErr := json.Unmarshal([]byte(permJSON), &perms); uErr != nil {
-				t.logger.Infof("[VALIDATE] ⚠️  Failed to parse SG %s permissions: %v", sg, uErr)
+				t.logger.Infof("⚠️  Failed to parse SG %s permissions: %v", sg, uErr)
 				continue
 			}
 			for _, ip := range perms {
@@ -1044,10 +1044,10 @@ func (t *ThanosStack) validateEFSMountTargets(ctx context.Context, region, fsId 
 				}
 			}
 			if sgAllowsNFS {
-				t.logger.Infof("[VALIDATE] ✅ SG %s allows TCP 2049", sg)
+				t.logger.Infof("✅ SG %s allows TCP 2049", sg)
 				break
 			} else {
-				t.logger.Infof("[VALIDATE] ℹ️  SG %s has no explicit TCP 2049 rule", sg)
+				t.logger.Infof("ℹ️  SG %s has no explicit TCP 2049 rule", sg)
 			}
 		}
 
@@ -1070,7 +1070,7 @@ func (t *ThanosStack) backupPvPvc(ctx context.Context, namespace string) error {
 	if _, err := os.Stat(local); err != nil {
 		_ = os.MkdirAll("./scripts", 0755)
 		url := "https://raw.githubusercontent.com/tokamak-network/trh-sdk/main/scripts/backup_pv_pvc.sh"
-		t.logger.Infof("[BACKUP] Downloading backup script to %s...", local)
+		t.logger.Infof("Downloading backup script to %s...", local)
 		if _, dErr := utils.ExecuteCommand(ctx, "bash", "-lc", fmt.Sprintf("curl -fsSL %s -o %s && chmod +x %s", url, local, local)); dErr != nil {
 			return fmt.Errorf("failed to download backup script: %w", dErr)
 		}
@@ -1082,7 +1082,7 @@ func (t *ThanosStack) backupPvPvc(ctx context.Context, namespace string) error {
 
 // validateAttachPrerequisites checks if required tools and cluster access are available
 func (t *ThanosStack) validateAttachPrerequisites(ctx context.Context) error {
-	t.logger.Info("[VALIDATION] Checking attach prerequisites...")
+	t.logger.Info("Checking attach prerequisites...")
 
 	// Check kubectl
 	if _, err := utils.ExecuteCommand(ctx, "kubectl", "version", "--client"); err != nil {
@@ -1099,13 +1099,13 @@ func (t *ThanosStack) validateAttachPrerequisites(ctx context.Context) error {
 		return fmt.Errorf("namespace %s does not exist or is not accessible: %w", t.deployConfig.K8s.Namespace, err)
 	}
 
-	t.logger.Info("[VALIDATION] ✅ Attach prerequisites check passed")
+	t.logger.Info("✅ Attach prerequisites check passed")
 	return nil
 }
 
 // verifyEFSData creates a temporary pod to verify EFS data accessibility and op-geth metadata
 func (t *ThanosStack) verifyEFSData(ctx context.Context, namespace string) error {
-	t.logger.Info("[VERIFY] Checking EFS data...")
+	t.logger.Info("Checking EFS data...")
 
 	// Clean up any existing verify pod
 	_, _ = utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "delete", "pod", "verify-efs", "--ignore-not-found=true")
@@ -1131,7 +1131,7 @@ func (t *ThanosStack) verifyEFSData(ctx context.Context, namespace string) error
 		return fmt.Errorf("no op-geth PVC found in namespace %s", namespace)
 	}
 
-	t.logger.Infof("[VERIFY] Using PVC: %s", opGethPVC)
+	t.logger.Infof("Using PVC: %s", opGethPVC)
 
 	// Create verify pod with op-geth metadata checking capabilities
 	podYaml := fmt.Sprintf(`apiVersion: v1
@@ -1151,64 +1151,84 @@ spec:
       
       echo "🔍 Op-Geth Data Analysis"
       
-      GETH_DIRS=$(find /db -name "geth" -type d 2>/dev/null)
-      if [ -n "$GETH_DIRS" ]; then
-        
-        for GETH_DIR in $GETH_DIRS; do
-          
-          CHAINDATA_DIR="$GETH_DIR/chaindata"
-          if [ -d "$CHAINDATA_DIR" ]; then
-            echo "   ✅ Found chaindata: $CHAINDATA_DIR"
-            chaindata_size=$(du -sh "$CHAINDATA_DIR" 2>/dev/null | awk '{print $1}' || echo 'N/A')
-            file_count=$(find "$CHAINDATA_DIR" -type f 2>/dev/null | wc -l || echo '0')
-            echo "   📊 Size: $chaindata_size, Files: $file_count"
-            
-            # Set the first found chaindata as the primary one for further checks
-            if [ -z "${PRIMARY_CHAINDATA:-}" ]; then
-              PRIMARY_CHAINDATA="$CHAINDATA_DIR"
-            fi
-          fi
-        done
-      else
-        echo "⚠️  No geth directories found"
-        if [ -d "/db/chaindata" ]; then
-          echo "✅ Found chaindata at: /db/chaindata"
-          PRIMARY_CHAINDATA="/db/chaindata"
+      # Find the actual operational chaindata path (subPath-based)
+      OPERATIONAL_CHAINDATA=""
+      for subpath_dir in /db/*-op-geth; do
+        if [ -d "$subpath_dir/geth/chaindata" ]; then
+          OPERATIONAL_CHAINDATA="$subpath_dir/geth/chaindata"
+          break
         fi
+      done
+      
+      # Fallback to direct chaindata if no subPath found
+      if [ -z "$OPERATIONAL_CHAINDATA" ] && [ -d "/db/chaindata" ]; then
+        OPERATIONAL_CHAINDATA="/db/chaindata"
       fi
       
-      echo "Verification:"
-      
-      CHAINDATA_TO_CHECK="${PRIMARY_CHAINDATA:-}"
-      if [ -z "$CHAINDATA_TO_CHECK" ]; then
-        for potential_path in "/db/geth/chaindata" "/db/chaindata"; do
-          if [ -d "$potential_path" ]; then
-            CHAINDATA_TO_CHECK="$potential_path"
-            break
-          fi
-        done
+      if [ -n "$OPERATIONAL_CHAINDATA" ]; then
+        echo "   ✅ Operational chaindata: $OPERATIONAL_CHAINDATA"
+        chaindata_size=$(du -sh "$OPERATIONAL_CHAINDATA" 2>/dev/null | awk '{print $1}' || echo 'N/A')
+        file_count=$(find "$OPERATIONAL_CHAINDATA" -type f 2>/dev/null | wc -l || echo '0')
+        echo "   📊 Size: $chaindata_size, Files: $file_count"
+        PRIMARY_CHAINDATA="$OPERATIONAL_CHAINDATA"
+      else
+        echo "   ❌ No operational chaindata found"
       fi
       
-      if [ -n "$CHAINDATA_TO_CHECK" ] && [ -d "$CHAINDATA_TO_CHECK" ]; then
-        file_count=$(find "$CHAINDATA_TO_CHECK" -type f 2>/dev/null | wc -l || echo "0")
+      echo "🔍 Chaindata Integrity Check:"
+      
+      if [ -n "$PRIMARY_CHAINDATA" ] && [ -d "$PRIMARY_CHAINDATA" ]; then
+        file_count=$(find "$PRIMARY_CHAINDATA" -type f 2>/dev/null | wc -l || echo "0")
         
         if [ "$file_count" -gt 0 ]; then
-          echo "✅ Chaindata contains $file_count files"
+          echo "✅ Contains $file_count files"
           
-          # Extract the datadir from chaindata path (parent of geth directory)
-          DATADIR_PATH=$(dirname $(dirname "$CHAINDATA_TO_CHECK"))
-          
-          # Check database structure
-          if [ -f "$CHAINDATA_TO_CHECK/CURRENT" ]; then
-            echo "✅ Database structure valid"
+          # Check critical LevelDB files
+          if [ -f "$PRIMARY_CHAINDATA/CURRENT" ]; then
+            echo "✅ CURRENT file exists"
           else
-            echo "⚠️  Database structure incomplete"
+            echo "❌ CURRENT file missing - database corrupted"
+            exit 1
           fi
+          
+          if ls "$PRIMARY_CHAINDATA"/MANIFEST-* >/dev/null 2>&1; then
+            echo "✅ MANIFEST file exists"
+          else
+            echo "❌ MANIFEST file missing - database corrupted"
+            exit 1
+          fi
+          
+          # Check for LOG files (indicates recent activity)
+          log_files=$(find "$PRIMARY_CHAINDATA" -name "*.log" -type f 2>/dev/null | wc -l || echo "0")
+          if [ "$log_files" -gt 0 ]; then
+            echo "✅ Found $log_files LOG files"
+          else
+            echo "⚠️  No LOG files found"
+          fi
+          
+          # Check for SST files (actual data)
+          sst_files=$(find "$PRIMARY_CHAINDATA" -name "*.sst" -o -name "*.ldb" -type f 2>/dev/null | wc -l || echo "0")
+          if [ "$sst_files" -gt 0 ]; then
+            echo "✅ Found $sst_files data files"
+          else
+            echo "❌ No data files found - empty database"
+            exit 1
+          fi
+          
+          # Check for LOCK file (should not exist if geth is not running)
+          if [ -f "$PRIMARY_CHAINDATA/LOCK" ]; then
+            echo "⚠️  LOCK file exists - database may be in use"
+          else
+            echo "✅ No LOCK file - database available"
+          fi
+          
         else
-          echo "⚠️  Chaindata is empty"
+          echo "❌ Chaindata directory is empty"
+          exit 1
         fi
       else
-        echo "⚠️  No chaindata found"
+        echo "❌ No operational chaindata found"
+        exit 1
       fi
       echo ""
     volumeMounts:
@@ -1232,23 +1252,23 @@ spec:
 	}
 
 	// Wait for pod to complete
-	t.logger.Info("[VERIFY] Waiting for verification pod to complete...")
+	t.logger.Info("Waiting for verification pod to complete...")
 	for i := 0; i < 90; i++ { // Increased timeout to 3 minutes for geth operations
 		status, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pod", "verify-efs", "-o", "jsonpath={.status.phase}")
 		if err != nil {
-			t.logger.Infof("[VERIFY] Pod status check failed: %v", err)
+			t.logger.Infof("Pod status check failed: %v", err)
 			time.Sleep(2 * time.Second)
 			continue
 		}
 
 		status = strings.TrimSpace(status)
 		if status == "Succeeded" {
-			t.logger.Info("[VERIFY] ✅ EFS data verification completed successfully")
+			t.logger.Info("✅ EFS data verification completed successfully")
 
 			// Get and display pod logs with metadata information
 			logs, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "logs", "verify-efs")
 			if err != nil {
-				t.logger.Infof("[VERIFY] Warning: Could not retrieve verification logs: %v", err)
+				t.logger.Infof("Warning: Could not retrieve verification logs: %v", err)
 			} else {
 				t.logger.Info(logs)
 			}
@@ -1257,14 +1277,14 @@ spec:
 		if status == "Failed" {
 			// Get pod logs for analysis
 			logs, _ := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "logs", "verify-efs")
-			t.logger.Infof("[VERIFY] ❌ Pod failed. Logs:\n%s", logs)
+			t.logger.Infof("❌ Pod failed. Logs:\n%s", logs)
 			return fmt.Errorf("verification pod failed")
 		}
 		if status == "Pending" {
-			t.logger.Infof("[VERIFY] Pod is pending... (attempt %d/90)", i+1)
+			t.logger.Infof("Pod is pending... (attempt %d/90)", i+1)
 		}
 		if status == "Running" {
-			t.logger.Infof("[VERIFY] Pod is running... (attempt %d/90)", i+1)
+			t.logger.Infof("Pod is running... (attempt %d/90)", i+1)
 		}
 		time.Sleep(2 * time.Second)
 	}
@@ -1276,7 +1296,7 @@ spec:
 
 // updatePVVolumeHandles updates PV volume handles to point to new EFS
 func (t *ThanosStack) updatePVVolumeHandles(ctx context.Context, namespace, newEfs string, pvcs *string) error {
-	t.logger.Infof("[ATTACH] Updating PV volume handles to EFS: %s", newEfs)
+	t.logger.Infof("Updating PV volume handles to EFS: %s", newEfs)
 
 	var targetPVCs []string
 
@@ -1315,17 +1335,17 @@ func (t *ThanosStack) updatePVVolumeHandles(ctx context.Context, namespace, newE
 			}
 
 			if resolvedPVC == "" {
-				t.logger.Warnf("[WARNING] PVC alias '%s' did not match any PVC in namespace %s", alias, namespace)
+				t.logger.Warnf("PVC alias '%s' did not match any PVC in namespace %s", alias, namespace)
 				continue
 			}
 
 			// Validate resolved PVC exists
 			if _, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", resolvedPVC); err != nil {
-				t.logger.Warnf("[WARNING] PVC %s not found after resolution, skipping", resolvedPVC)
+				t.logger.Warnf("PVC %s not found after resolution, skipping", resolvedPVC)
 				continue
 			}
 
-			t.logger.Infof("[ATTACH] Resolved PVC alias '%s' -> '%s'", alias, resolvedPVC)
+			t.logger.Infof("Resolved PVC alias '%s' -> '%s'", alias, resolvedPVC)
 			targetPVCs = append(targetPVCs, resolvedPVC)
 		}
 	} else {
@@ -1339,7 +1359,7 @@ func (t *ThanosStack) updatePVVolumeHandles(ctx context.Context, namespace, newE
 		for _, pvc := range strings.Fields(pvcsList) {
 			if strings.Contains(pvc, "op-geth") || strings.Contains(pvc, "op-node") {
 				targetPVCs = append(targetPVCs, pvc)
-				t.logger.Infof("[ATTACH] Found PVC: %s", pvc)
+				t.logger.Infof("Found PVC: %s", pvc)
 			}
 		}
 	}
@@ -1349,7 +1369,7 @@ func (t *ThanosStack) updatePVVolumeHandles(ctx context.Context, namespace, newE
 	}
 
 	// Since PV volumeHandle is immutable, we need to delete and recreate PVs
-	t.logger.Infof("[ATTACH] PV volumeHandle is immutable, deleting and recreating PVs with new EFS...")
+	t.logger.Infof("PV volumeHandle is immutable, deleting and recreating PVs with new EFS...")
 
 	successCount := 0
 	for _, pvcName := range targetPVCs {
@@ -1361,25 +1381,25 @@ func (t *ThanosStack) updatePVVolumeHandles(ctx context.Context, namespace, newE
 		// Get current PV name from PVC
 		pvName, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", pvcName, "-o", "jsonpath={.spec.volumeName}")
 		if err != nil {
-			t.logger.Errorf("[ERROR] Failed to get PV name for PVC %s: %v", pvcName, err)
+			t.logger.Errorf("Failed to get PV name for PVC %s: %v", pvcName, err)
 			continue
 		}
 		pvName = strings.TrimSpace(pvName)
 		if pvName == "" {
-			t.logger.Warnf("[WARNING] PVC %s has no volumeName, skipping", pvcName)
+			t.logger.Warnf("PVC %s has no volumeName, skipping", pvcName)
 			continue
 		}
 
-		t.logger.Infof("[ATTACH] Processing PVC: %s (PV: %s)", pvcName, pvName)
+		t.logger.Infof("Processing PVC: %s (PV: %s)", pvcName, pvName)
 
 		// Delete the PVC first (this will also delete the PV if it's dynamically provisioned)
-		t.logger.Infof("[ATTACH] Deleting PVC %s...", pvcName)
+		t.logger.Infof("Deleting PVC %s...", pvcName)
 
 		// First, delete pods that use this PVC
 		podsUsingPVC, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pods", "-o", "jsonpath={range .items[?(@.spec.volumes[*].persistentVolumeClaim.claimName=='"+pvcName+"')]}{.metadata.name}{\"\\n\"}{end}")
 		if err == nil && strings.TrimSpace(podsUsingPVC) != "" {
 			for _, podName := range strings.Fields(podsUsingPVC) {
-				t.logger.Infof("[ATTACH] Deleting pod %s that uses PVC %s...", podName, pvcName)
+				t.logger.Infof("Deleting pod %s that uses PVC %s...", podName, pvcName)
 				utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "delete", "pod", podName, "--ignore-not-found=true")
 			}
 			// Wait for pods to be deleted
@@ -1388,14 +1408,14 @@ func (t *ThanosStack) updatePVVolumeHandles(ctx context.Context, namespace, newE
 
 		// Delete PVC
 		if _, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "delete", "pvc", pvcName); err != nil {
-			t.logger.Errorf("[ERROR] Failed to delete PVC %s: %v", pvcName, err)
+			t.logger.Errorf("Failed to delete PVC %s: %v", pvcName, err)
 			continue
 		}
 
 		// Delete the old PV
-		t.logger.Infof("[ATTACH] Deleting old PV %s...", pvName)
+		t.logger.Infof("Deleting old PV %s...", pvName)
 		if _, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "pv", pvName, "--ignore-not-found=true"); err != nil {
-			t.logger.Warnf("[WARNING] Failed to delete PV %s: %v", pvName, err)
+			t.logger.Warnf("Failed to delete PV %s: %v", pvName, err)
 		}
 
 		// Wait a moment for deletion to complete
@@ -1422,13 +1442,13 @@ spec:
 
 		tempPVFile := fmt.Sprintf("/tmp/new-pv-%s.yaml", pvName)
 		if err := os.WriteFile(tempPVFile, []byte(newPVYaml), 0644); err != nil {
-			t.logger.Errorf("[ERROR] Failed to create temporary PV YAML file: %v", err)
+			t.logger.Errorf("Failed to create temporary PV YAML file: %v", err)
 			continue
 		}
 		defer os.Remove(tempPVFile)
 
 		if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempPVFile); err != nil {
-			t.logger.Errorf("[ERROR] Failed to create new PV %s: %v", pvName, err)
+			t.logger.Errorf("Failed to create new PV %s: %v", pvName, err)
 			continue
 		}
 
@@ -1453,18 +1473,18 @@ spec:
 
 		tempPVCFile := fmt.Sprintf("/tmp/new-pvc-%s.yaml", pvcName)
 		if err := os.WriteFile(tempPVCFile, []byte(newPVCYaml), 0644); err != nil {
-			t.logger.Errorf("[ERROR] Failed to create temporary PVC YAML file: %v", err)
+			t.logger.Errorf("Failed to create temporary PVC YAML file: %v", err)
 			continue
 		}
 		defer os.Remove(tempPVCFile)
 
 		if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempPVCFile); err != nil {
-			t.logger.Errorf("[ERROR] Failed to create new PVC %s: %v", pvcName, err)
+			t.logger.Errorf("Failed to create new PVC %s: %v", pvcName, err)
 			continue
 		}
 
 		// Wait for PVC to be bound
-		t.logger.Infof("[ATTACH] Waiting for PVC %s to be bound...", pvcName)
+		t.logger.Infof("Waiting for PVC %s to be bound...", pvcName)
 		for i := 0; i < 30; i++ { // Wait up to 30 seconds
 			status, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", pvcName, "-o", "jsonpath={.status.phase}")
 			if err == nil && strings.TrimSpace(status) == "Bound" {
@@ -1473,7 +1493,7 @@ spec:
 			time.Sleep(1 * time.Second)
 		}
 
-		t.logger.Infof("[ATTACH] ✅ PVC %s and PV %s recreated successfully with new EFS", pvcName, pvName)
+		t.logger.Infof("✅ PVC %s and PV %s recreated successfully with new EFS", pvcName, pvName)
 		successCount++
 	}
 
@@ -1481,13 +1501,13 @@ spec:
 		return fmt.Errorf("failed to recreate any PVCs/PVs")
 	}
 
-	t.logger.Infof("[ATTACH] ✅ Successfully recreated %d/%d PVCs with new EFS", successCount, len(targetPVCs))
+	t.logger.Infof("✅ Successfully recreated %d/%d PVCs with new EFS", successCount, len(targetPVCs))
 	return nil
 }
 
 // restartStatefulSets restarts specified StatefulSets
 func (t *ThanosStack) restartStatefulSets(ctx context.Context, namespace, stss string) error {
-	t.logger.Infof("[RESTART] Restarting StatefulSets: %s", stss)
+	t.logger.Infof("Restarting StatefulSets: %s", stss)
 
 	successCount := 0
 
@@ -1524,14 +1544,14 @@ func (t *ThanosStack) restartStatefulSets(ctx context.Context, namespace, stss s
 		}
 
 		if resolved == "" {
-			t.logger.Warnf("[WARNING] StatefulSet alias '%s' not found in namespace %s, skipping", sts, namespace)
+			t.logger.Warnf("StatefulSet alias '%s' not found in namespace %s, skipping", sts, namespace)
 			continue
 		}
 
 		if _, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "rollout", "restart", fmt.Sprintf("statefulset/%s", resolved)); err != nil {
-			t.logger.Errorf("[ERROR] Failed to restart StatefulSet %s: %v", resolved, err)
+			t.logger.Errorf("Failed to restart StatefulSet %s: %v", resolved, err)
 		} else {
-			t.logger.Infof("[RESTART] ✅ StatefulSet %s restarted successfully", resolved)
+			t.logger.Infof("✅ StatefulSet %s restarted successfully", resolved)
 			successCount++
 		}
 	}
@@ -1540,13 +1560,13 @@ func (t *ThanosStack) restartStatefulSets(ctx context.Context, namespace, stss s
 		return fmt.Errorf("failed to restart any StatefulSets")
 	}
 
-	t.logger.Infof("[RESTART] ✅ Successfully restarted %d StatefulSets", successCount)
+	t.logger.Infof("✅ Successfully restarted %d StatefulSets", successCount)
 	return nil
 }
 
 // performHealthCheck performs health check on the cluster
 func (t *ThanosStack) performHealthCheck(ctx context.Context, namespace string) error {
-	t.logger.Info("[HEALTH] Performing health check...")
+	t.logger.Info("Performing health check...")
 
 	// 1) Check op-geth and op-node restarted
 	labels := map[string]string{
@@ -1571,14 +1591,14 @@ func (t *ThanosStack) performHealthCheck(ctx context.Context, namespace string) 
 			}
 		}
 		if restarted[comp] {
-			t.logger.Infof("[HEALTH] ✅ %s restarted (pod: %s)", comp, pod)
+			t.logger.Infof("✅ %s restarted (pod: %s)", comp, pod)
 		} else {
-			t.logger.Infof("[HEALTH] ℹ️ %s shows no container restarts (pod: %s)", comp, pod)
+			t.logger.Infof("ℹ️ %s shows no container restarts (pod: %s)", comp, pod)
 		}
 	}
 
 	if !restarted["op-geth"] || !restarted["op-node"] {
-		t.logger.Info("[HEALTH] Warning: One or more components did not report a container restart.")
+		t.logger.Info("Warning: One or more components did not report a container restart.")
 	}
 
 	// 2) Fetch and print L1 and L2 block numbers
@@ -1626,16 +1646,16 @@ func (t *ThanosStack) performHealthCheck(ctx context.Context, namespace string) 
 
 	l2Block, l2Err := queryBlock(l2URL)
 	if l2Err != nil {
-		t.logger.Infof("[HEALTH] ❌ Failed to fetch L2 block: %v", l2Err)
+		t.logger.Infof("❌ Failed to fetch L2 block: %v", l2Err)
 	} else {
-		t.logger.Infof("[HEALTH] L2 latest block: %s (via %s)", l2Block, l2URL)
+		t.logger.Infof("L2 latest block: %s (via %s)", l2Block, l2URL)
 	}
 
 	l1Block, l1Err := queryBlock(l1URL)
 	if l1Err != nil {
-		t.logger.Infof("[HEALTH] ❌ Failed to fetch L1 block: %v", l1Err)
+		t.logger.Infof("❌ Failed to fetch L1 block: %v", l1Err)
 	} else {
-		t.logger.Infof("[HEALTH] L1 latest block (on-chain): %s (via %s)", l1Block, l1URL)
+		t.logger.Infof("L1 latest block (on-chain): %s (via %s)", l1Block, l1URL)
 	}
 
 	// Additionally, fetch L1 block height as seen by op-node (synced view)
@@ -1645,7 +1665,7 @@ func (t *ThanosStack) performHealthCheck(ctx context.Context, namespace string) 
 		val, err := utils.ExecuteCommand(ctx, "bash", "-c", fmt.Sprintf("curl -s %s | grep -m1 '^op_node_l1_head' | awk '{print $NF}'", metricsURL))
 		if err == nil && strings.TrimSpace(val) != "" {
 			opNodeSynced = strings.TrimSpace(val)
-			t.logger.Infof("[HEALTH] L1 latest block (op-node synced): %s (via %s)", opNodeSynced, metricsURL)
+			t.logger.Infof("L1 latest block (op-node synced): %s (via %s)", opNodeSynced, metricsURL)
 		} else {
 			// Fallback: try rollup_getInfo on op-node RPC (default 8547)
 			opNodeRPC := fmt.Sprintf("http://%s.%s.svc.cluster.local:8547", svcs[0], namespace)
@@ -1661,15 +1681,15 @@ func (t *ThanosStack) performHealthCheck(ctx context.Context, namespace string) 
 					v, jqErr := utils.ExecuteCommand(ctx, "bash", "-c", fmt.Sprintf(`echo %s | jq -r '%s'`, strings.ReplaceAll(strings.TrimSpace(res), "'", "\\'"), p))
 					if jqErr == nil && strings.TrimSpace(v) != "" && strings.TrimSpace(v) != "null" {
 						opNodeSynced = strings.TrimSpace(v)
-						t.logger.Infof("[HEALTH] L1 latest block (op-node synced): %s (via %s rollup_getInfo)", opNodeSynced, opNodeRPC)
+						t.logger.Infof("L1 latest block (op-node synced): %s (via %s rollup_getInfo)", opNodeSynced, opNodeRPC)
 						break
 					}
 				}
 				if opNodeSynced == "" {
-					t.logger.Infof("[HEALTH] ℹ️ Could not parse op-node synced L1 block from rollup_getInfo")
+					t.logger.Infof("ℹ️ Could not parse op-node synced L1 block from rollup_getInfo")
 				}
 			} else {
-				t.logger.Infof("[HEALTH] ℹ️ Could not reach op-node metrics or RPC for synced L1 block")
+				t.logger.Infof("ℹ️ Could not reach op-node metrics or RPC for synced L1 block")
 			}
 		}
 	}
@@ -1683,7 +1703,7 @@ func (t *ThanosStack) performHealthCheck(ctx context.Context, namespace string) 
 
 // printAttachSummary prints a summary of the attach operation
 func (t *ThanosStack) printAttachSummary(newEfs string, pvcs *string, stss *string) {
-	t.logger.Info("\n[SUMMARY] Attach operation completed:")
+	t.logger.Info("\nAttach operation completed:")
 	if newEfs != "" {
 		t.logger.Infof("  EFS FileSystemId: %s", newEfs)
 	}
@@ -1718,9 +1738,9 @@ func (t *ThanosStack) BackupConfigure(ctx context.Context, on *bool, off *bool, 
 		}
 		_, err := utils.ExecuteCommand(ctx, "bash", "-c", fmt.Sprintf("cd %s && source .envrc && cd thanos-stack && terraform init && terraform plan %s && terraform apply %s", tfRoot, strings.Join(varArgs, " "), strings.Join(varArgs, " ")))
 		if err != nil {
-			t.logger.Info("[EFS] terraform apply failed:", err)
+			t.logger.Info("terraform apply failed:", err)
 		} else {
-			t.logger.Info("[EFS] terraform apply completed")
+			t.logger.Info("terraform apply completed")
 		}
 	}
 
@@ -1739,9 +1759,9 @@ func (t *ThanosStack) BackupConfigure(ctx context.Context, on *bool, off *bool, 
 		}
 		_, err := utils.ExecuteCommand(ctx, "bash", "-c", fmt.Sprintf("cd %s && source .envrc && cd block-explorer && terraform init && terraform plan %s && terraform apply %s", tfRoot, strings.Join(varArgs, " "), strings.Join(varArgs, " ")))
 		if err != nil {
-			t.logger.Info("[RDS] terraform apply failed:", err)
+			t.logger.Info("terraform apply failed:", err)
 		} else {
-			t.logger.Info("[RDS] terraform apply completed")
+			t.logger.Info("terraform apply completed")
 		}
 	}
 	return nil
@@ -1814,7 +1834,7 @@ func (t *ThanosStack) selectRecoveryPoint(ctx context.Context) (string, error) {
 	// Get backup vault name from namespace
 	vaultName := fmt.Sprintf("%s-backup-vault", namespace)
 
-	t.logger.Infof("\n[SELECTION] Available EFS Recovery Points from Backup Vault: %s", vaultName)
+	t.logger.Infof("\nAvailable EFS Recovery Points from Backup Vault: %s", vaultName)
 	t.logger.Info("   -------------------------------------------------")
 
 	// Get recent recovery points from backup vault (max 5, EFS only)
