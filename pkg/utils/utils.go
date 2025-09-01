@@ -157,8 +157,8 @@ func ConvertChainNameToNamespace(chainName string) string {
 	processed = strings.ReplaceAll(processed, " ", "-")
 	processed = regexp.MustCompile(`[^a-z0-9-]`).ReplaceAllString(processed, "")
 	processed = strings.Trim(processed, "-")
-	if len(processed) > 20 {
-		processed = processed[:20]
+	if len(processed) > 14 {
+		processed = processed[:14]
 	}
 
 	// Generate random 5-character string with a-z and 0-9

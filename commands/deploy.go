@@ -113,7 +113,12 @@ func ActionDeploy() cli.ActionFunc {
 					fmt.Println("Error getting GitHub credentials:", err)
 					return err
 				}
+				metadataInfo, err := utils.ReadMetadataInfoFromJSONFile(deploymentPath, config.L1ChainID)
+				if err != nil {
+					return fmt.Errorf("failed to read metadata info: %w", err)
+				}
 				inputs.GithubCredentials = creds
+				inputs.MetadataInfo = metadataInfo
 			}
 
 			err = thanosStack.Deploy(ctx, infraOpt, inputs)

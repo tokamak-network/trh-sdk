@@ -24,8 +24,8 @@ import (
 )
 
 var (
-	// Chain name must be 10 characters or less, and can only contain letters, numbers, and spaces
-	chainNameRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9 ]{0,15}$`)
+	// Chain name must be 14 characters or less, and can only contain letters, numbers, and spaces
+	chainNameRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9 ]{0,13}$`)
 	// Pre-compiled regex patterns for validation
 	telegramTokenRegex = regexp.MustCompile(`^\d+:[A-Za-z0-9_-]+$`)
 	chatIdRegex        = regexp.MustCompile(`^-?\d+$`)
@@ -86,6 +86,7 @@ type DeployInfraInput struct {
 
 	// register metadata
 	GithubCredentials *types.GitHubCredentials
+	MetadataInfo      *types.MetadataInfo
 }
 
 func (c *DeployInfraInput) Validate(ctx context.Context) error {
@@ -98,7 +99,7 @@ func (c *DeployInfraInput) Validate(ctx context.Context) error {
 	}
 
 	if !chainNameRegex.MatchString(c.ChainName) {
-		return errors.New("invalid chain name, chain name must contain only letters (a-z, A-Z), numbers (0-9), spaces with 15 characters or less. Special characters are not allowed")
+		return errors.New("invalid chain name, chain name must contain only letters (a-z, A-Z), numbers (0-9), spaces with 14 characters or less. Special characters are not allowed")
 	}
 
 	return nil
@@ -150,28 +151,24 @@ func (i *InstallMonitoringInput) Validate() error {
 
 	if i.AlertManager.Email.Enabled {
 		if i.AlertManager.Email.SmtpFrom == "" {
-			return errors.New("from email address is required when Email is enabled")
-		}
-
-		if i.AlertManager.Email.SmtpAuthUsername == "" {
-			return errors.New("Gmail address is required when Email is enabled")
+			return errors.New("gmail address is required when Email is enabled")
 		}
 
 		if i.AlertManager.Email.SmtpAuthPassword == "" {
-			return errors.New("Gmail app password is required when Email is enabled")
+			return errors.New("gmail app password is required when Email is enabled")
 		}
 
-		if len(i.AlertManager.Email.CriticalReceivers) == 0 {
+		if len(i.AlertManager.Email.AlertReceivers) == 0 {
 			return errors.New("at least one email receiver is required when Email is enabled")
 		}
 
-		// Validate from email
+		// Validate gmail address
 		if !emailRegex.MatchString(i.AlertManager.Email.SmtpFrom) {
-			return fmt.Errorf("invalid from email address format: %s", i.AlertManager.Email.SmtpFrom)
+			return fmt.Errorf("invalid gmail address format: %s", i.AlertManager.Email.SmtpFrom)
 		}
 
 		// Validate receiver emails
-		for _, receiver := range i.AlertManager.Email.CriticalReceivers {
+		for _, receiver := range i.AlertManager.Email.AlertReceivers {
 			if !emailRegex.MatchString(receiver) {
 				return fmt.Errorf("invalid email receiver format: %s", receiver)
 			}
@@ -471,7 +468,7 @@ func InputDeployInfra() (*DeployInfraInput, error) {
 		}
 
 		if !chainNameRegex.MatchString(chainName) {
-			fmt.Println("Input must contain only letters (a-z, A-Z), numbers (0-9), spaces with 15 characters or less. Special characters are not allowed")
+			fmt.Println("Input must contain only letters (a-z, A-Z), numbers (0-9), spaces with 14 characters or less. Special characters are not allowed")
 			continue
 		}
 
@@ -833,31 +830,29 @@ func getEmailConfigFromUser() types.EmailConfig {
 	fmt.Printf("✅ Using Gmail SMTP: %s\n", smtpSmarthost)
 
 	// Get Gmail address
-	var smtpAuthUsername string
+	var smtpFrom string
 	for {
 		fmt.Print("Enter Gmail Address: ")
-		smtpAuthUsername, err = scanner.ScanString()
+		smtpFrom, err = scanner.ScanString()
 		if err != nil {
 			fmt.Printf("Error while reading Gmail Address: %s\n", err)
 			return types.EmailConfig{Enabled: false}
 		}
 
 		// Validate Gmail address format
-		if smtpAuthUsername == "" {
+		if smtpFrom == "" {
 			fmt.Println("⚠️  Gmail address cannot be empty")
 			continue
 		}
 
 		// Basic email validation
-		if !emailRegex.MatchString(smtpAuthUsername) {
+		if !emailRegex.MatchString(smtpFrom) {
 			fmt.Println("⚠️  Invalid email address format")
 			continue
 		}
 		break
 	}
 
-	// Set from address same as Gmail address
-	smtpFrom := smtpAuthUsername
 	fmt.Printf("✅ From Email Address: %s\n", smtpFrom)
 
 	var smtpAuthPassword string
@@ -934,13 +929,11 @@ func getEmailConfigFromUser() types.EmailConfig {
 	}
 
 	return types.EmailConfig{
-		Enabled:           enabled,
-		SmtpSmarthost:     smtpSmarthost,
-		SmtpFrom:          smtpFrom,
-		SmtpAuthUsername:  smtpAuthUsername,
-		SmtpAuthPassword:  smtpAuthPassword,
-		DefaultReceivers:  receivers,
-		CriticalReceivers: receivers,
+		Enabled:          enabled,
+		SmtpSmarthost:    smtpSmarthost,
+		SmtpFrom:         smtpFrom,
+		SmtpAuthPassword: smtpAuthPassword,
+		AlertReceivers:   receivers,
 	}
 }
 
@@ -964,7 +957,7 @@ func getEmailConfigSummary(config types.EmailConfig) string {
 		return "Disabled"
 	}
 
-	receiverCount := len(config.CriticalReceivers)
+	receiverCount := len(config.AlertReceivers)
 	if receiverCount == 0 {
 		return "Enabled (no receivers configured)"
 	}

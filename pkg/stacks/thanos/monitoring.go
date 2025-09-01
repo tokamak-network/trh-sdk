@@ -221,8 +221,21 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 // UninstallMonitoring removes monitoring plugin
 func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 	logger := t.getLogger()
-	logger.Info("Starting monitoring uninstallation...")
 	monitoringNamespace := constants.MonitoringNamespace
+
+	// Check if monitoring namespace exists first
+	exists, err := utils.CheckNamespaceExists(ctx, monitoringNamespace)
+	if err != nil {
+		logger.Errorw("Failed to check monitoring namespace existence", "err", err)
+		return err
+	}
+
+	if !exists {
+		// Monitoring namespace doesn't exist, skip uninstallation silently
+		return nil
+	}
+
+	logger.Info("Starting monitoring uninstallation...")
 
 	if t.deployConfig == nil || t.deployConfig.K8s == nil {
 		logger.Warn("Deploy configuration is not initialized, skip monitoring uninstallation")
@@ -1310,7 +1323,7 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *types.MonitoringC
 	if config.AlertManager.Email.Enabled {
 		emailConfigs := []map[string]interface{}{}
 		templates := t.generateAlertTemplates(grafanaURL)
-		for _, email := range config.AlertManager.Email.CriticalReceivers {
+		for _, email := range config.AlertManager.Email.AlertReceivers {
 			if email != "" {
 				emailConfigs = append(emailConfigs, map[string]interface{}{
 					"to": email,
@@ -1373,7 +1386,7 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *types.MonitoringC
 		alertManagerConfig["global"] = map[string]interface{}{
 			"smtp_smarthost":     config.AlertManager.Email.SmtpSmarthost,
 			"smtp_from":          config.AlertManager.Email.SmtpFrom,
-			"smtp_auth_username": config.AlertManager.Email.SmtpAuthUsername,
+			"smtp_auth_username": config.AlertManager.Email.SmtpFrom,
 			"smtp_auth_password": config.AlertManager.Email.SmtpAuthPassword,
 		}
 	}

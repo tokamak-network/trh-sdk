@@ -45,13 +45,11 @@ type TelegramReceiver struct {
 
 // EmailConfig holds email notification configuration
 type EmailConfig struct {
-	Enabled           bool
-	SmtpSmarthost     string
-	SmtpFrom          string
-	SmtpAuthUsername  string
-	SmtpAuthPassword  string
-	DefaultReceivers  []string
-	CriticalReceivers []string
+	Enabled          bool
+	SmtpSmarthost    string
+	SmtpFrom         string
+	SmtpAuthPassword string
+	AlertReceivers   []string
 }
 
 // EmailReceiver represents an email recipient configuration
