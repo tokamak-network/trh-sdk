@@ -1324,7 +1324,7 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *types.MonitoringC
 					"headers": map[string]string{
 						"subject": templates["email_subject"],
 					},
-					"html": "<p>" + templates["email_message"] + "</p>",
+					"html": templates["email_html"],
 				})
 			}
 		}
