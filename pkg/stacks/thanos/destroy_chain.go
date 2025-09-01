@@ -100,6 +100,11 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 		return err
 	}
 
+	// Cleanup unused backup resources after infrastructure destruction
+	if err := t.CleanupUnusedBackupResources(ctx); err != nil {
+		t.logger.Warnf("Failed to cleanup unused backup resources: %v", err)
+	}
+
 	t.logger.Info("✅The chain has been destroyed successfully!")
 	return nil
 }

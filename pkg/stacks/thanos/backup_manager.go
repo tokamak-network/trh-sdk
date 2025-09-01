@@ -2020,3 +2020,206 @@ func (t *ThanosStack) interactiveEFSRestore(ctx context.Context) error {
 	t.logger.Info("\n🎉 EFS restore completed!")
 	return fmt.Errorf("completed") // Special marker for successful completion
 }
+
+// CleanupUnusedBackupResources removes unused EFS filesystems and old recovery points during deploy
+func (t *ThanosStack) CleanupUnusedBackupResources(ctx context.Context) error {
+	t.logger.Info("🧹 Cleaning up unused backup resources...")
+
+	region := t.deployConfig.AWS.Region
+	namespace := t.deployConfig.K8s.Namespace
+
+	// Get account ID
+	accountID, err := utils.DetectAWSAccountID(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to detect AWS account ID: %w", err)
+	}
+
+	// 1. Cleanup old recovery points
+	if err := t.cleanupOldRecoveryPoints(ctx, region, namespace, accountID); err != nil {
+		t.logger.Warnf("Failed to cleanup old recovery points: %v", err)
+	}
+
+	// 2. Cleanup unused EFS filesystems
+	if err := t.cleanupUnusedEFS(ctx, region, namespace); err != nil {
+		t.logger.Warnf("Failed to cleanup unused EFS: %v", err)
+	}
+
+	t.logger.Info("✅ Backup resources cleanup completed")
+	return nil
+}
+
+// cleanupOldRecoveryPoints removes recovery points older than 7 days
+func (t *ThanosStack) cleanupOldRecoveryPoints(ctx context.Context, region, namespace, accountID string) error {
+	t.logger.Info("🗑️ Cleaning up old recovery points...")
+
+	// Get current EFS ID to find its recovery points
+	currentEfsID, err := utils.DetectEFSId(ctx, namespace)
+	if err != nil {
+		t.logger.Warn("Could not detect current EFS ID, skipping recovery point cleanup")
+		return nil
+	}
+
+	arn := utils.BuildEFSArn(region, accountID, currentEfsID)
+
+	// List recovery points older than 7 days
+	cutoffDate := time.Now().AddDate(0, 0, -7).Format("2006-01-02T15:04:05.000000-07:00")
+
+	rpList, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-recovery-points-by-resource",
+		"--region", region,
+		"--resource-arn", arn,
+		"--query", fmt.Sprintf("RecoveryPoints[?CreationDate<='%s'].{Arn:RecoveryPointArn,Created:CreationDate}", cutoffDate),
+		"--output", "json")
+
+	if err != nil {
+		return fmt.Errorf("failed to list old recovery points: %w", err)
+	}
+
+	if strings.TrimSpace(rpList) == "[]" || strings.TrimSpace(rpList) == "" {
+		t.logger.Info("No old recovery points found to cleanup")
+		return nil
+	}
+
+	// Parse and delete old recovery points
+	var recoveryPoints []struct {
+		Arn     string `json:"Arn"`
+		Created string `json:"Created"`
+	}
+
+	if err := json.Unmarshal([]byte(rpList), &recoveryPoints); err != nil {
+		return fmt.Errorf("failed to parse recovery points list: %w", err)
+	}
+
+	deletedCount := 0
+	for _, rp := range recoveryPoints {
+		t.logger.Infof("Deleting old recovery point: %s (created: %s)", rp.Arn, rp.Created)
+
+		_, err := utils.ExecuteCommand(ctx, "aws", "backup", "delete-recovery-point",
+			"--region", region,
+			"--backup-vault-name", fmt.Sprintf("%s-backup-vault", namespace),
+			"--recovery-point-arn", rp.Arn)
+
+		if err != nil {
+			t.logger.Warnf("Failed to delete recovery point %s: %v", rp.Arn, err)
+		} else {
+			deletedCount++
+			t.logger.Infof("✅ Deleted recovery point: %s", rp.Arn)
+		}
+	}
+
+	if deletedCount > 0 {
+		t.logger.Infof("✅ Deleted %d old recovery points", deletedCount)
+	}
+
+	return nil
+}
+
+// cleanupUnusedEFS removes EFS filesystems that are not currently in use
+func (t *ThanosStack) cleanupUnusedEFS(ctx context.Context, region, namespace string) error {
+	t.logger.Info("🗑️ Cleaning up unused EFS filesystems...")
+
+	// Get current EFS ID in use
+	currentEfsID, err := utils.DetectEFSId(ctx, namespace)
+	if err != nil {
+		t.logger.Warn("Could not detect current EFS ID, skipping EFS cleanup")
+		return nil
+	}
+
+	// List all EFS filesystems with our naming pattern
+	efsPattern := fmt.Sprintf("%s-*", namespace)
+
+	efsList, err := utils.ExecuteCommand(ctx, "aws", "efs", "describe-file-systems",
+		"--region", region,
+		"--query", "FileSystems[?starts_with(Name, `"+efsPattern+"`) && FileSystemId != `"+currentEfsID+"`].{Id:FileSystemId,Name:Name,State:LifeCycleState}",
+		"--output", "json")
+
+	if err != nil {
+		return fmt.Errorf("failed to list EFS filesystems: %w", err)
+	}
+
+	if strings.TrimSpace(efsList) == "[]" || strings.TrimSpace(efsList) == "" {
+		t.logger.Info("No unused EFS filesystems found to cleanup")
+		return nil
+	}
+
+	// Parse EFS list
+	var filesystems []struct {
+		Id    string `json:"Id"`
+		Name  string `json:"Name"`
+		State string `json:"State"`
+	}
+
+	if err := json.Unmarshal([]byte(efsList), &filesystems); err != nil {
+		return fmt.Errorf("failed to parse EFS list: %w", err)
+	}
+
+	deletedCount := 0
+	for _, efs := range filesystems {
+		if efs.State != "available" {
+			t.logger.Warnf("Skipping EFS %s (state: %s)", efs.Id, efs.State)
+			continue
+		}
+
+		t.logger.Infof("Deleting unused EFS: %s (%s)", efs.Id, efs.Name)
+
+		// Delete mount targets first
+		if err := t.deleteEFSMountTargets(ctx, region, efs.Id); err != nil {
+			t.logger.Warnf("Failed to delete mount targets for %s: %v", efs.Id, err)
+			continue
+		}
+
+		// Wait for mount targets to be deleted
+		time.Sleep(10 * time.Second)
+
+		// Delete the EFS filesystem
+		_, err := utils.ExecuteCommand(ctx, "aws", "efs", "delete-file-system",
+			"--region", region,
+			"--file-system-id", efs.Id)
+
+		if err != nil {
+			t.logger.Warnf("Failed to delete EFS %s: %v", efs.Id, err)
+		} else {
+			deletedCount++
+			t.logger.Infof("✅ Deleted EFS filesystem: %s", efs.Id)
+		}
+	}
+
+	if deletedCount > 0 {
+		t.logger.Infof("✅ Deleted %d unused EFS filesystems", deletedCount)
+	}
+
+	return nil
+}
+
+// deleteEFSMountTargets removes all mount targets for an EFS filesystem
+func (t *ThanosStack) deleteEFSMountTargets(ctx context.Context, region, efsId string) error {
+	// List mount targets
+	mtList, err := utils.ExecuteCommand(ctx, "aws", "efs", "describe-mount-targets",
+		"--region", region,
+		"--file-system-id", efsId,
+		"--query", "MountTargets[].MountTargetId",
+		"--output", "text")
+
+	if err != nil {
+		return fmt.Errorf("failed to list mount targets: %w", err)
+	}
+
+	mountTargets := strings.Fields(strings.TrimSpace(mtList))
+
+	for _, mtId := range mountTargets {
+		if mtId == "" || mtId == "None" {
+			continue
+		}
+
+		t.logger.Infof("Deleting mount target: %s", mtId)
+
+		_, err := utils.ExecuteCommand(ctx, "aws", "efs", "delete-mount-target",
+			"--region", region,
+			"--mount-target-id", mtId)
+
+		if err != nil {
+			t.logger.Warnf("Failed to delete mount target %s: %v", mtId, err)
+		}
+	}
+
+	return nil
+}
