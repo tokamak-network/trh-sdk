@@ -1004,9 +1004,9 @@ func (t *ThanosStack) validateAttachPrerequisites(ctx context.Context) error {
 	return nil
 }
 
-// verifyEFSData creates a temporary pod to verify EFS data accessibility
+// verifyEFSData creates a temporary pod to verify EFS data accessibility and op-geth metadata
 func (t *ThanosStack) verifyEFSData(ctx context.Context, namespace string) error {
-	fmt.Println("[VERIFY] Creating temporary pod to verify EFS data...")
+	fmt.Println("[VERIFY] Creating temporary pod to verify EFS data and op-geth metadata...")
 
 	// Clean up any existing verify pod
 	_, _ = utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "delete", "pod", "verify-efs", "--ignore-not-found=true")
@@ -1034,7 +1034,7 @@ func (t *ThanosStack) verifyEFSData(ctx context.Context, namespace string) error
 
 	fmt.Printf("[VERIFY] Using PVC: %s\n", opGethPVC)
 
-	// Create verify pod
+	// Create verify pod with op-geth metadata checking capabilities
 	podYaml := fmt.Sprintf(`apiVersion: v1
 kind: Pod
 metadata:
@@ -1043,9 +1043,126 @@ metadata:
 spec:
   containers:
   - name: verify
-    image: alpine:latest
+    image: ethereum/client-go:latest
     command: ["/bin/sh", "-c"]
-    args: ["ls -la /db || true; echo 'EFS verification completed'; sleep 5"]
+    args:
+    - |
+      echo "=== EFS Data Verification ==="
+      echo "Checking EFS mount and basic structure..."
+      ls -la /db || { echo "ERROR: /db directory not accessible"; exit 1; }
+      
+      echo "EFS root directory structure:"
+      find /db -maxdepth 3 -type d 2>/dev/null | head -20 || echo "No subdirectories found"
+      
+      echo "Searching for geth data directories..."
+      GETH_DIRS=$(find /db -name "geth" -type d 2>/dev/null)
+      if [ -n "$GETH_DIRS" ]; then
+        echo "Found geth directories:"
+        echo "$GETH_DIRS"
+        
+        for GETH_DIR in $GETH_DIRS; do
+          echo "Checking geth directory: $GETH_DIR"
+          ls -la "$GETH_DIR/" 2>/dev/null || echo "Cannot list $GETH_DIR"
+          
+          CHAINDATA_DIR="$GETH_DIR/chaindata"
+          if [ -d "$CHAINDATA_DIR" ]; then
+            echo "✅ Found chaindata at: $CHAINDATA_DIR"
+            echo "Chaindata size: $(du -sh "$CHAINDATA_DIR" 2>/dev/null || echo 'N/A')"
+            echo "Chaindata files count: $(find "$CHAINDATA_DIR" -type f 2>/dev/null | wc -l || echo 'N/A')"
+            
+            # Set the first found chaindata as the primary one for further checks
+            if [ -z "${PRIMARY_CHAINDATA:-}" ]; then
+              PRIMARY_CHAINDATA="$CHAINDATA_DIR"
+            fi
+          else
+            echo "⚠️  No chaindata directory found in $GETH_DIR"
+          fi
+        done
+      else
+        echo "⚠️  No geth directories found in EFS"
+        echo "Checking if data might be in root /db directory..."
+        if [ -d "/db/chaindata" ]; then
+          echo "✅ Found chaindata directly at: /db/chaindata"
+          PRIMARY_CHAINDATA="/db/chaindata"
+        else
+          echo "⚠️  No chaindata found in /db root either"
+        fi
+      fi
+      
+      echo "=== Op-Geth Metadata Verification ==="
+      
+      # Use the primary chaindata directory found earlier, or try common paths
+      CHAINDATA_TO_CHECK="${PRIMARY_CHAINDATA:-}"
+      if [ -z "$CHAINDATA_TO_CHECK" ]; then
+        # Fallback: try common paths
+        for potential_path in "/db/geth/chaindata" "/db/chaindata"; do
+          if [ -d "$potential_path" ]; then
+            CHAINDATA_TO_CHECK="$potential_path"
+            break
+          fi
+        done
+      fi
+      
+      if [ -n "$CHAINDATA_TO_CHECK" ] && [ -d "$CHAINDATA_TO_CHECK" ]; then
+        echo "Checking chaindata at: $CHAINDATA_TO_CHECK"
+        file_count=$(find "$CHAINDATA_TO_CHECK" -type f 2>/dev/null | wc -l || echo "0")
+        echo "Files in chaindata: $file_count"
+        
+        if [ "$file_count" -gt 0 ]; then
+          echo "✅ Chaindata directory contains files"
+          
+          # Extract the datadir from chaindata path (parent of geth directory)
+          DATADIR_PATH=$(dirname $(dirname "$CHAINDATA_TO_CHECK"))
+          echo "Attempting to extract metadata using datadir: $DATADIR_PATH"
+          
+          # Try to get block number and chain ID using geth console
+          timeout 30 geth --datadir "$DATADIR_PATH" console --exec "
+            try {
+              var blockNumber = eth.blockNumber;
+              var chainId = eth.chainId;
+              var syncing = eth.syncing;
+              
+              console.log('=== GETH METADATA ===');
+              console.log('Block Number: ' + blockNumber);
+              console.log('Chain ID: ' + chainId);
+              console.log('Syncing Status: ' + (syncing ? JSON.stringify(syncing) : 'false'));
+              console.log('=== END METADATA ===');
+            } catch (e) {
+              console.log('ERROR: Failed to extract metadata - ' + e.message);
+            }
+          " 2>/dev/null || {
+            echo "⚠️  Could not attach to geth database (this might be normal if geth is not running)"
+            
+            # Alternative: Check database files directly
+            echo "Checking database files directly..."
+            if [ -f "$CHAINDATA_TO_CHECK/CURRENT" ]; then
+              echo "✅ Database CURRENT file exists"
+            fi
+            
+            if find "$CHAINDATA_TO_CHECK" -name "MANIFEST-*" -type f | grep -q .; then
+              echo "✅ Database MANIFEST file exists"
+            fi
+            
+            # Count LDB files (leveldb database files)
+            ldb_count=$(find "$CHAINDATA_TO_CHECK" -name "*.ldb" 2>/dev/null | wc -l || echo "0")
+            echo "LevelDB files count: $ldb_count"
+            
+            if [ "$ldb_count" -gt 0 ]; then
+              echo "✅ Database appears to contain data"
+            else
+              echo "⚠️  No LevelDB files found - database might be empty"
+            fi
+          }
+        else
+          echo "⚠️  Chaindata directory is empty"
+        fi
+      else
+        echo "⚠️  No chaindata found or chaindata is empty"
+      fi
+      
+      echo "=== Verification Summary ==="
+      echo "EFS verification completed at $(date)"
+      echo "For detailed geth metadata, ensure geth service is running and try manual attachment"
     volumeMounts:
     - name: efs-volume
       mountPath: /db
@@ -1068,7 +1185,7 @@ spec:
 
 	// Wait for pod to complete
 	fmt.Println("[VERIFY] Waiting for verification pod to complete...")
-	for i := 0; i < 60; i++ { // Increased timeout to 2 minutes
+	for i := 0; i < 90; i++ { // Increased timeout to 3 minutes for geth operations
 		status, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pod", "verify-efs", "-o", "jsonpath={.status.phase}")
 		if err != nil {
 			fmt.Printf("[VERIFY] Pod status check failed: %v\n", err)
@@ -1079,26 +1196,112 @@ spec:
 		status = strings.TrimSpace(status)
 		if status == "Succeeded" {
 			fmt.Println("[VERIFY] ✅ EFS data verification completed successfully")
+
+			// Get and display pod logs with metadata information
+			logs, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "logs", "verify-efs")
+			if err != nil {
+				fmt.Printf("[VERIFY] Warning: Could not retrieve verification logs: %v\n", err)
+			} else {
+				fmt.Println("[VERIFY] === Verification Results ===")
+				fmt.Println(logs)
+				fmt.Println("[VERIFY] === End Results ===")
+
+				// Parse and highlight important metadata from logs
+				t.parseAndDisplayGethMetadata(logs)
+			}
 			return nil
 		}
 		if status == "Failed" {
 			// Get pod logs for debugging
 			logs, _ := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "logs", "verify-efs")
-			fmt.Printf("[VERIFY] Pod failed. Logs: %s\n", logs)
+			fmt.Printf("[VERIFY] ❌ Pod failed. Logs:\n%s\n", logs)
 			return fmt.Errorf("verification pod failed")
 		}
 		if status == "Pending" {
-			fmt.Printf("[VERIFY] Pod is pending... (attempt %d/60)\n", i+1)
+			fmt.Printf("[VERIFY] Pod is pending... (attempt %d/90)\n", i+1)
 		}
 		if status == "Running" {
-			fmt.Printf("[VERIFY] Pod is running... (attempt %d/60)\n", i+1)
+			fmt.Printf("[VERIFY] Pod is running... (attempt %d/90)\n", i+1)
 		}
 		time.Sleep(2 * time.Second)
 	}
 
 	// Clean up the pod
 	utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "delete", "pod", "verify-efs", "--ignore-not-found=true")
-	return fmt.Errorf("verification pod timed out after 2 minutes")
+	return fmt.Errorf("verification pod timed out after 3 minutes")
+}
+
+// parseAndDisplayGethMetadata parses verification logs and displays important geth metadata
+func (t *ThanosStack) parseAndDisplayGethMetadata(logs string) {
+	fmt.Println("\n[METADATA] === Op-Geth Metadata Summary ===")
+
+	lines := strings.Split(logs, "\n")
+	var blockNumber, chainId string
+	var hasMetadata bool
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Parse geth metadata from console output
+		if strings.Contains(line, "Block Number:") {
+			parts := strings.Split(line, "Block Number:")
+			if len(parts) > 1 {
+				blockNumber = strings.TrimSpace(parts[1])
+				hasMetadata = true
+			}
+		}
+
+		if strings.Contains(line, "Chain ID:") {
+			parts := strings.Split(line, "Chain ID:")
+			if len(parts) > 1 {
+				chainId = strings.TrimSpace(parts[1])
+				hasMetadata = true
+			}
+		}
+	}
+
+	if hasMetadata {
+		fmt.Printf("[METADATA] 📊 Block Number: %s\n", blockNumber)
+		fmt.Printf("[METADATA] 🔗 Chain ID: %s\n", chainId)
+
+		// Provide interpretation
+		if blockNumber != "" && blockNumber != "0" {
+			fmt.Printf("[METADATA] ✅ Database contains blockchain data (latest block: %s)\n", blockNumber)
+		} else {
+			fmt.Printf("[METADATA] ⚠️  Database appears to be empty or genesis only\n")
+		}
+	} else {
+		fmt.Printf("[METADATA] ⚠️  Could not extract geth metadata from verification logs\n")
+		fmt.Printf("[METADATA] This might be normal if:\n")
+		fmt.Printf("[METADATA]   - Geth database is empty or corrupted\n")
+		fmt.Printf("[METADATA]   - Database format is incompatible\n")
+		fmt.Printf("[METADATA]   - Network connectivity issues during verification\n")
+	}
+
+	// Check for database health indicators from logs
+	if strings.Contains(logs, "Database CURRENT file exists") {
+		fmt.Printf("[METADATA] ✅ Database structure appears healthy\n")
+	}
+
+	if strings.Contains(logs, "LevelDB files count:") {
+		for _, line := range lines {
+			if strings.Contains(line, "LevelDB files count:") {
+				fmt.Printf("[METADATA] 📁 %s\n", line)
+				break
+			}
+		}
+	}
+
+	if strings.Contains(logs, "Chaindata size:") {
+		for _, line := range lines {
+			if strings.Contains(line, "Chaindata size:") {
+				fmt.Printf("[METADATA] 💾 %s\n", line)
+				break
+			}
+		}
+	}
+
+	fmt.Println("[METADATA] === End Metadata Summary ===")
 }
 
 // updatePVVolumeHandles updates PV volume handles to point to new EFS
