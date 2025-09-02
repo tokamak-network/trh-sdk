@@ -608,6 +608,14 @@ func (t *ThanosStack) getRestoreIAMRole(ctx context.Context) (string, error) {
 func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *string, stss *string) error {
 	namespace := t.deployConfig.K8s.Namespace
 
+	// Check if no parameters provided - show usage
+	if (efsId == nil || strings.TrimSpace(*efsId) == "") &&
+		(pvcs == nil || strings.TrimSpace(*pvcs) == "") &&
+		(stss == nil || strings.TrimSpace(*stss) == "") {
+		t.showAttachUsage()
+		return fmt.Errorf("at least one parameter (--efs-id, --pvc, or --sts) must be provided")
+	}
+
 	t.logger.Info("Verifying restored data and switching workloads...")
 
 	// Validate prerequisites
@@ -706,6 +714,17 @@ func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *str
 			t.logger.Info("✅ Post-attach verification completed successfully")
 		}
 	}
+	// Update AWS Backup protected resources if EFS changed
+	if newEfs != "" {
+		t.logger.Info("")
+		if err := t.updateBackupProtectedResources(ctx, newEfs); err != nil {
+			t.logger.Warnf("Failed to update AWS Backup protected resources: %v", err)
+			t.logger.Info("You may need to manually update backup configuration for the new EFS")
+		} else {
+			t.logger.Info("✅ AWS Backup protected resources updated successfully")
+		}
+	}
+
 	// Summary
 	t.printAttachSummary(ctx, newEfs, pvcs, stss)
 	return nil
@@ -1747,9 +1766,156 @@ func (t *ThanosStack) printAttachSummary(ctx context.Context, newEfs string, pvc
 		t.logger.Info("    --data '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' \\")
 		t.logger.Info("    http://localhost:8545")
 		t.logger.Info("")
-		t.logger.Info("⏱️  Expected sync time: 30-60 minutes (varies by restored data state)")
+		t.logger.Info("⏱️  Expected sync time: 15-30 minutes (varies by restored data state)")
 		t.logger.Info("⚠️  'header not found' warnings during sync are normal behavior.")
 	}
+}
+
+// updateBackupProtectedResources updates AWS Backup protected resources to use the new EFS
+func (t *ThanosStack) updateBackupProtectedResources(ctx context.Context, newEfsId string) error {
+	region := t.deployConfig.AWS.Region
+	namespace := t.deployConfig.K8s.Namespace
+
+	accountID, err := utils.DetectAWSAccountID(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to detect AWS account ID: %w", err)
+	}
+
+	newEfsArn := utils.BuildEFSArn(region, accountID, newEfsId)
+
+	t.logger.Infof("Updating AWS Backup protected resources for new EFS: %s", newEfsId)
+
+	// Check if the new EFS is already protected
+	protectedCheck, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-protected-resources",
+		"--region", region,
+		"--query", fmt.Sprintf("length(Results[?ResourceArn=='%s'])", newEfsArn),
+		"--output", "text")
+	if err != nil {
+		return fmt.Errorf("failed to check if new EFS is protected: %w", err)
+	}
+
+	isAlreadyProtected := strings.TrimSpace(protectedCheck) == "1"
+
+	if isAlreadyProtected {
+		t.logger.Infof("New EFS %s is already protected by AWS Backup", newEfsId)
+		return nil
+	}
+
+	// Get backup vault and IAM role information
+	backupVaultName := fmt.Sprintf("%s-backup-vault", namespace)
+	iamRoleArn := fmt.Sprintf("arn:aws:iam::%s:role/%s-backup-service-role", accountID, namespace)
+
+	// Start an initial backup job for the new EFS to register it as a protected resource
+	t.logger.Info("Starting initial backup job to register new EFS as protected resource...")
+
+	backupJobOutput, err := utils.ExecuteCommand(ctx, "aws", "backup", "start-backup-job",
+		"--region", region,
+		"--backup-vault-name", backupVaultName,
+		"--resource-arn", newEfsArn,
+		"--iam-role-arn", iamRoleArn)
+
+	if err != nil {
+		return fmt.Errorf("failed to start backup job for new EFS: %w", err)
+	}
+
+	jobId := strings.TrimSpace(backupJobOutput)
+	t.logger.Infof("Initial backup job started for new EFS: %s", jobId)
+
+	// Wait a moment for the backup job to register the resource
+	time.Sleep(5 * time.Second)
+
+	// Verify the new EFS is now protected
+	verifyCheck, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-protected-resources",
+		"--region", region,
+		"--query", fmt.Sprintf("length(Results[?ResourceArn=='%s'])", newEfsArn),
+		"--output", "text")
+	if err != nil {
+		return fmt.Errorf("failed to verify new EFS protection status: %w", err)
+	}
+
+	if strings.TrimSpace(verifyCheck) == "1" {
+		t.logger.Infof("✅ New EFS %s is now protected by AWS Backup", newEfsId)
+
+		// Optionally clean up old protected resources
+		if err := t.cleanupOldProtectedResources(ctx, region, accountID, namespace, newEfsArn); err != nil {
+			t.logger.Warnf("Failed to cleanup old protected resources: %v", err)
+		}
+
+		return nil
+	} else {
+		return fmt.Errorf("new EFS %s was not registered as protected resource", newEfsId)
+	}
+}
+
+// cleanupOldProtectedResources removes old EFS from protected resources if they're no longer in use
+func (t *ThanosStack) cleanupOldProtectedResources(ctx context.Context, region, accountID, namespace, currentEfsArn string) error {
+	// List all protected EFS resources
+	protectedResources, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-protected-resources",
+		"--region", region,
+		"--query", "Results[?ResourceType=='EFS'].ResourceArn",
+		"--output", "text")
+	if err != nil {
+		return fmt.Errorf("failed to list protected resources: %w", err)
+	}
+
+	protectedList := strings.Fields(strings.TrimSpace(protectedResources))
+
+	for _, arn := range protectedList {
+		if arn != currentEfsArn && strings.Contains(arn, accountID) {
+			// Extract EFS ID from ARN
+			parts := strings.Split(arn, "/")
+			if len(parts) > 0 {
+				oldEfsId := parts[len(parts)-1]
+
+				// Check if this old EFS still exists and is not in use by any PV
+				if exists, err := t.checkEFSExists(ctx, region, oldEfsId); err == nil && !exists {
+					t.logger.Infof("Old EFS %s no longer exists, will be automatically removed from protected resources", oldEfsId)
+				} else {
+					t.logger.Infof("Old EFS %s still exists but is no longer used by this deployment", oldEfsId)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// checkEFSExists verifies if an EFS still exists
+func (t *ThanosStack) checkEFSExists(ctx context.Context, region, efsId string) (bool, error) {
+	_, err := utils.ExecuteCommand(ctx, "aws", "efs", "describe-file-systems",
+		"--region", region,
+		"--file-system-id", efsId,
+		"--query", "FileSystems[0].FileSystemId",
+		"--output", "text")
+	if err != nil {
+		// If EFS doesn't exist, AWS CLI returns an error
+		return false, nil
+	}
+	return true, nil
+}
+
+// showAttachUsage displays usage information for backup attach command
+func (t *ThanosStack) showAttachUsage() {
+	t.logger.Info("📋 Backup Attach Usage")
+	t.logger.Info("")
+	t.logger.Info("DESCRIPTION:")
+	t.logger.Info("  Attach a new or existing EFS to workloads and verify readiness.")
+	t.logger.Info("  This command is typically used after EFS restore operations.")
+	t.logger.Info("")
+	t.logger.Info("USAGE:")
+	t.logger.Info("  ./trh-sdk backup-manager --attach [OPTIONS]")
+	t.logger.Info("")
+	t.logger.Info("OPTIONS:")
+	t.logger.Info("  --efs-id <EFS_ID>     EFS filesystem ID to attach (e.g., fs-0123456789abcdef0)")
+	t.logger.Info("  --pvc <PVC_LIST>      Comma-separated list of PVCs to update (e.g., op-geth,op-node)")
+	t.logger.Info("  --sts <STS_LIST>      Comma-separated list of StatefulSets to restart (e.g., op-geth,op-node)")
+	t.logger.Info("")
+	t.logger.Info("EXAMPLES:")
+	t.logger.Info("  # Attach new EFS and restart workloads")
+	t.logger.Info("  ./trh-sdk backup-manager --attach \\")
+	t.logger.Info("    --efs-id fs-0123456789abcdef0 \\")
+	t.logger.Info("    --pvc op-geth,op-node \\")
+	t.logger.Info("    --sts op-geth,op-node")
 }
 
 // BackupConfigure applies EFS backup configuration via Terraform
@@ -2149,7 +2315,7 @@ func (t *ThanosStack) interactiveEFSRestore(ctx context.Context) error {
 		return fmt.Errorf("EFS restore failed: %w", err)
 	}
 
-	t.logger.Info("   ✅ EFS restore completed successfully!")
+	t.logger.Info("✅ EFS restore completed successfully!")
 
 	if newEfsID != "" {
 		t.logger.Infof("   New EFS ID: %s", newEfsID)
@@ -2183,9 +2349,7 @@ func (t *ThanosStack) interactiveEFSRestore(ctx context.Context) error {
 		t.logger.Info("   ⚠️  No new EFS ID detected from restore")
 		t.logger.Info("   You may need to manually attach the restored EFS")
 	}
-
-	t.logger.Info("\n🎉 EFS restore completed!")
-	return fmt.Errorf("completed") // Special marker for successful completion
+	return nil
 }
 
 // CleanupUnusedBackupResources removes unused EFS filesystems and old recovery points during deploy
