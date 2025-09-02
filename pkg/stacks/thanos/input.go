@@ -1678,10 +1678,10 @@ func (t *ThanosStack) cloneSourcecode(ctx context.Context, repositoryName, url s
 	}
 
 	// Case 2: Repo exists → try pulling
-	t.logger.Info("Repository exists. Trying to pull latest changes...", "repo", repositoryName)
+	t.logger.Infof("Repository exists. Trying to pull latest changes... (repo: %s)", repositoryName)
 	err = utils.PullLatestCode(ctx, t.logger, t.deploymentPath, repositoryName)
 	if err == nil {
-		t.logger.Info("Successfully pulled latest changes", "repo: ", repositoryName)
+		t.logger.Infof("Successfully pulled latest changes (repo: %s)", repositoryName)
 		fmt.Printf("\r✅ Clone the %s repository successfully \n", repositoryName)
 		return nil
 	}
@@ -1693,7 +1693,7 @@ func (t *ThanosStack) cloneSourcecode(ctx context.Context, repositoryName, url s
 		return removeErr
 	}
 
-	t.logger.Info("Re-cloning repository after cleanup...", "repo", repositoryName)
+	t.logger.Infof("Re-cloning repository after cleanup... (repo: %s)", repositoryName)
 	err = utils.CloneRepo(ctx, t.logger, t.deploymentPath, url, repositoryName)
 	if err != nil {
 		t.logger.Error("Failed to re-clone repository", "repo", repositoryName, "err", err)

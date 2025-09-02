@@ -36,10 +36,10 @@ func Run() {
 				Flags: []cli.Flag{
 					// primary actions
 					&cli.BoolFlag{Name: "status", Usage: "Show backup protection status and latest points"},
-					&cli.BoolFlag{Name: "snapshot", Usage: "Create an on-demand backup (EFS + RDS)"},
-					&cli.BoolFlag{Name: "list", Usage: "List recovery points (EFS) and snapshots (RDS)"},
-					&cli.BoolFlag{Name: "restore", Usage: "Interactive restore EFS/RDS"},
-					&cli.BoolFlag{Name: "config", Usage: "Configure backup settings via Terraform (module)"},
+					&cli.BoolFlag{Name: "snapshot", Usage: "Create an on-demand backup for EFS"},
+					&cli.BoolFlag{Name: "list", Usage: "List recovery points"},
+					&cli.BoolFlag{Name: "restore", Usage: "Interactive restore chain data"},
+					&cli.BoolFlag{Name: "config", Usage: "Configure backup settings"},
 
 					// common options
 					&cli.StringFlag{Name: "limit", Usage: "Limit number of entries when listing"},

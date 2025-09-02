@@ -90,7 +90,7 @@ func ActionBackupManager() cli.ActionFunc {
 			daily := cfgDaily
 			keep := cfgKeep
 			rst := cfgReset
-			return thanosStack.BackupConfigure(ctx, nil, nil, &daily, &keep, nil, &rst, nil, nil)
+			return thanosStack.BackupConfigure(ctx, &daily, &keep, &rst)
 		default:
 			return errors.New("no action specified. Try --status, --snapshot, --list, --restore, or --config")
 		}

@@ -1716,55 +1716,188 @@ func (t *ThanosStack) printAttachSummary(newEfs string, pvcs *string, stss *stri
 	t.logger.Info("  Health Check: ✅ Passed")
 }
 
-// BackupConfigure applies module configuration via Terraform
-func (t *ThanosStack) BackupConfigure(ctx context.Context, on *bool, off *bool, daily *string, keep *string, vault *string, reset *bool, keepRDS *string, window *string) error {
+// BackupConfigure applies EFS backup configuration via Terraform
+func (t *ThanosStack) BackupConfigure(ctx context.Context, daily *string, keep *string, reset *bool) error {
+	// Check if no options provided - show usage
+	if (daily == nil || strings.TrimSpace(*daily) == "") &&
+		(keep == nil || strings.TrimSpace(*keep) == "") &&
+		(reset == nil || !*reset) {
+		t.showBackupConfigUsage()
+		return nil
+	}
+
 	tfRoot := fmt.Sprintf("%s/tokamak-thanos-stack/terraform", t.deploymentPath)
 
-	{
-		varArgs := []string{"-auto-approve"}
-		if reset != nil && *reset {
-			varArgs = append(varArgs, "-var=backup_schedule_cron=cron(0 3 * * ? *)", "-var=backup_delete_after_days=35")
-		} else {
-			if daily != nil && strings.TrimSpace(*daily) != "" {
-				// convert HH:MM -> cron(0 H * * ? *) using provided hour
-				hhmm := strings.TrimSpace(*daily)
-				parts := strings.Split(hhmm, ":")
-				cron := fmt.Sprintf("cron(0 %s * * ? *)", parts[0])
-				varArgs = append(varArgs, fmt.Sprintf("-var=backup_schedule_cron=%s", cron))
+	// Verify terraform directory exists
+	thanosStackPath := fmt.Sprintf("%s/thanos-stack", tfRoot)
+	if _, err := os.Stat(thanosStackPath); os.IsNotExist(err) {
+		return fmt.Errorf("terraform thanos-stack directory not found: %s", thanosStackPath)
+	}
+
+	// Verify .envrc file exists
+	envrcPath := fmt.Sprintf("%s/.envrc", tfRoot)
+	if _, err := os.Stat(envrcPath); os.IsNotExist(err) {
+		return fmt.Errorf("terraform .envrc file not found: %s", envrcPath)
+	}
+
+	varArgs := []string{"-auto-approve"}
+	if reset != nil && *reset {
+		t.logger.Info("Resetting backup configuration to default values...")
+		varArgs = append(varArgs, `-var=backup_schedule_cron="cron(0 3 * * ? *)"`, "-var=backup_delete_after_days=35")
+	} else {
+		if daily != nil && strings.TrimSpace(*daily) != "" {
+			// convert HH:MM -> cron(M H * * ? *) using provided hour and minute
+			hhmm := strings.TrimSpace(*daily)
+			parts := strings.Split(hhmm, ":")
+			if len(parts) != 2 {
+				return fmt.Errorf("invalid time format: %s (expected HH:MM)", hhmm)
 			}
-			if keep != nil && strings.TrimSpace(*keep) != "" {
-				varArgs = append(varArgs, fmt.Sprintf("-var=backup_delete_after_days=%s", strings.TrimSpace(*keep)))
-			}
+			cron := fmt.Sprintf("cron(%s %s * * ? *)", parts[1], parts[0])
+			varArgs = append(varArgs, fmt.Sprintf(`-var=backup_schedule_cron="%s"`, cron))
+			t.logger.Infof("Setting backup schedule to: %s UTC", hhmm)
 		}
-		_, err := utils.ExecuteCommand(ctx, "bash", "-c", fmt.Sprintf("cd %s && source .envrc && cd thanos-stack && terraform init && terraform plan %s && terraform apply %s", tfRoot, strings.Join(varArgs, " "), strings.Join(varArgs, " ")))
-		if err != nil {
-			t.logger.Info("terraform apply failed:", err)
-		} else {
-			t.logger.Info("terraform apply completed")
+		if keep != nil && strings.TrimSpace(*keep) != "" {
+			varArgs = append(varArgs, fmt.Sprintf("-var=backup_delete_after_days=%s", strings.TrimSpace(*keep)))
+			t.logger.Infof("Setting backup retention to: %s days", strings.TrimSpace(*keep))
 		}
 	}
 
-	// RDS via block-explorer
-	{
-		varArgs := []string{"-auto-approve"}
-		if reset != nil && *reset {
-			varArgs = append(varArgs, "-var=backup_retention_period=14", "-var=preferred_backup_window=03:00-04:00")
-		} else {
-			if keepRDS != nil && strings.TrimSpace(*keepRDS) != "" {
-				varArgs = append(varArgs, fmt.Sprintf("-var=backup_retention_period=%s", strings.TrimSpace(*keepRDS)))
-			}
-			if window != nil && strings.TrimSpace(*window) != "" {
-				varArgs = append(varArgs, fmt.Sprintf("-var=preferred_backup_window=%s", strings.TrimSpace(*window)))
-			}
-		}
-		_, err := utils.ExecuteCommand(ctx, "bash", "-c", fmt.Sprintf("cd %s && source .envrc && cd block-explorer && terraform init && terraform plan %s && terraform apply %s", tfRoot, strings.Join(varArgs, " "), strings.Join(varArgs, " ")))
-		if err != nil {
-			t.logger.Info("terraform apply failed:", err)
-		} else {
-			t.logger.Info("terraform apply completed")
+	t.logger.Info("Applying EFS backup configuration...")
+
+	// Change to terraform directory and execute commands
+	originalDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current directory: %w", err)
+	}
+
+	// Change to terraform root directory
+	if err := os.Chdir(tfRoot); err != nil {
+		return fmt.Errorf("failed to change to terraform directory %s: %w", tfRoot, err)
+	}
+	defer os.Chdir(originalDir) // Restore original directory
+
+	// Allow direnv
+	if _, err := utils.ExecuteCommand(ctx, "direnv", "allow"); err != nil {
+		t.logger.Warnf("Failed to run direnv allow: %v", err)
+	}
+
+	// Source .envrc and change to thanos-stack directory
+	if err := os.Chdir("thanos-stack"); err != nil {
+		return fmt.Errorf("failed to change to thanos-stack directory: %w", err)
+	}
+
+	// Initialize terraform
+	t.logger.Info("Initializing terraform...")
+	t.logger.Infof("Current directory: %s", func() string { dir, _ := os.Getwd(); return dir }())
+	if output, err := utils.ExecuteCommand(ctx, "bash", "-c", "source ../.envrc && terraform init"); err != nil {
+		t.logger.Errorf("Terraform init failed: %v", err)
+		t.logger.Errorf("Output: %s", output)
+		return fmt.Errorf("terraform init failed: %w", err)
+	}
+
+	// Plan terraform changes (remove -auto-approve from plan args)
+	planArgs := make([]string, 0)
+	for _, arg := range varArgs {
+		if arg != "-auto-approve" {
+			planArgs = append(planArgs, arg)
 		}
 	}
+	planCmd := fmt.Sprintf(`source ../.envrc && terraform plan %s`, strings.Join(planArgs, " "))
+	t.logger.Info("Planning terraform changes...")
+	if output, err := utils.ExecuteCommand(ctx, "bash", "-c", planCmd); err != nil {
+		t.logger.Errorf("Terraform plan failed: %v", err)
+		t.logger.Errorf("Output: %s", output)
+		return fmt.Errorf("terraform plan failed: %w", err)
+	}
+
+	// Apply terraform changes
+	applyCmd := fmt.Sprintf(`source ../.envrc && terraform apply %s`, strings.Join(varArgs, " "))
+	t.logger.Info("Applying terraform changes...")
+	if output, err := utils.ExecuteCommand(ctx, "bash", "-c", applyCmd); err != nil {
+		t.logger.Errorf("Terraform apply failed: %v", err)
+		t.logger.Errorf("Output: %s", output)
+		return fmt.Errorf("terraform apply failed: %w", err)
+	}
+
+	// Show applied configuration
+	t.logger.Info("✅ EFS backup configuration updated successfully")
+	t.logger.Info("")
+	t.logger.Info("📋 Applied Configuration:")
+
+	// Extract and display applied values
+	var appliedSchedule, appliedRetention string
+
+	if reset != nil && *reset {
+		appliedSchedule = "03:00 UTC"
+		appliedRetention = "35 days"
+	} else {
+		// Extract from varArgs
+		for _, arg := range varArgs {
+			if strings.HasPrefix(arg, `-var=backup_schedule_cron=`) {
+				cronValue := strings.TrimPrefix(arg, `-var=backup_schedule_cron="`)
+				cronValue = strings.TrimSuffix(cronValue, `"`)
+				// Extract minute and hour from cron expression: cron(M H * * ? *)
+				if strings.HasPrefix(cronValue, "cron(") {
+					cronParts := strings.Split(cronValue, " ")
+					if len(cronParts) >= 3 {
+						minute := strings.TrimPrefix(cronParts[0], "cron(")
+						hour := cronParts[1]
+
+						// Format hour and minute with leading zeros
+						if len(hour) == 1 {
+							hour = "0" + hour
+						}
+						if len(minute) == 1 {
+							minute = "0" + minute
+						}
+						appliedSchedule = hour + ":" + minute + " UTC"
+					}
+				}
+			}
+			if strings.HasPrefix(arg, `-var=backup_delete_after_days=`) {
+				appliedRetention = strings.TrimPrefix(arg, `-var=backup_delete_after_days=`) + " days"
+			}
+		}
+	}
+
+	if appliedSchedule != "" {
+		t.logger.Infof("  Daily backup time: %s", appliedSchedule)
+	}
+	if appliedRetention != "" {
+		t.logger.Infof("  Retention period:  %s", appliedRetention)
+	}
+
 	return nil
+}
+
+// showBackupConfigUsage displays usage information for backup configuration
+func (t *ThanosStack) showBackupConfigUsage() {
+	t.logger.Info("📋 Backup Configuration Usage")
+	t.logger.Info("")
+	t.logger.Info("COMMAND:")
+	t.logger.Info("  trh-sdk backup-manager --config [OPTIONS]")
+	t.logger.Info("")
+	t.logger.Info("OPTIONS:")
+	t.logger.Info("  --daily <HH:MM>   Set daily backup time (24-hour format, UTC)")
+	t.logger.Info("  --keep <DAYS>     Set backup retention period in days")
+	t.logger.Info("  --reset           Reset to default configuration")
+	t.logger.Info("")
+	t.logger.Info("EXAMPLES:")
+	t.logger.Info("  # Set backup time to 02:30 UTC")
+	t.logger.Info("  trh-sdk backup-manager --config --daily \"02:30\"")
+	t.logger.Info("")
+	t.logger.Info("  # Set retention period to 60 days")
+	t.logger.Info("  trh-sdk backup-manager --config --keep \"60\"")
+	t.logger.Info("")
+	t.logger.Info("  # Set both backup time and retention")
+	t.logger.Info("  trh-sdk backup-manager --config --daily \"01:00\" --keep \"30\"")
+	t.logger.Info("")
+	t.logger.Info("  # Reset to default values (03:00 UTC, 35 days)")
+	t.logger.Info("  trh-sdk backup-manager --config --reset")
+	t.logger.Info("")
+	t.logger.Info("CURRENT DEFAULT VALUES:")
+	t.logger.Info("  Daily backup time: 03:00 UTC")
+	t.logger.Info("  Retention period:  35 days")
 }
 
 // initializeBackupSystem initializes the backup system after deployment
