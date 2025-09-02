@@ -706,11 +706,8 @@ func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *str
 			t.logger.Info("✅ Post-attach verification completed successfully")
 		}
 	}
-
-	t.logger.Info("Completed basic post-restore steps.")
-
 	// Summary
-	t.printAttachSummary(newEfs, pvcs, stss)
+	t.printAttachSummary(ctx, newEfs, pvcs, stss)
 	return nil
 }
 
@@ -732,7 +729,6 @@ func (t *ThanosStack) verifyPostAttach(ctx context.Context, namespace string) er
 		return fmt.Errorf("verification failed")
 	}
 
-	t.logger.Info("✅ All components ready")
 	return nil
 }
 
@@ -771,7 +767,7 @@ func (t *ThanosStack) monitorComponentPod(ctx context.Context, namespace, compon
 
 		// Print status every 30 seconds
 		if i%6 == 0 {
-			t.logger.Infof("%s status: %s/%s", component, phase, ready)
+			t.logger.Infof("%s status: %s", component, phase)
 		}
 
 		time.Sleep(5 * time.Second)
@@ -1702,8 +1698,8 @@ func (t *ThanosStack) performHealthCheck(ctx context.Context, namespace string) 
 }
 
 // printAttachSummary prints a summary of the attach operation
-func (t *ThanosStack) printAttachSummary(newEfs string, pvcs *string, stss *string) {
-	t.logger.Info("\nAttach operation completed:")
+func (t *ThanosStack) printAttachSummary(ctx context.Context, newEfs string, pvcs *string, stss *string) {
+	t.logger.Info("\n✅ Attach operation completed:")
 	if newEfs != "" {
 		t.logger.Infof("  EFS FileSystemId: %s", newEfs)
 	}
@@ -1714,6 +1710,46 @@ func (t *ThanosStack) printAttachSummary(newEfs string, pvcs *string, stss *stri
 		t.logger.Infof("  StatefulSets: %s", strings.TrimSpace(*stss))
 	}
 	t.logger.Info("  Health Check: ✅ Passed")
+
+	// Post-attach synchronization notice
+	if newEfs != "" {
+		namespace := t.deployConfig.K8s.Namespace
+
+		// Get actual pod and service names dynamically
+		opGethPodName, _ := t.findComponentPod(ctx, namespace, "op-geth")
+		opNodePodName, _ := t.findComponentPod(ctx, namespace, "op-node")
+
+		// Construct service name based on namespace pattern
+		servicePrefix := fmt.Sprintf("%s-thanos-stack", namespace)
+		opGethServiceName := fmt.Sprintf("%s-op-geth", servicePrefix)
+
+		t.logger.Info("")
+		t.logger.Info("📋 Important Notice:")
+		t.logger.Info("  Geth client synchronization may take some time after recovery.")
+		t.logger.Info("  Block explorer and additional services will operate normally")
+		t.logger.Info("  once synchronization is complete.")
+		t.logger.Info("")
+		t.logger.Info("🔍 Monitor Synchronization Status:")
+		if opGethPodName != "" {
+			t.logger.Infof("  kubectl logs -f %s -n %s", opGethPodName, namespace)
+		} else {
+			t.logger.Infof("  kubectl logs -f -l app.kubernetes.io/name=op-geth -n %s", namespace)
+		}
+		if opNodePodName != "" {
+			t.logger.Infof("  kubectl logs -f %s -n %s", opNodePodName, namespace)
+		} else {
+			t.logger.Infof("  kubectl logs -f -l app.kubernetes.io/name=op-node -n %s", namespace)
+		}
+		t.logger.Info("")
+		t.logger.Info("📊 Check Latest Block Number:")
+		t.logger.Infof("  kubectl port-forward svc/%s 8545:8545 -n %s", opGethServiceName, namespace)
+		t.logger.Info("  curl -X POST -H \"Content-Type: application/json\" \\")
+		t.logger.Info("    --data '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' \\")
+		t.logger.Info("    http://localhost:8545")
+		t.logger.Info("")
+		t.logger.Info("⏱️  Expected sync time: 30-60 minutes (varies by restored data state)")
+		t.logger.Info("⚠️  'header not found' warnings during sync are normal behavior.")
+	}
 }
 
 // BackupConfigure applies EFS backup configuration via Terraform
@@ -2139,8 +2175,6 @@ func (t *ThanosStack) interactiveEFSRestore(ctx context.Context) error {
 			if err := t.BackupAttach(ctx, efsID, &pvcs, &sts); err != nil {
 				t.logger.Infof("   ❌ Attach failed: %v", err)
 				t.logger.Infof("   You can try attaching manually later using: ./trh-sdk backup-manager --attach --efs-id %s --pvc op-geth,op-node --sts op-geth,op-node", newEfsID)
-			} else {
-				t.logger.Info("   ✅ Attach completed successfully!")
 			}
 		} else {
 			t.logger.Infof("   ℹ️  You can attach the EFS later using: ./trh-sdk backup-manager --attach --efs-id %s --pvc op-geth,op-node --sts op-geth,op-node", newEfsID)
