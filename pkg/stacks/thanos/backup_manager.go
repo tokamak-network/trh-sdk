@@ -2044,6 +2044,11 @@ func (t *ThanosStack) CleanupUnusedBackupResources(ctx context.Context) error {
 		t.logger.Warnf("Failed to cleanup unused EFS: %v", err)
 	}
 
+	// 3. Cleanup backup vaults with namespace prefix
+	if err := t.cleanupBackupVaults(ctx, region, namespace); err != nil {
+		t.logger.Warnf("Failed to cleanup backup vaults: %v", err)
+	}
+
 	t.logger.Info("✅ Backup resources cleanup completed")
 	return nil
 }
@@ -2219,6 +2224,123 @@ func (t *ThanosStack) deleteEFSMountTargets(ctx context.Context, region, efsId s
 		if err != nil {
 			t.logger.Warnf("Failed to delete mount target %s: %v", mtId, err)
 		}
+	}
+
+	return nil
+}
+
+// cleanupBackupVaults removes backup vaults with namespace prefix
+func (t *ThanosStack) cleanupBackupVaults(ctx context.Context, region, namespace string) error {
+	t.logger.Info("🗑️ Cleaning up backup vaults...")
+
+	// List all backup vaults with namespace prefix
+	// Pattern matches:
+	// - {namespace}-backup-vault (created by BackupSnapshot and Terraform)
+	// - {namespace}-* (any other namespace-prefixed vaults)
+	vaultPattern := namespace + "-"
+
+	vaultsList, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-backup-vaults",
+		"--region", region,
+		"--query", "BackupVaultList[?starts_with(BackupVaultName, `"+vaultPattern+"`)]",
+		"--output", "json")
+
+	if err != nil {
+		return fmt.Errorf("failed to list backup vaults: %w", err)
+	}
+
+	if strings.TrimSpace(vaultsList) == "[]" || strings.TrimSpace(vaultsList) == "" {
+		t.logger.Infof("No backup vaults found with prefix: %s-*", namespace)
+		return nil
+	}
+
+	// Parse vault list
+	var vaults []struct {
+		BackupVaultName string `json:"BackupVaultName"`
+	}
+
+	if err := json.Unmarshal([]byte(vaultsList), &vaults); err != nil {
+		return fmt.Errorf("failed to parse backup vaults list: %w", err)
+	}
+
+	deletedCount := 0
+	for _, vault := range vaults {
+		t.logger.Infof("Processing backup vault: %s", vault.BackupVaultName)
+
+		// First, delete all recovery points in the vault
+		if err := t.deleteAllRecoveryPointsInVault(ctx, region, vault.BackupVaultName); err != nil {
+			t.logger.Warnf("Failed to delete recovery points in vault %s: %v", vault.BackupVaultName, err)
+			continue
+		}
+
+		// Wait a bit for recovery points to be fully deleted
+		time.Sleep(5 * time.Second)
+
+		// Delete the backup vault
+		t.logger.Infof("Deleting backup vault: %s", vault.BackupVaultName)
+
+		_, err := utils.ExecuteCommand(ctx, "aws", "backup", "delete-backup-vault",
+			"--region", region,
+			"--backup-vault-name", vault.BackupVaultName)
+
+		if err != nil {
+			t.logger.Warnf("Failed to delete backup vault %s: %v", vault.BackupVaultName, err)
+		} else {
+			deletedCount++
+			t.logger.Infof("✅ Deleted backup vault: %s", vault.BackupVaultName)
+		}
+	}
+
+	if deletedCount > 0 {
+		t.logger.Infof("✅ Deleted %d backup vaults", deletedCount)
+	}
+
+	return nil
+}
+
+// deleteAllRecoveryPointsInVault removes all recovery points from a backup vault
+func (t *ThanosStack) deleteAllRecoveryPointsInVault(ctx context.Context, region, vaultName string) error {
+	t.logger.Infof("Deleting all recovery points in vault: %s", vaultName)
+
+	// List all recovery points in the vault
+	rpList, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-recovery-points-by-backup-vault",
+		"--region", region,
+		"--backup-vault-name", vaultName,
+		"--query", "RecoveryPoints[].RecoveryPointArn",
+		"--output", "json")
+
+	if err != nil {
+		return fmt.Errorf("failed to list recovery points in vault %s: %w", vaultName, err)
+	}
+
+	if strings.TrimSpace(rpList) == "[]" || strings.TrimSpace(rpList) == "" {
+		t.logger.Infof("No recovery points found in vault: %s", vaultName)
+		return nil
+	}
+
+	// Parse recovery points list
+	var recoveryPointArns []string
+	if err := json.Unmarshal([]byte(rpList), &recoveryPointArns); err != nil {
+		return fmt.Errorf("failed to parse recovery points list for vault %s: %w", vaultName, err)
+	}
+
+	deletedCount := 0
+	for _, rpArn := range recoveryPointArns {
+		t.logger.Infof("Deleting recovery point: %s", rpArn)
+
+		_, err := utils.ExecuteCommand(ctx, "aws", "backup", "delete-recovery-point",
+			"--region", region,
+			"--backup-vault-name", vaultName,
+			"--recovery-point-arn", rpArn)
+
+		if err != nil {
+			t.logger.Warnf("Failed to delete recovery point %s: %v", rpArn, err)
+		} else {
+			deletedCount++
+		}
+	}
+
+	if deletedCount > 0 {
+		t.logger.Infof("Deleted %d recovery points from vault: %s", deletedCount, vaultName)
 	}
 
 	return nil
