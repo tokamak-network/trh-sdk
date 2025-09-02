@@ -1821,10 +1821,37 @@ func (t *ThanosStack) updateBackupProtectedResources(ctx context.Context, newEfs
 	jobId := strings.TrimSpace(backupJobOutput)
 	t.logger.Infof("Initial backup job started for new EFS: %s", jobId)
 
-	// Wait a moment for the backup job to register the resource
-	time.Sleep(5 * time.Second)
+	// Poll backup job status until COMPLETED (or fail fast on ABORTED/FAILED)
+	maxAttempts := 30 // ~5 minutes with 10s interval
+	for i := 0; i < maxAttempts; i++ {
+		status, sErr := utils.ExecuteCommand(ctx, "aws", "backup", "describe-backup-job",
+			"--region", region,
+			"--backup-job-id", jobId,
+			"--query", "Status",
+			"--output", "text")
+		if sErr == nil {
+			st := strings.TrimSpace(status)
+			// Print status on every poll
+			t.logger.Infof("Backup job status: %s (attempt %d/%d)", st, i+1, maxAttempts)
+			if st == "COMPLETED" {
+				break
+			}
+			if st == "ABORTED" || st == "FAILED" {
+				msg, _ := utils.ExecuteCommand(ctx, "aws", "backup", "describe-backup-job",
+					"--region", region,
+					"--backup-job-id", jobId,
+					"--query", "StatusMessage",
+					"--output", "text")
+				return fmt.Errorf("backup job failed (status=%s): %s", st, strings.TrimSpace(msg))
+			}
+		} else {
+			// Log transient polling error and continue
+			t.logger.Infof("Backup job status check failed (attempt %d/%d): %v", i+1, maxAttempts, sErr)
+		}
+		time.Sleep(10 * time.Second)
+	}
 
-	// Verify the new EFS is now protected
+	// After job completion, verify the new EFS is now protected
 	verifyCheck, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-protected-resources",
 		"--region", region,
 		"--query", fmt.Sprintf("length(Results[?ResourceArn=='%s'])", newEfsArn),
@@ -1841,10 +1868,225 @@ func (t *ThanosStack) updateBackupProtectedResources(ctx context.Context, newEfs
 			t.logger.Warnf("Failed to cleanup old protected resources: %v", err)
 		}
 
+		// Reconcile backup plan selections to include only the current EFS
+		if err := t.reconcileBackupPlanSelections(ctx, region, namespace, newEfsArn); err != nil {
+			t.logger.Warnf("Failed to reconcile backup plan selections: %v", err)
+		} else {
+			t.logger.Info("✅ Backup plan selections updated to target only the current EFS")
+		}
+
+		// Replace ongoing backup jobs: stop old-EFS jobs and ensure current EFS job exists
+		if err := t.replaceBackupJobsForCurrentEFS(ctx, region, namespace, newEfsArn); err != nil {
+			t.logger.Warnf("Failed to replace running backup jobs: %v", err)
+		}
+
 		return nil
 	} else {
 		return fmt.Errorf("new EFS %s was not registered as protected resource", newEfsId)
 	}
+}
+
+// replaceBackupJobsForCurrentEFS stops RUNNING/CREATED jobs for old EFS ARNs and ensures a job exists for current EFS
+func (t *ThanosStack) replaceBackupJobsForCurrentEFS(ctx context.Context, region, namespace, currentEfsArn string) error {
+	checkStates := []string{"RUNNING", "CREATED"}
+	hasCurrent := false
+	for _, st := range checkStates {
+		jobsJSON, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-backup-jobs",
+			"--region", region,
+			"--by-state", st,
+			"--max-results", "1000",
+			"--output", "json")
+		if err != nil {
+			t.logger.Warnf("Failed to list backup jobs (state=%s): %v", st, err)
+			continue
+		}
+		var jobs []struct {
+			BackupJobId string `json:"BackupJobId"`
+		}
+		if err := json.Unmarshal([]byte(strings.TrimSpace(jobsJSON)), &jobs); err != nil {
+			t.logger.Warnf("Failed to parse backup jobs (state=%s): %v", st, err)
+			continue
+		}
+		for _, j := range jobs {
+			if strings.TrimSpace(j.BackupJobId) == "" {
+				continue
+			}
+			// Describe each job to read ResourceArn
+			resArn, dErr := utils.ExecuteCommand(ctx, "aws", "backup", "describe-backup-job",
+				"--region", region,
+				"--backup-job-id", j.BackupJobId,
+				"--query", "ResourceArn",
+				"--output", "text")
+			if dErr != nil {
+				continue
+			}
+			rArn := strings.TrimSpace(resArn)
+			if rArn == currentEfsArn {
+				hasCurrent = true
+				continue
+			}
+			if strings.Contains(rArn, ":elasticfilesystem:") && strings.Contains(rArn, "/file-system/") {
+				// Stop old EFS job
+				_, _ = utils.ExecuteCommand(ctx, "aws", "backup", "stop-backup-job",
+					"--region", region,
+					"--backup-job-id", j.BackupJobId)
+				t.logger.Infof("Stopped old EFS backup job: %s (resource=%s)", j.BackupJobId, rArn)
+			}
+		}
+	}
+
+	if !hasCurrent {
+		// Start a job for current EFS
+		accountID, err := utils.DetectAWSAccountID(ctx)
+		if err != nil {
+			return err
+		}
+		backupVaultName := fmt.Sprintf("%s-backup-vault", namespace)
+		roleArn := fmt.Sprintf("arn:aws:iam::%s:role/%s-backup-service-role", accountID, namespace)
+		out, err := utils.ExecuteCommand(ctx, "aws", "backup", "start-backup-job",
+			"--region", region,
+			"--backup-vault-name", backupVaultName,
+			"--resource-arn", currentEfsArn,
+			"--iam-role-arn", roleArn)
+		if err != nil {
+			return fmt.Errorf("failed to start backup job for current EFS: %w", err)
+		}
+		t.logger.Infof("Started backup job for current EFS: %s", strings.TrimSpace(out))
+	}
+	return nil
+}
+
+// reconcileBackupPlanSelections ensures backup selections reference only the current EFS ARN
+func (t *ThanosStack) reconcileBackupPlanSelections(ctx context.Context, region, namespace, currentEfsArn string) error {
+	// Find backup plans likely associated with this deployment
+	plansText, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-backup-plans",
+		"--region", region,
+		"--query", "BackupPlansList[].{Id:BackupPlanId,Name:BackupPlanName}",
+		"--output", "json")
+	if err != nil {
+		return fmt.Errorf("failed to list backup plans: %w", err)
+	}
+	plansText = strings.TrimSpace(plansText)
+	if plansText == "" || plansText == "[]" || plansText == "null" {
+		return nil
+	}
+	var plans []struct {
+		Id   string `json:"Id"`
+		Name string `json:"Name"`
+	}
+	if err := json.Unmarshal([]byte(plansText), &plans); err != nil {
+		return fmt.Errorf("failed to parse backup plans: %w", err)
+	}
+
+	for _, p := range plans {
+		if p.Id == "" || p.Name == "" {
+			continue
+		}
+		// Only touch plans related to this namespace by name heuristic
+		if !strings.Contains(strings.ToLower(p.Name), strings.ToLower(namespace)) && !strings.Contains(strings.ToLower(p.Name), strings.ToLower("thanos")) {
+			continue
+		}
+		// List selections for the plan
+		selectionsText, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-backup-selections",
+			"--region", region,
+			"--backup-plan-id", p.Id,
+			"--query", "BackupSelectionsList[].SelectionId",
+			"--output", "text")
+		if err != nil {
+			// Non-fatal
+			t.logger.Warnf("Failed to list selections for plan %s: %v", p.Name, err)
+			continue
+		}
+		for _, selId := range strings.Fields(strings.TrimSpace(selectionsText)) {
+			if selId == "" {
+				continue
+			}
+			// Get selection details
+			selJSON, err := utils.ExecuteCommand(ctx, "aws", "backup", "get-backup-selection",
+				"--region", region,
+				"--backup-plan-id", p.Id,
+				"--selection-id", selId,
+				"--output", "json")
+			if err != nil {
+				t.logger.Warnf("Failed to get selection %s for plan %s: %v", selId, p.Name, err)
+				continue
+			}
+			var sel struct {
+				BackupSelection struct {
+					SelectionName string   `json:"SelectionName"`
+					IamRoleArn    string   `json:"IamRoleArn"`
+					Resources     []string `json:"Resources"`
+					ListOfTags    []any    `json:"ListOfTags"`
+				} `json:"BackupSelection"`
+			}
+			if err := json.Unmarshal([]byte(strings.TrimSpace(selJSON)), &sel); err != nil {
+				t.logger.Warnf("Failed to parse selection %s for plan %s: %v", selId, p.Name, err)
+				continue
+			}
+			// If selection relies purely on tags, skip changes
+			if len(sel.BackupSelection.Resources) == 0 {
+				continue
+			}
+			// Build filtered resources keeping non-EFS resources and replacing EFS ARNs with current
+			updated := []string{}
+			hasEFS := false
+			for _, r := range sel.BackupSelection.Resources {
+				rTrim := strings.TrimSpace(r)
+				if rTrim == "" {
+					continue
+				}
+				if strings.Contains(rTrim, ":elasticfilesystem:") && strings.Contains(rTrim, "/file-system/") {
+					hasEFS = true
+					// replace any EFS with current one (ensure single instance)
+					continue
+				}
+				updated = append(updated, rTrim)
+			}
+			if hasEFS {
+				updated = append(updated, currentEfsArn)
+				// Try to update selection (best-effort)
+				_, uErr := utils.ExecuteCommand(ctx, "aws", "backup", "update-backup-selection",
+					"--region", region,
+					"--backup-plan-id", p.Id,
+					"--selection-id", selId,
+					"--backup-selection",
+					fmt.Sprintf("SelectionName=%s,IamRoleArn=%s,Resources=%s", sel.BackupSelection.SelectionName, sel.BackupSelection.IamRoleArn, strings.Join(quoteEach(updated), ",")))
+				if uErr != nil {
+					// Fallback: delete and recreate selection
+					_, _ = utils.ExecuteCommand(ctx, "aws", "backup", "delete-backup-selection",
+						"--region", region,
+						"--backup-plan-id", p.Id,
+						"--selection-id", selId)
+					// put-backup-selection (create)
+					selectionDoc := map[string]any{
+						"SelectionName": sel.BackupSelection.SelectionName,
+						"IamRoleArn":    sel.BackupSelection.IamRoleArn,
+						"Resources":     updated,
+					}
+					b, _ := json.Marshal(selectionDoc)
+					_, cErr := utils.ExecuteCommand(ctx, "aws", "backup", "put-backup-selection",
+						"--region", region,
+						"--backup-plan-id", p.Id,
+						"--backup-selection", string(b))
+					if cErr != nil {
+						t.logger.Warnf("Failed to recreate selection for plan %s: %v", p.Name, cErr)
+						continue
+					}
+				}
+				t.logger.Infof("Updated backup selection %s in plan %s to target current EFS", selId, p.Name)
+			}
+		}
+	}
+	return nil
+}
+
+// quoteEach helper to wrap resource ARNs for CLI struct input
+func quoteEach(items []string) []string {
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		out = append(out, fmt.Sprintf("\"%s\"", it))
+	}
+	return out
 }
 
 // cleanupOldProtectedResources removes old EFS from protected resources if they're no longer in use
@@ -1867,16 +2109,71 @@ func (t *ThanosStack) cleanupOldProtectedResources(ctx context.Context, region, 
 			if len(parts) > 0 {
 				oldEfsId := parts[len(parts)-1]
 
-				// Check if this old EFS still exists and is not in use by any PV
-				if exists, err := t.checkEFSExists(ctx, region, oldEfsId); err == nil && !exists {
-					t.logger.Infof("Old EFS %s no longer exists, will be automatically removed from protected resources", oldEfsId)
+				// Best-effort: delete all recovery points so it no longer shows as protected
+				if err := t.deleteRecoveryPointsByResource(ctx, region, arn); err != nil {
+					t.logger.Warnf("Failed to delete recovery points for %s: %v", oldEfsId, err)
 				} else {
-					t.logger.Infof("Old EFS %s still exists but is no longer used by this deployment", oldEfsId)
+					t.logger.Infof("✅ Cleared recovery points for old EFS: %s", oldEfsId)
+				}
+
+				// Log existence for operator awareness
+				if exists, err := t.checkEFSExists(ctx, region, oldEfsId); err == nil {
+					if exists {
+						t.logger.Infof("Old EFS %s still exists. Ensure backup plan selections exclude it if not needed.", oldEfsId)
+					} else {
+						t.logger.Infof("Old EFS %s no longer exists in the account.", oldEfsId)
+					}
 				}
 			}
 		}
 	}
 
+	return nil
+}
+
+// deleteRecoveryPointsByResource deletes all recovery points for a specific resource ARN across vaults
+func (t *ThanosStack) deleteRecoveryPointsByResource(ctx context.Context, region, resourceArn string) error {
+	rpJSON, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-recovery-points-by-resource",
+		"--region", region,
+		"--resource-arn", resourceArn,
+		"--query", "RecoveryPoints[].{Arn:RecoveryPointArn,Vault:BackupVaultName}",
+		"--output", "json")
+	if err != nil {
+		return fmt.Errorf("failed to list recovery points for resource: %w", err)
+	}
+
+	rpJSON = strings.TrimSpace(rpJSON)
+	if rpJSON == "" || rpJSON == "[]" || rpJSON == "null" {
+		return nil
+	}
+
+	var items []struct {
+		Arn   string `json:"Arn"`
+		Vault string `json:"Vault"`
+	}
+	if err := json.Unmarshal([]byte(rpJSON), &items); err != nil {
+		return fmt.Errorf("failed to parse recovery points for resource: %w", err)
+	}
+
+	deleted := 0
+	for _, it := range items {
+		if strings.TrimSpace(it.Arn) == "" || strings.TrimSpace(it.Vault) == "" {
+			continue
+		}
+		_, delErr := utils.ExecuteCommand(ctx, "aws", "backup", "delete-recovery-point",
+			"--region", region,
+			"--backup-vault-name", it.Vault,
+			"--recovery-point-arn", it.Arn)
+		if delErr != nil {
+			t.logger.Warnf("Failed to delete recovery point %s in vault %s: %v", it.Arn, it.Vault, delErr)
+			continue
+		}
+		deleted++
+	}
+
+	if deleted > 0 {
+		t.logger.Infof("Deleted %d recovery points for resource", deleted)
+	}
 	return nil
 }
 
