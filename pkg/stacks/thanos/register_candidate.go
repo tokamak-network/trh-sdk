@@ -508,14 +508,14 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, cwd string) error {
 
 	contract, err := abis.NewSafeExtender(ethCommon.HexToAddress(safeWalletAddress), l1Client)
 	if err != nil {
-		t.logger.Error("failed to create contract instance", "err", err)
+		t.logger.Error("failed to create contract instance ", "err ", err)
 		return fmt.Errorf("failed to create contract instance: %v", err)
 	}
 
 	// Call getThreshold() function
 	threshold, err := contract.GetThreshold(callOpts)
 	if err != nil {
-		t.logger.Error("failed to call getThreshold", "err", err)
+		t.logger.Error("failed to call getThreshold ", "err ", err)
 		return fmt.Errorf("failed to call getThreshold: %v", err)
 	}
 

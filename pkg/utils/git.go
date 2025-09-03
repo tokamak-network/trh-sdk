@@ -17,6 +17,16 @@ import (
 
 const gitHubAPIBaseURL string = "https://api.github.com/repos"
 
+type GitHubPR struct {
+	Number  int    `json:"number"`
+	Title   string `json:"title"`
+	State   string `json:"state"`
+	HTMLURL string `json:"html_url"`
+	Head    struct {
+		Ref string `json:"ref"`
+	} `json:"head"`
+}
+
 func CloneRepo(ctx context.Context, l *zap.SugaredLogger, deploymentPath string, url string, folderName string) error {
 	var clonePath string
 	if filepath.IsAbs(deploymentPath) {
@@ -251,4 +261,53 @@ func SetupGitConfig(ctx context.Context, l *zap.SugaredLogger, repoPath string, 
 	fmt.Printf("   - user.email: %s\n", creds.Email)
 
 	return nil
+}
+
+// CheckExistingPRForBranch checks if there are any existing PRs for the given branch
+func CheckExistingPRForBranch(username, token, repoName, branchName string) (*GitHubPR, error) {
+	// GitHub API endpoint to list PRs from the user's fork
+	url := fmt.Sprintf("%s/tokamak-network/%s/pulls?head=%s:%s&state=all",
+		gitHubAPIBaseURL, repoName, username, branchName)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("token %s", token))
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to make request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		// No PRs found or repo doesn't exist
+		return nil, nil
+	}
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+	}
+
+	var prs []GitHubPR
+	if err := json.NewDecoder(resp.Body).Decode(&prs); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	// Return the most recent PR for this branch (first in the list)
+	if len(prs) > 0 {
+		return &prs[0], nil
+	}
+
+	return nil, nil
+}
+
+func CheckPRStatus(pr *GitHubPR) (bool, bool) {
+	isOpenPR := pr.State == "open"
+	isCreatePR := strings.Contains(pr.Title, "[Rollup]")
+	return isCreatePR, isOpenPR
 }

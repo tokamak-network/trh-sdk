@@ -122,6 +122,7 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 
 	var contracts *types.Contracts
 	var newMetadataEntry bool
+	var isOpenPR bool
 
 	contracts, err = utils.ReadDeployementConfigFromJSONFile(t.deploymentPath, t.deployConfig.L1ChainID)
 	if err != nil {
@@ -137,7 +138,7 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 
 	branchName := fmt.Sprintf("feat/add-rollup-%s", systemConfigAddress)
 	// STEP 1. Fork the repository
-	t.logger.Info("\n📋 STEP 1: Forking repository...")
+	t.logger.Info("📋 STEP 1: Forking repository...")
 	forkExists, err := utils.CheckIfForkExists(creds.Username, creds.Token, MetadataRepoName)
 	if err != nil {
 		t.logger.Warn("⚠️ Warning: Could not check if fork exists", "err", err)
@@ -145,7 +146,7 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 	}
 
 	if forkExists {
-		t.logger.Info("✅ Fork already exists", "user", creds.Username, "repo", MetadataRepoName)
+		t.logger.Info("✅ Fork already exists ", "user ", creds.Username, "repo ", MetadataRepoName)
 	} else {
 		err = utils.ForkRepository(creds.Username, creds.Token, MetadataRepoName)
 		if err != nil {
@@ -154,71 +155,85 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 	}
 
 	// STEP 2. Clone the user's forked repository locally
-	t.logger.Info("\n📋 STEP 2: Cloning your forked repository...")
+	t.logger.Info("📋 STEP 2: Cloning your forked repository...")
 	forkURL := fmt.Sprintf("https://%s:%s@github.com/%s/%s.git", creds.Username, creds.Token, creds.Username, MetadataRepoName)
 	err = t.cloneSourcecode(ctx, MetadataRepoName, forkURL)
 	if err != nil {
-		t.logger.Error("Failed to clone fork", "err", err)
+		t.logger.Error("Failed to clone fork ", "err ", err)
 		return nil, fmt.Errorf("failed to clone fork: %w", err)
 	}
 
 	err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "remote", "add", "upstream", MetadataRepoURL)
 	if err != nil {
-		t.logger.Warn("⚠️ Warning: Could not add upstream remote", "err", err)
+		t.logger.Warn("⚠️ Warning: Could not add upstream remote ", "err ", err)
 	}
 
 	// Fetch latest changes from upstream
 	t.logger.Info("📥 Fetching latest changes from upstream...")
 	err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "fetch", "upstream")
 	if err != nil {
-		t.logger.Warn("⚠️ Warning: Failed to fetch upstream", "err", err)
+		t.logger.Warn("⚠️ Warning: Failed to fetch upstream ", "err ", err)
 	}
 
 	t.logger.Info("🔄 Updating main branch...")
 	err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "checkout", "main")
 	if err != nil {
-		t.logger.Warn("⚠️ Warning: Failed to checkout main", "err", err)
+		t.logger.Warn("⚠️ Warning: Failed to checkout main ", "err ", err)
 	}
 
 	err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "merge", "upstream/main")
 	if err != nil {
-		t.logger.Warn("⚠️ Warning: Failed to merge upstream/main", "err", err)
+		t.logger.Warn("⚠️ Warning: Failed to merge upstream/main ", "err ", err)
 	}
 
 	// STEP 3. Create and checkout new branch
-	t.logger.Info("\n📋 STEP 3: Creating feature branch...")
+	t.logger.Info("📋 STEP 3: Creating feature branch...")
 	err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "fetch", "origin", fmt.Sprintf("%s:%s", branchName, branchName))
 	// Checking if the branch already exists
 	if err != nil {
-		t.logger.Info("Creating and checking out branch", "branch", branchName)
+		t.logger.Info("Creating and checking out branch ", "branch ", branchName)
 		newMetadataEntry = true
 		err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "checkout", "-b", branchName)
 		if err != nil {
-			t.logger.Error("Failed to create and checkout branch", "err", err)
+			t.logger.Error("Failed to create and checkout branch", "err ", err)
 			return nil, fmt.Errorf("failed to create and checkout branch: %w", err)
 		}
 	} else {
-		t.logger.Info("✅ Branch already exists!", "branch", branchName)
+		t.logger.Info("✅ Branch already exists! ", "branch ", branchName)
 		newMetadataEntry = false
+
+		t.logger.Info("📋 STEP 3.5: Checking for existing Pull Requests...")
+		existingPR, err := utils.CheckExistingPRForBranch(creds.Username, creds.Token, MetadataRepoName, branchName)
+		if err != nil {
+			t.logger.Warn("⚠️ Warning: Could not check for existing PRs ", "err ", err)
+		} else if existingPR != nil {
+			t.logger.Info("✅ Found existing PR ", existingPR.Title)
+			t.logger.Info("PR Status: ", existingPR.State)
+
+			newMetadataEntry, isOpenPR = utils.CheckPRStatus(existingPR)
+		} else {
+			t.logger.Info("✅ No existing PRs found for branch ", "branch ", branchName)
+		}
+
 		err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "checkout", branchName)
 		if err != nil {
-			t.logger.Error("Failed to checkout branch from remote", "err", err)
+			t.logger.Error("Failed to checkout branch from remote ", "err ", err)
 			return nil, fmt.Errorf("failed to checkout branch from remote: %w", err)
 		}
 	}
 
 	// STEP 4. Install dependencies
-	t.logger.Info("\n📋 STEP 4: Installing dependencies...")
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && npm install", MetadataRepoName))
+	t.logger.Info("📋 STEP 4: Installing dependencies...")
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && pnpm install", MetadataRepoName))
 	if err != nil {
-		t.logger.Error("Failed to install dependencies", "err", err)
+		t.logger.Error("Failed to install dependencies ", "err ", err)
 		return nil, fmt.Errorf("failed to install dependencies: %w", err)
 	}
 
 	// STEP 5. Create metadata file
-	t.logger.Info("\n📋 STEP 5: Creating metadata file...")
+	t.logger.Info("📋 STEP 5: Creating metadata file...")
 	if t.deployConfig.L1ChainID != constants.EthereumSepoliaChainID { // Sepolia chain ID
-		t.logger.Error("Unsupported network", "chainID", t.deployConfig.L1ChainID)
+		t.logger.Error("Unsupported network ", "chainID ", t.deployConfig.L1ChainID)
 		return nil, fmt.Errorf("unsupported network. Currently only Sepolia (chain ID: 11155111) is supported, got chain ID: %d", t.deployConfig.L1ChainID)
 	}
 	networkDir := fmt.Sprintf("%s/data/sepolia", MetadataRepoName)
@@ -228,10 +243,10 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 	targetFile := fmt.Sprintf("%s/%s", networkDir, metadataFileName)
 
 	if newMetadataEntry {
-		t.logger.Info("Creating new metadata file", "file", targetFile)
+		t.logger.Info("Creating new metadata file ", "file ", targetFile)
 		err = utils.ExecuteCommandStream(ctx, t.logger, "cp", sourceFile, targetFile)
 		if err != nil {
-			t.logger.Error("Failed to copy example metadata file", "err", err)
+			t.logger.Error("Failed to copy example metadata file ", "err ", err)
 			return nil, fmt.Errorf("failed to copy example metadata file: %w", err)
 		}
 	}
@@ -240,13 +255,13 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 
 	metadataBytes, err := os.ReadFile(targetFile)
 	if err != nil {
-		t.logger.Error("Failed to read metadata file", "err", err)
+		t.logger.Error("Failed to read metadata file ", "err ", err)
 		return nil, fmt.Errorf("failed to read metadata file: %w", err)
 	}
 
 	var metadata types.RollupMetadata
 	if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
-		t.logger.Error("Failed to unmarshal metadata", "err", err)
+		t.logger.Error("Failed to unmarshal metadata ", "err ", err)
 		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
 	}
 
@@ -364,19 +379,19 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 
 	sequencerAddress, err := utils.GetAddressFromPrivateKey(t.deployConfig.SequencerPrivateKey)
 	if err != nil {
-		t.logger.Error("Failed to get sequencer address", "err", err)
+		t.logger.Error("Failed to get sequencer address ", "err ", err)
 		return nil, fmt.Errorf("failed to get sequencer address: %w", err)
 	}
 
 	batcherAddress, err := utils.GetAddressFromPrivateKey(t.deployConfig.BatcherPrivateKey)
 	if err != nil {
-		t.logger.Error("Failed to get batcher address", "err", err)
+		t.logger.Error("Failed to get batcher address ", "err ", err)
 		return nil, fmt.Errorf("failed to get batcher address: %w", err)
 	}
 
 	proposerAddress, err := utils.GetAddressFromPrivateKey(t.deployConfig.ProposerPrivateKey)
 	if err != nil {
-		t.logger.Error("Failed to get proposer address", "err", err)
+		t.logger.Error("Failed to get proposer address ", "err ", err)
 		return nil, fmt.Errorf("failed to get proposer address: %w", err)
 	}
 
@@ -438,13 +453,13 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 	privateKeyHex := strings.TrimPrefix(t.deployConfig.SequencerPrivateKey, "0x")
 	privateKey, err := crypto.HexToECDSA(privateKeyHex)
 	if err != nil {
-		t.logger.Error("Failed to parse sequencer private key", "err", err)
+		t.logger.Error("Failed to parse sequencer private key ", "err ", err)
 		return nil, fmt.Errorf("failed to parse sequencer private key: %w", err)
 	}
 
 	signature, err := crypto.Sign(hash.Bytes(), privateKey)
 	if err != nil {
-		t.logger.Error("Failed to sign metadata", "err", err)
+		t.logger.Error("Failed to sign metadata ", "err ", err)
 		return nil, fmt.Errorf("failed to sign metadata: %w", err)
 	}
 
@@ -462,12 +477,12 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 
 	updatedMetadataBytes, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
-		t.logger.Error("Failed to marshal updated metadata", "err", err)
+		t.logger.Error("Failed to marshal updated metadata ", "err ", err)
 		return nil, fmt.Errorf("failed to marshal updated metadata: %w", err)
 	}
 
 	if err := os.WriteFile(targetFile, updatedMetadataBytes, 0644); err != nil {
-		t.logger.Error("Failed to write updated metadata file", "err", err)
+		t.logger.Error("Failed to write updated metadata file ", "err ", err)
 		return nil, fmt.Errorf("failed to write updated metadata file: %w", err)
 	}
 	t.logger.Info("✅ Metadata file updated successfully!")
@@ -483,7 +498,7 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 	validationPath := fmt.Sprintf("data/sepolia/%s.json", systemConfigAddress)
 	validationCmd := fmt.Sprintf("cd %s && npm run validate -- --pr-title \"%s\" %s", MetadataRepoName, prTitle, validationPath)
 
-	t.logger.Info("\n📋STEP 6: Running validation command: %s\n", validationCmd)
+	t.logger.Info("📋STEP 6: Running validation command: ", validationCmd)
 	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", validationCmd)
 	if err != nil {
 		return nil, fmt.Errorf("metadata validation failed: %w", err)
@@ -491,7 +506,7 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 	t.logger.Info("✅ Metadata file validated successfully!")
 
 	// STEP 7. Setup git config and commit changes
-	t.logger.Info("\n📋 STEP 7: Committing changes...")
+	t.logger.Info("📋 STEP 7: Committing changes...")
 	err = utils.SetupGitConfig(ctx, t.logger, MetadataRepoName, creds)
 	if err != nil {
 		return nil, fmt.Errorf("failed to setup git config: %w", err)
@@ -510,7 +525,7 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 	t.logger.Info("✅ Changes committed successfully!")
 
 	// STEP 8. Push changes to user's fork
-	t.logger.Info("\n📋 STEP 8: Pushing changes to your fork...")
+	t.logger.Info("📋 STEP 8: Pushing changes to your fork...")
 	err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "push", "origin", branchName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to push changes to fork: %w", err)
@@ -518,7 +533,14 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 	t.logger.Info("✅ Changes pushed to fork successfully!")
 
 	// STEP 9. Create Pull Request from user's fork to original repo
-	t.logger.Info("\n📋 STEP 9: Creating Pull Request...")
+	if isOpenPR {
+		t.logger.Info("📋 STEP 9: Existing open PR found ", t.deployConfig.MetadataPRLink)
+		t.logger.Info("Skipping PR creation.")
+		return &types.RegisterMetadataDaoResult{
+			PRLink: t.deployConfig.MetadataPRLink,
+		}, nil
+	}
+	t.logger.Info("📋 STEP 9: Creating Pull Request...")
 	prLink, err := utils.CreateGitHubPRFromFork(prTitle, branchName, creds.Username, creds.Token, MetadataRepoName, newMetadataEntry)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pull request: %w", err)
@@ -526,16 +548,16 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 	t.deployConfig.MetadataPRLink = prLink
 	err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
 	if err != nil {
-		t.logger.Error("Failed to write settings file", "err", err)
+		t.logger.Error("Failed to write settings file ", "err ", err)
 		return nil, err
 	}
 
-	t.logger.Info("\n🎉 Metadata registration process completed!")
+	t.logger.Info("🎉 Metadata registration process completed!")
 	t.logger.Info("📋 Summary:")
-	t.logger.Info("   ✅ Repository forked to %s/%s", creds.Username, MetadataRepoName)
-	t.logger.Info("   ✅ Metadata file created: %s", targetFile)
-	t.logger.Info("   ✅ Changes committed and pushed to fork")
-	t.logger.Info("   ✅ Pull request created from fork to original repository")
+	t.logger.Info("✅ Repository forked to ", creds.Username, " ", MetadataRepoName)
+	t.logger.Info("✅ Metadata file created: ", targetFile)
+	t.logger.Info("✅ Changes committed and pushed to fork")
+	t.logger.Info("✅ Pull request created from fork to original repository")
 
 	return &types.RegisterMetadataDaoResult{
 		PRLink: prLink,
