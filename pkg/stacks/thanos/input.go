@@ -1633,19 +1633,6 @@ func makeBlockExplorerEnvs(dirPath string, filename string, config types.BlockEx
 		fmt.Sprintf("export TF_VAR_vpc_id=\"%s\"\n", config.VpcId),
 	}
 
-	// Apply default values for initialization
-	rdsRetention := config.RdsBackupRetentionDays
-	if rdsRetention <= 0 {
-		rdsRetention = 14 // 14 days
-	}
-	envVars = append(envVars, fmt.Sprintf("export TF_VAR_backup_retention_period=\"%d\"\n", rdsRetention))
-
-	rdsWindow := config.RdsPreferredBackupWindow
-	if strings.TrimSpace(rdsWindow) == "" {
-		rdsWindow = "03:00-04:00" // 03:00-04:00 UTC
-	}
-	envVars = append(envVars, fmt.Sprintf("export TF_VAR_preferred_backup_window=\"%s\"\n", rdsWindow))
-
 	for _, envVar := range envVars {
 		_, err = writer.WriteString(envVar)
 		if err != nil {

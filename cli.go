@@ -24,7 +24,7 @@ func Run() {
 		Commands: []*cli.Command{
 			{
 				Name:  "backup-manager",
-				Usage: "Manage L2 backups and restores (EFS/RDS)",
+				Usage: "Manage L2 backups and restores (EFS)",
 				Description: `Examples:
     trh-sdk backup-manager --status
     trh-sdk backup-manager --snapshot

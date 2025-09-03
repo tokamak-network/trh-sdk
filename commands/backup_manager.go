@@ -14,7 +14,7 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
-// ActionBackupManager provides backup/restore operations for EFS and RDS
+// ActionBackupManager provides backup/restore operations for EFS
 func ActionBackupManager() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
 		// CWD
@@ -30,8 +30,6 @@ func ActionBackupManager() cli.ActionFunc {
 		doRestore := cmd.Bool("restore")
 		doConfigure := cmd.Bool("config")
 
-		// target flags removed; manager operates on both EFS and RDS
-
 		limitStr := cmd.String("limit")
 
 		// post-restore attach flags
@@ -45,7 +43,6 @@ func ActionBackupManager() cli.ActionFunc {
 		cfgDaily := cmd.String("daily")
 		cfgKeep := cmd.String("keep")
 		cfgReset := cmd.Bool("reset")
-		// RDS flags removed
 
 		// Load settings.json (needed before logger for stack/network naming)
 		config, err := utils.ReadConfigFromJSONFile(deploymentPath)
@@ -84,7 +81,7 @@ func ActionBackupManager() cli.ActionFunc {
 			stssArg := attachSTSs
 			return thanosStack.BackupAttach(ctx, &e, &pvcsArg, &stssArg)
 		case doRestore:
-			return thanosStack.BackupRestore(ctx, nil, nil, nil, nil)
+			return thanosStack.BackupRestore(ctx)
 		case doConfigure:
 			// take addresses for optional pointer arguments
 			daily := cfgDaily

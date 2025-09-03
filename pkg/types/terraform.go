@@ -42,10 +42,6 @@ type BlockExplorerEnvs struct {
 	BlockExplorerDatabasePassword string
 	BlockExplorerDatabaseUserName string
 	VpcId                         string
-
-	// RDS backup (block explorer)
-	RdsBackupRetentionDays   int
-	RdsPreferredBackupWindow string
 }
 
 type ThanosStackTerraformState struct {

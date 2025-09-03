@@ -11,7 +11,7 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
-// BackupStatus prints EFS and RDS backup status
+// BackupStatus prints EFS backup status
 func (t *ThanosStack) BackupStatus(ctx context.Context) error {
 	region := t.deployConfig.AWS.Region
 	namespace := t.deployConfig.K8s.Namespace
@@ -109,7 +109,7 @@ func (t *ThanosStack) BackupStatus(ctx context.Context) error {
 	return nil
 }
 
-// BackupSnapshot triggers on-demand EFS backup and RDS snapshot
+// BackupSnapshot triggers on-demand EFS backup
 func (t *ThanosStack) BackupSnapshot(ctx context.Context) error {
 	region := t.deployConfig.AWS.Region
 	namespace := t.deployConfig.K8s.Namespace
@@ -150,7 +150,7 @@ func (t *ThanosStack) BackupSnapshot(ctx context.Context) error {
 	return nil
 }
 
-// BackupList lists recent EFS recovery points and RDS snapshots
+// BackupList lists recent EFS recovery points
 func (t *ThanosStack) BackupList(ctx context.Context, limit string) error {
 	region := t.deployConfig.AWS.Region
 	namespace := t.deployConfig.K8s.Namespace
@@ -252,8 +252,8 @@ func (t *ThanosStack) BackupList(ctx context.Context, limit string) error {
 	return nil
 }
 
-// BackupRestore provides a fully interactive restore experience for EFS and RDS
-func (t *ThanosStack) BackupRestore(ctx context.Context, point *string, newFS *bool, snap *string, newRDSId *string) error {
+// BackupRestore provides a fully interactive restore experience for EFS
+func (t *ThanosStack) BackupRestore(ctx context.Context) error {
 	// Validate prerequisites
 	if err := t.validateRestorePrerequisites(ctx); err != nil {
 		return fmt.Errorf("prerequisites validation failed: %w", err)
@@ -305,12 +305,6 @@ func (t *ThanosStack) validateAWSCredentials(ctx context.Context) error {
 	if _, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-backup-vaults", "--region", t.deployConfig.AWS.Region, "--max-items", "1"); err != nil {
 		return fmt.Errorf("insufficient AWS Backup permissions: %w", err)
 	}
-
-	// Check RDS permissions
-	if _, err := utils.ExecuteCommand(ctx, "aws", "rds", "describe-db-instances", "--region", t.deployConfig.AWS.Region, "--max-items", "1"); err != nil {
-		return fmt.Errorf("insufficient RDS permissions: %w", err)
-	}
-
 	t.logger.Infof("✅ AWS credentials valid (Account: %s)", accountID)
 	return nil
 }
@@ -721,7 +715,7 @@ func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *str
 			t.logger.Warnf("Failed to update AWS Backup protected resources: %v", err)
 			t.logger.Info("You may need to manually update backup configuration for the new EFS")
 		} else {
-			t.logger.Info("✅ AWS Backup protected resources updated successfully")
+			t.logger.Info("✅ AWS Backup protected resources updated successfully\n")
 		}
 	}
 
@@ -1718,7 +1712,6 @@ func (t *ThanosStack) performHealthCheck(ctx context.Context, namespace string) 
 
 // printAttachSummary prints a summary of the attach operation
 func (t *ThanosStack) printAttachSummary(ctx context.Context, newEfs string, pvcs *string, stss *string) {
-	t.logger.Info("\n✅ Attach operation completed:")
 	if newEfs != "" {
 		t.logger.Infof("  EFS FileSystemId: %s", newEfs)
 	}
@@ -2584,7 +2577,7 @@ func (t *ThanosStack) selectRecoveryPoint(ctx context.Context) (string, error) {
 	return selectedArn, nil
 }
 
-// interactiveRestore provides a fully interactive restore experience for EFS and RDS
+// interactiveRestore provides a fully interactive restore experience for EFS
 func (t *ThanosStack) interactiveRestore(ctx context.Context) error {
 	t.logger.Info("\n🔄 Starting Interactive Restore")
 	t.logger.Info("================================")
@@ -2652,6 +2645,17 @@ func (t *ThanosStack) interactiveEFSRestore(ctx context.Context) error {
 // CleanupUnusedBackupResources removes unused EFS filesystems and old recovery points during deploy
 func (t *ThanosStack) CleanupUnusedBackupResources(ctx context.Context) error {
 	t.logger.Info("🧹 Cleaning up unused backup resources...")
+
+	// Check if deployConfig is available
+	if t.deployConfig == nil {
+		return fmt.Errorf("deployConfig is not available - cannot cleanup backup resources")
+	}
+	if t.deployConfig.AWS == nil {
+		return fmt.Errorf("AWS configuration is not available - cannot cleanup backup resources")
+	}
+	if t.deployConfig.K8s == nil {
+		return fmt.Errorf("Kubernetes configuration is not available - cannot cleanup backup resources")
+	}
 
 	region := t.deployConfig.AWS.Region
 	namespace := t.deployConfig.K8s.Namespace
