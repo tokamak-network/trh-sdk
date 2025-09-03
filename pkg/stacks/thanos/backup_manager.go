@@ -2134,7 +2134,7 @@ func (t *ThanosStack) BackupConfigure(ctx context.Context, daily *string, keep *
 	varArgs := []string{"-auto-approve"}
 	if reset != nil && *reset {
 		t.logger.Info("Resetting backup configuration to default values...")
-		varArgs = append(varArgs, `-var=backup_schedule_cron="cron(0 3 * * ? *)"`, "-var=backup_delete_after_days=35")
+		varArgs = append(varArgs, `-var=backup_schedule_cron="cron(0 3 * * ? *)"`, "-var=backup_delete_after_days=0") // 0 = unlimited retention
 	} else {
 		if daily != nil && strings.TrimSpace(*daily) != "" {
 			// convert HH:MM -> cron(M H * * ? *) using provided hour and minute
@@ -2148,8 +2148,14 @@ func (t *ThanosStack) BackupConfigure(ctx context.Context, daily *string, keep *
 			t.logger.Infof("Setting backup schedule to: %s UTC", hhmm)
 		}
 		if keep != nil && strings.TrimSpace(*keep) != "" {
-			varArgs = append(varArgs, fmt.Sprintf("-var=backup_delete_after_days=%s", strings.TrimSpace(*keep)))
-			t.logger.Infof("Setting backup retention to: %s days", strings.TrimSpace(*keep))
+			keepDays := strings.TrimSpace(*keep)
+			if keepDays == "0" {
+				varArgs = append(varArgs, "-var=backup_delete_after_days=0")
+				t.logger.Info("Setting backup retention to: unlimited (recommended for blockchain)")
+			} else {
+				varArgs = append(varArgs, fmt.Sprintf("-var=backup_delete_after_days=%s", keepDays))
+				t.logger.Infof("Setting backup retention to: %s days", keepDays)
+			}
 		}
 	}
 
@@ -2283,12 +2289,15 @@ func (t *ThanosStack) showBackupConfigUsage() {
 	t.logger.Info("  # Set both backup time and retention")
 	t.logger.Info("  trh-sdk backup-manager --config --daily \"01:00\" --keep \"30\"")
 	t.logger.Info("")
-	t.logger.Info("  # Reset to default values (03:00 UTC, 35 days)")
+	t.logger.Info("  # Reset to default values (03:00 UTC, unlimited retention)")
 	t.logger.Info("  trh-sdk backup-manager --config --reset")
+	t.logger.Info("")
+	t.logger.Info("  # Set unlimited retention (recommended for blockchain)")
+	t.logger.Info("  trh-sdk backup-manager --config --keep \"0\"")
 	t.logger.Info("")
 	t.logger.Info("CURRENT DEFAULT VALUES:")
 	t.logger.Info("  Daily backup time: 03:00 UTC")
-	t.logger.Info("  Retention period:  35 days")
+	t.logger.Info("  Retention period:  unlimited (recommended for blockchain data)")
 }
 
 // initializeBackupSystem initializes the backup system after deployment
