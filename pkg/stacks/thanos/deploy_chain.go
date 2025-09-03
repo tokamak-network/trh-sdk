@@ -294,7 +294,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		t.logger.Error("❌ Error checking K8s cluster readiness", "err", err)
 		return err
 	}
-	t.logger.Info("✅ K8s cluster is ready: %t", k8sReady)
+	t.logger.Infof("✅ K8s cluster is ready: %t", k8sReady)
 
 	// ---------------------------------------- Deploy chain --------------------------//
 	// Step 8. Add Helm repository
@@ -375,7 +375,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		time.Sleep(15 * time.Second)
 	}
 	t.logger.Info("✅ Network deployment completed successfully!")
-	t.logger.Info("🌐 RPC endpoint: %s", l2RPCUrl)
+	t.logger.Infof("🌐 RPC endpoint: %s", l2RPCUrl)
 
 	t.deployConfig.K8s = &types.K8sConfig{
 		Namespace: namespace,
@@ -388,7 +388,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		t.logger.Error("Error saving configuration file", "err", err)
 		return err
 	}
-	t.logger.Info("Configuration saved successfully to: %s/settings.json", t.deploymentPath)
+	t.logger.Infof("Configuration saved successfully to: %s/settings.json", t.deploymentPath)
 
 	// After installing the infra successfully, we install the bridge
 	if !inputs.IgnoreInstallBridge {

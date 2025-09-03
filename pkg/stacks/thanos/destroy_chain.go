@@ -57,7 +57,7 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 	if len(helmReleases) > 0 {
 		for _, release := range helmReleases {
 			if strings.Contains(release, namespace) || strings.Contains(release, "op-bridge") || strings.Contains(release, "block-explorer") || strings.Contains(release, constants.MonitoringNamespace) {
-				t.logger.Info("Uninstalling Helm release: %s in namespace: %s...", release, namespace)
+				t.logger.Infof("Uninstalling Helm release: %s in namespace: %s...", release, namespace)
 				_, err := utils.ExecuteCommand(ctx, "helm", "uninstall", release, "--namespace", namespace)
 				if err != nil {
 					t.logger.Error("Error removing Helm release", "err", err)
