@@ -28,7 +28,7 @@ func Run() {
 				Description: `Examples:
     trh-sdk backup-manager --status
     trh-sdk backup-manager --snapshot
-    trh-sdk backup-manager --list --limit 5
+    trh-sdk backup-manager --list --limit 5  # Show only 5 most recent backups (default: 20)
     trh-sdk backup-manager --restore
     trh-sdk backup-manager --config --daily 03:00 --keep 35
     trh-sdk backup-manager --attach --efs-id fs-1234567890abcdef0 --pvc op-geth,op-node --sts op-geth,op-node
@@ -42,7 +42,7 @@ func Run() {
 					&cli.BoolFlag{Name: "config", Usage: "Configure backup settings"},
 
 					// common options
-					&cli.StringFlag{Name: "limit", Usage: "Limit number of entries when listing"},
+					&cli.StringFlag{Name: "limit", Usage: "Limit number of entries when listing (default: 20)"},
 
 					// post-restore attach options (EFS)
 					&cli.BoolFlag{Name: "attach", Usage: "Attach workloads to a new EFS and verify (can be used after restore or standalone)"},

@@ -169,7 +169,9 @@ func (t *ThanosStack) BackupList(ctx context.Context, limit string) error {
 		t.logger.Infof("📁 EFS Recovery Points (FileSystemId: %s)", efsID)
 
 		// First get the data in JSON format to process expiry dates
-		jsonQuery := "reverse(sort_by(RecoveryPoints,&CreationDate))[:10]"
+		// Default limit: show the 20 most recent recovery points
+		defaultLimit := "20"
+		jsonQuery := fmt.Sprintf("reverse(sort_by(RecoveryPoints,&CreationDate))[:%s]", defaultLimit)
 		if limit != "" {
 			jsonQuery = fmt.Sprintf("reverse(sort_by(RecoveryPoints,&CreationDate))[:%s]", limit)
 		}
@@ -182,8 +184,8 @@ func (t *ThanosStack) BackupList(ctx context.Context, limit string) error {
 			if jsonOutTrimmed == "" || jsonOutTrimmed == "[]" {
 				t.logger.Infof("   ⚠️  No recovery points found")
 			} else {
-				// For now, use the table format but with calculated expiry dates
-				query := "reverse(sort_by(RecoveryPoints,&CreationDate))[:10].{Vault:BackupVaultName,Created:CreationDate,Expiry:ExpiryDate,Status:Status}"
+				// Use the table format to display recovery points
+				query := fmt.Sprintf("reverse(sort_by(RecoveryPoints,&CreationDate))[:%s].{Vault:BackupVaultName,Created:CreationDate,Expiry:ExpiryDate,Status:Status}", defaultLimit)
 				if limit != "" {
 					query = fmt.Sprintf("reverse(sort_by(RecoveryPoints,&CreationDate))[:%s].{Vault:BackupVaultName,Created:CreationDate,Expiry:ExpiryDate,Status:Status}", limit)
 				}
@@ -195,47 +197,29 @@ func (t *ThanosStack) BackupList(ctx context.Context, limit string) error {
 					if outTrimmed == "" {
 						t.logger.Infof("   ⚠️  No recovery points found")
 					} else {
-						// Add indentation to the table output and replace the header
-						lines := strings.Split(outTrimmed, "")
-						for i, line := range lines {
-							if i == 0 {
-								// Replace the AWS CLI generated header with a custom one
-								t.logger.Infof("   -------------------------------------------------")
-								t.logger.Infof("   |                EFS Recovery Points            |")
-								t.logger.Infof("   +---------+-------------------------------------+")
-							} else if i == 1 {
-								// Skip the original header line
-								continue
-							} else {
-								// Replace "None" expiry with calculated date
-								if strings.Contains(line, "|  Expiry |  None") {
-									// Find the creation date from the previous line
-									if i > 2 && i < len(lines) {
-										prevLine := lines[i-1]
-										if strings.Contains(prevLine, "|  Created|") {
-											parts := strings.Split(prevLine, "|")
-											if len(parts) >= 3 {
-												createdStr := strings.TrimSpace(parts[2])
-												if createdStr != "" && createdStr != "None" {
-													// Parse the creation date
-													creationTime, err := time.Parse("2006-01-02T15:04:05.000000-07:00", createdStr)
-													if err != nil {
-														creationTime, err = time.Parse("2006-01-02T15:04:05.000000+09:00", createdStr)
-													}
-													if err == nil {
-														expiryTime := creationTime.AddDate(0, 0, 35)
-														expiryStr := expiryTime.Format("2006-01-02T15:04:05-07:00")
-														// Replace the "None" with calculated expiry date
-														modifiedLine := strings.Replace(line, "|  Expiry |  None", fmt.Sprintf("|  Expiry |  %s (calc)", expiryStr), 1)
-														t.logger.Infof("   %s", modifiedLine)
-														continue
-													}
-												}
-											}
-										}
+						// Add indentation to the table output and display properly
+						lines := strings.Split(outTrimmed, "\n")
+						if len(lines) > 0 {
+							t.logger.Infof("   -------------------------------------------------")
+							t.logger.Infof("   |                EFS Recovery Points            |")
+							t.logger.Infof("   -------------------------------------------------")
+
+							for i, line := range lines {
+								if i == 0 {
+									// Skip the table separator line
+									continue
+								} else if i == 1 {
+									// Display the header with indentation
+									t.logger.Infof("   %s", line)
+								} else if i == 2 {
+									// Display the separator line
+									t.logger.Infof("   %s", line)
+								} else {
+									// Display data rows with indentation
+									if strings.TrimSpace(line) != "" {
+										t.logger.Infof("   %s", line)
 									}
 								}
-								t.logger.Infof("   %s", line) // Regular data rows
 							}
 						}
 					}
@@ -2421,10 +2405,12 @@ func (t *ThanosStack) initializeBackupSystem(ctx context.Context, chainName stri
 	backupVaultName := fmt.Sprintf("%s-backup-vault", chainName)
 
 	// Start initial backup job
-	t.logger.Info("Starting initial backup job...")
+	currentTime := time.Now()
+	t.logger.Infof("Starting initial backup job at: %s", currentTime.Format("2006-01-02 15:04:05 MST"))
 	efsArn := utils.BuildEFSArn(region, accountID, efsID)
 	iamRoleArn := fmt.Sprintf("arn:aws:iam::%s:role/%s-backup-service-role", accountID, chainName)
 
+	// Start backup job with default AWS settings
 	_, err = utils.ExecuteCommand(ctx, "aws", "backup", "start-backup-job",
 		"--region", region,
 		"--backup-vault-name", backupVaultName,
@@ -2435,7 +2421,7 @@ func (t *ThanosStack) initializeBackupSystem(ctx context.Context, chainName stri
 		return fmt.Errorf("failed to start initial backup job: %w", err)
 	}
 
-	t.logger.Infof("✅ Initial backup job started for EFS: %s", efsID)
+	t.logger.Infof("✅ Initial backup job started for EFS: %s at %s", efsID, currentTime.Format("2006-01-02 15:04:05 MST"))
 	return nil
 }
 
@@ -2654,7 +2640,7 @@ func (t *ThanosStack) CleanupUnusedBackupResources(ctx context.Context) error {
 		return fmt.Errorf("AWS configuration is not available - cannot cleanup backup resources")
 	}
 	if t.deployConfig.K8s == nil {
-		return fmt.Errorf("Kubernetes configuration is not available - cannot cleanup backup resources")
+		return fmt.Errorf("kubernetes configuration is not available - cannot cleanup backup resources")
 	}
 
 	region := t.deployConfig.AWS.Region
