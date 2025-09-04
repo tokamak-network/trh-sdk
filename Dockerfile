@@ -1,35 +1,41 @@
-FROM ubuntu:latest
+FROM golang:1.22.6 
+
 
 WORKDIR /app
 
-# Copy scripts
-COPY scripts /app/scripts
-
-# Install base system packages
+# Install base system packages in a single layer
 RUN apt-get update && apt-get upgrade -y && \
   apt-get install -y \
   wget \
   gnupg \
   software-properties-common \
   curl \
-  unzip && \
+  unzip \
+  jq \
+  bc \
+  lsb-release \
+  ca-certificates \
+  sudo \
+  build-essential \
+  git && \
   # Install Node.js v20.16.0
   curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
   apt-get install -y nodejs && \
   npm install -g n && \
-  n 20.16.0
+  n 20.16.0 && \
+  # Clean up in the same layer to reduce image size
+  apt-get clean && \
+  rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Copy scripts
+COPY scripts /app/scripts
 
 # Run setup script
 RUN chmod +x /app/scripts/setup.sh && \
-  DEBIAN_FRONTEND=noninteractive bash -x /app/scripts/setup.sh 2>&1 | tee /var/log/setup.log
+  bash -x /app/scripts/setup.sh 2>&1 | tee /var/log/setup.log
 
-
-# Clean up
-RUN apt-get clean && \
-  rm -rf /var/lib/apt/lists/*
-
-# Use bash shell and source profile
 SHELL ["/bin/bash", "-c"]
-RUN source ~/.bashrc
+
+RUN echo 'source ~/.bashrc' >> ~/.bash_profile
 
 CMD ["/bin/bash"]
