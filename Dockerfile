@@ -1,7 +1,5 @@
 FROM ubuntu:latest
 
-# Set non-interactive frontend and working directory
-ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /app
 
 # Copy scripts
