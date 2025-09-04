@@ -27,8 +27,8 @@ RUN apt-get update && apt-get upgrade -y && \
   apt-get clean && \
   rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Copy scripts
 COPY scripts /app/scripts
+COPY setup.sh /app/scripts/
 
 # Run setup script
 RUN chmod +x /app/scripts/setup.sh && \
