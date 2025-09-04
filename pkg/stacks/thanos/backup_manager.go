@@ -1781,26 +1781,26 @@ func (t *ThanosStack) replaceBackupJobsForCurrentEFS(ctx context.Context, region
 			"--region", region,
 			"--by-state", st,
 			"--max-results", "1000",
+			"--query", "BackupJobs[].BackupJobId",
 			"--output", "json")
 		if err != nil {
 			t.logger.Warnf("Failed to list backup jobs (state=%s): %v", st, err)
 			continue
 		}
-		var jobs []struct {
-			BackupJobId string `json:"BackupJobId"`
-		}
-		if err := json.Unmarshal([]byte(strings.TrimSpace(jobsJSON)), &jobs); err != nil {
+		var jobIDs []string
+		if err := json.Unmarshal([]byte(strings.TrimSpace(jobsJSON)), &jobIDs); err != nil {
 			t.logger.Warnf("Failed to parse backup jobs (state=%s): %v", st, err)
 			continue
 		}
-		for _, j := range jobs {
-			if strings.TrimSpace(j.BackupJobId) == "" {
+		for _, jobID := range jobIDs {
+			jobID = strings.TrimSpace(jobID)
+			if jobID == "" {
 				continue
 			}
 			// Describe each job to read ResourceArn
 			resArn, dErr := utils.ExecuteCommand(ctx, "aws", "backup", "describe-backup-job",
 				"--region", region,
-				"--backup-job-id", j.BackupJobId,
+				"--backup-job-id", jobID,
 				"--query", "ResourceArn",
 				"--output", "text")
 			if dErr != nil {
@@ -1815,8 +1815,8 @@ func (t *ThanosStack) replaceBackupJobsForCurrentEFS(ctx context.Context, region
 				// Stop old EFS job
 				_, _ = utils.ExecuteCommand(ctx, "aws", "backup", "stop-backup-job",
 					"--region", region,
-					"--backup-job-id", j.BackupJobId)
-				t.logger.Infof("Stopped old EFS backup job: %s (resource=%s)", j.BackupJobId, rArn)
+					"--backup-job-id", jobID)
+				t.logger.Infof("Stopped old EFS backup job: %s (resource=%s)", jobID, rArn)
 			}
 		}
 	}
