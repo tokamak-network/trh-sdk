@@ -49,6 +49,11 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 		return fmt.Errorf("AWS profile is not set")
 	}
 
+	// Perform backup cleanup early while Kubernetes context still exists
+	if err := t.CleanupUnusedBackupResources(ctx); err != nil {
+		t.logger.Warnf("Failed to cleanup unused backup resources: %v", err)
+	}
+
 	helmReleases, err := utils.GetHelmReleases(ctx, namespace)
 	if err != nil {
 		t.logger.Error("Error retrieving Helm releases", "err", err)
@@ -98,11 +103,6 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 	if err != nil {
 		t.logger.Error("Failed to write the updated config", "err", err)
 		return err
-	}
-
-	// Cleanup unused backup resources after infrastructure destruction
-	if err := t.CleanupUnusedBackupResources(ctx); err != nil {
-		t.logger.Warnf("Failed to cleanup unused backup resources: %v", err)
 	}
 
 	t.logger.Info("✅The chain has been destroyed successfully!")
