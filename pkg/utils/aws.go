@@ -54,7 +54,29 @@ func IsAvailableRegion(region string, availableRegions []string) bool {
 	return false
 }
 
+// SwitchAWSRegion sets the AWS CLI default region configuration
+func SwitchAWSRegion(ctx context.Context, region string) error {
+	regionSetup, err := ExecuteCommand(ctx, "aws", []string{
+		"configure",
+		"set",
+		"region", region,
+	}...)
+	if err != nil {
+		fmt.Println("Error setting AWS region:", err, "details:", regionSetup)
+		return fmt.Errorf("error setting AWS region: %w, details: %s", err, regionSetup)
+	}
+
+	fmt.Println("AWS region updated to:", region)
+	return nil
+}
+
 func SwitchKubernetesContext(ctx context.Context, namespace string, region string) error {
+	// First, set the AWS region configuration
+	if err := SwitchAWSRegion(ctx, region); err != nil {
+		return fmt.Errorf("failed to set AWS region: %w", err)
+	}
+
+	// Then update the EKS kubeconfig
 	eksSetup, err := ExecuteCommand(ctx, "aws", []string{
 		"eks",
 		"update-kubeconfig",
