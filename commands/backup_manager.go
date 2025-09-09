@@ -17,32 +17,19 @@ import (
 // ActionBackupManager provides backup/restore operations for EFS
 func ActionBackupManager() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
-		// CWD
+		// Get deployment path
 		deploymentPath, err := os.Getwd()
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to get current working directory: %w", err)
 		}
 
-		// Flags
-		showStatus := cmd.Bool("status")
-		startBackup := cmd.Bool("snapshot")
-		listPoints := cmd.Bool("list")
-		doRestore := cmd.Bool("restore")
-		doConfigure := cmd.Bool("config")
+		// Parse command flags
+		flags := parseBackupManagerFlags(cmd)
 
-		limitStr := cmd.String("limit")
-
-		// post-restore attach flags
-		doAttach := cmd.Bool("attach")
-		attachEfs := cmd.String("efs-id")
-		attachPVCs := cmd.String("pvc")
-		attachSTSs := cmd.String("sts")
-
-		// Configure flags (module/Terraform path)
-		// EFS
-		cfgDaily := cmd.String("daily")
-		cfgKeep := cmd.String("keep")
-		cfgReset := cmd.Bool("reset")
+		// Validate flags
+		if err := validateBackupManagerFlags(flags); err != nil {
+			return err
+		}
 
 		// Load settings.json (needed before logger for stack/network naming)
 		config, err := utils.ReadConfigFromJSONFile(deploymentPath)
@@ -66,30 +53,106 @@ func ActionBackupManager() cli.ActionFunc {
 			return fmt.Errorf("failed to create ThanosStack instance: %w", err)
 		}
 
-		// Dispatch
-		switch {
-		case showStatus:
-			return thanosStack.BackupStatus(ctx)
-		case startBackup:
-			return thanosStack.BackupSnapshot(ctx)
-		case listPoints:
-			return thanosStack.BackupList(ctx, limitStr)
-		case doAttach:
-			// standalone post-restore attach mode
-			e := attachEfs
-			pvcsArg := attachPVCs
-			stssArg := attachSTSs
-			return thanosStack.BackupAttach(ctx, &e, &pvcsArg, &stssArg)
-		case doRestore:
-			return thanosStack.BackupRestore(ctx)
-		case doConfigure:
-			// take addresses for optional pointer arguments
-			daily := cfgDaily
-			keep := cfgKeep
-			rst := cfgReset
-			return thanosStack.BackupConfigure(ctx, &daily, &keep, &rst)
-		default:
-			return errors.New("no action specified. Try --status, --snapshot, --list, --restore, or --config")
+		// Execute the appropriate action
+		return executeBackupManagerAction(ctx, thanosStack, flags)
+	}
+}
+
+// BackupManagerFlags represents all command line flags for backup manager
+type BackupManagerFlags struct {
+	// Primary actions
+	ShowStatus  bool
+	StartBackup bool
+	ListPoints  bool
+	DoRestore   bool
+	DoConfigure bool
+	DoAttach    bool
+
+	// Common options
+	Limit string
+
+	// Post-restore attach options
+	AttachEfs  string
+	AttachPVCs string
+	AttachSTSs string
+
+	// Configure options
+	ConfigDaily string
+	ConfigKeep  string
+	ConfigReset bool
+}
+
+// parseBackupManagerFlags extracts and parses all command line flags
+func parseBackupManagerFlags(cmd *cli.Command) *BackupManagerFlags {
+	return &BackupManagerFlags{
+		// Primary actions
+		ShowStatus:  cmd.Bool("status"),
+		StartBackup: cmd.Bool("snapshot"),
+		ListPoints:  cmd.Bool("list"),
+		DoRestore:   cmd.Bool("restore"),
+		DoConfigure: cmd.Bool("config"),
+		DoAttach:    cmd.Bool("attach"),
+
+		// Common options
+		Limit: cmd.String("limit"),
+
+		// Post-restore attach options
+		AttachEfs:  cmd.String("efs-id"),
+		AttachPVCs: cmd.String("pvc"),
+		AttachSTSs: cmd.String("sts"),
+
+		// Configure options
+		ConfigDaily: cmd.String("daily"),
+		ConfigKeep:  cmd.String("keep"),
+		ConfigReset: cmd.Bool("reset"),
+	}
+}
+
+// validateBackupManagerFlags validates that exactly one action is specified
+func validateBackupManagerFlags(flags *BackupManagerFlags) error {
+	actions := []bool{
+		flags.ShowStatus,
+		flags.StartBackup,
+		flags.ListPoints,
+		flags.DoRestore,
+		flags.DoConfigure,
+		flags.DoAttach,
+	}
+
+	actionCount := 0
+	for _, action := range actions {
+		if action {
+			actionCount++
 		}
+	}
+
+	if actionCount == 0 {
+		return errors.New("no action specified. Try --status, --snapshot, --list, --restore, --config, or --attach")
+	}
+
+	if actionCount > 1 {
+		return errors.New("only one action can be specified at a time")
+	}
+
+	return nil
+}
+
+// executeBackupManagerAction routes to the appropriate backup manager action
+func executeBackupManagerAction(ctx context.Context, thanosStack *thanos.ThanosStack, flags *BackupManagerFlags) error {
+	switch {
+	case flags.ShowStatus:
+		return thanosStack.BackupStatus(ctx)
+	case flags.StartBackup:
+		return thanosStack.BackupSnapshot(ctx)
+	case flags.ListPoints:
+		return thanosStack.BackupList(ctx, flags.Limit)
+	case flags.DoAttach:
+		return thanosStack.BackupAttach(ctx, &flags.AttachEfs, &flags.AttachPVCs, &flags.AttachSTSs)
+	case flags.DoRestore:
+		return thanosStack.BackupRestore(ctx)
+	case flags.DoConfigure:
+		return thanosStack.BackupConfigure(ctx, &flags.ConfigDaily, &flags.ConfigKeep, &flags.ConfigReset)
+	default:
+		return errors.New("no action specified. Try --status, --snapshot, --list, --restore, or --config")
 	}
 }
