@@ -193,6 +193,16 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							}
 							return nil
 
+						case constants.PluginDRB:
+							_, err := thanosStack.InstallDRB(ctx, &thanos.DRBInputs{
+								PrivateKey: config.AdminPrivateKey,
+								RrpcUrl:    config.L2RpcUrl,
+							})
+							if err != nil {
+								return thanosStack.UninstallDRB(ctx)
+							}
+							return nil
+
 						default:
 							return nil
 						}

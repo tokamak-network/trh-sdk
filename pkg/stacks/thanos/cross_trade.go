@@ -2,10 +2,8 @@ package thanos
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/big"
-	"os"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -164,8 +162,9 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 			DeploymentScriptPath: deploymentScriptPath,
 		}
 	} else {
-		contracts, err := t.getContractAddressFromOutput(ctx, l1ContractFileName, t.deployConfig.L1ChainID)
+		contracts, err := t.getContractAddressFromOutput(ctx, "crossTrade", l1ContractFileName, t.deployConfig.L1ChainID)
 		if err != nil {
+			t.logger.Errorf("failed to get the contract address: %s", err)
 			return nil, fmt.Errorf("failed to get the contract address: %w", err)
 		}
 
@@ -304,8 +303,9 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 			DeploymentScriptPath: deploymentScriptPath,
 		})
 	} else {
-		contracts, err := t.getContractAddressFromOutput(ctx, l2ContractFileName, t.deployConfig.L2ChainID)
+		contracts, err := t.getContractAddressFromOutput(ctx, "crossTrade", l2ContractFileName, t.deployConfig.L2ChainID)
 		if err != nil {
+			t.logger.Errorf("failed to get the contract address: %s", err)
 			return nil, fmt.Errorf("failed to get the contract address: %w", err)
 		}
 
@@ -587,7 +587,7 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *Depl
 			return nil, fmt.Errorf("failed to deploy the contracts: %s", err)
 		}
 		// Get the contract address from the output
-		l1ContractAddresses, err = t.getContractAddressFromOutput(ctx, input.L1ChainConfig.ContractName, input.L1ChainConfig.ChainID)
+		l1ContractAddresses, err = t.getContractAddressFromOutput(ctx, "crossTrade", input.L1ChainConfig.ContractName, input.L1ChainConfig.ChainID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get the contract address: %s", err)
 		}
@@ -657,8 +657,9 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *Depl
 		}
 
 		// Get the contract address from the output
-		addresses, err := t.getContractAddressFromOutput(ctx, l2ChainConfig.ContractName, l2ChainConfig.ChainID)
+		addresses, err := t.getContractAddressFromOutput(ctx, "crossTrade", l2ChainConfig.ContractName, l2ChainConfig.ChainID)
 		if err != nil {
+			t.logger.Errorf("failed to get the contract address: %s", err)
 			return nil, fmt.Errorf("failed to get the contract address: %s", err)
 		}
 
@@ -729,63 +730,4 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *Depl
 		L2CrossTradeProxyAddresses: l2CrossTradeProxyAddresses,
 		L2CrossTradeAddresses:      l2CrossTradeAddresses,
 	}, nil
-}
-
-func (t *ThanosStack) getContractAddressFromOutput(_ context.Context, deployFile string, chainID uint64) (map[string]string, error) {
-	// Construct the file path
-	filePath := fmt.Sprintf("%s/crossTrade/broadcast/%s/%d/run-latest.json", t.deploymentPath, deployFile, chainID)
-
-	// Open and read the file
-	file, err := os.Open(filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return make(map[string]string), nil
-		}
-		return nil, fmt.Errorf("failed to open deployment file %s: %w", filePath, err)
-	}
-	defer file.Close()
-
-	// Parse the JSON structure
-	var deploymentData map[string]any
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&deploymentData); err != nil {
-		return nil, fmt.Errorf("failed to decode deployment JSON: %w", err)
-	}
-
-	// Extract the transactions array
-	transactions, ok := deploymentData["transactions"].([]any)
-	if !ok {
-		return nil, fmt.Errorf("transactions field not found or not an array in deployment file")
-	}
-
-	// Collect all contract addresses from CREATE transactions
-	contractAddresses := make(map[string]string)
-
-	// Loop through transactions to find CREATE type
-	for _, tx := range transactions {
-		txMap, ok := tx.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		// Check if transaction type is CREATE
-		txType, ok := txMap["transactionType"].(string)
-		if !ok || txType != "CREATE" {
-			continue
-		}
-
-		// Extract contract address
-		contractAddress, ok := txMap["contractAddress"].(string)
-		if !ok || contractAddress == "" {
-			continue
-		}
-
-		contractAddresses[txMap["contractName"].(string)] = contractAddress
-	}
-
-	if len(contractAddresses) == 0 {
-		return nil, fmt.Errorf("no CREATE transaction found in deployment file")
-	}
-
-	return contractAddresses, nil
 }
