@@ -270,16 +270,6 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	// Sleep for 30 seconds to allow the infrastructure to be fully deployed
 	time.Sleep(30 * time.Second)
 
-	// Step 6.5. Initialize backup system
-	fmt.Println("Initializing backup system...")
-	err = t.initializeBackupSystem(ctx, inputs.ChainName)
-	if err != nil {
-		fmt.Printf("Warning: Failed to initialize backup system: %v\n", err)
-		// Continue deployment even if backup initialization fails
-	} else {
-		fmt.Println("✅ Backup system initialized successfully")
-	}
-
 	// Step 7. Configure EKS access
 	err = utils.SwitchKubernetesContext(ctx, namespace, awsLoginInputs.Region)
 	if err != nil {
@@ -389,6 +379,16 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		return err
 	}
 	t.logger.Infof("Configuration saved successfully to: %s/settings.json", t.deploymentPath)
+
+	// Step 8.3. Initialize backup system (after K8s config is set)
+	fmt.Println("Initializing backup system...")
+	err = t.initializeBackupSystem(ctx, inputs.ChainName)
+	if err != nil {
+		fmt.Printf("Warning: Failed to initialize backup system: %v\n", err)
+		// Continue deployment even if backup initialization fails
+	} else {
+		fmt.Println("✅ Backup system initialized successfully")
+	}
 
 	// After installing the infra successfully, we install the bridge
 	if !inputs.IgnoreInstallBridge {
