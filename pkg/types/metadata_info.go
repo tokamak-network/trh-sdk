@@ -5,23 +5,23 @@ import "errors"
 // TODO: Check and update these default info with team if required
 var MetadataGenericInfo = MetadataInfo{
 	Chain: ChainInfo{
-		Description: "Example rollup deployed with TRH SDK",
-		Logo:        "https://example.com/logo.png",
-		Website:     "https://example-l2.com",
+		Description: "Rollup chain deployed with TRH SDK",
+		Logo:        "",
+		Website:     "",
 	},
 	Bridge: BridgeInfo{
-		Name: "Example Bridge",
+		Name: "Default Bridge",
 	},
 	Explorer: ExplorerInfo{
-		Name: "Example Explorer",
+		Name: "Default Explorer",
 	},
 	Support: SupportResources{
-		StatusPageUrl:     "https://status.example-l2.com",
-		SupportContactUrl: "https://discord.gg/example-support",
-		DocumentationUrl:  "https://docs.example-l2.com",
-		CommunityUrl:      "https://t.me/example_community",
-		HelpCenterUrl:     "https://help.example-l2.com",
-		AnnouncementUrl:   "https://twitter.com/example_l2",
+		StatusPageUrl:     "",
+		SupportContactUrl: "",
+		DocumentationUrl:  "",
+		CommunityUrl:      "",
+		HelpCenterUrl:     "",
+		AnnouncementUrl:   "",
 	},
 }
 
