@@ -106,7 +106,9 @@ func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *str
 				return backup.VerifyEFSDataImpl(ctx, t.logger, namespace)
 			})
 		},
-		backup.RestartStatefulSets,
+		func(c context.Context, ns string, stsCSV string) error {
+			return backup.RestartStatefulSets(c, t.logger, ns, stsCSV)
+		},
 		func(c context.Context, ai *types.BackupAttachInfo) error {
 			return backup.ExecuteEFSOperationsFull(c, t.logger, ai, func(ctx context.Context, namespace string) error {
 				return backup.VerifyEFSDataImpl(ctx, t.logger, namespace)

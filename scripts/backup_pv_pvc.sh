@@ -1,4 +1,26 @@
 #!/usr/bin/env bash
+#
+# Kubernetes PV/PVC Backup Script for TRH-SDK
+#
+# This script creates a comprehensive backup of Kubernetes resources related to
+# PersistentVolumes and PersistentVolumeClaims used by op-geth and op-node components.
+# It automatically detects the namespace and backs up the following resources:
+#
+# - PVC definitions for op-geth and op-node components
+# - PV definitions bound to the PVCs
+# - StatefulSet definitions for op-geth and op-node
+# - StorageClass definitions
+# - ConfigMaps in the target namespace
+# - Summary file with key information (PVC, PV, StorageClass, EFS IDs)
+#
+# Usage:
+#   NAMESPACE=<namespace> ./backup_pv_pvc.sh
+#   or
+#   ./backup_pv_pvc.sh  # auto-detects namespace
+#
+# Output:
+#   Creates timestamped backup directory: ./k8s-efs-backup/<namespace>_<timestamp>/
+#
 set -euo pipefail
 
 command -v kubectl >/dev/null 2>&1 || { echo "kubectl not found"; exit 1; }

@@ -14,6 +14,8 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
+const DefaultBackupPvPvcRawURL = "https://raw.githubusercontent.com/tokamak-network/trh-sdk/main/scripts/backup_pv_pvc.sh"
+
 // ShowAttachUsage prints usage via the provided logger
 func ShowAttachUsage(l *zap.SugaredLogger) {
 	if l == nil {
@@ -53,7 +55,7 @@ func VerifyEFSData(ctx context.Context, namespace string, verify func(context.Co
 }
 
 // RestartStatefulSets restarts comma-separated StatefulSets and waits for rollout
-func RestartStatefulSets(ctx context.Context, namespace, stsCSV string) error {
+func RestartStatefulSets(ctx context.Context, l *zap.SugaredLogger, namespace, stsCSV string) error {
 	list := strings.Split(strings.TrimSpace(stsCSV), ",")
 	for _, raw := range list {
 		name := strings.TrimSpace(raw)
@@ -68,21 +70,21 @@ func RestartStatefulSets(ctx context.Context, namespace, stsCSV string) error {
 		}
 
 		// Log StatefulSet restart initiation
-		fmt.Printf("🔄 Restarting StatefulSet %s (actual: %s)...\n", name, actualName)
+		l.Infof("🔄 Restarting StatefulSet %s (actual: %s)...", name, actualName)
 
 		if _, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "rollout", "restart", "statefulset/"+actualName); err != nil {
 			return fmt.Errorf("failed to restart StatefulSet %s (actual: %s): %w", name, actualName, err)
 		}
 
 		// Log rollout status monitoring
-		fmt.Printf("⏳ Waiting for StatefulSet %s rollout to complete (timeout: 10 minutes)...\n", actualName)
+		l.Infof("⏳ Waiting for StatefulSet %s rollout to complete (timeout: 10 minutes)...", actualName)
 
 		if _, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "rollout", "status", "statefulset/"+actualName, "--timeout=600s"); err != nil {
 			return fmt.Errorf("rollout status failed for %s (actual: %s): %w", name, actualName, err)
 		}
 
 		// Log successful completion
-		fmt.Printf("✅ StatefulSet %s rollout completed successfully\n", actualName)
+		l.Infof("✅ StatefulSet %s rollout completed successfully", actualName)
 	}
 	return nil
 }
@@ -181,6 +183,8 @@ func ExecuteBackupAttach(
 	if err := validatePrereq(ctx); err != nil {
 		return fmt.Errorf("attach prerequisites validation failed: %w", err)
 	}
+
+	// Handle EFS operations
 	if attachInfo.EFSID != "" {
 		if err := execOps(ctx, attachInfo); err != nil {
 			return err
@@ -192,6 +196,8 @@ func ExecuteBackupAttach(
 		}
 		_, _ = utils.ExecuteCommand(ctx, "kubectl", "-n", attachInfo.Namespace, "delete", "pod", "verify-efs", "--ignore-not-found=true")
 	}
+
+	// Handle StatefulSet restarts
 	if len(attachInfo.STSs) > 0 {
 		stsList := strings.Join(attachInfo.STSs, ",")
 		if err := restart(ctx, attachInfo.Namespace, stsList); err != nil {
@@ -202,15 +208,17 @@ func ExecuteBackupAttach(
 	l.Info("✅ Backup attach completed successfully")
 
 	// Create recovery point after successful attach
-	if attachInfo.EFSID != "" {
-		l.Info("Creating recovery point for attached EFS...")
-		if err := SnapshotExecute(ctx, l, attachInfo.Region, attachInfo.Namespace); err != nil {
-			l.Warnf("Failed to create recovery point: %v", err)
-		} else {
-			l.Info("✅ Recovery point created successfully")
-		}
+	if attachInfo.EFSID == "" {
+		return nil
 	}
 
+	l.Info("Creating recovery point for attached EFS...")
+	if err := SnapshotExecute(ctx, l, attachInfo.Region, attachInfo.Namespace); err != nil {
+		l.Warnf("Failed to create recovery point: %v", err)
+		return nil
+	}
+
+	l.Info("✅ Recovery point created successfully")
 	return nil
 }
 
@@ -345,7 +353,7 @@ func backupPvPvc(ctx context.Context, l *zap.SugaredLogger, namespace string) er
 		// Attempt to auto-download the script from a configurable raw URL
 		rawURL := strings.TrimSpace(os.Getenv("BACKUP_PV_PVC_URL"))
 		if rawURL == "" {
-			rawURL = "https://raw.githubusercontent.com/tokamak-network/trh-sdk/main/scripts/backup_pv_pvc.sh"
+			rawURL = DefaultBackupPvPvcRawURL
 		}
 		l.Infof("Backup script not found. Attempting download from %s", rawURL)
 		downloadCmd := fmt.Sprintf("mkdir -p ./scripts && curl -fsSL %s -o %s && chmod +x %s", rawURL, scriptPath, scriptPath)
@@ -371,6 +379,8 @@ func backupPvPvc(ctx context.Context, l *zap.SugaredLogger, namespace string) er
 func UpdatePVVolumeHandles(ctx context.Context, l *zap.SugaredLogger, namespace, newEfs string, pvcs *string) error {
 	l.Infof("Updating PV volume handles to EFS: %s", newEfs)
 	var targetPVCs []string
+
+	// Handle specific PVCs if provided
 	if pvcs != nil && strings.TrimSpace(*pvcs) != "" {
 		allPVCsOut, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", "-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")
 		if err != nil {
@@ -409,6 +419,7 @@ func UpdatePVVolumeHandles(ctx context.Context, l *zap.SugaredLogger, namespace,
 			targetPVCs = append(targetPVCs, resolvedPVC)
 		}
 	} else {
+		// Auto-detect op-geth and op-node PVCs
 		pvcsList, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", "-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")
 		if err != nil {
 			return fmt.Errorf("failed to list PVCs: %w", err)
@@ -420,6 +431,7 @@ func UpdatePVVolumeHandles(ctx context.Context, l *zap.SugaredLogger, namespace,
 			}
 		}
 	}
+
 	if len(targetPVCs) == 0 {
 		return fmt.Errorf("no target PVCs found to update")
 	}
@@ -564,20 +576,24 @@ func ExecuteEFSOperationsFull(
 	verify func(context.Context, string) error,
 ) error {
 	// Replicate mount targets from current EFS to the new one (best effort)
-	if srcEfs, err := utils.DetectEFSId(ctx, attachInfo.Namespace); err == nil && strings.TrimSpace(srcEfs) != "" {
-		if err := ReplicateEFSMountTargets(ctx, l, attachInfo.Region, strings.TrimSpace(srcEfs), attachInfo.EFSID); err != nil {
-			l.Warnf("Failed to replicate EFS mount targets from %s to %s: %v", srcEfs, attachInfo.EFSID, err)
-		} else {
-			l.Infof("✅ Replicated mount targets from %s to %s (region: %s)", srcEfs, attachInfo.EFSID, attachInfo.Region)
-			if vErr := ValidateEFSMountTargets(ctx, l, attachInfo.Region, attachInfo.EFSID); vErr != nil {
-				l.Warnf("Mount target validation for %s reported issues: %v", attachInfo.EFSID, vErr)
-			} else {
-				l.Infof("✅ Mount targets validated for %s", attachInfo.EFSID)
-			}
-		}
-	} else {
+	srcEfs, err := utils.DetectEFSId(ctx, attachInfo.Namespace)
+	if err != nil || strings.TrimSpace(srcEfs) == "" {
 		l.Warnf("Could not detect source EFS in namespace %s. Skipping mount-target replication.", attachInfo.Namespace)
+		return nil
 	}
+
+	if err := ReplicateEFSMountTargets(ctx, l, attachInfo.Region, strings.TrimSpace(srcEfs), attachInfo.EFSID); err != nil {
+		l.Warnf("Failed to replicate EFS mount targets from %s to %s: %v", srcEfs, attachInfo.EFSID, err)
+		return nil
+	}
+
+	l.Infof("✅ Replicated mount targets from %s to %s (region: %s)", srcEfs, attachInfo.EFSID, attachInfo.Region)
+	if vErr := ValidateEFSMountTargets(ctx, l, attachInfo.Region, attachInfo.EFSID); vErr != nil {
+		l.Warnf("Mount target validation for %s reported issues: %v", attachInfo.EFSID, vErr)
+		return nil
+	}
+
+	l.Infof("✅ Mount targets validated for %s", attachInfo.EFSID)
 
 	// Verify EFS data using injected verifier (best effort)
 	if verify != nil {
@@ -593,11 +609,13 @@ func ExecuteEFSOperationsFull(
 	}
 
 	// Update PV volume handles
-	if len(attachInfo.PVCs) > 0 {
-		pvcList := strings.Join(attachInfo.PVCs, ",")
-		if err := UpdatePVVolumeHandles(ctx, l, attachInfo.Namespace, attachInfo.EFSID, &pvcList); err != nil {
-			return fmt.Errorf("failed to update PV volume handles: %w", err)
-		}
+	if len(attachInfo.PVCs) == 0 {
+		return nil
+	}
+
+	pvcList := strings.Join(attachInfo.PVCs, ",")
+	if err := UpdatePVVolumeHandles(ctx, l, attachInfo.Namespace, attachInfo.EFSID, &pvcList); err != nil {
+		return fmt.Errorf("failed to update PV volume handles: %w", err)
 	}
 
 	return nil

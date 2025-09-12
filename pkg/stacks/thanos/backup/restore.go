@@ -223,18 +223,18 @@ func MonitorEFSRestoreJob(ctx context.Context, l *zap.SugaredLogger, region stri
 			}
 			createdArn = strings.TrimSpace(createdArn)
 			l.Infof("Restore completed. CreatedResourceArn: %s", createdArn)
-			var newFsId string
-			if strings.Contains(createdArn, ":file-system/") {
-				parts := strings.Split(createdArn, "/")
-				if len(parts) > 0 {
-					newFsId = parts[len(parts)-1]
-					// Set throughput mode to elastic
-					if err := SetEFSThroughputElastic(ctx, region, newFsId); err != nil {
-						l.Warnf("Failed to set EFS ThroughputMode to elastic: %v", err)
-					} else {
-						l.Info("✅ ThroughputMode set to elastic")
-					}
-				}
+			if !strings.Contains(createdArn, ":file-system/") {
+				return "", nil
+			}
+			parts := strings.Split(createdArn, "/")
+			if len(parts) == 0 {
+				return "", nil
+			}
+			newFsId := parts[len(parts)-1]
+			if err := SetEFSThroughputElastic(ctx, region, newFsId); err != nil {
+				l.Warnf("Failed to set EFS ThroughputMode to elastic: %v", err)
+			} else {
+				l.Info("✅ ThroughputMode set to elastic")
 			}
 			return newFsId, nil
 		case "ABORTED", "FAILED":
@@ -262,17 +262,18 @@ func HandleEFSRestoreCompletion(ctx context.Context, l *zap.SugaredLogger, regio
 	}
 	createdArn = strings.TrimSpace(createdArn)
 	l.Infof("Restore completed. CreatedResourceArn: %s", createdArn)
-	var newFsId string
-	if strings.Contains(createdArn, ":file-system/") {
-		parts := strings.Split(createdArn, "/")
-		if len(parts) > 0 {
-			newFsId = parts[len(parts)-1]
-			if err := setThroughput(ctx, region, newFsId); err != nil {
-				l.Warnf("Failed to set EFS ThroughputMode to elastic: %v", err)
-			} else {
-				l.Info("✅ ThroughputMode set to elastic")
-			}
-		}
+	if !strings.Contains(createdArn, ":file-system/") {
+		return "", nil
+	}
+	parts := strings.Split(createdArn, "/")
+	if len(parts) == 0 {
+		return "", nil
+	}
+	newFsId := parts[len(parts)-1]
+	if err := setThroughput(ctx, region, newFsId); err != nil {
+		l.Warnf("Failed to set EFS ThroughputMode to elastic: %v", err)
+	} else {
+		l.Info("✅ ThroughputMode set to elastic")
 	}
 	return newFsId, nil
 }

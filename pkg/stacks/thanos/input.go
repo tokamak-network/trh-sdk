@@ -1515,8 +1515,8 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	writer.WriteString(fmt.Sprintf("export TF_VAR_backup_schedule_cron=\"%s\"\n", scheduleCron))
 
 	deleteAfter := config.EfsBackupDeleteAfterDays
-	if deleteAfter <= 0 {
-		deleteAfter = 35 // 35 days
+	if deleteAfter < 0 {
+		deleteAfter = 0 // unlimited retention (recommended for blockchain)
 	}
 	writer.WriteString(fmt.Sprintf("export TF_VAR_backup_delete_after_days=\"%d\"\n", deleteAfter))
 

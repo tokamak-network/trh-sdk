@@ -95,38 +95,50 @@ func ExecuteTerraformCommands(
 	if infof != nil {
 		infof("Applying EFS backup configuration...")
 	}
+
 	originalDir, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get current directory: %w", err)
 	}
+
 	if err := os.Chdir(tfRoot); err != nil {
 		return fmt.Errorf("failed to change to terraform directory %s: %w", tfRoot, err)
 	}
 	defer os.Chdir(originalDir)
+
 	if _, err := utils.ExecuteCommand(ctx, "direnv", "allow"); err != nil {
 		if warnf != nil {
 			warnf("Failed to run direnv allow: %v", err)
 		}
 	}
+
 	if err := os.Chdir("thanos-stack"); err != nil {
 		return fmt.Errorf("failed to change to thanos-stack directory: %w", err)
 	}
+
 	if infof != nil {
 		infof("Initializing terraform...")
 	}
-	if output, err := utils.ExecuteCommand(ctx, "bash", "-c", "source ../.envrc && terraform init"); err != nil {
+
+	output, err := utils.ExecuteCommand(ctx, "bash", "-c", "source ../.envrc && terraform init")
+	if err != nil {
 		return fmt.Errorf("terraform init failed: %w\nOutput: %s", err, output)
 	}
+
 	if infof != nil {
 		infof("Applying terraform changes...")
 	}
+
 	applyCmd := fmt.Sprintf("source ../.envrc && terraform apply %s", strings.Join(varArgs, " "))
-	if output, err := utils.ExecuteCommand(ctx, "bash", "-c", applyCmd); err != nil {
+	output, err = utils.ExecuteCommand(ctx, "bash", "-c", applyCmd)
+	if err != nil {
 		return fmt.Errorf("terraform apply failed: %w\nOutput: %s", err, output)
 	}
+
 	if infof != nil {
 		infof("✅ Backup configuration applied successfully")
 	}
+
 	return nil
 }
 

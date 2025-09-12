@@ -33,28 +33,7 @@ func Run() {
     trh-sdk backup-manager --config --daily 03:00 --keep 35
     trh-sdk backup-manager --attach --efs-id fs-1234567890abcdef0 --pvc op-geth,op-node --sts op-geth,op-node
     `,
-				Flags: []cli.Flag{
-					// primary actions
-					&cli.BoolFlag{Name: "status", Usage: "Show backup protection status and latest points"},
-					&cli.BoolFlag{Name: "snapshot", Usage: "Create an on-demand backup for EFS"},
-					&cli.BoolFlag{Name: "list", Usage: "List recovery points"},
-					&cli.BoolFlag{Name: "restore", Usage: "Interactive restore chain data"},
-					&cli.BoolFlag{Name: "config", Usage: "Configure backup settings"},
-
-					// common options
-					&cli.StringFlag{Name: "limit", Usage: "Limit number of entries when listing (default: 20)"},
-
-					// post-restore attach options (EFS)
-					&cli.BoolFlag{Name: "attach", Usage: "Attach workloads to a new EFS and verify (can be used after restore or standalone)"},
-					&cli.StringFlag{Name: "efs-id", Usage: "New EFS FileSystemId (fs-xxxx) to switch to"},
-					&cli.StringFlag{Name: "pvc", Usage: "Comma-separated PVC names to switch (e.g., op-geth,op-node)"},
-					&cli.StringFlag{Name: "sts", Usage: "Comma-separated StatefulSet names to restart and verify"},
-
-					// config options
-					&cli.StringFlag{Name: "daily", Usage: "Daily time (UTC) e.g. 03:00 (converted to cron)"},
-					&cli.StringFlag{Name: "keep", Usage: "EFS keep days (retention)"},
-					&cli.BoolFlag{Name: "reset", Usage: "Reset to defaults (EFS daily 03:00, keep 35)"},
-				},
+				Flags:  flags.BackupManagerFlags,
 				Action: commands.ActionBackupManager(),
 			},
 			{

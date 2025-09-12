@@ -65,6 +65,7 @@ func DisplayBackupStatus(l *zap.SugaredLogger, statusInfo *types.BackupStatusInf
 		l.Warn("   Protected: ❌ false")
 	}
 
+	// Handle latest recovery point display
 	if statusInfo.LatestRecoveryPoint == "" || statusInfo.LatestRecoveryPoint == "None" {
 		l.Warn("   Latest recovery point: ⚠️  None (no backups found)")
 	} else {
@@ -76,6 +77,7 @@ func DisplayBackupStatus(l *zap.SugaredLogger, statusInfo *types.BackupStatusInf
 		}
 	}
 
+	// Handle backup vaults display
 	if len(statusInfo.BackupVaults) == 0 {
 		l.Warn("   Vaults: ⚠️  None (no backups found)")
 	} else {

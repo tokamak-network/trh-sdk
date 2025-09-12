@@ -384,10 +384,10 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	fmt.Println("Initializing backup system...")
 	err = t.initializeBackupSystem(ctx, inputs.ChainName)
 	if err != nil {
-		fmt.Printf("Warning: Failed to initialize backup system: %v\n", err)
+		t.logger.Warnf("Warning: Failed to initialize backup system: %v\n", err)
 		// Continue deployment even if backup initialization fails
 	} else {
-		fmt.Println("✅ Backup system initialized successfully")
+		t.logger.Info("✅ Backup system initialized successfully")
 	}
 
 	// After installing the infra successfully, we install the bridge
