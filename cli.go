@@ -23,6 +23,20 @@ func Run() {
 		},
 		Commands: []*cli.Command{
 			{
+				Name:  "backup-manager",
+				Usage: "Manage L2 backups and restores (EFS)",
+				Description: `Examples:
+    trh-sdk backup-manager --status
+    trh-sdk backup-manager --snapshot
+    trh-sdk backup-manager --list --limit 5  # Show only 5 most recent backups (default: 20)
+    trh-sdk backup-manager --restore
+    trh-sdk backup-manager --config --daily 03:00 --keep 35
+    trh-sdk backup-manager --attach --efs-id fs-1234567890abcdef0 --pvc op-geth,op-node --sts op-geth,op-node
+    `,
+				Flags:  flags.BackupManagerFlags,
+				Action: commands.ActionBackupManager(),
+			},
+			{
 				Name:   "deploy-contracts",
 				Usage:  "Deploy contracts on L1",
 				Flags:  flags.DeployContractsFlag,

@@ -1507,6 +1507,19 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_thanos_stack_image_tag=\"%s\"\n", config.ThanosStackImageTag))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_max_channel_duration=\"%d\"\n", config.MaxChannelDuration))
 
+	// AWS Backup configuration - Always enabled for production-ready backup protection
+	scheduleCron := config.EfsBackupScheduleCron
+	if scheduleCron == "" {
+		scheduleCron = "cron(0 3 * * ? *)" // daily 03:00 UTC
+	}
+	writer.WriteString(fmt.Sprintf("export TF_VAR_backup_schedule_cron=\"%s\"\n", scheduleCron))
+
+	deleteAfter := config.EfsBackupDeleteAfterDays
+	if deleteAfter < 0 {
+		deleteAfter = 0 // unlimited retention (recommended for blockchain)
+	}
+	writer.WriteString(fmt.Sprintf("export TF_VAR_backup_delete_after_days=\"%d\"\n", deleteAfter))
+
 	err = writer.Flush()
 	if err != nil {
 		return err
@@ -1652,10 +1665,10 @@ func (t *ThanosStack) cloneSourcecode(ctx context.Context, repositoryName, url s
 	}
 
 	// Case 2: Repo exists → try pulling
-	t.logger.Info("Repository exists. Trying to pull latest changes...", "repo", repositoryName)
+	t.logger.Infof("Repository exists. Trying to pull latest changes... (repo: %s)", repositoryName)
 	err = utils.PullLatestCode(ctx, t.logger, t.deploymentPath, repositoryName)
 	if err == nil {
-		t.logger.Info("Successfully pulled latest changes", "repo: ", repositoryName)
+		t.logger.Infof("Successfully pulled latest changes (repo: %s)", repositoryName)
 		fmt.Printf("\r✅ Clone the %s repository successfully \n", repositoryName)
 		return nil
 	}
@@ -1667,7 +1680,7 @@ func (t *ThanosStack) cloneSourcecode(ctx context.Context, repositoryName, url s
 		return removeErr
 	}
 
-	t.logger.Info("Re-cloning repository after cleanup...", "repo", repositoryName)
+	t.logger.Infof("Re-cloning repository after cleanup... (repo: %s)", repositoryName)
 	err = utils.CloneRepo(ctx, t.logger, t.deploymentPath, url, repositoryName)
 	if err != nil {
 		t.logger.Error("Failed to re-clone repository", "repo", repositoryName, "err", err)

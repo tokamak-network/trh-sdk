@@ -31,6 +31,10 @@ type TerraformEnvConfig struct {
 	OpGethImageTag      string
 	ThanosStackImageTag string
 	MaxChannelDuration  uint64
+
+	// EFS backup (op-node, op-geth) - Always enabled for production-ready backup protection
+	EfsBackupScheduleCron    string
+	EfsBackupDeleteAfterDays int
 }
 
 type BlockExplorerEnvs struct {

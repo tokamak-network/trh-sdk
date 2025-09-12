@@ -256,7 +256,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			t.logger.Error("❌ Failed to retrieve admin account balance", "err", err)
 			return err
 		}
-		t.logger.Info("Admin account balance: %.2f ETH", utils.WeiToEther(balance))
+		t.logger.Infof("Admin account balance: %.2f ETH", utils.WeiToEther(balance))
 
 		// Estimate gas price
 		gasPriceWei, err := l1Client.SuggestGasPrice(ctx)
@@ -264,12 +264,12 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			t.logger.Error("❌ Failed to get gas price", "err", err)
 			return err
 		}
-		t.logger.Info("⛽ Current gas price: %.4f Gwei", new(big.Float).Quo(new(big.Float).SetInt(gasPriceWei), big.NewFloat(1e9)))
+		t.logger.Infof("⛽ Current gas price: %.4f Gwei", new(big.Float).Quo(new(big.Float).SetInt(gasPriceWei), big.NewFloat(1e9)))
 
 		// Estimate deployment cost
 		estimatedCost := new(big.Int).Mul(gasPriceWei, estimatedDeployContracts)
 		estimatedCost.Mul(estimatedCost, big.NewInt(2))
-		t.logger.Info("💰 Estimated deployment cost: %.4f ETH", utils.WeiToEther(estimatedCost))
+		t.logger.Infof("💰 Estimated deployment cost: %.4f ETH", utils.WeiToEther(estimatedCost))
 
 		// Check if balance is sufficient
 		if balance.Cmp(estimatedCost) < 0 {
@@ -307,10 +307,10 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		return err
 	}
 	t.logger.Info("✅ Successfully generated rollup and genesis files!")
-	t.logger.Info("Genesis file path: %s/tokamak-thanos/build/genesis.json", t.deploymentPath)
-	t.logger.Info("Rollup file path: %s/tokamak-thanos/build/rollup.json", t.deploymentPath)
+	t.logger.Infof("Genesis file path: %s/tokamak-thanos/build/genesis.json", t.deploymentPath)
+	t.logger.Infof("Rollup file path: %s/tokamak-thanos/build/rollup.json", t.deploymentPath)
 
-	t.logger.Info("✅ Configuration successfully saved to: %s/settings.json", t.deploymentPath)
+	t.logger.Infof("✅ Configuration successfully saved to: %s/settings.json", t.deploymentPath)
 
 	// If --no-candidate flag is NOT provided, register the candidate
 	if t.registerCandidate {
