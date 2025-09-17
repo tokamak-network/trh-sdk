@@ -3,6 +3,7 @@ package utils
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -56,6 +57,9 @@ func IsAvailableRegion(region string, availableRegions []string) bool {
 
 // SwitchAWSRegion sets the AWS CLI default region configuration
 func SwitchAWSRegion(ctx context.Context, region string) error {
+	os.Setenv("AWS_REGION", region)
+	os.Setenv("AWS_DEFAULT_REGION", region)
+
 	regionSetup, err := ExecuteCommand(ctx, "aws", []string{
 		"configure",
 		"set",
