@@ -29,8 +29,8 @@ func NewThanosStack(
 	deploymentPath string,
 	awsConfig *types.AWSConfig,
 ) (*ThanosStack, error) {
-	l.Info("Deployment Path:", "deploymentPath", deploymentPath)
-	l.Info("Network:", "network", network)
+	l.Infof("Deployment Path: %s", deploymentPath)
+	l.Infof("Network: %s", network)
 
 	// get the config file
 	config, err := utils.ReadConfigFromJSONFile(deploymentPath)

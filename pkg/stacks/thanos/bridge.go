@@ -169,7 +169,7 @@ func (t *ThanosStack) InstallBridge(ctx context.Context) (string, error) {
 
 		time.Sleep(15 * time.Second)
 	}
-	t.logger.Info("✅ Bridge component is up and running. You can access it at: %s", bridgeUrl)
+	t.logger.Infof("✅ Bridge component is up and running. You can access it at: %s", bridgeUrl)
 
 	return bridgeUrl, nil
 }

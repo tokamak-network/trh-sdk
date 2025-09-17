@@ -49,6 +49,11 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 		return fmt.Errorf("AWS profile is not set")
 	}
 
+	// Perform backup cleanup early while Kubernetes context still exists
+	if err := t.CleanupUnusedBackupResources(ctx); err != nil {
+		t.logger.Warnf("Failed to cleanup unused backup resources: %v", err)
+	}
+
 	helmReleases, err := utils.GetHelmReleases(ctx, namespace)
 	if err != nil {
 		t.logger.Error("Error retrieving Helm releases", "err", err)
@@ -57,7 +62,7 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 	if len(helmReleases) > 0 {
 		for _, release := range helmReleases {
 			if strings.Contains(release, namespace) || strings.Contains(release, "op-bridge") || strings.Contains(release, "block-explorer") || strings.Contains(release, constants.MonitoringNamespace) {
-				t.logger.Info("Uninstalling Helm release: %s in namespace: %s...", release, namespace)
+				t.logger.Infof("Uninstalling Helm release: %s in namespace: %s...", release, namespace)
 				_, err := utils.ExecuteCommand(ctx, "helm", "uninstall", release, "--namespace", namespace)
 				if err != nil {
 					t.logger.Error("Error removing Helm release", "err", err)

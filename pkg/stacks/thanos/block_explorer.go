@@ -292,7 +292,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		return "", err
 	}
 
-	t.logger.Info("✅ Block Explorer frontend component installed successfully. Accessible at: %s", fmt.Sprintf("http://%s", blockExplorerUrl))
+	t.logger.Infof("✅ Block Explorer frontend component installed successfully. Accessible at: %s", fmt.Sprintf("http://%s", blockExplorerUrl))
 
 	return "http://" + blockExplorerUrl, nil
 }

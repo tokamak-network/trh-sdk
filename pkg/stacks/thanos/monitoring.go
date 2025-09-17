@@ -242,24 +242,42 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 		return nil
 	}
 
+	// Early return if deploy config is not available
+	if t.deployConfig == nil {
+		logger.Warnw("DeployConfig is nil, skipping namespace-specific cleanup")
+		return nil
+	}
+	if t.deployConfig.K8s == nil {
+		logger.Warnw("K8s config is nil, skipping namespace-specific cleanup")
+		return nil
+	}
+
 	// Use namespace from deploy config; skip sidecar cleanup if invalid
 	ns := strings.TrimSpace(t.deployConfig.K8s.Namespace)
 	if ns == "" {
-		logger.Errorw("K8s namespace is not set in deploy config")
-	} else if exists, err := utils.CheckNamespaceExists(ctx, ns); err != nil {
-		logger.Errorw("Failed to check namespace existence", "err", err)
-	} else if exists {
-		// Clean up Sidecar deployments
-		logger.Info("Cleaning up Sidecar deployments")
-		if err := t.cleanupSidecarDeployments(ctx, ns); err != nil {
-			logger.Warnw("Failed to cleanup Sidecar deployments", "err", err)
-		}
+		logger.Warnw("K8s namespace is not set in deploy config")
+		return nil
+	}
 
-		// Clean up RBAC resources
-		logger.Info("Cleaning up RBAC resources")
-		if err := t.cleanupRBACResources(ctx); err != nil {
-			logger.Warnw("Failed to cleanup RBAC resources", "err", err)
-		}
+	exists, err = utils.CheckNamespaceExists(ctx, ns)
+	if err != nil {
+		logger.Errorw("Failed to check namespace existence", "err", err)
+		return nil
+	}
+	if !exists {
+		return nil
+	}
+
+	// Clean up Sidecar deployments
+	logger.Info("Cleaning up Sidecar deployments")
+	if err := t.cleanupSidecarDeployments(ctx, ns); err != nil {
+		logger.Warnw("Failed to cleanup Sidecar deployments", "err", err)
+	}
+
+	// Clean up RBAC resources
+	logger.Info("Cleaning up RBAC resources")
+	if err := t.cleanupRBACResources(ctx); err != nil {
+		logger.Warnw("Failed to cleanup RBAC resources", "err", err)
 	}
 
 	releases, err := utils.FilterHelmReleases(ctx, monitoringNamespace, constants.MonitoringNamespace)

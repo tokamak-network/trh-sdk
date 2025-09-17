@@ -43,3 +43,5 @@ logs/
 
 stack-info.json
 crossTrade
+
+k8s-efs-backup
