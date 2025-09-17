@@ -124,7 +124,5 @@ func InitializeBackupSystem(ctx context.Context, l *zap.SugaredLogger, region, n
 	if err := executeInitialBackup(ctx, l, region, accountID, efsID, namespace); err != nil {
 		return fmt.Errorf("failed to execute initial backup: %w", err)
 	}
-
-	l.Info("✅ Backup system initialized successfully")
 	return nil
 }
