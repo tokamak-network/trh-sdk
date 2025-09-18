@@ -296,10 +296,14 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 		}
 	}
 
+	// Delete monitoring namespace with timeout and forced cleanup
 	logger.Infow("Deleting monitoring namespace", "namespace", monitoringNamespace)
-	_, err = utils.ExecuteCommand(ctx, "kubectl", "delete", "namespace", monitoringNamespace, "--ignore-not-found=true")
+	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	err = t.tryToDeleteMonitoringNamespace(ctxTimeout, monitoringNamespace)
 	if err != nil {
-		logger.Errorw("Failed to delete namespace", "err", err, "namespace", monitoringNamespace)
+		logger.Errorw("Failed to delete monitoring namespace", "err", err, "namespace", monitoringNamespace)
 		return err
 	}
 	logger.Info("🧹 Monitoring plugin uninstalled successfully")
@@ -360,6 +364,91 @@ func (t *ThanosStack) cleanupRBACResources(ctx context.Context) error {
 	_, err = utils.ExecuteCommand(ctx, "kubectl", "delete", "serviceaccount", "thanos-logs-sidecar", "-n", ns, "--ignore-not-found=true")
 	if err != nil {
 		logger.Warnw("Failed to delete ServiceAccount", "namespace", ns, "err", err)
+	}
+
+	return nil
+}
+
+// tryToDeleteMonitoringNamespace attempts to delete monitoring namespace with forced cleanup if stuck in Terminating state
+func (t *ThanosStack) tryToDeleteMonitoringNamespace(ctx context.Context, namespace string) error {
+	logger := t.getLogger()
+
+	if namespace == "" {
+		logger.Warn("Monitoring namespace is empty, skipping namespace deletion")
+		return nil
+	}
+
+	// First attempt normal deletion
+	_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "namespace", namespace, "--ignore-not-found=true")
+	if err != nil {
+		logger.Warnw("Initial namespace deletion failed", "err", err)
+	}
+
+	// Wait a bit for normal deletion to complete
+	time.Sleep(10 * time.Second)
+
+	// Check if namespace still exists
+	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "namespace", namespace, "-o", "json")
+	if err != nil {
+		// Namespace doesn't exist, deletion successful
+		logger.Infow("Monitoring namespace deleted successfully", "namespace", namespace)
+		return nil
+	}
+
+	// Parse namespace status
+	var namespaceStatus struct {
+		Metadata struct {
+			Name string `json:"name"`
+		} `json:"metadata"`
+		Spec struct {
+			Finalizers []string `json:"finalizers"`
+		} `json:"spec"`
+		Status struct {
+			Phase string `json:"phase"`
+		} `json:"status"`
+	}
+
+	if err := json.Unmarshal([]byte(output), &namespaceStatus); err != nil {
+		logger.Errorw("Error unmarshalling monitoring namespace status", "err", err)
+		return err
+	}
+
+	if namespaceStatus.Status.Phase == "Terminating" {
+		logger.Warnw("Monitoring namespace is stuck in Terminating state, forcing cleanup", "namespace", namespace)
+
+		// Remove finalizers to force completion
+		namespaceStatus.Spec.Finalizers = make([]string, 0)
+
+		// Write to temporary file
+		tmpFile, err := os.Create("/tmp/monitoring-namespace.json")
+		if err != nil {
+			logger.Errorw("Error creating temporary file for monitoring namespace", "err", err)
+			return err
+		}
+		defer func() {
+			tmpFile.Close()
+			os.Remove("/tmp/monitoring-namespace.json")
+		}()
+
+		encoder := json.NewEncoder(tmpFile)
+		encoder.SetIndent("", "  ")
+		err = encoder.Encode(namespaceStatus)
+		if err != nil {
+			logger.Errorw("Error encoding monitoring namespace", "err", err)
+			return err
+		}
+
+		// Close file before kubectl command
+		tmpFile.Close()
+
+		// Apply the changes to force finalize
+		_, err = utils.ExecuteCommand(ctx, "kubectl", "replace", "--raw", fmt.Sprintf("/api/v1/namespaces/%s/finalize", namespace), "-f", "/tmp/monitoring-namespace.json")
+		if err != nil {
+			logger.Errorw("Error applying changes to monitoring namespace", "err", err)
+			return err
+		}
+
+		logger.Infow("Successfully forced monitoring namespace cleanup", "namespace", namespace)
 	}
 
 	return nil
