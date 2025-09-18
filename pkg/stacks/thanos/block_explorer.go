@@ -62,12 +62,6 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		return "", err
 	}
 
-	// Switch to the main branch
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd tokamak-thanos-stack && git checkout fix/install-block-explorer-by-region")
-	if err != nil {
-		return "", fmt.Errorf("failed to checkout fix/install-block-explorer-by-region: %s", err)
-	}
-
 	t.logger.Info("Installing a block explorer component...")
 
 	// Make .envrc file
