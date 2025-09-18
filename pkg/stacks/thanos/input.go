@@ -1631,6 +1631,7 @@ func makeBlockExplorerEnvs(dirPath string, filename string, config types.BlockEx
 		fmt.Sprintf("export TF_VAR_db_password=\"%s\"\n", config.BlockExplorerDatabasePassword),
 		fmt.Sprintf("export TF_VAR_db_name=\"%s\"\n", config.BlockExplorerDatabaseName),
 		fmt.Sprintf("export TF_VAR_vpc_id=\"%s\"\n", config.VpcId),
+		fmt.Sprintf("export TF_VAR_aws_region=\"%s\"\n", config.AwsRegion),
 	}
 
 	for _, envVar := range envVars {

@@ -42,6 +42,7 @@ type BlockExplorerEnvs struct {
 	BlockExplorerDatabasePassword string
 	BlockExplorerDatabaseUserName string
 	VpcId                         string
+	AwsRegion                     string
 }
 
 type ThanosStackTerraformState struct {
