@@ -306,8 +306,7 @@ func CheckExistingPRForBranch(username, token, repoName, branchName string) (*Gi
 	return nil, nil
 }
 
-func CheckPRStatus(pr *GitHubPR) (bool, bool) {
+func CheckPRStatus(pr *GitHubPR) bool {
 	isOpenPR := pr.State == "open"
-	isCreatePR := strings.Contains(pr.Title, "[Rollup]")
-	return isCreatePR, isOpenPR
+	return isOpenPR
 }
