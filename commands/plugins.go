@@ -187,7 +187,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 								return err
 							}
 
-							_, err = thanosStack.DeployCrossTradeContracts(ctx, input)
+							_, err = thanosStack.DeployCrossTrade(ctx, input)
 							if err != nil {
 								return err
 							}
@@ -224,6 +224,8 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							return thanosStack.UninstallBlockExplorer(ctx)
 						case constants.PluginMonitoring:
 							return thanosStack.UninstallMonitoring(ctx)
+						case constants.PluginCrossTrade:
+							return thanosStack.UninstallCrossTrade(ctx)
 						}
 					}
 				default:
