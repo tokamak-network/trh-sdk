@@ -123,6 +123,8 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 	var contracts *types.Contracts
 	var newMetadataEntry bool
 	var isOpenPR bool
+	var branchName string
+	networkName := constants.ChainIDToForgeChainName[t.deployConfig.L1ChainID]
 
 	contracts, err = utils.ReadDeployementConfigFromJSONFile(t.deploymentPath, t.deployConfig.L1ChainID)
 	if err != nil {
@@ -136,7 +138,11 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 		return nil, fmt.Errorf("SystemConfigProxy address not found in deployment contracts")
 	}
 
-	branchName := fmt.Sprintf("feat/add-rollup-%s", systemConfigAddress)
+	networkDir := fmt.Sprintf("%s/data/%s", MetadataRepoName, networkName)
+
+	metadataFileName := fmt.Sprintf("%s.json", systemConfigAddress)
+	sourceFile := fmt.Sprintf("%s/schemas/example-rollup-metadata.json", MetadataRepoName)
+	targetFile := fmt.Sprintf("%s/%s", networkDir, metadataFileName)
 	// STEP 1. Fork the repository
 	t.logger.Info("📋 STEP 1: Forking repository...")
 	forkExists, err := utils.CheckIfForkExists(creds.Username, creds.Token, MetadataRepoName)
@@ -187,10 +193,11 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 	}
 
 	// STEP 3. Create and checkout new branch
-	t.logger.Info("📋 STEP 3: Creating feature branch...")
-	err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "fetch", "origin", fmt.Sprintf("%s:%s", branchName, branchName))
+	fileExists := utils.CheckFileExists(targetFile)
+	t.logger.Info("📋 STEP 3: Checking for existing metadata and creating/updating branch...")
 	// Checking if the branch already exists
-	if err != nil {
+	if !fileExists {
+		branchName = fmt.Sprintf("feat/add-rollup-%s", systemConfigAddress)
 		t.logger.Info("Creating and checking out branch ", "branch ", branchName)
 		newMetadataEntry = true
 		err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "checkout", "-b", branchName)
@@ -199,27 +206,32 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 			return nil, fmt.Errorf("failed to create and checkout branch: %w", err)
 		}
 	} else {
-		t.logger.Info("✅ Branch already exists! ", "branch ", branchName)
+		branchName = fmt.Sprintf("feat/update-rollup-%s", systemConfigAddress)
+		t.logger.Info("✅ Metadata file already exists! ", "file ", targetFile)
 		newMetadataEntry = false
-
-		t.logger.Info("📋 STEP 3.5: Checking for existing Pull Requests...")
-		existingPR, err := utils.CheckExistingPRForBranch(creds.Username, creds.Token, MetadataRepoName, branchName)
-		if err != nil {
-			t.logger.Warn("⚠️ Warning: Could not check for existing PRs ", "err ", err)
-		} else if existingPR != nil {
-			t.logger.Info("✅ Found existing PR ", existingPR.Title)
-			t.logger.Info("PR Status: ", existingPR.State)
-
-			newMetadataEntry, isOpenPR = utils.CheckPRStatus(existingPR)
-		} else {
-			t.logger.Info("✅ No existing PRs found for branch ", "branch ", branchName)
-		}
 
 		err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "checkout", branchName)
 		if err != nil {
-			t.logger.Error("Failed to checkout branch from remote ", "err ", err)
-			return nil, fmt.Errorf("failed to checkout branch from remote: %w", err)
+			t.logger.Info("Creating branch for existing metadata ", "branch ", branchName)
+			err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "checkout", "-b", branchName)
+			if err != nil {
+				t.logger.Error("Failed to create and checkout branch", "err ", err)
+				return nil, fmt.Errorf("failed to create and checkout branch: %w", err)
+			}
 		}
+	}
+
+	t.logger.Info("📋 STEP 3.5: Checking for existing Pull Requests...")
+	existingPR, err := utils.CheckExistingPRForBranch(creds.Username, creds.Token, MetadataRepoName, branchName)
+	if err != nil {
+		t.logger.Warn("⚠️ Warning: Could not check for existing PRs ", "err ", err)
+	} else if existingPR != nil {
+		t.logger.Info("✅ Found existing PR ", existingPR.Title)
+		t.logger.Info("PR Status: ", existingPR.State)
+
+		isOpenPR = utils.CheckPRStatus(existingPR)
+	} else {
+		t.logger.Info("✅ No existing PRs found for branch ", "branch ", branchName)
 	}
 
 	// STEP 4. Install dependencies
@@ -236,11 +248,6 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 		t.logger.Error("Unsupported network ", "chainID ", t.deployConfig.L1ChainID)
 		return nil, fmt.Errorf("unsupported network. Currently only Sepolia (chain ID: 11155111) is supported, got chain ID: %d", t.deployConfig.L1ChainID)
 	}
-	networkDir := fmt.Sprintf("%s/data/sepolia", MetadataRepoName)
-
-	metadataFileName := fmt.Sprintf("%s.json", systemConfigAddress)
-	sourceFile := fmt.Sprintf("%s/schemas/example-rollup-metadata.json", MetadataRepoName)
-	targetFile := fmt.Sprintf("%s/%s", networkDir, metadataFileName)
 
 	if newMetadataEntry {
 		t.logger.Info("Creating new metadata file ", "file ", targetFile)
@@ -490,12 +497,12 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 	// STEP 6. Validate metadata
 	var prTitle string
 	if newMetadataEntry {
-		prTitle = fmt.Sprintf("[Rollup] sepolia %s - %s", systemConfigAddress, t.deployConfig.ChainName)
+		prTitle = fmt.Sprintf("[Rollup] %s %s - %s", networkName, systemConfigAddress, t.deployConfig.ChainName)
 	} else {
-		prTitle = fmt.Sprintf("[Update] sepolia %s - %s", systemConfigAddress, t.deployConfig.ChainName)
+		prTitle = fmt.Sprintf("[Update] %s %s - %s", networkName, systemConfigAddress, t.deployConfig.ChainName)
 	}
 
-	validationPath := fmt.Sprintf("data/sepolia/%s.json", systemConfigAddress)
+	validationPath := fmt.Sprintf("data/%s/%s.json", networkName, systemConfigAddress)
 	validationCmd := fmt.Sprintf("cd %s && npm run validate -- --pr-title \"%s\" %s", MetadataRepoName, prTitle, validationPath)
 
 	t.logger.Info("📋STEP 6: Running validation command: ", validationCmd)
@@ -517,7 +524,7 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 		return nil, fmt.Errorf("failed to add changes: %w", err)
 	}
 
-	commitMessage := fmt.Sprintf("[Rollup] %s sepolia %s - %s", operation, systemConfigAddress, t.deployConfig.ChainName)
+	commitMessage := fmt.Sprintf("[Rollup] %s %s %s - %s", operation, networkName, systemConfigAddress, t.deployConfig.ChainName)
 	err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "commit", "-m", commitMessage)
 	if err != nil {
 		return nil, fmt.Errorf("failed to commit changes: %w", err)
