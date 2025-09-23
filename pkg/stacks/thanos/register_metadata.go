@@ -124,6 +124,7 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 	var newMetadataEntry bool
 	var isOpenPR bool
 	var branchName string
+	networkName := constants.ChainIDToForgeChainName[t.deployConfig.L1ChainID]
 
 	contracts, err = utils.ReadDeployementConfigFromJSONFile(t.deploymentPath, t.deployConfig.L1ChainID)
 	if err != nil {
@@ -137,7 +138,7 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 		return nil, fmt.Errorf("SystemConfigProxy address not found in deployment contracts")
 	}
 
-	networkDir := fmt.Sprintf("%s/data/sepolia", MetadataRepoName)
+	networkDir := fmt.Sprintf("%s/data/%s", MetadataRepoName, networkName)
 
 	metadataFileName := fmt.Sprintf("%s.json", systemConfigAddress)
 	sourceFile := fmt.Sprintf("%s/schemas/example-rollup-metadata.json", MetadataRepoName)
@@ -496,12 +497,12 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 	// STEP 6. Validate metadata
 	var prTitle string
 	if newMetadataEntry {
-		prTitle = fmt.Sprintf("[Rollup] sepolia %s - %s", systemConfigAddress, t.deployConfig.ChainName)
+		prTitle = fmt.Sprintf("[Rollup] %s %s - %s", networkName, systemConfigAddress, t.deployConfig.ChainName)
 	} else {
-		prTitle = fmt.Sprintf("[Update] sepolia %s - %s", systemConfigAddress, t.deployConfig.ChainName)
+		prTitle = fmt.Sprintf("[Update] %s %s - %s", networkName, systemConfigAddress, t.deployConfig.ChainName)
 	}
 
-	validationPath := fmt.Sprintf("data/sepolia/%s.json", systemConfigAddress)
+	validationPath := fmt.Sprintf("data/%s/%s.json", networkName, systemConfigAddress)
 	validationCmd := fmt.Sprintf("cd %s && npm run validate -- --pr-title \"%s\" %s", MetadataRepoName, prTitle, validationPath)
 
 	t.logger.Info("📋STEP 6: Running validation command: ", validationCmd)
@@ -523,7 +524,7 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 		return nil, fmt.Errorf("failed to add changes: %w", err)
 	}
 
-	commitMessage := fmt.Sprintf("[Rollup] %s sepolia %s - %s", operation, systemConfigAddress, t.deployConfig.ChainName)
+	commitMessage := fmt.Sprintf("[Rollup] %s %s %s - %s", operation, networkName, systemConfigAddress, t.deployConfig.ChainName)
 	err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "commit", "-m", commitMessage)
 	if err != nil {
 		return nil, fmt.Errorf("failed to commit changes: %w", err)
