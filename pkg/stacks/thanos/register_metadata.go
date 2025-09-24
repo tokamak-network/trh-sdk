@@ -95,6 +95,24 @@ func GetGitHubCredentials() (*types.GitHubCredentials, error) {
 	}, nil
 }
 
+func (t *ThanosStack) handleBranchCheckout(ctx context.Context, branchName string) error {
+	err := utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "checkout", branchName)
+	if err != nil {
+		err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "checkout", "-b", branchName)
+		if err != nil {
+			t.logger.Error("Failed to create and checkout branch", "err ", err)
+			return fmt.Errorf("failed to create and checkout branch: %w", err)
+		}
+	} else {
+		t.logger.Info("Branch exists remotely, pulling latest changes ", "branch ", branchName)
+		err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "pull", "origin", branchName)
+		if err != nil {
+			t.logger.Warn("⚠️ Warning: Failed to pull latest changes ", "err ", err)
+		}
+	}
+	return nil
+}
+
 func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubCredentials, metadataInfo *types.MetadataInfo) (*types.RegisterMetadataDaoResult, error) {
 	if creds == nil {
 		t.logger.Error("Credentials are required")
@@ -195,7 +213,6 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 	// STEP 3. Create and checkout new branch
 	fileExists := utils.CheckFileExists(targetFile)
 	t.logger.Info("📋 STEP 3: Checking for existing metadata and creating/updating branch...")
-	// Checking if the branch already exists
 	if !fileExists {
 		branchName = fmt.Sprintf("feat/add-rollup-%s", systemConfigAddress)
 		t.logger.Info("Creating and checking out branch ", "branch ", branchName)
@@ -209,16 +226,11 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 		branchName = fmt.Sprintf("feat/update-rollup-%s", systemConfigAddress)
 		t.logger.Info("✅ Metadata file already exists! ", "file ", targetFile)
 		newMetadataEntry = false
-
-		err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "checkout", branchName)
-		if err != nil {
-			t.logger.Info("Creating branch for existing metadata ", "branch ", branchName)
-			err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "checkout", "-b", branchName)
-			if err != nil {
-				t.logger.Error("Failed to create and checkout branch", "err ", err)
-				return nil, fmt.Errorf("failed to create and checkout branch: %w", err)
-			}
-		}
+	}
+	// Checkout the branch
+	err = t.handleBranchCheckout(ctx, branchName)
+	if err != nil {
+		return nil, err
 	}
 
 	t.logger.Info("📋 STEP 3.5: Checking for existing Pull Requests...")
