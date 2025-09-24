@@ -11,13 +11,13 @@ import (
 )
 
 // BackupStatus prints EFS backup status
-func (t *ThanosStack) BackupStatus(ctx context.Context) error {
+func (t *ThanosStack) BackupStatus(ctx context.Context) (*types.BackupStatusInfo, error) {
 	statusInfo, err := backup.GatherBackupStatusInfo(ctx, t.deployConfig.AWS.Region, t.deployConfig.K8s.Namespace)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	backup.DisplayBackupStatus(t.logger, statusInfo)
-	return nil
+	return statusInfo, nil
 }
 
 // BackupSnapshot triggers on-demand EFS backup
@@ -26,29 +26,29 @@ func (t *ThanosStack) BackupSnapshot(ctx context.Context) error {
 }
 
 // BackupList lists recent EFS recovery points
-func (t *ThanosStack) BackupList(ctx context.Context, limit string) error {
+func (t *ThanosStack) BackupList(ctx context.Context, limit string) ([]types.RecoveryPoint, error) {
 	region := t.deployConfig.AWS.Region
 	namespace := t.deployConfig.K8s.Namespace
 
 	accountID, err := utils.DetectAWSAccountID(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	efsID, err := utils.DetectEFSId(ctx, namespace)
 	if err != nil || strings.TrimSpace(efsID) == "" {
 		t.logger.Infof("📁 EFS Recovery Points")
 		t.logger.Errorf("   ❌ Not detected in cluster PVs: %v", err)
-		return nil
+		return nil, err
 	}
 	arn := utils.BuildEFSArn(region, accountID, efsID)
 
 	rps, err := backup.ListRecoveryPoints(ctx, region, arn, strings.TrimSpace(limit))
 	if err != nil {
 		t.logger.Infof("   ❌ Error retrieving recovery points: %v", err)
-		return nil
+		return nil, err
 	}
 	backup.DisplayRecoveryPoints(t.logger, rps)
-	return nil
+	return rps, nil
 }
 
 // BackupRestore provides a fully interactive restore experience for EFS

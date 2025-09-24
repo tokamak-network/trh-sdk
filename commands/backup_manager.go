@@ -141,11 +141,13 @@ func validateBackupManagerFlags(flags *BackupManagerFlags) error {
 func executeBackupManagerAction(ctx context.Context, thanosStack *thanos.ThanosStack, flags *BackupManagerFlags) error {
 	switch {
 	case flags.ShowStatus:
-		return thanosStack.BackupStatus(ctx)
+		_, err := thanosStack.BackupStatus(ctx)
+		return err
 	case flags.StartBackup:
 		return thanosStack.BackupSnapshot(ctx)
 	case flags.ListPoints:
-		return thanosStack.BackupList(ctx, flags.Limit)
+		_, err := thanosStack.BackupList(ctx, flags.Limit)
+		return err
 	case flags.DoAttach:
 		return thanosStack.BackupAttach(ctx, &flags.AttachEfs, &flags.AttachPVCs, &flags.AttachSTSs)
 	case flags.DoRestore:
