@@ -217,11 +217,6 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 		branchName = fmt.Sprintf("feat/add-rollup-%s", systemConfigAddress)
 		t.logger.Info("Creating and checking out branch ", "branch ", branchName)
 		newMetadataEntry = true
-		err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "checkout", "-b", branchName)
-		if err != nil {
-			t.logger.Error("Failed to create and checkout branch", "err ", err)
-			return nil, fmt.Errorf("failed to create and checkout branch: %w", err)
-		}
 	} else {
 		branchName = fmt.Sprintf("feat/update-rollup-%s", systemConfigAddress)
 		t.logger.Info("✅ Metadata file already exists! ", "file ", targetFile)
