@@ -96,20 +96,29 @@ func GetGitHubCredentials() (*types.GitHubCredentials, error) {
 }
 
 func (t *ThanosStack) handleBranchCheckout(ctx context.Context, branchName string) error {
-	err := utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "checkout", branchName)
-	if err != nil {
-		err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "checkout", "-b", branchName)
-		if err != nil {
-			t.logger.Error("Failed to create and checkout branch", "err ", err)
-			return fmt.Errorf("failed to create and checkout branch: %w", err)
+	t.logger.Info("Fetching latest changes from remote...")
+	if err := utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "fetch", "origin"); err != nil {
+		t.logger.Warn("Failed to fetch from remote, continuing with local branches", "error", err)
+	}
+
+	if err := utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "rev-parse", "--verify", "--quiet", branchName); err == nil {
+		t.logger.Info("Branch exists locally, switching to branch", "branch", branchName)
+
+		if err := utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "checkout", branchName); err != nil {
+			return fmt.Errorf("failed to checkout existing branch %s: %w", branchName, err)
+		}
+
+		t.logger.Info("Pulling latest changes from remote", "branch", branchName)
+		if err := utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "pull", "origin", branchName); err != nil {
+			t.logger.Warn("Failed to pull latest changes, continuing with local version", "error", err)
 		}
 	} else {
-		t.logger.Info("Branch exists remotely, pulling latest changes ", "branch ", branchName)
-		err = utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "pull", "origin", branchName)
-		if err != nil {
-			t.logger.Warn("⚠️ Warning: Failed to pull latest changes ", "err ", err)
+		t.logger.Info("Creating new branch from current HEAD", "branch", branchName)
+		if err := utils.ExecuteCommandStream(ctx, t.logger, "git", "-C", MetadataRepoName, "checkout", "-b", branchName); err != nil {
+			return fmt.Errorf("failed to create new branch %s: %w", branchName, err)
 		}
 	}
+
 	return nil
 }
 
