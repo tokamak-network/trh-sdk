@@ -20,9 +20,13 @@ func (t *ThanosStack) BackupStatus(ctx context.Context) (*types.BackupStatusInfo
 	return statusInfo, nil
 }
 
-// BackupSnapshot triggers on-demand EFS backup
-func (t *ThanosStack) BackupSnapshot(ctx context.Context) error {
-	return backup.SnapshotExecute(ctx, t.logger, t.deployConfig.AWS.Region, t.deployConfig.K8s.Namespace)
+// BackupSnapshot triggers on-demand EFS backup and returns snapshot information
+func (t *ThanosStack) BackupSnapshot(ctx context.Context) (*types.BackupSnapshotInfo, error) {
+	snapshotInfo, err := backup.SnapshotExecute(ctx, t.logger, t.deployConfig.AWS.Region, t.deployConfig.K8s.Namespace)
+	if err != nil {
+		return nil, err
+	}
+	return snapshotInfo, nil
 }
 
 // BackupList lists recent EFS recovery points and returns comprehensive information
@@ -100,7 +104,8 @@ func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string
 		},
 		func(c context.Context, efsId string, pvcs, stss, other *string) error {
 			// Use the same attach logic as BackupAttach
-			return t.BackupAttach(c, &efsId, pvcs, stss)
+			_, err := t.BackupAttach(c, &efsId, pvcs, stss)
+			return err
 		},
 	)
 
@@ -137,8 +142,8 @@ func (t *ThanosStack) BackupRestoreInteractive(ctx context.Context) error {
 	)
 }
 
-// BackupAttach switches workloads to use the new EFS and verifies readiness
-func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *string, stss *string) error {
+// BackupAttach switches workloads to use the new EFS and verifies readiness, returns attach information
+func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *string, stss *string) (*types.BackupAttachInfo, error) {
 	// gather info via backup subpackage
 	info, err := backup.GatherBackupAttachInfo(
 		ctx,
@@ -150,10 +155,10 @@ func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *str
 		func() { backup.ShowAttachUsage(t.logger) },
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// execute via backup subpackage with injected helpers
-	return backup.ExecuteBackupAttach(
+	err = backup.ExecuteBackupAttach(
 		ctx,
 		t.logger,
 		info,
@@ -172,10 +177,17 @@ func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *str
 			})
 		},
 	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update status after successful execution
+	info.Status = "attached"
+	return info, nil
 }
 
-// BackupConfigure applies EFS backup configuration via Terraform
-func (t *ThanosStack) BackupConfigure(ctx context.Context, daily *string, keep *string, reset *bool) error {
+// BackupConfigure applies EFS backup configuration via Terraform and returns configuration info
+func (t *ThanosStack) BackupConfigure(ctx context.Context, daily *string, keep *string, reset *bool) (*types.BackupConfigInfo, error) {
 	info, err := backup.GatherBackupConfigInfo(
 		t.deployConfig.AWS.Region,
 		t.deployConfig.K8s.Namespace,
@@ -183,7 +195,7 @@ func (t *ThanosStack) BackupConfigure(ctx context.Context, daily *string, keep *
 		func(format string, args ...any) { t.logger.Infof(format, args...) },
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	buildArgs := func(ci *types.BackupConfigInfo) []string {
 		return backup.BuildTerraformArgs(ci, func(format string, args ...any) { t.logger.Infof(format, args...) })
@@ -197,7 +209,14 @@ func (t *ThanosStack) BackupConfigure(ctx context.Context, daily *string, keep *
 			func(format string, a ...any) { t.logger.Warnf(format, a...) },
 		)
 	}
-	return backup.ExecuteBackupConfiguration(ctx, t.deploymentPath, info, buildArgs, execTf)
+	err = backup.ExecuteBackupConfiguration(ctx, t.deploymentPath, info, buildArgs, execTf)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update status after successful execution
+	info.Status = "applied"
+	return info, nil
 }
 
 // CleanupUnusedBackupResources removes unused EFS filesystems and old recovery points during deploy

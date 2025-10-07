@@ -87,20 +87,23 @@ func ActionBackupManager() cli.ActionFunc {
 			return err
 
 		case flags.StartBackup:
-			return thanosStack.BackupSnapshot(ctx)
+			_, err := thanosStack.BackupSnapshot(ctx)
+			return err
 
 		case flags.ListPoints:
 			_, err := thanosStack.BackupList(ctx, flags.Limit)
 			return err
 
 		case flags.DoAttach:
-			return thanosStack.BackupAttach(ctx, &flags.AttachEfs, &flags.AttachPVCs, &flags.AttachSTSs)
+			_, err := thanosStack.BackupAttach(ctx, &flags.AttachEfs, &flags.AttachPVCs, &flags.AttachSTSs)
+			return err
 
 		case flags.DoRestore:
 			return handleRestore(ctx, thanosStack, flags)
 
 		case flags.DoConfigure:
-			return thanosStack.BackupConfigure(ctx, &flags.ConfigDaily, &flags.ConfigKeep, &flags.ConfigReset)
+			_, err := thanosStack.BackupConfigure(ctx, &flags.ConfigDaily, &flags.ConfigKeep, &flags.ConfigReset)
+			return err
 
 		default:
 			return errors.New("no action specified. Try --status, --snapshot, --list, --restore, --config, or --attach")
