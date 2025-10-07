@@ -735,72 +735,65 @@ func getTelegramConfigFromUser() types.TelegramConfig {
 		break
 	}
 
-	var chatIds []string
-	fmt.Println("\n💡 Chat ID Help:")
-	fmt.Println("   • Personal chat: Positive number (e.g., 123456789)")
-	fmt.Println("   • Group chat: Negative number (e.g., -987654321)")
-	fmt.Println("   • Supergroup/Channel: Negative number starting with -100 (e.g., -1001234567890)")
-	fmt.Println("   • How to find Chat ID: Use @userinfobot or @chatid_echo_bot")
+	fmt.Println("\n💡 For multiple users to receive alerts:")
+	fmt.Println("   ✅ RECOMMENDED: Create a Telegram group and use the group's Chat ID")
+	fmt.Println("   ✅ All group members will receive alerts automatically")
+	fmt.Println("")
+	fmt.Println("📝 Chat ID examples:")
+	fmt.Println("   • Group chat: -987654321 (recommended for teams)")
+	fmt.Println("   • Personal chat: 123456789 (only one person)")
+	fmt.Println("")
+	fmt.Println("🔍 How to find your Chat ID:")
+	fmt.Println("   1. Add @userinfobot or @RawDataBot to your group")
+	fmt.Println("   2. The bot will show the Chat ID")
 
+	var chatId string
 	for {
-		fmt.Print("Enter Telegram Chat IDs (comma-separated): ")
-		chatIdsInput, err := scanner.ScanString()
+		fmt.Print("\nEnter Telegram Chat ID: ")
+		chatIdInput, err := scanner.ScanString()
 		if err != nil {
-			fmt.Printf("Error while reading Telegram Chat IDs: %s\n", err)
+			fmt.Printf("Error while reading Telegram Chat ID: %s\n", err)
 			return types.TelegramConfig{Enabled: false}
 		}
 
-		if chatIdsInput == "" {
-			fmt.Println("⚠️  At least one Chat ID is required")
+		chatId = strings.TrimSpace(chatIdInput)
+
+		if chatId == "" {
+			fmt.Println("⚠️  Chat ID cannot be empty")
 			continue
 		}
 
-		chatIds = strings.Split(chatIdsInput, ",")
-		for i, id := range chatIds {
-			chatIds[i] = strings.TrimSpace(id)
-		}
-
-		// Validate Chat IDs format
-		validChatIds := []string{}
-		hasValidId := false
-		for _, chatId := range chatIds {
-			if chatId != "" {
-				// Check if it's a valid Chat ID format (numeric, can be negative)
-				if chatIdRegex.MatchString(chatId) {
-					// Additional validation for Chat ID range
-					if chatIdInt, err := strconv.ParseInt(chatId, 10, 64); err == nil {
-						// Valid Chat ID ranges (approximate)
-						if chatIdInt > 0 || (chatIdInt < 0 && chatIdInt > -2000000000000) {
-							validChatIds = append(validChatIds, chatId)
-							fmt.Printf("✅ Valid Chat ID: %s\n", chatId)
-							hasValidId = true
-						} else {
-							fmt.Printf("⚠️  Chat ID out of valid range: %s\n", chatId)
-						}
-					} else {
-						fmt.Printf("⚠️  Invalid Chat ID format: %s (must be numeric)\n", chatId)
-					}
-				} else {
-					fmt.Printf("⚠️  Invalid Chat ID format: %s (must be numeric)\n", chatId)
-				}
-			}
-		}
-
-		if !hasValidId {
-			fmt.Println("⚠️  At least one valid Chat ID is required")
+		// Validate Chat ID format
+		if !chatIdRegex.MatchString(chatId) {
+			fmt.Printf("⚠️  Invalid Chat ID format: %s (must be numeric)\n", chatId)
 			continue
 		}
 
-		chatIds = validChatIds
+		// Additional validation for Chat ID range
+		chatIdInt, err := strconv.ParseInt(chatId, 10, 64)
+		if err != nil {
+			fmt.Printf("⚠️  Invalid Chat ID format: %s (must be numeric)\n", chatId)
+			continue
+		}
+
+		// Valid Chat ID ranges (approximate)
+		if chatIdInt == 0 || (chatIdInt < 0 && chatIdInt <= -2000000000000) {
+			fmt.Printf("⚠️  Chat ID out of valid range: %s\n", chatId)
+			continue
+		}
+
+		// Provide feedback based on Chat ID type
+		if strings.HasPrefix(chatId, "-") {
+			fmt.Printf("✅ Valid Chat ID: %s (Group chat - all members will receive alerts)\n", chatId)
+		} else {
+			fmt.Printf("✅ Valid Chat ID: %s (Personal DM - only one person will receive alerts)\n", chatId)
+			fmt.Println("💡 Tip: Consider using a group chat for team notifications")
+		}
 		break
 	}
 
 	var receivers []types.TelegramReceiver
-	for _, chatId := range chatIds {
-		if chatId != "" {
-			receivers = append(receivers, types.TelegramReceiver{ChatId: chatId})
-		}
-	}
+	receivers = append(receivers, types.TelegramReceiver{ChatId: chatId})
 
 	return types.TelegramConfig{
 		Enabled:           enabled,
