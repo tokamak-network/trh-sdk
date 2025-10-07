@@ -18,6 +18,8 @@ type BackupStatusInfo struct {
 	LatestRecoveryPoint string
 	ExpectedExpiryDate  string
 	BackupVaults        []string
+	BackupSchedule      string
+	NextBackupTime      string
 }
 
 // BackupSnapshotInfo represents backup snapshot information
