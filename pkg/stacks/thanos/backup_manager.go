@@ -64,13 +64,25 @@ func (t *ThanosStack) BackupList(ctx context.Context, limit string) (*types.Back
 	}, nil
 }
 
-// BackupRestore provides a fully interactive restore experience for EFS
-func (t *ThanosStack) BackupRestore(ctx context.Context) error {
-	return backup.InteractiveRestore(
+// BackupRestore executes EFS restore from a recovery point ARN and returns restore information
+func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string) (*types.BackupRestoreInfo, error) {
+	// Validate ARN
+	if !strings.Contains(recoveryPointArn, "arn:aws:backup:") {
+		return nil, fmt.Errorf("invalid recovery point ARN format: %s", recoveryPointArn)
+	}
+
+	// Get current EFS ID for tracking
+	currentEfsID, err := utils.DetectEFSId(ctx, t.deployConfig.K8s.Namespace)
+	if err != nil {
+		currentEfsID = "" // Not critical, continue
+	}
+
+	restoreInfo, err := backup.DirectRestore(
 		ctx,
 		t.logger,
 		t.deployConfig.AWS.Region,
 		t.deployConfig.K8s.Namespace,
+		recoveryPointArn,
 		func(c context.Context, arn string) (string, error) {
 			return backup.RestoreEFS(c, t.deployConfig.AWS.Region, arn, func(c2 context.Context) (string, error) {
 				acct, err := utils.DetectAWSAccountID(c2)
@@ -89,6 +101,38 @@ func (t *ThanosStack) BackupRestore(ctx context.Context) error {
 		func(c context.Context, efsId string, pvcs, stss, other *string) error {
 			// Use the same attach logic as BackupAttach
 			return t.BackupAttach(c, &efsId, pvcs, stss)
+		},
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Build and return BackupRestoreInfo
+	accountID, _ := utils.DetectAWSAccountID(ctx)
+	efsArn := utils.BuildEFSArn(t.deployConfig.AWS.Region, accountID, currentEfsID)
+
+	return &types.BackupRestoreInfo{
+		Region:           t.deployConfig.AWS.Region,
+		Namespace:        t.deployConfig.K8s.Namespace,
+		EFSID:            currentEfsID,
+		ARN:              efsArn,
+		RecoveryPointARN: recoveryPointArn,
+		NewEFSID:         restoreInfo.NewEFSID,
+		JobID:            restoreInfo.JobID,
+		Status:           restoreInfo.Status,
+	}, nil
+}
+
+// BackupRestoreInteractive provides interactive recovery point selection and restoration
+func (t *ThanosStack) BackupRestoreInteractive(ctx context.Context) error {
+	return backup.InteractiveRestoreWithSelection(
+		ctx,
+		t.logger,
+		t.deployConfig.AWS.Region,
+		t.deployConfig.K8s.Namespace,
+		func(c context.Context, arn string) (*types.BackupRestoreInfo, error) {
+			return t.BackupRestore(c, arn)
 		},
 	)
 }

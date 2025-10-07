@@ -14,6 +14,33 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
+// BackupManagerFlags represents all command line flags for backup manager
+type BackupManagerFlags struct {
+	// Primary actions
+	ShowStatus  bool
+	StartBackup bool
+	ListPoints  bool
+	DoRestore   bool
+	DoConfigure bool
+	DoAttach    bool
+
+	// Common options
+	Limit string
+
+	// Restore options
+	RestoreArn string
+
+	// Post-restore attach options
+	AttachEfs  string
+	AttachPVCs string
+	AttachSTSs string
+
+	// Configure options
+	ConfigDaily string
+	ConfigKeep  string
+	ConfigReset bool
+}
+
 // ActionBackupManager provides backup/restore operations for EFS
 func ActionBackupManager() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
@@ -54,32 +81,43 @@ func ActionBackupManager() cli.ActionFunc {
 		}
 
 		// Execute the appropriate action
-		return executeBackupManagerAction(ctx, thanosStack, flags)
+		switch {
+		case flags.ShowStatus:
+			_, err := thanosStack.BackupStatus(ctx)
+			return err
+
+		case flags.StartBackup:
+			return thanosStack.BackupSnapshot(ctx)
+
+		case flags.ListPoints:
+			_, err := thanosStack.BackupList(ctx, flags.Limit)
+			return err
+
+		case flags.DoAttach:
+			return thanosStack.BackupAttach(ctx, &flags.AttachEfs, &flags.AttachPVCs, &flags.AttachSTSs)
+
+		case flags.DoRestore:
+			return handleRestore(ctx, thanosStack, flags)
+
+		case flags.DoConfigure:
+			return thanosStack.BackupConfigure(ctx, &flags.ConfigDaily, &flags.ConfigKeep, &flags.ConfigReset)
+
+		default:
+			return errors.New("no action specified. Try --status, --snapshot, --list, --restore, --config, or --attach")
+		}
 	}
 }
 
-// BackupManagerFlags represents all command line flags for backup manager
-type BackupManagerFlags struct {
-	// Primary actions
-	ShowStatus  bool
-	StartBackup bool
-	ListPoints  bool
-	DoRestore   bool
-	DoConfigure bool
-	DoAttach    bool
+// handleRestore manages the restore process with interactive or direct mode
+func handleRestore(ctx context.Context, thanosStack *thanos.ThanosStack, flags *BackupManagerFlags) error {
+	// If ARN is provided, use direct restore mode
+	if flags.RestoreArn != "" {
+		_, err := thanosStack.BackupRestore(ctx, flags.RestoreArn)
+		return err
+	}
 
-	// Common options
-	Limit string
-
-	// Post-restore attach options
-	AttachEfs  string
-	AttachPVCs string
-	AttachSTSs string
-
-	// Configure options
-	ConfigDaily string
-	ConfigKeep  string
-	ConfigReset bool
+	// Otherwise, use interactive mode (default)
+	return thanosStack.BackupRestoreInteractive(ctx)
 }
 
 // parseBackupManagerFlags extracts and parses all command line flags
@@ -95,6 +133,9 @@ func parseBackupManagerFlags(cmd *cli.Command) *BackupManagerFlags {
 
 		// Common options
 		Limit: cmd.String("limit"),
+
+		// Restore options
+		RestoreArn: cmd.String("recovery-point-arn"),
 
 		// Post-restore attach options
 		AttachEfs:  cmd.String("efs-id"),
@@ -135,26 +176,4 @@ func validateBackupManagerFlags(flags *BackupManagerFlags) error {
 	}
 
 	return nil
-}
-
-// executeBackupManagerAction routes to the appropriate backup manager action
-func executeBackupManagerAction(ctx context.Context, thanosStack *thanos.ThanosStack, flags *BackupManagerFlags) error {
-	switch {
-	case flags.ShowStatus:
-		_, err := thanosStack.BackupStatus(ctx)
-		return err
-	case flags.StartBackup:
-		return thanosStack.BackupSnapshot(ctx)
-	case flags.ListPoints:
-		_, err := thanosStack.BackupList(ctx, flags.Limit)
-		return err
-	case flags.DoAttach:
-		return thanosStack.BackupAttach(ctx, &flags.AttachEfs, &flags.AttachPVCs, &flags.AttachSTSs)
-	case flags.DoRestore:
-		return thanosStack.BackupRestore(ctx)
-	case flags.DoConfigure:
-		return thanosStack.BackupConfigure(ctx, &flags.ConfigDaily, &flags.ConfigKeep, &flags.ConfigReset)
-	default:
-		return errors.New("no action specified. Try --status, --snapshot, --list, --restore, or --config")
-	}
 }
