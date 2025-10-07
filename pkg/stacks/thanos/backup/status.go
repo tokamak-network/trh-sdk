@@ -72,7 +72,7 @@ func DisplayBackupStatus(l *zap.SugaredLogger, statusInfo *types.BackupStatusInf
 	if statusInfo.LatestRecoveryPoint == "" || statusInfo.LatestRecoveryPoint == "None" {
 		l.Warn("   Latest recovery point: ⚠️  None (no backups found)")
 	} else {
-		l.Infof("   Latest recovery point: ✅ %s", statusInfo.LatestRecoveryPoint)
+		l.Infof("   Latest recovery point: %s", statusInfo.LatestRecoveryPoint)
 	}
 
 	// Handle expected expiry date display
@@ -84,7 +84,7 @@ func DisplayBackupStatus(l *zap.SugaredLogger, statusInfo *types.BackupStatusInf
 	if len(statusInfo.BackupVaults) == 0 {
 		l.Warn("   Vaults: ⚠️  None (no backups found)")
 	} else {
-		l.Infof("   Vaults: ✅ %s", strings.Join(statusInfo.BackupVaults, ", "))
+		l.Infof("   Vaults: %s", strings.Join(statusInfo.BackupVaults, ", "))
 	}
 
 	// Handle backup schedule display

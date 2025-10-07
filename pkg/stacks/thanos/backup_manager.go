@@ -25,8 +25,8 @@ func (t *ThanosStack) BackupSnapshot(ctx context.Context) error {
 	return backup.SnapshotExecute(ctx, t.logger, t.deployConfig.AWS.Region, t.deployConfig.K8s.Namespace)
 }
 
-// BackupList lists recent EFS recovery points
-func (t *ThanosStack) BackupList(ctx context.Context, limit string) ([]types.RecoveryPoint, error) {
+// BackupList lists recent EFS recovery points and returns comprehensive information
+func (t *ThanosStack) BackupList(ctx context.Context, limit string) (*types.BackupListInfo, error) {
 	region := t.deployConfig.AWS.Region
 	namespace := t.deployConfig.K8s.Namespace
 
@@ -42,13 +42,26 @@ func (t *ThanosStack) BackupList(ctx context.Context, limit string) ([]types.Rec
 	}
 	arn := utils.BuildEFSArn(region, accountID, efsID)
 
+	if strings.TrimSpace(limit) == "" {
+		limit = "20"
+	}
+
 	rps, err := backup.ListRecoveryPoints(ctx, region, arn, strings.TrimSpace(limit))
 	if err != nil {
 		t.logger.Infof("   ❌ Error retrieving recovery points: %v", err)
 		return nil, err
 	}
 	backup.DisplayRecoveryPoints(t.logger, rps)
-	return rps, nil
+
+	// Return comprehensive backup list information
+	return &types.BackupListInfo{
+		Region:         region,
+		Namespace:      namespace,
+		EFSID:          efsID,
+		ResourceARN:    arn,
+		Limit:          limit,
+		RecoveryPoints: rps,
+	}, nil
 }
 
 // BackupRestore provides a fully interactive restore experience for EFS
