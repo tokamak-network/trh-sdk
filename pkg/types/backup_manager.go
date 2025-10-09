@@ -18,6 +18,8 @@ type BackupStatusInfo struct {
 	LatestRecoveryPoint string
 	ExpectedExpiryDate  string
 	BackupVaults        []string
+	BackupSchedule      string
+	NextBackupTime      string
 }
 
 // BackupSnapshotInfo represents backup snapshot information
@@ -35,17 +37,18 @@ type BackupListInfo struct {
 	Region         string
 	Namespace      string
 	EFSID          string
-	ARN            string
+	ResourceARN    string // EFS file system ARN
 	Limit          string
 	RecoveryPoints []RecoveryPoint
 }
 
 // RecoveryPoint represents a single recovery point
 type RecoveryPoint struct {
-	Vault   string
-	Created string
-	Expiry  string
-	Status  string
+	RecoveryPointARN string // Recovery point ARN for restoration
+	Vault            string
+	Created          string
+	Expiry           string
+	Status           string
 }
 
 // BackupRestoreInfo represents backup restore information

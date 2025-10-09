@@ -9,8 +9,184 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
+
+// InteractiveRestoreWithSelection displays recovery points and lets user select one
+func InteractiveRestoreWithSelection(
+	ctx context.Context,
+	l *zap.SugaredLogger,
+	region, namespace string,
+	executeRestore func(context.Context, string) (*types.BackupRestoreInfo, error),
+) error {
+	// Get AWS account ID and EFS ID
+	accountID, err := utils.DetectAWSAccountID(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to detect AWS account ID: %w", err)
+	}
+
+	efsID, err := utils.DetectEFSId(ctx, namespace)
+	if err != nil || strings.TrimSpace(efsID) == "" {
+		return fmt.Errorf("failed to detect current EFS in namespace %s: %w", namespace, err)
+	}
+
+	resourceArn := utils.BuildEFSArn(region, accountID, efsID)
+
+	// List recovery points
+	rps, err := ListRecoveryPoints(ctx, region, resourceArn, "20")
+	if err != nil {
+		return fmt.Errorf("failed to list recovery points: %w", err)
+	}
+
+	// Filter only COMPLETED recovery points
+	var availablePoints []types.RecoveryPoint
+	for _, rp := range rps {
+		if strings.ToUpper(rp.Status) == "COMPLETED" {
+			availablePoints = append(availablePoints, rp)
+		}
+	}
+
+	if len(availablePoints) == 0 {
+		return fmt.Errorf("no available recovery points found for EFS %s", efsID)
+	}
+
+	// Display recovery points to user
+	l.Info("")
+	l.Infof("📦 Available Recovery Points (%d)", len(availablePoints))
+	l.Info("")
+
+	for i, rp := range availablePoints {
+		createdRelative := formatRelativeTime(rp.Created)
+
+		l.Infof("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		l.Infof("#%-2d", i+1) // Display 1-based index like --list
+		l.Infof("    🔑 ARN      : %s", rp.RecoveryPointARN)
+		l.Infof("    🗄️  Vault    : %s", rp.Vault)
+		l.Infof("    📅 Created  : %s %s", rp.Created, createdRelative)
+
+		if rp.Expiry != "" {
+			expiryRelative := formatRelativeTime(rp.Expiry)
+			l.Infof("    ⏰ Expires  : %s %s", rp.Expiry, expiryRelative)
+		} else {
+			l.Infof("    ⏰ Expires  : Never")
+		}
+
+		l.Infof("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		if i < len(availablePoints)-1 {
+			l.Info("")
+		}
+	}
+	l.Info("")
+
+	// Get user selection (1-based index)
+	var sel int
+	fmt.Printf("Enter index (1-%d): ", len(availablePoints))
+	if _, err := fmt.Scanf("%d", &sel); err != nil || sel < 1 || sel > len(availablePoints) {
+		return fmt.Errorf("invalid selection: must be between 1 and %d", len(availablePoints))
+	}
+
+	selectedArn := availablePoints[sel-1].RecoveryPointARN // Convert to 0-based array index
+
+	// Execute restore with selected ARN
+	_, err = executeRestore(ctx, selectedArn)
+	return err
+}
+
+// DirectRestore executes restore from a specific recovery point ARN without user interaction
+func DirectRestore(
+	ctx context.Context,
+	l *zap.SugaredLogger,
+	region, namespace string,
+	recoveryPointArn string,
+	restoreEFS func(context.Context, string) (string, error),
+	monitorRestore func(context.Context, string) (string, error),
+	handleCompletion func(context.Context, string) (string, error),
+	executeAttach func(context.Context, string, *string, *string, *string) error,
+) (*types.BackupRestoreInfo, error) {
+	// Validate ARN
+	if !strings.Contains(recoveryPointArn, "arn:aws:backup:") {
+		return nil, fmt.Errorf("invalid recovery point ARN: %s", recoveryPointArn)
+	}
+
+	l.Info("")
+	l.Infof("🔄 Starting restore from recovery point...")
+	l.Infof("    ARN: %s", recoveryPointArn)
+	l.Info("")
+
+	// Step 1: Start restore
+	jobID, err := restoreEFS(ctx, recoveryPointArn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start restore: %w", err)
+	}
+
+	l.Infof("📝 Restore job started: %s", jobID)
+	l.Info("")
+
+	// Step 2: Monitor restore
+	newEfsID, err := monitorRestore(ctx, jobID)
+	if err != nil {
+		return nil, fmt.Errorf("restore failed: %w", err)
+	}
+
+	l.Info("")
+	l.Infof("✅ Restore completed. New EFS: %s", newEfsID)
+
+	// Step 3: Tag EFS
+	if err := TagEFSWithName(ctx, region, newEfsID, namespace); err != nil {
+		l.Warnf("Failed to tag EFS %s with Name=%s: %v", newEfsID, namespace, err)
+	} else {
+		l.Infof("✅ Tagged EFS %s with Name=%s", newEfsID, namespace)
+	}
+
+	// Build restore info for API response
+	restoreInfo := &types.BackupRestoreInfo{
+		Region:           region,
+		Namespace:        namespace,
+		EFSID:            "", // Will be set by caller if needed
+		ARN:              "",
+		RecoveryPointARN: recoveryPointArn,
+		NewEFSID:         newEfsID,
+		JobID:            jobID,
+		Status:           "COMPLETED",
+	}
+
+	// Step 4: Ask user if they want to attach (only for CLI)
+	l.Info("")
+	var response string
+	fmt.Print("Would you like to attach the restored EFS to workloads now? (y/n) ")
+	if _, err := fmt.Scanf("%s", &response); err != nil {
+		l.Warnf("Failed to read input: %v", err)
+		response = "n"
+	}
+
+	response = strings.ToLower(strings.TrimSpace(response))
+	if response == "y" || response == "yes" {
+		l.Info("")
+		l.Info("🔗 Starting attach process...")
+
+		defaultPVCs := "op-geth,op-node"
+		defaultSTSs := "op-geth,op-node"
+
+		if err := executeAttach(ctx, newEfsID, &defaultPVCs, &defaultSTSs, nil); err != nil {
+			l.Errorf("❌ Attach failed: %v", err)
+			l.Info("You can manually attach later with:")
+			l.Infof("  ./trh-sdk backup-manager --attach --efs-id %s --pvc op-geth,op-node --sts op-geth,op-node", newEfsID)
+			restoreInfo.Status = "COMPLETED_WITH_ATTACH_ERROR"
+			return restoreInfo, err
+		}
+
+		l.Info("")
+		l.Info("✅ Attach completed successfully!")
+		restoreInfo.Status = "COMPLETED_WITH_ATTACH"
+	} else {
+		l.Info("")
+		l.Info("You can attach workloads to the restored EFS later with:")
+		l.Infof("  ./trh-sdk backup-manager --attach --efs-id %s --pvc op-geth,op-node --sts op-geth,op-node", newEfsID)
+	}
+
+	return restoreInfo, nil
+}
 
 // InteractiveRestore provides an interactive flow:
 // - Detect current EFS and list recent recovery points
@@ -36,7 +212,7 @@ func InteractiveRestore(
 	}
 	resourceArn := utils.BuildEFSArn(region, accountID, efsID)
 
-	query := "reverse(sort_by(RecoveryPoints,&CreationDate))[:20].{Arn:RecoveryPointArn,Created:CreationDate,Status:Status}"
+	query := "reverse(sort_by(RecoveryPoints,&CreationDate))[:20].{RecoveryPointArn:RecoveryPointArn,Created:CreationDate,Expiry:ExpiryDate,Status:Status,Vault:BackupVaultName}"
 	out, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-recovery-points-by-resource",
 		"--region", region,
 		"--resource-arn", resourceArn,
@@ -50,32 +226,70 @@ func InteractiveRestore(
 	if out == "" || out == "[]" {
 		return fmt.Errorf("no recovery points found for %s", resourceArn)
 	}
-	var items []struct {
-		Arn     string `json:"Arn"`
-		Created string `json:"Created"`
-		Status  string `json:"Status"`
+	var allItems []struct {
+		RecoveryPointArn string `json:"RecoveryPointArn"`
+		Created          string `json:"Created"`
+		Expiry           string `json:"Expiry"`
+		Status           string `json:"Status"`
+		Vault            string `json:"Vault"`
 	}
-	if err := json.Unmarshal([]byte(out), &items); err != nil {
+	if err := json.Unmarshal([]byte(out), &allItems); err != nil {
 		return fmt.Errorf("failed to parse recovery points: %w", err)
 	}
 
-	l.Info("Select a recovery point to restore:")
+	// Filter only COMPLETED recovery points
+	var items []struct {
+		RecoveryPointArn string `json:"RecoveryPointArn"`
+		Created          string `json:"Created"`
+		Expiry           string `json:"Expiry"`
+		Status           string `json:"Status"`
+		Vault            string `json:"Vault"`
+	}
+	for _, item := range allItems {
+		if strings.ToUpper(item.Status) == "COMPLETED" {
+			items = append(items, item)
+		}
+	}
+
+	if len(items) == 0 {
+		return fmt.Errorf("no available recovery points found for %s", resourceArn)
+	}
+
+	l.Info("")
+	l.Infof("📦 Available Recovery Points (%d)", len(items))
 	l.Info("")
 
-	// Display recovery points in a more user-friendly format
+	// Display recovery points in card style format
 	for i, it := range items {
-		l.Infof("  [%d] Created: %s", i, it.Created)
-		l.Infof("      Status: %s", it.Status)
-		l.Infof("      ARN: %s", it.Arn)
-		l.Info("")
+		createdRelative := formatRelativeTimeRestore(it.Created)
+
+		l.Infof("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		l.Infof("[%d]", i)
+		l.Infof("    🔑 ARN      : %s", it.RecoveryPointArn)
+		l.Infof("    🗄️  Vault    : %s", it.Vault)
+		l.Infof("    📅 Created  : %s %s", it.Created, createdRelative)
+
+		// Handle expiry date - show "Never" if no expiry is set
+		if strings.TrimSpace(it.Expiry) == "" {
+			l.Infof("    ⏰ Expires  : Never")
+		} else {
+			expiryRelative := formatRelativeTimeRestore(it.Expiry)
+			l.Infof("    ⏰ Expires  : %s %s", it.Expiry, expiryRelative)
+		}
+
+		l.Infof("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		if i < len(items)-1 {
+			l.Info("")
+		}
 	}
+	l.Info("")
 
 	var sel int
 	fmt.Print("Enter index: ")
 	if _, err := fmt.Scanf("%d", &sel); err != nil || sel < 0 || sel >= len(items) {
 		return fmt.Errorf("invalid selection")
 	}
-	selectedArn := items[sel].Arn
+	selectedArn := items[sel].RecoveryPointArn
 
 	jobID, err := restoreEFS(ctx, selectedArn)
 	if err != nil {
@@ -365,4 +579,71 @@ func TagEFSWithName(ctx context.Context, region, fsId, name string) error {
 		"--tags", fmt.Sprintf("Key=Name,Value=%s", name),
 	)
 	return err
+}
+
+// formatRelativeTimeRestore formats a timestamp to show relative time (e.g., "2 days ago")
+func formatRelativeTimeRestore(timestamp string) string {
+	if strings.TrimSpace(timestamp) == "" {
+		return ""
+	}
+
+	// Try parsing with different time formats
+	var t time.Time
+	var err error
+
+	// ISO8601 formats to try
+	formats := []string{
+		time.RFC3339,
+		"2006-01-02T15:04:05.000000-07:00",
+		"2006-01-02T15:04:05.000000Z07:00",
+		"2006-01-02T15:04:05Z07:00",
+		"2006-01-02T15:04:05.000Z",
+		"2006-01-02T15:04:05Z",
+	}
+
+	for _, format := range formats {
+		t, err = time.Parse(format, timestamp)
+		if err == nil {
+			break
+		}
+	}
+
+	if err != nil {
+		return ""
+	}
+
+	now := time.Now()
+	duration := now.Sub(t)
+
+	// If time is in the future
+	if duration < 0 {
+		duration = -duration
+		days := int(duration.Hours() / 24)
+		hours := int(duration.Hours()) % 24
+
+		if days > 0 {
+			return fmt.Sprintf("(in %d days)", days)
+		} else if hours > 0 {
+			return fmt.Sprintf("(in %d hours)", hours)
+		} else {
+			minutes := int(duration.Minutes())
+			return fmt.Sprintf("(in %d minutes)", minutes)
+		}
+	}
+
+	// If time is in the past
+	days := int(duration.Hours() / 24)
+	hours := int(duration.Hours()) % 24
+
+	if days > 0 {
+		return fmt.Sprintf("(%d days ago)", days)
+	} else if hours > 0 {
+		return fmt.Sprintf("(%d hours ago)", hours)
+	} else {
+		minutes := int(duration.Minutes())
+		if minutes <= 0 {
+			return "(just now)"
+		}
+		return fmt.Sprintf("(%d minutes ago)", minutes)
+	}
 }
