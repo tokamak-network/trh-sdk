@@ -6,14 +6,18 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
+	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
+	"gopkg.in/yaml.v3"
 )
 
 type BlockExplorerConfig struct {
@@ -57,8 +61,17 @@ type DeployCrossTradeContractsOutput struct {
 	Mode                       constants.CrossTradeDeployMode `json:"mode"`
 	L1CrossTradeProxyAddress   string                         `json:"l1_cross_trade_proxy_address"`
 	L1CrossTradeAddress        string                         `json:"l1_cross_trade_address"`
-	L2CrossTradeProxyAddresses map[uint64][]string            `json:"l2_cross_trade_proxy_addresses"`
-	L2CrossTradeAddresses      map[uint64][]string            `json:"l2_cross_trade_addresses"`
+	L2CrossTradeProxyAddresses map[uint64]string              `json:"l2_cross_trade_proxy_addresses"`
+	L2CrossTradeAddresses      map[uint64]string              `json:"l2_l2_cross_trade_addresses"`
+}
+
+type DeployCrossTradeApplicationOutput struct {
+	URL string `json:"url"`
+}
+
+type DeployCrossTradeOutput struct {
+	DeployCrossTradeContractsOutput   *DeployCrossTradeContractsOutput   `json:"deploy_cross_trade_contracts_output"`
+	DeployCrossTradeApplicationOutput *DeployCrossTradeApplicationOutput `json:"deploy_cross_trade_application_output"`
 }
 
 const (
@@ -538,6 +551,22 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 	}, nil
 }
 
+func (t *ThanosStack) DeployCrossTrade(ctx context.Context, input *DeployCrossTradeContractsInputs) (*DeployCrossTradeOutput, error) {
+	deployCrossTradeContractsOutput, err := t.DeployCrossTradeContracts(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deploy cross trade contracts: %s", err)
+	}
+
+	_, err = t.DeployCrossTradeApplication(ctx, deployCrossTradeContractsOutput)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deploy cross trade application: %s", err)
+	}
+
+	return &DeployCrossTradeOutput{
+		DeployCrossTradeContractsOutput: deployCrossTradeContractsOutput,
+	}, nil
+}
+
 func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *DeployCrossTradeContractsInputs) (*DeployCrossTradeContractsOutput, error) {
 	if input.L1ChainConfig == nil {
 		return nil, fmt.Errorf("l1 chain config is required")
@@ -564,11 +593,13 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *Depl
 
 	// Step 1: Check if the L1 contracts are deployed
 	var (
-		l1CrossTradeProxyAddress   string
-		l1CrossTradeAddress        string
-		l1ContractAddresses        = make(map[string]string)
-		l2CrossTradeProxyAddresses = make(map[uint64][]string)
-		l2CrossTradeAddresses      = make(map[uint64][]string)
+		l1CrossTradeProxyAddress     string
+		l1CrossTradeAddress          string
+		l1ContractAddresses          = make(map[string]string)
+		l2l2CrossTradeProxyAddresses = make(map[uint64]string)
+		l1l2CrossTradeProxyAddresses = make(map[uint64]string)
+		l2l2CrossTradeAddresses      = make(map[uint64]string)
+		l1l2CrossTradeAddresses      = make(map[uint64]string)
 	)
 	if input.L1ChainConfig.IsDeployedNew {
 		t.logger.Info("L1 contracts are not deployed. Deploying new L1 contracts")
@@ -665,10 +696,14 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *Depl
 		for contractName, address := range addresses {
 			t.logger.Infof("L2 contract address %s with address %s", contractName, address)
 			switch contractName {
-			case L2L2CrossTradeProxyL2ContractName, L1L2CrossTradeProxyL2ContractName:
-				l2CrossTradeProxyAddresses[l2ChainConfig.ChainID] = append(l2CrossTradeProxyAddresses[l2ChainConfig.ChainID], address)
-			case L2L2CrossTradeL2ContractName, L1L2CrossTradeL2ContractName:
-				l2CrossTradeAddresses[l2ChainConfig.ChainID] = append(l2CrossTradeAddresses[l2ChainConfig.ChainID], address)
+			case L2L2CrossTradeProxyL2ContractName:
+				l2l2CrossTradeProxyAddresses[l2ChainConfig.ChainID] = address
+			case L1L2CrossTradeProxyL2ContractName:
+				l1l2CrossTradeProxyAddresses[l2ChainConfig.ChainID] = address
+			case L2L2CrossTradeL2ContractName:
+				l2l2CrossTradeAddresses[l2ChainConfig.ChainID] = address
+			case L1L2CrossTradeL2ContractName:
+				l1l2CrossTradeAddresses[l2ChainConfig.ChainID] = address
 			default:
 				t.logger.Infof("Unknown contract %s", contractName)
 			}
@@ -719,16 +754,219 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *Depl
 
 	t.logger.Infof("L1 cross trade proxy address %s", l1CrossTradeProxyAddress)
 	t.logger.Infof("L1 cross trade address %s", l1CrossTradeAddress)
-	t.logger.Infof("L2 cross trade proxy addresses %v", l2CrossTradeProxyAddresses)
-	t.logger.Infof("L2 cross trade addresses %v", l2CrossTradeAddresses)
+	t.logger.Infof("L2 <> L2 cross trade proxy addresses %v", l2l2CrossTradeProxyAddresses)
+	t.logger.Infof("L1 <> L2 cross trade addresses %v", l1l2CrossTradeAddresses)
 
-	return &DeployCrossTradeContractsOutput{
-		Mode:                       input.Mode,
-		L1CrossTradeProxyAddress:   l1CrossTradeProxyAddress,
-		L1CrossTradeAddress:        l1CrossTradeAddress,
-		L2CrossTradeProxyAddresses: l2CrossTradeProxyAddresses,
-		L2CrossTradeAddresses:      l2CrossTradeAddresses,
+	if input.Mode == constants.CrossTradeDeployModeL2ToL1 {
+		return &DeployCrossTradeContractsOutput{
+			Mode:                       input.Mode,
+			L1CrossTradeProxyAddress:   l1CrossTradeProxyAddress,
+			L1CrossTradeAddress:        l1CrossTradeAddress,
+			L2CrossTradeProxyAddresses: l1l2CrossTradeProxyAddresses,
+			L2CrossTradeAddresses:      l1l2CrossTradeAddresses,
+		}, nil
+	} else {
+		return &DeployCrossTradeContractsOutput{
+			Mode:                       input.Mode,
+			L1CrossTradeProxyAddress:   l1CrossTradeProxyAddress,
+			L1CrossTradeAddress:        l1CrossTradeAddress,
+			L2CrossTradeProxyAddresses: l2l2CrossTradeProxyAddresses,
+			L2CrossTradeAddresses:      l2l2CrossTradeAddresses,
+		}, nil
+	}
+}
+
+func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, contracts *DeployCrossTradeContractsOutput) (*DeployCrossTradeApplicationOutput, error) {
+	if t.deployConfig.K8s == nil {
+		t.logger.Error("K8s configuration is not set. Please run the deploy command first")
+		return nil, fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+	}
+
+	var (
+		namespace = t.deployConfig.K8s.Namespace
+		l1ChainID = t.deployConfig.L1ChainID
+	)
+
+	crossTradePods, err := utils.GetPodsByName(ctx, namespace, "cross-trade")
+	if err != nil {
+		t.logger.Error("Error to get cross trade pods", "err", err)
+		return nil, err
+	}
+	if len(crossTradePods) > 0 {
+		t.logger.Info("Cross trade is running: \n")
+		var bridgeUrl string
+		for {
+			k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, "cross-trade")
+			if err != nil {
+				t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
+				return nil, err
+			}
+
+			if len(k8sIngresses) > 0 {
+				bridgeUrl = "http://" + k8sIngresses[0]
+				break
+			}
+
+			time.Sleep(15 * time.Second)
+		}
+		return &DeployCrossTradeApplicationOutput{
+			URL: bridgeUrl,
+		}, nil
+	}
+
+	t.logger.Info("Installing a cross trade component...")
+
+	// make yaml file at {cwd}/tokamak-thanos-stack/terraform/thanos-stack/cross-trade-values.yaml
+	crossTradeConfig := types.CrossTradeConfig{}
+
+	// Add L1 chain config
+	crossTradeConfig.CrossTrade.Env.NextPublicProjectID = "568b8d3d0528e743b0e2c6c92f54d721"
+
+	chainConfig := make(map[string]types.CrossTradeChainConfig)
+	chainConfig[fmt.Sprintf("%d", l1ChainID)] = types.CrossTradeChainConfig{
+		Name:        constants.L1ChainConfigurations[l1ChainID].ChainName,
+		DisplayName: constants.L1ChainConfigurations[l1ChainID].ChainName,
+		Contracts: types.CrossTradeContracts{
+			L1CrossTrade: &contracts.L1CrossTradeProxyAddress,
+		},
+		Tokens: types.CrossTradeTokens{
+			ETH:  "0x0000000000000000000000000000000000000000",
+			USDC: constants.L1ChainConfigurations[l1ChainID].USDCAddress,
+			USDT: constants.L1ChainConfigurations[l1ChainID].USDTAddress,
+			TON:  constants.L1ChainConfigurations[l1ChainID].TON,
+		},
+	}
+
+	// Add L2 chain config
+	for l2ChainID, l2ChainConfig := range contracts.L2CrossTradeProxyAddresses {
+		chainConfig[fmt.Sprintf("%d", l2ChainID)] = types.CrossTradeChainConfig{
+			Name:        fmt.Sprintf("%d", l2ChainID),
+			DisplayName: fmt.Sprintf("%d", l2ChainID),
+			Contracts: types.CrossTradeContracts{
+				L2CrossTrade: &l2ChainConfig,
+			},
+			Tokens: types.CrossTradeTokens{
+				ETH:  "0x0000000000000000000000000000000000000000",
+				USDC: "0x0000000000000000000000000000000000000000",
+				USDT: "0x0000000000000000000000000000000000000000",
+				TON:  "0x0000000000000000000000000000000000000000",
+			},
+		}
+	}
+
+	chainConfigJSON, err := json.Marshal(chainConfig)
+	if err != nil {
+		t.logger.Error("Error marshalling chain config", "err", err)
+		return nil, err
+	}
+	crossTradeConfig.CrossTrade.Env.NextPublicChainConfig = string(chainConfigJSON)
+
+	// input from users
+
+	crossTradeConfig.CrossTrade.Ingress = types.Ingress{Enabled: true, ClassName: "alb", Annotations: map[string]string{
+		"alb.ingress.kubernetes.io/target-type":  "ip",
+		"alb.ingress.kubernetes.io/scheme":       "internet-facing",
+		"alb.ingress.kubernetes.io/listen-ports": "[{\"HTTP\": 80}]",
+		"alb.ingress.kubernetes.io/group.name":   "cross-trade",
+	}, TLS: types.TLS{
+		Enabled: false,
+	}}
+
+	data, err := yaml.Marshal(&crossTradeConfig)
+	if err != nil {
+		t.logger.Error("Error marshalling cross-trade values YAML file", "err", err)
+		return nil, err
+	}
+
+	configFileDir := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", t.deploymentPath)
+	if err := os.MkdirAll(configFileDir, os.ModePerm); err != nil {
+		t.logger.Error("Error creating directory", "err", err)
+		return nil, err
+	}
+
+	// Write to file
+	filePath := filepath.Join(configFileDir, "/cross-trade-values.yaml")
+	err = os.WriteFile(filePath, data, 0644)
+	if err != nil {
+		t.logger.Error("Error writing file", "err", err)
+		return nil, nil
+	}
+
+	helmReleaseName := fmt.Sprintf("cross-trade-%d", time.Now().Unix())
+	_, err = utils.ExecuteCommand(ctx, "helm", []string{
+		"install",
+		helmReleaseName,
+		fmt.Sprintf("%s/tokamak-thanos-stack/charts/cross-trade", t.deploymentPath),
+		"--values",
+		filePath,
+		"--namespace",
+		namespace,
+	}...)
+	if err != nil {
+		t.logger.Error("Error installing Helm charts", "err", err)
+		return nil, err
+	}
+
+	t.logger.Info("✅ Cross trade component installed successfully and is being initialized. Please wait for the ingress address to become available...")
+	var bridgeUrl string
+	for {
+		k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, helmReleaseName)
+		if err != nil {
+			t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
+			return nil, err
+		}
+
+		if len(k8sIngresses) > 0 {
+			bridgeUrl = "http://" + k8sIngresses[0]
+			break
+		}
+
+		time.Sleep(15 * time.Second)
+	}
+	t.logger.Infof("✅ Cross trade component is up and running. You can access it at: %s", bridgeUrl)
+
+	return &DeployCrossTradeApplicationOutput{
+		URL: bridgeUrl,
 	}, nil
+}
+
+func (t *ThanosStack) UninstallCrossTrade(ctx context.Context) error {
+	if t.deployConfig.K8s == nil {
+		t.logger.Error("K8s configuration is not set. Please run the deploy command first")
+		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+	}
+
+	var (
+		namespace = t.deployConfig.K8s.Namespace
+	)
+
+	if t.deployConfig.AWS == nil {
+		t.logger.Error("AWS configuration is not set. Please run the deploy command first")
+		return fmt.Errorf("AWS configuration is not set. Please run the deploy command first")
+	}
+
+	releases, err := utils.FilterHelmReleases(ctx, namespace, "cross-trade")
+	if err != nil {
+		t.logger.Error("Error to filter helm releases", "err", err)
+		return err
+	}
+
+	for _, release := range releases {
+		_, err = utils.ExecuteCommand(ctx, "helm", []string{
+			"uninstall",
+			release,
+			"--namespace",
+			namespace,
+		}...)
+		if err != nil {
+			t.logger.Error("❌ Error uninstalling cross-trade helm chart", "err", err)
+			return err
+		}
+	}
+
+	t.logger.Info("✅ Uninstall a cross-trade component successfully!")
+
+	return nil
 }
 
 func (t *ThanosStack) getContractAddressFromOutput(_ context.Context, deployFile string, chainID uint64) (map[string]string, error) {
