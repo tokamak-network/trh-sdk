@@ -140,10 +140,26 @@ func getAvailabilityZones(region string) ([]string, error) {
 		return nil, err
 	}
 
-	// Extract and print only available zones
+	// EKS unsupported availability zones by region
+	// Reference: https://docs.aws.amazon.com/eks/latest/userguide/network_reqs.html
+	eksUnsupportedAZs := map[string][]string{
+		"us-east-1": {"us-east-1e"}, // EKS control plane not supported
+	}
+
+	unsupportedZones := eksUnsupportedAZs[region]
+	isUnsupported := func(zoneName string) bool {
+		for _, unsupported := range unsupportedZones {
+			if zoneName == unsupported {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Extract only available zones and filter out EKS unsupported zones
 	availabilityZones := make([]string, 0)
 	for _, zone := range awsResponse.AvailabilityZones {
-		if zone.State == "available" {
+		if zone.State == "available" && !isUnsupported(zone.ZoneName) {
 			availabilityZones = append(availabilityZones, zone.ZoneName)
 		}
 	}
