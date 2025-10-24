@@ -573,8 +573,53 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, cwd string) error {
 		return nil
 	}
 
+	// Ensure workspace packages are built and symlinked correctly
+	// This handles cases where buildSource() in start-deploy.sh may have failed silently
+	thanosRoot := filepath.Join(cwd, "tokamak-thanos")
+	sdkPath := filepath.Join(thanosRoot, "packages", "tokamak", "sdk")
+	coreUtilsSymlink := filepath.Join(sdkPath, "node_modules", "@tokamak-network", "core-utils", "dist", "index.js")
+
+	// Check if workspace packages are properly built and symlinked
+	if _, err := os.Stat(coreUtilsSymlink); os.IsNotExist(err) {
+		t.logger.Warn("Workspace packages are not properly built or symlinks are broken")
+		t.logger.Info("Attempting to rebuild and restore workspace symlinks...")
+
+		// Try to fix by rebuilding the packages
+		coreUtilsPath := filepath.Join(thanosRoot, "packages", "tokamak", "core-utils")
+
+		// Rebuild core-utils
+		t.logger.Info("Rebuilding core-utils...")
+		if err := utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && pnpm build", coreUtilsPath)); err != nil {
+			t.logger.Error("Failed to rebuild core-utils")
+			return fmt.Errorf("failed to rebuild core-utils: %v", err)
+		}
+
+		// Reinstall SDK dependencies to restore workspace symlinks
+		t.logger.Info("Restoring workspace symlinks...")
+		if err := utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && pnpm install --prefer-offline", thanosRoot)); err != nil {
+			t.logger.Error("Failed to restore workspace symlinks")
+			return fmt.Errorf("failed to restore workspace symlinks: %v", err)
+		}
+
+		// Rebuild SDK
+		t.logger.Info("Rebuilding SDK...")
+		if err := utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && pnpm build", sdkPath)); err != nil {
+			t.logger.Error("Failed to rebuild SDK")
+			return fmt.Errorf("failed to rebuild SDK: %v", err)
+		}
+
+		// Verify the fix worked
+		if _, err := os.Stat(coreUtilsSymlink); os.IsNotExist(err) {
+			t.logger.Error("Failed to restore workspace packages after rebuild attempt")
+			return fmt.Errorf("workspace packages could not be restored: %v", err)
+		}
+
+		t.logger.Info("✅ Successfully rebuilt workspace packages and restored symlinks")
+	} else {
+		t.logger.Info("✅ Workspace packages are properly built and symlinked")
+	}
+
 	// Run hardhat task
-	sdkPath := filepath.Join(cwd, "tokamak-thanos", "packages", "tokamak", "sdk")
 	cmdStr := fmt.Sprintf("cd %s && L1_URL=%s PRIVATE_KEY=%s SAFE_WALLET_ADDRESS=%s npx hardhat set-safe-wallet", sdkPath, t.deployConfig.L1RPCURL, t.deployConfig.AdminPrivateKey, safeWalletAddress)
 	if err := utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", cmdStr); err != nil {
 		t.logger.Error("failed to setup the Safe wallet!")
