@@ -49,10 +49,15 @@ type L2CrossTradeChainInput struct {
 	CrossDomainMessenger   string               `json:"cross_domain_messenger"`
 	CrossTradeProxyAddress string               `json:"cross_trade_proxy_address"`
 	CrossTradeAddress      string               `json:"cross_trade_address"`
+	USDCAddress            string               `json:"usdc_address"`
+	USDTAddress            string               `json:"usdt_address"`
+	TONAddress             string               `json:"ton_address"`
+	ETHAddress             string               `json:"eth_address"`
 }
 
 type DeployCrossTradeInputs struct {
 	Mode          constants.CrossTradeDeployMode `json:"mode"`
+	ProjectID     string                         `json:"project_id"`
 	L1ChainConfig *L1CrossTradeChainInput        `json:"l1_chain_config"`
 	L2ChainConfig []*L2CrossTradeChainInput      `json:"l2_chain_config"`
 }
@@ -315,6 +320,9 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 			BlockExplorerConfig:  l2BlockExplorerConfig,
 			CrossDomainMessenger: constants.L2CrossDomainMessenger,
 			DeploymentScriptPath: deploymentScriptPath,
+			USDCAddress:          constants.USDCAddress,
+			TONAddress:           constants.TON,
+			ETHAddress:           constants.ETH,
 		})
 	} else {
 		contracts, err := t.getContractAddressFromOutput(ctx, l2ContractFileName, t.deployConfig.L2ChainID)
@@ -376,6 +384,9 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 			CrossTradeProxyAddress: l2CrossTradeProxyAddress,
 			CrossTradeAddress:      l2CrossTradeAddress,
 			DeploymentScriptPath:   deploymentScriptPath,
+			USDCAddress:            constants.USDCAddress,
+			TONAddress:             constants.TON,
+			ETHAddress:             constants.ETH,
 		})
 	}
 
@@ -467,6 +478,29 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 				return nil, fmt.Errorf("failed to get chain ID: %w", err)
 			}
 
+			// Ask for tokens addresses
+			fmt.Print("Please enter the USDC address: ")
+			usdcAddress, err := scanner.ScanString()
+			if err != nil {
+				return nil, fmt.Errorf("failed to read USDC address: %w", err)
+			}
+			fmt.Print("Please enter the TON address: ")
+			tonAddress, err := scanner.ScanString()
+			if err != nil {
+				return nil, fmt.Errorf("failed to read TON address: %w", err)
+			}
+
+			fmt.Print("Please enter the USDT address: ")
+			usdtAddress, err := scanner.ScanString()
+			if err != nil {
+				return nil, fmt.Errorf("failed to read USDT address: %w", err)
+			}
+			fmt.Print("Please enter the ETH address: ")
+			ethAddress, err := scanner.ScanString()
+			if err != nil {
+				return nil, fmt.Errorf("failed to read ETH address: %w", err)
+			}
+
 			l2ChainConfigs = append(l2ChainConfigs, &L2CrossTradeChainInput{
 				RPC:                  otherRpc,
 				ChainID:              otherChainID.Uint64(),
@@ -476,6 +510,10 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 				BlockExplorerConfig:  otherL2BlockExplorerConfig,
 				CrossDomainMessenger: constants.L2CrossDomainMessenger,
 				DeploymentScriptPath: deploymentScriptPath,
+				USDCAddress:          usdcAddress,
+				TONAddress:           tonAddress,
+				USDTAddress:          usdtAddress,
+				ETHAddress:           ethAddress,
 			})
 		} else {
 			var l2CrossTradeProxyAddress string
@@ -529,6 +567,29 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 				break
 			}
 
+			// Ask for tokens addresses
+			fmt.Print("Please enter the USDC address: ")
+			usdcAddress, err := scanner.ScanString()
+			if err != nil {
+				return nil, fmt.Errorf("failed to read USDC address: %w", err)
+			}
+			fmt.Print("Please enter the TON address: ")
+			tonAddress, err := scanner.ScanString()
+			if err != nil {
+				return nil, fmt.Errorf("failed to read TON address: %w", err)
+			}
+
+			fmt.Print("Please enter the USDT address: ")
+			usdtAddress, err := scanner.ScanString()
+			if err != nil {
+				return nil, fmt.Errorf("failed to read USDT address: %w", err)
+			}
+			fmt.Print("Please enter the ETH address: ")
+			ethAddress, err := scanner.ScanString()
+			if err != nil {
+				return nil, fmt.Errorf("failed to read ETH address: %w", err)
+			}
+
 			l2ChainConfigs = append(l2ChainConfigs, &L2CrossTradeChainInput{
 				RPC:                    l2RPC,
 				ChainID:                uint64(l2ChainID),
@@ -540,6 +601,10 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 				CrossTradeProxyAddress: l2CrossTradeProxyAddress,
 				CrossTradeAddress:      l2CrossTradeAddress,
 				DeploymentScriptPath:   deploymentScriptPath,
+				USDCAddress:            usdcAddress,
+				TONAddress:             tonAddress,
+				USDTAddress:            usdtAddress,
+				ETHAddress:             ethAddress,
 			})
 		}
 	}
@@ -857,6 +922,19 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, input *De
 		usdtAddress := constants.L2ChainConfigurations[l2ChainID].USDTAddress
 		tonAddress := constants.L2ChainConfigurations[l2ChainID].TONAddress
 		ethAddress := constants.L2ChainConfigurations[l2ChainID].ETHAddress
+
+		if input.L2ChainConfig[l2ChainID].USDCAddress != "" {
+			usdcAddress = input.L2ChainConfig[l2ChainID].USDCAddress
+		}
+		if input.L2ChainConfig[l2ChainID].USDTAddress != "" {
+			usdtAddress = input.L2ChainConfig[l2ChainID].USDTAddress
+		}
+		if input.L2ChainConfig[l2ChainID].TONAddress != "" {
+			tonAddress = input.L2ChainConfig[l2ChainID].TONAddress
+		}
+		if input.L2ChainConfig[l2ChainID].ETHAddress != "" {
+			ethAddress = input.L2ChainConfig[l2ChainID].ETHAddress
+		}
 
 		if l2ChainID == t.deployConfig.L2ChainID {
 			usdcAddress = constants.USDCAddress
