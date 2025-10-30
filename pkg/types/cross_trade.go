@@ -14,9 +14,10 @@ type CrossTradeTokens struct {
 
 type CrossTradeChainConfig struct {
 	Name        string              `yaml:"name" json:"name"`
-	DisplayName string              `yaml:"display_name" json:"display_name"`
+	DisplayName string              `yaml:"displayName" json:"displayName"`
 	Contracts   CrossTradeContracts `yaml:"contracts" json:"contracts"`
 	Tokens      CrossTradeTokens    `yaml:"tokens" json:"tokens"`
+	RPCURL      string              `yaml:"rpcURL" json:"rpcURL"`
 }
 
 type CrossTradeConfigs map[string]CrossTradeChainConfig

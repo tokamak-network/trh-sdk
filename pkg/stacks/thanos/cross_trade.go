@@ -51,7 +51,7 @@ type L2CrossTradeChainInput struct {
 	CrossTradeAddress      string               `json:"cross_trade_address"`
 }
 
-type DeployCrossTradeContractsInputs struct {
+type DeployCrossTradeInputs struct {
 	Mode          constants.CrossTradeDeployMode `json:"mode"`
 	L1ChainConfig *L1CrossTradeChainInput        `json:"l1_chain_config"`
 	L2ChainConfig []*L2CrossTradeChainInput      `json:"l2_chain_config"`
@@ -98,7 +98,7 @@ const (
 	L1L2ScriptPath = "scripts/foundry_scripts/L2L1"
 )
 
-func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode constants.CrossTradeDeployMode) (*DeployCrossTradeContractsInputs, error) {
+func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode constants.CrossTradeDeployMode) (*DeployCrossTradeInputs, error) {
 	var (
 		l1ContractFileName, l2ContractFileName  string
 		l1CrossTradeProxyName, l1CrossTradeName string
@@ -131,7 +131,7 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 
 	var l1ChainConfig *L1CrossTradeChainInput
 
-	t.logger.Info("Please enter your configuration to deploy the L1 contracts to your L1 chain")
+	fmt.Println("Please enter your configuration to deploy the L1 contracts to your L1 chain")
 
 	// Ask if user wants to deploy new L1 contracts
 	l1RPC := t.deployConfig.L1RPCURL
@@ -146,6 +146,7 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 		return nil, fmt.Errorf("failed to read L1 deployment option: %w", err)
 	}
 
+	fmt.Print("Do you want to verify the L1 cross-trade contracts? (Y/n): ")
 	verifyL1, err := scanner.ScanBool(true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read L1 verification option: %w", err)
@@ -165,8 +166,6 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 	}
 
 	if deployNewL1 {
-		fmt.Print("Do you want to verify the L1 cross-trade contracts? (Y/n): ")
-
 		l1ChainConfig = &L1CrossTradeChainInput{
 			RPC:                  l1RPC,
 			ChainID:              l1ChainID,
@@ -247,7 +246,8 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 	}
 	l2ChainID := t.deployConfig.L2ChainID
 
-	t.logger.Info("Please enter your configuration to deploy the L2 contracts to your L2 chain")
+	fmt.Println("\n--------------------------------")
+	fmt.Println("\nPlease enter your configuration to deploy the L2 contracts to your L2 chain")
 	fmt.Print("Do you want to deploy the L2 cross-trade contracts to the current L2 chain? (Y/n): ")
 	deployNewL2, err := scanner.ScanBool(true)
 	if err != nil {
@@ -258,7 +258,7 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 	var l2BlockExplorerConfig *BlockExplorerConfig
 	l2BlockExplorerURL, err := t.GetBlockExplorerURL(ctx)
 	if err != nil {
-		t.logger.Warnf("No block explorer URL found, skip verifying L2 cross-trade contracts")
+		fmt.Println("No block explorer URL found, skip verifying L2 cross-trade contracts")
 	} else {
 		l2BlockExplorerConfig = &BlockExplorerConfig{
 			URL:  l2BlockExplorerURL,
@@ -380,7 +380,7 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 	}
 
 	if mode == constants.CrossTradeDeployModeL2ToL2 {
-		t.logger.Info("Please enter your configuration to deploy the L2 contracts to other L2 chain")
+		fmt.Println("Please enter your configuration to deploy the L2 contracts to other L2 chain")
 		fmt.Print("Do you want to deploy contracts to other L2 chain? (Y/n): ")
 		addOtherL2, err := scanner.ScanBool(true)
 		if err != nil {
@@ -422,9 +422,9 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 				return nil, fmt.Errorf("failed to dial RPC URL: %w", err)
 			}
 
-			fmt.Print("Please enter the private key: ")
 			var otherPrivateKey string
 			for {
+				fmt.Print("Please enter the private key: ")
 				otherPrivateKey, err = scanner.ScanString()
 				if err != nil {
 					fmt.Println("Failed to read private key: ", err)
@@ -544,20 +544,20 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 		}
 	}
 
-	return &DeployCrossTradeContractsInputs{
+	return &DeployCrossTradeInputs{
 		Mode:          mode,
 		L1ChainConfig: l1ChainConfig,
 		L2ChainConfig: l2ChainConfigs,
 	}, nil
 }
 
-func (t *ThanosStack) DeployCrossTrade(ctx context.Context, input *DeployCrossTradeContractsInputs) (*DeployCrossTradeOutput, error) {
+func (t *ThanosStack) DeployCrossTrade(ctx context.Context, input *DeployCrossTradeInputs) (*DeployCrossTradeOutput, error) {
 	deployCrossTradeContractsOutput, err := t.DeployCrossTradeContracts(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("failed to deploy cross trade contracts: %s", err)
 	}
 
-	_, err = t.DeployCrossTradeApplication(ctx, deployCrossTradeContractsOutput)
+	_, err = t.DeployCrossTradeApplication(ctx, input, deployCrossTradeContractsOutput)
 	if err != nil {
 		return nil, fmt.Errorf("failed to deploy cross trade application: %s", err)
 	}
@@ -567,7 +567,7 @@ func (t *ThanosStack) DeployCrossTrade(ctx context.Context, input *DeployCrossTr
 	}, nil
 }
 
-func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *DeployCrossTradeContractsInputs) (*DeployCrossTradeContractsOutput, error) {
+func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *DeployCrossTradeInputs) (*DeployCrossTradeContractsOutput, error) {
 	if input.L1ChainConfig == nil {
 		return nil, fmt.Errorf("l1 chain config is required")
 	}
@@ -666,90 +666,98 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *Depl
 	}
 
 	for _, l2ChainConfig := range input.L2ChainConfig {
-		if !l2ChainConfig.IsDeployedNew {
-			continue
-		}
-
-		script := fmt.Sprintf(
-			`cd crossTrade && PRIVATE_KEY=%s CHAIN_ID=%d NATIVE_TOKEN=%s CROSS_DOMAIN_MESSENGER=%s L1_CROSS_TRADE=%s forge script %s/%s --rpc-url %s --broadcast`,
-			l2ChainConfig.PrivateKey,
-			l2ChainConfig.ChainID,
-			constants.NativeToken,
-			l2ChainConfig.CrossDomainMessenger,
-			l1CrossTradeProxyAddress,
-			l2ChainConfig.DeploymentScriptPath,
-			l2ChainConfig.ContractName,
-			l2ChainConfig.RPC,
-		)
-		t.logger.Infof("Deploying L2 contracts %s", script)
-		err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", script)
-		if err != nil {
-			return nil, fmt.Errorf("failed to deploy the contracts: %s", err)
-		}
-
-		// Get the contract address from the output
-		addresses, err := t.getContractAddressFromOutput(ctx, l2ChainConfig.ContractName, l2ChainConfig.ChainID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get the contract address: %s", err)
-		}
-
-		for contractName, address := range addresses {
-			t.logger.Infof("L2 contract address %s with address %s", contractName, address)
-			switch contractName {
-			case L2L2CrossTradeProxyL2ContractName:
-				l2l2CrossTradeProxyAddresses[l2ChainConfig.ChainID] = address
-			case L1L2CrossTradeProxyL2ContractName:
-				l1l2CrossTradeProxyAddresses[l2ChainConfig.ChainID] = address
-			case L2L2CrossTradeL2ContractName:
-				l2l2CrossTradeAddresses[l2ChainConfig.ChainID] = address
-			case L1L2CrossTradeL2ContractName:
-				l1l2CrossTradeAddresses[l2ChainConfig.ChainID] = address
-			default:
-				t.logger.Infof("Unknown contract %s", contractName)
+		if l2ChainConfig.IsDeployedNew {
+			script := fmt.Sprintf(
+				`cd crossTrade && PRIVATE_KEY=%s CHAIN_ID=%d NATIVE_TOKEN=%s CROSS_DOMAIN_MESSENGER=%s L1_CROSS_TRADE=%s forge script %s/%s --rpc-url %s --broadcast`,
+				l2ChainConfig.PrivateKey,
+				l2ChainConfig.ChainID,
+				constants.NativeToken,
+				l2ChainConfig.CrossDomainMessenger,
+				l1CrossTradeProxyAddress,
+				l2ChainConfig.DeploymentScriptPath,
+				l2ChainConfig.ContractName,
+				l2ChainConfig.RPC,
+			)
+			t.logger.Infof("Deploying L2 contracts %s", script)
+			err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", script)
+			if err != nil {
+				return nil, fmt.Errorf("failed to deploy the contracts: %s", err)
 			}
-		}
 
-		// Verify the contracts
-		//
-		if l2ChainConfig.BlockExplorerConfig != nil {
+			// Get the contract address from the output
+			t.logger.Infof("Getting contract address from output for %s on chain %d", l2ChainConfig.ContractName, l2ChainConfig.ChainID)
+			addresses, err := t.getContractAddressFromOutput(ctx, l2ChainConfig.ContractName, l2ChainConfig.ChainID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get the contract address: %s", err)
+			}
+
+			t.logger.Infof("Contract addresses: %v", addresses)
+
 			for contractName, address := range addresses {
-				t.logger.Infof("Verifying L2 contract %s with address %s", contractName, address)
-				if l2ChainConfig.BlockExplorerConfig.Type == constants.BlockExplorerTypeEtherscan {
-					script = fmt.Sprintf(
-						"cd crossTrade && forge verify-contract %s contracts/L2/%s.sol:%s --etherscan-api-key %s --chain %s",
-						address,
-						contractName,
-						contractName,
-						l2ChainConfig.BlockExplorerConfig.APIKey,
-						constants.ChainIDToForgeChainName[l2ChainConfig.ChainID],
-					)
-					t.logger.Infof("Verifying L2 contract %s", script)
-					err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", script)
-					if err != nil {
-						t.logger.Errorf("failed to verify the contracts: %s", err)
-						continue
-					}
-					t.logger.Infof("Verified L2 contract %s with address %s", contractName, address)
-				} else if l2ChainConfig.BlockExplorerConfig.Type == constants.BlockExplorerTypeBlockscout {
-					script = fmt.Sprintf(
-						"cd crossTrade && forge verify-contract --rpc-url %s %s contracts/L2/%s.sol:%s --verifier blockscout --verifier-url %s/api",
-						l2ChainConfig.RPC,
-						address,
-						contractName,
-						contractName,
-						l2ChainConfig.BlockExplorerConfig.URL,
-					)
-					t.logger.Infof("Verifying L2 contract %s", script)
-					err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", script)
-					if err != nil {
-						t.logger.Errorf("failed to verify the contracts: %s", err)
-						continue
-					}
-					t.logger.Infof("Verified L2 contract %s with address %s", contractName, address)
+				t.logger.Infof("L2 contract address %s with address %s", contractName, address)
+				switch contractName {
+				case L2L2CrossTradeProxyL2ContractName:
+					l2l2CrossTradeProxyAddresses[l2ChainConfig.ChainID] = address
+				case L1L2CrossTradeProxyL2ContractName:
+					l1l2CrossTradeProxyAddresses[l2ChainConfig.ChainID] = address
+				case L2L2CrossTradeL2ContractName:
+					l2l2CrossTradeAddresses[l2ChainConfig.ChainID] = address
+				case L1L2CrossTradeL2ContractName:
+					l1l2CrossTradeAddresses[l2ChainConfig.ChainID] = address
+				default:
+					t.logger.Infof("Unknown contract %s", contractName)
 				}
 			}
-		}
 
+			// Verify the contracts
+			//
+			if l2ChainConfig.BlockExplorerConfig != nil {
+				for contractName, address := range addresses {
+					t.logger.Infof("Verifying L2 contract %s with address %s", contractName, address)
+					if l2ChainConfig.BlockExplorerConfig.Type == constants.BlockExplorerTypeEtherscan {
+						script = fmt.Sprintf(
+							"cd crossTrade && forge verify-contract %s contracts/L2/%s.sol:%s --etherscan-api-key %s --chain %s",
+							address,
+							contractName,
+							contractName,
+							l2ChainConfig.BlockExplorerConfig.APIKey,
+							constants.ChainIDToForgeChainName[l2ChainConfig.ChainID],
+						)
+						t.logger.Infof("Verifying L2 contract %s", script)
+						err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", script)
+						if err != nil {
+							t.logger.Errorf("failed to verify the contracts: %s", err)
+							continue
+						}
+						t.logger.Infof("Verified L2 contract %s with address %s", contractName, address)
+					} else if l2ChainConfig.BlockExplorerConfig.Type == constants.BlockExplorerTypeBlockscout {
+						script = fmt.Sprintf(
+							"cd crossTrade && forge verify-contract --rpc-url %s %s contracts/L2/%s.sol:%s --verifier blockscout --verifier-url %s/api",
+							l2ChainConfig.RPC,
+							address,
+							contractName,
+							contractName,
+							l2ChainConfig.BlockExplorerConfig.URL,
+						)
+						t.logger.Infof("Verifying L2 contract %s", script)
+						err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", script)
+						if err != nil {
+							t.logger.Errorf("failed to verify the contracts: %s", err)
+							continue
+						}
+						t.logger.Infof("Verified L2 contract %s with address %s", contractName, address)
+					}
+				}
+			}
+		} else {
+			if input.Mode == constants.CrossTradeDeployModeL2ToL1 {
+				l1l2CrossTradeProxyAddresses[l2ChainConfig.ChainID] = l2ChainConfig.CrossTradeProxyAddress
+				l1l2CrossTradeAddresses[l2ChainConfig.ChainID] = l2ChainConfig.CrossTradeAddress
+			} else {
+				l2l2CrossTradeProxyAddresses[l2ChainConfig.ChainID] = l2ChainConfig.CrossTradeProxyAddress
+				l2l2CrossTradeAddresses[l2ChainConfig.ChainID] = l2ChainConfig.CrossTradeAddress
+			}
+		}
 	}
 
 	t.logger.Infof("L1 cross trade proxy address %s", l1CrossTradeProxyAddress)
@@ -776,7 +784,7 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *Depl
 	}
 }
 
-func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, contracts *DeployCrossTradeContractsOutput) (*DeployCrossTradeApplicationOutput, error) {
+func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, input *DeployCrossTradeInputs, contracts *DeployCrossTradeContractsOutput) (*DeployCrossTradeApplicationOutput, error) {
 	if t.deployConfig.K8s == nil {
 		t.logger.Error("K8s configuration is not set. Please run the deploy command first")
 		return nil, fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
@@ -829,6 +837,7 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, contracts
 		Contracts: types.CrossTradeContracts{
 			L1CrossTrade: &contracts.L1CrossTradeProxyAddress,
 		},
+		RPCURL: input.L1ChainConfig.RPC,
 		Tokens: types.CrossTradeTokens{
 			ETH:  "0x0000000000000000000000000000000000000000",
 			USDC: constants.L1ChainConfigurations[l1ChainID].USDCAddress,
@@ -837,19 +846,36 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, contracts
 		},
 	}
 
+	l2ChainRPCs := make(map[uint64]string)
+	for _, l2ChainConfig := range input.L2ChainConfig {
+		l2ChainRPCs[l2ChainConfig.ChainID] = l2ChainConfig.RPC
+	}
+
 	// Add L2 chain config
 	for l2ChainID, l2ChainConfig := range contracts.L2CrossTradeProxyAddresses {
+		usdcAddress := constants.L2ChainConfigurations[l2ChainID].USDCAddress
+		usdtAddress := constants.L2ChainConfigurations[l2ChainID].USDTAddress
+		tonAddress := constants.L2ChainConfigurations[l2ChainID].TONAddress
+		ethAddress := constants.L2ChainConfigurations[l2ChainID].ETHAddress
+
+		if l2ChainID == t.deployConfig.L2ChainID {
+			usdcAddress = constants.USDCAddress
+			tonAddress = constants.TON
+			ethAddress = constants.ETH
+		}
+
 		chainConfig[fmt.Sprintf("%d", l2ChainID)] = types.CrossTradeChainConfig{
 			Name:        fmt.Sprintf("%d", l2ChainID),
 			DisplayName: fmt.Sprintf("%d", l2ChainID),
 			Contracts: types.CrossTradeContracts{
 				L2CrossTrade: &l2ChainConfig,
 			},
+			RPCURL: l2ChainRPCs[l2ChainID],
 			Tokens: types.CrossTradeTokens{
-				ETH:  "0x0000000000000000000000000000000000000000",
-				USDC: "0x0000000000000000000000000000000000000000",
-				USDT: "0x0000000000000000000000000000000000000000",
-				TON:  "0x0000000000000000000000000000000000000000",
+				ETH:  ethAddress,
+				USDC: usdcAddress,
+				USDT: usdtAddress,
+				TON:  tonAddress,
 			},
 		}
 	}
