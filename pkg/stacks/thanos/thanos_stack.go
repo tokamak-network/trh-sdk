@@ -3,6 +3,7 @@ package thanos
 import (
 	"context"
 
+	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 
@@ -41,21 +42,21 @@ func NewThanosStack(
 
 	var awsProfile *types.AWSProfile
 
-	// if awsConfig != nil {
-	// 	awsProfile, err = aws.LoginAWS(ctx, awsConfig)
-	// 	if err != nil {
-	// 		l.Error("Failed to login aws", "err", err)
-	// 		return nil, err
-	// 	}
+	if awsConfig != nil {
+		awsProfile, err = aws.LoginAWS(ctx, awsConfig)
+		if err != nil {
+			l.Error("Failed to login aws", "err", err)
+			return nil, err
+		}
 
-	// 	// Switch to this context
-	// 	if config != nil && config.K8s != nil {
-	// 		err = utils.SwitchKubernetesContext(ctx, config.K8s.Namespace, awsConfig.Region)
-	// 		if err != nil {
-	// 			return nil, err
-	// 		}
-	// 	}
-	// }
+		// Switch to this context
+		if config != nil && config.K8s != nil {
+			err = utils.SwitchKubernetesContext(ctx, config.K8s.Namespace, awsConfig.Region)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	return &ThanosStack{
 		network:        network,
