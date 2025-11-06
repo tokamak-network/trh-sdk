@@ -111,6 +111,16 @@ func ActionInstallationPlugins() cli.ActionFunc {
 						fmt.Printf("Installing plugin: %s in namespace: %s...\n", pluginName, displayNamespace)
 
 						switch pluginName {
+						case constants.PluginUptimeKuma:
+							config, err := thanosStack.GetUptimeKumaConfig(ctx)
+							if err != nil {
+								return fmt.Errorf("failed to get uptime-kuma configuration: %w", err)
+							}
+							_, err = thanosStack.InstallUptimeKuma(ctx,config)
+							if err != nil {
+								return thanosStack.UninstallUptimeKuma(ctx)
+							}
+							return nil
 						case constants.PluginBlockExplorer:
 							installBlockExplorerInput, err := thanos.InputInstallBlockExplorer()
 							if err != nil || installBlockExplorerInput == nil {
@@ -218,6 +228,8 @@ func ActionInstallationPlugins() cli.ActionFunc {
 						fmt.Printf("Uninstalling plugin: %s in namespace: %s...\n", pluginName, displayNamespace)
 
 						switch pluginName {
+						case constants.PluginUptimeKuma:
+							return thanosStack.UninstallUptimeKuma(ctx)
 						case constants.PluginBridge:
 							return thanosStack.UninstallBridge(ctx)
 						case constants.PluginBlockExplorer:
