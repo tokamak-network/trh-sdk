@@ -1,4 +1,4 @@
-# Refactor Storage Functions and Improve Uptime Kuma Installation
+# Uptime Kuma Installation and refactor Storage Functions 
 
 ## Summary
 
@@ -142,4 +142,5 @@ trh install uptime-kuma
 # Verify LoadBalancer service
 kubectl get svc -n uptime-kuma
 ```
+
 
