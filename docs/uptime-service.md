@@ -1,14 +1,14 @@
-# Uptime Kuma Installation and Refactor Storage Functions 
+# Uptime Service Installation and Refactor Storage Functions 
 
 ## Summary
 
-This PR refactors redundant storage-related functions into generic, reusable utilities and improves the uptime-kuma installation logic to better handle existing installations and LoadBalancer services.
+This PR refactors redundant storage-related functions into generic, reusable utilities and improves the uptime-service installation logic to better handle existing installations and LoadBalancer services.
 
 ## Problem Statement
 
-1. **Code Duplication**: Storage-related functions (`getEFSFileSystemId`, `generateStaticPVManifest`, `applyPVManifest`, etc.) were duplicated across `uptime_kuma.go` and `monitoring.go`, violating **DRY(Don't Repeat Yourself)** principles.
+1. **Code Duplication**: Storage-related functions (`getEFSFileSystemId`, `generateStaticPVManifest`, `applyPVManifest`, etc.) were duplicated across `uptime_service.go` and `monitoring.go`, violating **DRY(Don't Repeat Yourself)** principles.
 
-2. **LoadBalancer Service Support**: The code needed extra support for retrieving LoadBalancer service URLs for uptime-kuma access.
+2. **LoadBalancer Service Support**: The code needed extra support for retrieving LoadBalancer service URLs for uptime-service access.
 
 3. **Code Organization**: Storage utilities were scattered across stack-specific files instead of being in a shared location.
 
@@ -20,7 +20,7 @@ Created a `StorageConfig` interface and moved common storage operations to `pkg/
 
 ### 2. LoadBalancer Service URL Retrieval
 
-Added utility function to retrieve LoadBalancer service hostnames for uptime-kuma access.
+Added utility function to retrieve LoadBalancer service hostnames for uptime-service access.
 
 ## Changes Made
 
@@ -36,15 +36,15 @@ Added utility function to retrieve LoadBalancer service hostnames for uptime-kum
 
 ### Modified Files
 
-#### `pkg/types/uptime_kuma.go`
+#### `pkg/types/uptime_service.go`
 - Introduced `StorageConfig` interface with methods:
   - `GetNamespace() string`
   - `GetChainName() string`
   - `GetEFSFileSystemId() string`
   - `GetHelmReleaseName() string`
-- Implemented `StorageConfig` interface for `UptimeKumaConfig`
+- Implemented `StorageConfig` interface for `UptimeServiceConfig`
 
-#### `pkg/stacks/thanos/uptime_kuma.go`
+#### `pkg/stacks/thanos/uptime_service.go`
 - **Refactored to use generic storage functions** from `utils/storage.go`
 - **Improved existing installation detection**:
   - Uses `FilterHelmReleases()` to find existing Helm release names
@@ -92,7 +92,7 @@ type StorageConfig interface {
 
 ### 3. Existing Installation Detection
 
-When uptime-kuma is already running:
+When uptime-service is already running:
 - Finds existing Helm release name using `FilterHelmReleases()`
 - Retrieves LoadBalancer service URL from existing installation
 - Returns immediately without reinstalling
@@ -124,8 +124,8 @@ addresses, err := GetAddressByService(ctx, namespace, serviceName)
 
 
 ### Manual Testing
-**Note**: A testnet/mainnet (not devnet) must be deployed before installing update-kuma.
-**Note**: Wait for 4-5 minutes before accessing the uptime-kuma from the URL.
+**Note**: A testnet/mainnet (not devnet) must be deployed before installing uptime-service.
+**Note**: Wait for 4-5 minutes before accessing the uptime-service from the URL.
 
 ```bash
 
@@ -145,7 +145,7 @@ trh-sdk install uptime-service
 trh-sdk install uptime-service
 
 # Verify LoadBalancer service
-kubectl get svc -n uptime-kuma
+kubectl get svc -n uptime-service
 ```
 
 

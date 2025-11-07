@@ -112,13 +112,13 @@ func ActionInstallationPlugins() cli.ActionFunc {
 
 						switch pluginName {
 						case constants.PluginUptimeService:
-							config, err := thanosStack.GetUptimeKumaConfig(ctx)
+							config, err := thanosStack.GetUptimeServiceConfig(ctx)
 							if err != nil {
-								return fmt.Errorf("failed to get uptime-kuma configuration: %w", err)
+								return fmt.Errorf("failed to get uptime-service configuration: %w", err)
 							}
-							_, err = thanosStack.InstallUptimeKuma(ctx, config)
+							_, err = thanosStack.InstallUptimeService(ctx, config)
 							if err != nil {
-								return thanosStack.UninstallUptimeKuma(ctx)
+								return thanosStack.UninstallUptimeService(ctx)
 							}
 							return nil
 						case constants.PluginBlockExplorer:
@@ -229,7 +229,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 
 						switch pluginName {
 						case constants.PluginUptimeService:
-							return thanosStack.UninstallUptimeKuma(ctx)
+							return thanosStack.UninstallUptimeService(ctx)
 						case constants.PluginBridge:
 							return thanosStack.UninstallBridge(ctx)
 						case constants.PluginBlockExplorer:

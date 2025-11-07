@@ -3,6 +3,7 @@ package thanos
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -11,27 +12,27 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
-// Insatlling uptime-kuma
-func (t *ThanosStack) InstallUptimeKuma(ctx context.Context, config *types.UptimeKumaConfig) (string, error) {
+// Installing uptime-service
+func (t *ThanosStack) InstallUptimeService(ctx context.Context, config *types.UptimeServiceConfig) (string, error) {
 	if t.deployConfig.K8s == nil {
 		t.logger.Error("K8s configuration is not set. Please run the deploy command first")
 		return "", fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
-	//Checking if uptime-kuma is already running
-	uptimeKumapods, err := utils.GetPodNamesByLabel(ctx, config.Namespace, "uptime-kuma")
+	//Checking if uptime-service is already running
+	uptimeServicePods, err := utils.GetPodNamesByLabel(ctx, config.Namespace, "uptime-service")
 	if err != nil {
-		t.logger.Error("Error to get uptime kuma pods", "err", err)
+		t.logger.Error("Failed to get uptime-service pods", "err", err)
 		return "", err
 	}
 
-	var kumaUrl string
-	helmReleaseName := fmt.Sprintf("%s-%d", "uptime-kuma", time.Now().Unix())
+	var uptimeURL string
+	helmReleaseName := fmt.Sprintf("%s-%d", "uptime-service", time.Now().Unix())
 
-	if len(uptimeKumapods) > 0 {
-		t.logger.Info("Uptime Kuma is already running")
+	if len(uptimeServicePods) > 0 {
+		t.logger.Info("Uptime Service is already running")
 		// Get existing Helm release name from running installation
-		existingReleases, err := utils.FilterHelmReleases(ctx, config.Namespace, "uptime-kuma")
+		existingReleases, err := utils.FilterHelmReleases(ctx, config.Namespace, "uptime-service")
 		if err != nil || len(existingReleases) == 0 {
 			t.logger.Warn("Could not find existing Helm release, trying to get service URL with label selector")
 		}
@@ -47,14 +48,14 @@ func (t *ThanosStack) InstallUptimeKuma(ctx context.Context, config *types.Uptim
 			}
 
 			if len(k8sServices) > 0 {
-				kumaUrl = "http://" + k8sServices[0]
+				uptimeURL = "http://" + k8sServices[0]
 
 				break
 			}
 			time.Sleep(15 * time.Second)
 		}
-		t.logger.Infof("😃uptime-kuma is already running. You can access it at: %s", kumaUrl)
-		return kumaUrl, nil
+		t.logger.Infof("✅ uptime-service is already running. You can access it at: %s", uptimeURL)
+		return uptimeURL, nil
 	}
 
 	// Set helmReleaseName for new installation
@@ -66,20 +67,20 @@ func (t *ThanosStack) InstallUptimeKuma(ctx context.Context, config *types.Uptim
 		return "", err
 	}
 
-	t.logger.Info("🚀 Installing uptime kuma...")
+	t.logger.Info("🚀 Installing uptime service...")
 
-	// Ensure uptime-kuma namespace exists
+	// Ensure uptime-service namespace exists
 	if err := t.ensureNamespaceExists(ctx, config.Namespace); err != nil {
-		t.logger.Errorw("Failed to ensure uptime-kuma namespace exists", "err", err)
-		return "", fmt.Errorf("failed to ensure uptime-kuma namespace exists: %w", err)
+		t.logger.Errorw("Failed to ensure uptime-service namespace exists", "err", err)
+		return "", fmt.Errorf("failed to ensure uptime-service namespace exists: %w", err)
 	}
 
 	// Deploy infrastructure if persistence is enabled
 	if config.IsPersistenceEnable {
-		t.logger.Info("Deploying uptime-kuma infrastructure (persistence enabled)")
-		if err := t.deployUptimeKumaInfrastructure(ctx, config); err != nil {
-			t.logger.Errorw("Failed to deploy uptime-kuma infrastructure", "err", err)
-			return "", fmt.Errorf("failed to deploy uptime-kuma infrastructure: %w", err)
+		t.logger.Info("Deploying uptime-service infrastructure (persistence enabled)")
+		if err := t.deployUptimeServiceInfrastructure(ctx, config); err != nil {
+			t.logger.Errorw("Failed to deploy uptime-service infrastructure", "err", err)
+			return "", fmt.Errorf("failed to deploy uptime-service infrastructure: %w", err)
 		}
 
 		// Wait for PVC to be bound before installing Helm chart
@@ -93,10 +94,26 @@ func (t *ThanosStack) InstallUptimeKuma(ctx context.Context, config *types.Uptim
 	}
 
 	// Patch the existing values.yaml file
-	valuesFilePath := fmt.Sprintf("%s/tokamak-thanos-stack/charts/uptime-kuma/values.yaml", t.deploymentPath)
+	valuesFilePath := fmt.Sprintf("%s/tokamak-thanos-stack/charts/uptime-service/values.yaml", t.deploymentPath)
 	pvcName := fmt.Sprintf("%s-pvc", config.HelmReleaseName)
 
+	// Check if required chart is present in tokamak-thanos-stack directory
+	if _, err := os.Stat(valuesFilePath); err != nil {
+		t.logger.Errorw("Uptime-service values.yaml not found", "path", valuesFilePath, "err", err)
+		return "", fmt.Errorf("❌ uptime-service values.yaml not found at %s: %w", valuesFilePath, err)
+	}
+
 	// Update helm chart service fields
+	err = utils.UpdateYAMLField(valuesFilePath, "nameOverride", "uptime-service")
+	if err != nil {
+		return "", fmt.Errorf("failed to update nameOverride: %w", err)
+	}
+
+	err = utils.UpdateYAMLField(valuesFilePath, "fullnameOverride", helmReleaseName)
+	if err != nil {
+		return "", fmt.Errorf("failed to update fullnameOverride: %w", err)
+	}
+
 	err = utils.UpdateYAMLField(valuesFilePath, "service.type", "LoadBalancer")
 	if err != nil {
 		return "", fmt.Errorf("failed to update service.type: %w", err)
@@ -122,9 +139,9 @@ func (t *ThanosStack) InstallUptimeKuma(ctx context.Context, config *types.Uptim
 		return "", fmt.Errorf("failed to update service.annotations: %w", err)
 	}
 
-	// Set pod labels so GetPodNamesByLabel can find pods with "uptime-kuma" label
+	// Set pod labels so GetPodNamesByLabel can find pods with "uptime-service" label
 	podLabels := map[string]interface{}{
-		"uptime-kuma": "",
+		"uptime-service": "",
 	}
 	err = utils.UpdateYAMLField(valuesFilePath, "podLabels", podLabels)
 	if err != nil {
@@ -155,24 +172,24 @@ func (t *ThanosStack) InstallUptimeKuma(ctx context.Context, config *types.Uptim
 	args := []string{
 		"install",
 		helmReleaseName,
-		fmt.Sprintf("%s/tokamak-thanos-stack/charts/uptime-kuma", t.deploymentPath),
+		fmt.Sprintf("%s/tokamak-thanos-stack/charts/uptime-service", t.deploymentPath),
 		"--values", valuesFilePath,
 		"--namespace", config.Namespace,
 		"--create-namespace",
 	}
 
-	//Installing helm chart for uptime-kuma
+	//Installing helm chart for uptime-service
 	output, err := utils.ExecuteCommand(ctx, "helm", args...)
 
 	if err != nil {
 		t.logger.Error(
-			"❌ Error installing uptime kuma",
+			"❌ Error installing uptime service",
 			"err", err,
 			"helm_output", output,
 		)
 		return "", err
 	}
-	t.logger.Info("✅ Install uptime kuma successfully")
+	t.logger.Info("✅ Install uptime service successfully")
 
 	//Fetching the service loadbalancer URL
 	for {
@@ -183,82 +200,83 @@ func (t *ThanosStack) InstallUptimeKuma(ctx context.Context, config *types.Uptim
 		}
 
 		if len(k8sServices) > 0 {
-			kumaUrl = "http://" + k8sServices[0]
+			uptimeURL = "http://" + k8sServices[0]
 			break
 		}
 
 		time.Sleep(15 * time.Second)
 	}
-	t.logger.Infof("✅ uptime-kuma is up and running. You can access it at: %s", kumaUrl)
+	t.logger.Infof("✅ uptime-service is up and running. You can access it at: %s", uptimeURL)
 
-	return kumaUrl, nil
+	return uptimeURL, nil
 
 }
 
-// Uninstalling uptime-kuma
-func (t *ThanosStack) UninstallUptimeKuma(ctx context.Context) error {
+// Uninstalling uptime-service
+func (t *ThanosStack) UninstallUptimeService(ctx context.Context) error {
 	if t.deployConfig.K8s == nil {
 		t.logger.Error("K8s configuration is not set. Please run the deploy command first")
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
-	kumaNamespace := constants.UptimeKumaNamespace
-	fmt.Printf("namespace while uninstalling : %s ", kumaNamespace)
+	uptimeNamespace := constants.UptimeServiceNamespace
+	fmt.Printf("namespace while uninstalling : %s ", uptimeNamespace)
 
 	// Check if namespace exists first
-	exists, err := utils.CheckNamespaceExists(ctx, kumaNamespace)
+	exists, err := utils.CheckNamespaceExists(ctx, uptimeNamespace)
 	if err != nil {
-		t.logger.Errorw("Failed to check uptime-kuma namespace existence", "err", err)
+		t.logger.Errorw("Failed to check uptime-service namespace existence", "err", err)
 		return err
 	}
 
 	if !exists {
-		t.logger.Info("Uptime-kuma namespace does not exist, skipping uninstallation")
+		t.logger.Info("Uptime-service namespace does not exist, skipping uninstallation")
 		return nil
 	}
 
 	// Uninstall Helm releases
-	releases, err := utils.FilterHelmReleases(ctx, kumaNamespace, "uptime-kuma")
+	releases, err := utils.FilterHelmReleases(ctx, uptimeNamespace, "uptime-service")
 	if err != nil {
 		t.logger.Error("Error to filter helm releases", "err", err)
 		return err
 	}
 
 	for _, release := range releases {
-		t.logger.Infow("Uninstalling Helm release", "release", release, "namespace", kumaNamespace)
+		t.logger.Infow("Uninstalling Helm release", "release", release, "namespace", uptimeNamespace)
 		_, err = utils.ExecuteCommand(ctx, "helm", []string{
 			"uninstall",
 			release,
 			"--namespace",
-			kumaNamespace,
+			uptimeNamespace,
 		}...)
 		if err != nil {
-			t.logger.Error("❌ Error uninstalling uptime-kuma helm chart", "err", err)
+			t.logger.Error("❌ Error uninstalling uptime-service helm chart", "err", err)
 			return err
 		}
 	}
 
-	// Clean up PVCs that might be left behind
-	config := &types.UptimeKumaConfig{
-		Namespace: kumaNamespace,
-	}
-	if err := t.cleanupExistingUptimeKumaStorage(ctx, config); err != nil {
-		t.logger.Warnw("❌ Failed to cleanup uptime-kuma storage", "err", err)
-	}
-
 	// Delete namespace
-	// t.logger.Info(fmt.Sprintf("❌ Deleting uptime-kuma namespace: %s", kumaNamespace))
-	// err = t.tryToDeleteK8sNamespace(ctx, kumaNamespace)
-	// if err != nil {
-	//     t.logger.Errorw("Failed to delete uptime-kuma namespace", "err", err, "namespace", kumaNamespace)
-	//     return err
+	t.logger.Info(fmt.Sprintf("❌ Deleting uptime-service namespace: %s", uptimeNamespace))
+	err = t.tryToDeleteK8sNamespace(ctx, uptimeNamespace)
+	if err != nil {
+		t.logger.Errorw("Failed to delete uptime-service namespace", "err", err, "namespace", uptimeNamespace)
+		return err
+	}
 
-	t.logger.Info("✅ Uninstall of uptime-kuma successfully!")
+	// Clean up volumes that might be left behind
+	config := &types.UptimeServiceConfig{
+		Namespace: uptimeNamespace,
+	}
+	if err := t.cleanupExistingUptimeServiceStorage(ctx, config); err != nil {
+		t.logger.Warnw("❌ Failed to cleanup uptime-service storage", "err", err)
+	}
+
+	t.logger.Info("✅ Uninstall of uptime-service successfully!")
 	return nil
 }
 
-// GetUptimeKumaConfig gathers all required configuration for uptime-kuma
-func (t *ThanosStack) GetUptimeKumaConfig(ctx context.Context) (*types.UptimeKumaConfig, error) {
+// GetUptimeServiceConfig gathers all required configuration for uptime-service
+func (t *ThanosStack) GetUptimeServiceConfig(ctx context.Context) (*types.UptimeServiceConfig, error) {
 
 	if t.deployConfig == nil {
 		return nil, fmt.Errorf("deploy configuration is not initialized")
@@ -276,8 +294,8 @@ func (t *ThanosStack) GetUptimeKumaConfig(ctx context.Context) (*types.UptimeKum
 		return nil, fmt.Errorf("error getting EFS filesystem ID: %w", err)
 	}
 
-	config := &types.UptimeKumaConfig{
-		Namespace:           constants.UptimeKumaNamespace,
+	config := &types.UptimeServiceConfig{
+		Namespace:           constants.UptimeServiceNamespace,
 		IsPersistenceEnable: true,
 		EFSFileSystemId:     efsFileSystemId,
 		ChainName:           chainName,
@@ -286,15 +304,15 @@ func (t *ThanosStack) GetUptimeKumaConfig(ctx context.Context) (*types.UptimeKum
 	return config, nil
 }
 
-// deployUptimeKumaInfrastructure creates PVs for Static Provisioning
-func (t *ThanosStack) deployUptimeKumaInfrastructure(ctx context.Context, config *types.UptimeKumaConfig) error {
+// deployUptimeServiceInfrastructure creates PVs for Static Provisioning
+func (t *ThanosStack) deployUptimeServiceInfrastructure(ctx context.Context, config *types.UptimeServiceConfig) error {
 	if err := t.ensureNamespaceExists(ctx, config.Namespace); err != nil {
 		return fmt.Errorf("❌ failed to ensure namespace exists: %w", err)
 	}
 
-	// Clean up existing UptimeKuma PVs and PVCs
-	if err := t.cleanupExistingUptimeKumaStorage(ctx, config); err != nil {
-		return fmt.Errorf("❌ failed to cleanup existing uptime-kuma storage: %w", err)
+	// Clean up existing UptimeService PVs and PVCs
+	if err := t.cleanupExistingUptimeServiceStorage(ctx, config); err != nil {
+		return fmt.Errorf("❌ failed to cleanup existing uptime-service storage: %w", err)
 	}
 
 	timestamp, err := utils.GetTimestampFromExistingPV(ctx, config.ChainName)
@@ -303,16 +321,16 @@ func (t *ThanosStack) deployUptimeKumaInfrastructure(ctx context.Context, config
 	}
 
 	// Create PV and PVC using generic functions from utils/storage.go
-	kumaPV := utils.GenerateStaticPVManifest("uptime-kuma", config, "4Gi", timestamp)
-	if err := utils.ApplyPVManifest(ctx, t.deploymentPath, "uptime-kuma", kumaPV, "UptimeKuma"); err != nil {
-		return fmt.Errorf("❌ failed to create kuma PV: %w", err)
+	uptimePV := utils.GenerateStaticPVManifest("uptime-service", config, "4Gi", timestamp)
+	if err := utils.ApplyPVManifest(ctx, t.deploymentPath, "uptime-service", uptimePV, "UptimeService"); err != nil {
+		return fmt.Errorf("❌ failed to create uptime-service PV: %w", err)
 	}
 
-	kumaPVC := utils.GenerateStaticPVCManifest("uptime-kuma", config, "4Gi", timestamp)
-	if err := utils.ApplyPVCManifest(ctx, t.deploymentPath, "uptime-kuma", kumaPVC, "UptimeKuma"); err != nil {
-		return fmt.Errorf("failed to create kuma PVC: %w", err)
+	uptimePVC := utils.GenerateStaticPVCManifest("uptime-service", config, "4Gi", timestamp)
+	if err := utils.ApplyPVCManifest(ctx, t.deploymentPath, "uptime-service", uptimePVC, "UptimeService"); err != nil {
+		return fmt.Errorf("failed to create uptime-service PVC: %w", err)
 	}
-	fmt.Println("✅ Created uptime-kuma PV and PVC")
+	fmt.Println("✅ Created uptime-service PV and PVC")
 
 	return nil
 }
@@ -335,8 +353,8 @@ func (t *ThanosStack) waitForPVCBound(ctx context.Context, namespace string, pvc
 	return fmt.Errorf("PVC %s not bound after %d attempts ", pvcName, maxRetries)
 }
 
-// cleanupExistingKumaStorage removes existing Kuma PVs and PVCs
-func (t *ThanosStack) cleanupExistingUptimeKumaStorage(ctx context.Context, config *types.UptimeKumaConfig) error {
+// cleanupExistingUptimeServiceStorage removes existing uptime-service PVs and PVCs
+func (t *ThanosStack) cleanupExistingUptimeServiceStorage(ctx context.Context, config *types.UptimeServiceConfig) error {
 	// Get existing monitoring PVCs
 	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", "-n", config.Namespace, "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
 	if err != nil {
@@ -366,6 +384,34 @@ func (t *ThanosStack) cleanupExistingUptimeKumaStorage(ctx context.Context, conf
 		_, err = utils.ExecuteCommand(ctx, "kubectl", "delete", "pvc", pvcName, "-n", config.Namespace, "--ignore-not-found=true")
 		if err == nil {
 			deletedPVCs++
+		}
+	}
+
+	// Get existing monitoring PVs
+	output, err = utils.ExecuteCommand(ctx, "kubectl", "get", "pv", "--no-headers", "-o", "custom-columns=NAME:.metadata.name,STATUS:.status.phase")
+	if err != nil {
+		return fmt.Errorf("failed to get existing PVs: %w", err)
+	}
+
+	lines = strings.Split(strings.TrimSpace(output), "\n")
+	deletedPVs := 0
+
+	for _, line := range lines {
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+
+		pvName := parts[0]
+		status := parts[1]
+
+		// Only delete Released PVs (not Bound or Available)
+		if status == "Released" && (strings.Contains(pvName, "uptime-service")) {
+			// Remove claimRef to allow reuse
+			_, err = utils.ExecuteCommand(ctx, "kubectl", "patch", "pv", pvName, "-p", `{"spec":{"claimRef":null}}`, "--type=merge")
+			if err == nil {
+				deletedPVs++
+			}
 		}
 	}
 
