@@ -422,10 +422,6 @@ func (t *ThanosStack) verifyRegisterCandidates(ctx context.Context, registerCand
 }
 
 func (t *ThanosStack) VerifyRegisterCandidates(ctx context.Context, registerCandidate *RegisterCandidateInput) error {
-	if t.deployConfig.Network != constants.Testnet {
-		return fmt.Errorf("register candidates verification is supported only on Testnet")
-	}
-
 	var err error
 	t.logger.Info("Starting candidate registration process...")
 	t.logger.Info("💲 Admin account will be used to register the candidate. Please ensure it has sufficient TON token balance.")
