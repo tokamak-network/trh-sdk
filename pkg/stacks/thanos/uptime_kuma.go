@@ -2,16 +2,16 @@ package thanos
 
 import (
 	"context"
-	"time"
-	"strings"
 	"fmt"
+	"strings"
+	"time"
 
-	"github.com/tokamak-network/trh-sdk/pkg/utils"
-	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
+	"github.com/tokamak-network/trh-sdk/pkg/types"
+	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
-//Insatlling uptime-kuma
+// Insatlling uptime-kuma
 func (t *ThanosStack) InstallUptimeKuma(ctx context.Context, config *types.UptimeKumaConfig) (string, error) {
 	if t.deployConfig.K8s == nil {
 		t.logger.Error("K8s configuration is not set. Please run the deploy command first")
@@ -19,7 +19,7 @@ func (t *ThanosStack) InstallUptimeKuma(ctx context.Context, config *types.Uptim
 	}
 
 	//Checking if uptime-kuma is already running
-	uptimeKumapods,err := utils.GetPodNamesByLabel(ctx,config.Namespace,"uptime-kuma");
+	uptimeKumapods, err := utils.GetPodNamesByLabel(ctx, config.Namespace, "uptime-kuma")
 	if err != nil {
 		t.logger.Error("Error to get uptime kuma pods", "err", err)
 		return "", err
@@ -38,7 +38,7 @@ func (t *ThanosStack) InstallUptimeKuma(ctx context.Context, config *types.Uptim
 		// Use the first existing release name
 		existingReleaseName := existingReleases[0]
 		t.logger.Info(fmt.Sprintf("Using existing Helm release: %s", existingReleaseName))
-		
+
 		for {
 			k8sServices, err := utils.GetAddressByService(ctx, config.Namespace, existingReleaseName)
 			if err != nil {
@@ -48,7 +48,7 @@ func (t *ThanosStack) InstallUptimeKuma(ctx context.Context, config *types.Uptim
 
 			if len(k8sServices) > 0 {
 				kumaUrl = "http://" + k8sServices[0]
-				
+
 				break
 			}
 			time.Sleep(15 * time.Second)
@@ -71,7 +71,7 @@ func (t *ThanosStack) InstallUptimeKuma(ctx context.Context, config *types.Uptim
 	// Ensure uptime-kuma namespace exists
 	if err := t.ensureNamespaceExists(ctx, config.Namespace); err != nil {
 		t.logger.Errorw("Failed to ensure uptime-kuma namespace exists", "err", err)
-		return "",fmt.Errorf("failed to ensure uptime-kuma namespace exists: %w", err)
+		return "", fmt.Errorf("failed to ensure uptime-kuma namespace exists: %w", err)
 	}
 
 	// Deploy infrastructure if persistence is enabled
@@ -79,7 +79,7 @@ func (t *ThanosStack) InstallUptimeKuma(ctx context.Context, config *types.Uptim
 		t.logger.Info("Deploying uptime-kuma infrastructure (persistence enabled)")
 		if err := t.deployUptimeKumaInfrastructure(ctx, config); err != nil {
 			t.logger.Errorw("Failed to deploy uptime-kuma infrastructure", "err", err)
-			return "",fmt.Errorf("failed to deploy uptime-kuma infrastructure: %w", err)
+			return "", fmt.Errorf("failed to deploy uptime-kuma infrastructure: %w", err)
 		}
 
 		// Wait for PVC to be bound before installing Helm chart
@@ -114,7 +114,7 @@ func (t *ThanosStack) InstallUptimeKuma(ctx context.Context, config *types.Uptim
 
 	// Set AWS LoadBalancer annotations
 	annotations := map[string]interface{}{
-		"service.beta.kubernetes.io/aws-load-balancer-type": "nlb-ip",
+		"service.beta.kubernetes.io/aws-load-balancer-type":   "nlb-ip",
 		"service.beta.kubernetes.io/aws-load-balancer-scheme": "internet-facing",
 	}
 	err = utils.UpdateYAMLField(valuesFilePath, "service.annotations", annotations)
@@ -166,11 +166,11 @@ func (t *ThanosStack) InstallUptimeKuma(ctx context.Context, config *types.Uptim
 
 	if err != nil {
 		t.logger.Error(
-			"❌ Error installing uptime kuma", 
-			"err", err,                     
-			"helm_output", output,         
+			"❌ Error installing uptime kuma",
+			"err", err,
+			"helm_output", output,
 		)
-		return "", err 
+		return "", err
 	}
 	t.logger.Info("✅ Install uptime kuma successfully")
 
@@ -195,7 +195,7 @@ func (t *ThanosStack) InstallUptimeKuma(ctx context.Context, config *types.Uptim
 
 }
 
-//Uninstalling uptime-kuma
+// Uninstalling uptime-kuma
 func (t *ThanosStack) UninstallUptimeKuma(ctx context.Context) error {
 	if t.deployConfig.K8s == nil {
 		t.logger.Error("K8s configuration is not set. Please run the deploy command first")
@@ -246,17 +246,16 @@ func (t *ThanosStack) UninstallUptimeKuma(ctx context.Context) error {
 		t.logger.Warnw("❌ Failed to cleanup uptime-kuma storage", "err", err)
 	}
 
-	// Delete namespace 
-    // t.logger.Info(fmt.Sprintf("❌ Deleting uptime-kuma namespace: %s", kumaNamespace))
-    // err = t.tryToDeleteK8sNamespace(ctx, kumaNamespace)
-    // if err != nil {
-    //     t.logger.Errorw("Failed to delete uptime-kuma namespace", "err", err, "namespace", kumaNamespace)
-    //     return err
+	// Delete namespace
+	// t.logger.Info(fmt.Sprintf("❌ Deleting uptime-kuma namespace: %s", kumaNamespace))
+	// err = t.tryToDeleteK8sNamespace(ctx, kumaNamespace)
+	// if err != nil {
+	//     t.logger.Errorw("Failed to delete uptime-kuma namespace", "err", err, "namespace", kumaNamespace)
+	//     return err
 
 	t.logger.Info("✅ Uninstall of uptime-kuma successfully!")
 	return nil
 }
-
 
 // GetUptimeKumaConfig gathers all required configuration for uptime-kuma
 func (t *ThanosStack) GetUptimeKumaConfig(ctx context.Context) (*types.UptimeKumaConfig, error) {
@@ -278,10 +277,10 @@ func (t *ThanosStack) GetUptimeKumaConfig(ctx context.Context) (*types.UptimeKum
 	}
 
 	config := &types.UptimeKumaConfig{
-		Namespace:         		constants.UptimeKumaNamespace,
-		IsPersistenceEnable: 	true,
-		EFSFileSystemId:   		efsFileSystemId,
-		ChainName:         		chainName,
+		Namespace:           constants.UptimeKumaNamespace,
+		IsPersistenceEnable: true,
+		EFSFileSystemId:     efsFileSystemId,
+		ChainName:           chainName,
 	}
 
 	return config, nil
@@ -320,7 +319,7 @@ func (t *ThanosStack) deployUptimeKumaInfrastructure(ctx context.Context, config
 
 // waitForPVCBound waits for a specific PVC to be bound
 func (t *ThanosStack) waitForPVCBound(ctx context.Context, namespace string, pvcName string) error {
-	maxRetries := 5 
+	maxRetries := 5
 	for i := 0; i < maxRetries; i++ {
 		status, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", pvcName, "-n", namespace, "-o", "jsonpath={.status.phase}", "--ignore-not-found=true")
 		if err != nil {
@@ -335,7 +334,6 @@ func (t *ThanosStack) waitForPVCBound(ctx context.Context, namespace string, pvc
 	}
 	return fmt.Errorf("PVC %s not bound after %d attempts ", pvcName, maxRetries)
 }
-
 
 // cleanupExistingKumaStorage removes existing Kuma PVs and PVCs
 func (t *ThanosStack) cleanupExistingUptimeKumaStorage(ctx context.Context, config *types.UptimeKumaConfig) error {

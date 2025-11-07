@@ -124,20 +124,25 @@ addresses, err := GetAddressByService(ctx, namespace, serviceName)
 
 
 ### Manual Testing
-
-**Note**: Before testing, checkout the PR branch/commit to ensure you're testing the changes from this PR.
+**Note**: A testnet/mainnet (not devnet) must be deployed before installing update-kuma.
+**Note**: Wait for 4-5 minutes before accessing the uptime-kuma from the URL.
 
 ```bash
-# Checkout the PR branch/commit
-git checkout <pr-branch-name>
-# or
-git checkout <commit-hash>
+
+# Install TRH SDK CLI from specific commit (Run this inside your testnet/mainnet directory)
+./setup.sh -c <commit-hash> 
+
+#Apply changes
+source ~/.bashrc
+
+#Check the Version
+trh-sdk version 
 
 # Test fresh installation
-trh-sdk install uptime-kuma
+trh-sdk install uptime-service
 
 # Test existing installation (run again)
-trh install uptime-kuma
+trh-sdk install uptime-service
 
 # Verify LoadBalancer service
 kubectl get svc -n uptime-kuma
