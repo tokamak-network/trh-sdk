@@ -39,20 +39,22 @@ type L1CrossTradeChainInput struct {
 }
 
 type L2CrossTradeChainInput struct {
-	RPC                    string               `json:"rpc"`
-	ChainID                uint64               `json:"chain_id"`
-	PrivateKey             string               `json:"private_key"`
-	IsDeployedNew          bool                 `json:"is_deployed_new"`
-	DeploymentScriptPath   string               `json:"deployment_script_path"`
-	ContractName           string               `json:"contract_name"`
-	BlockExplorerConfig    *BlockExplorerConfig `json:"block_explorer_config"`
-	CrossDomainMessenger   string               `json:"cross_domain_messenger"`
-	CrossTradeProxyAddress string               `json:"cross_trade_proxy_address"`
-	CrossTradeAddress      string               `json:"cross_trade_address"`
-	USDCAddress            string               `json:"usdc_address"`
-	USDTAddress            string               `json:"usdt_address"`
-	TONAddress             string               `json:"ton_address"`
-	ETHAddress             string               `json:"eth_address"`
+	RPC                     string               `json:"rpc"`
+	ChainID                 uint64               `json:"chain_id"`
+	PrivateKey              string               `json:"private_key"`
+	IsDeployedNew           bool                 `json:"is_deployed_new"`
+	DeploymentScriptPath    string               `json:"deployment_script_path"`
+	ContractName            string               `json:"contract_name"`
+	BlockExplorerConfig     *BlockExplorerConfig `json:"block_explorer_config"`
+	CrossDomainMessenger    string               `json:"cross_domain_messenger"`
+	CrossTradeProxyAddress  string               `json:"cross_trade_proxy_address"`
+	CrossTradeAddress       string               `json:"cross_trade_address"`
+	L2Tokens                map[string]string    `json:"l2_tokens"`
+	L1Tokens                map[string]string    `json:"l1_tokens"`
+	NativeTokenAddressOnL1  string               `json:"native_token_address"`
+	L1StandardBridgeAddress string               `json:"l1_standard_bridge_address"`
+	L1USDCBridgeAddress     string               `json:"l1_usdc_bridge_address"`
+	L1CrossDomainMessenger  string               `json:"l1_cross_domain_messenger"`
 }
 
 type DeployCrossTradeInputs struct {
@@ -102,6 +104,178 @@ const (
 	L2L2ScriptPath = "scripts/foundry_scripts"
 	L1L2ScriptPath = "scripts/foundry_scripts/L2L1"
 )
+
+// getTokenInputsFromUser interactively collects L1Tokens and L2Tokens from user input
+func getTokenInputsFromUser() (map[string]string, map[string]string, error) {
+	l1Tokens := make(map[string]string)
+	l2Tokens := make(map[string]string)
+
+	fmt.Println("\n--------------------------------")
+	fmt.Println("Token Configuration")
+	fmt.Println("--------------------------------")
+
+	for {
+		fmt.Print("\nDo you want to add a token? (Y/n): ")
+		addMore, err := scanner.ScanBool(true)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read add token option: %w", err)
+		}
+
+		if !addMore {
+			break
+		}
+
+		var tokenName string
+		for {
+			fmt.Print("Please enter the token name: ")
+			tokenName, err = scanner.ScanString()
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to read token name: %w", err)
+			}
+			if tokenName == "" {
+				fmt.Println("Token name cannot be empty")
+				continue
+			}
+			// Check if token name already exists
+			if _, exists := l1Tokens[tokenName]; exists {
+				fmt.Printf("Token '%s' already exists. Please use a different name.\n", tokenName)
+				continue
+			}
+			break
+		}
+
+		var l1Address string
+		for {
+			fmt.Print("Please enter the L1 token address: ")
+			l1Address, err = scanner.ScanString()
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to read L1 token address: %w", err)
+			}
+			if l1Address == "" {
+				fmt.Println("L1 token address cannot be empty")
+				continue
+			}
+			if !common.IsHexAddress(l1Address) {
+				fmt.Println("Invalid L1 token address")
+				continue
+			}
+			l1Address = common.HexToAddress(l1Address).Hex()
+			break
+		}
+
+		var l2Address string
+		for {
+			fmt.Print("Please enter the L2 token address: ")
+			l2Address, err = scanner.ScanString()
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to read L2 token address: %w", err)
+			}
+			if l2Address == "" {
+				fmt.Println("L2 token address cannot be empty")
+				continue
+			}
+			if !common.IsHexAddress(l2Address) {
+				fmt.Println("Invalid L2 token address")
+				continue
+			}
+			l2Address = common.HexToAddress(l2Address).Hex()
+			break
+		}
+
+		l1Tokens[tokenName] = l1Address
+		l2Tokens[tokenName] = l2Address
+		fmt.Printf("✅ Added token '%s' - L1: %s, L2: %s\n", tokenName, l1Address, l2Address)
+	}
+
+	return l1Tokens, l2Tokens, nil
+}
+
+// getL1BridgeConfigFromUser interactively collects L1 bridge configuration from user input
+func getL1BridgeConfigFromUser() (string, string, string, string, error) {
+	var nativeTokenAddressOnL1 string
+	var l1StandardBridgeAddress string
+	var l1USDCBridgeAddress string
+	var l1CrossDomainMessenger string
+	var err error
+
+	fmt.Println("\n--------------------------------")
+	fmt.Println("L1 Bridge Configuration")
+	fmt.Println("--------------------------------")
+
+	for {
+		fmt.Print("Please enter the Native Token Address on L1: ")
+		nativeTokenAddressOnL1, err = scanner.ScanString()
+		if err != nil {
+			return "", "", "", "", fmt.Errorf("failed to read native token address on L1: %w", err)
+		}
+		if nativeTokenAddressOnL1 == "" {
+			fmt.Println("Native token address on L1 cannot be empty")
+			continue
+		}
+		if !common.IsHexAddress(nativeTokenAddressOnL1) {
+			fmt.Println("Invalid native token address on L1")
+			continue
+		}
+		nativeTokenAddressOnL1 = common.HexToAddress(nativeTokenAddressOnL1).Hex()
+		break
+	}
+
+	for {
+		fmt.Print("Please enter the L1 Standard Bridge Address: ")
+		l1StandardBridgeAddress, err = scanner.ScanString()
+		if err != nil {
+			return "", "", "", "", fmt.Errorf("failed to read L1 standard bridge address: %w", err)
+		}
+		if l1StandardBridgeAddress == "" {
+			fmt.Println("L1 standard bridge address cannot be empty")
+			continue
+		}
+		if !common.IsHexAddress(l1StandardBridgeAddress) {
+			fmt.Println("Invalid L1 standard bridge address")
+			continue
+		}
+		l1StandardBridgeAddress = common.HexToAddress(l1StandardBridgeAddress).Hex()
+		break
+	}
+
+	for {
+		fmt.Print("Please enter the L1 USDC Bridge Address: ")
+		l1USDCBridgeAddress, err = scanner.ScanString()
+		if err != nil {
+			return "", "", "", "", fmt.Errorf("failed to read L1 USDC bridge address: %w", err)
+		}
+		if l1USDCBridgeAddress == "" {
+			fmt.Println("L1 USDC bridge address cannot be empty")
+			continue
+		}
+		if !common.IsHexAddress(l1USDCBridgeAddress) {
+			fmt.Println("Invalid L1 USDC bridge address")
+			continue
+		}
+		l1USDCBridgeAddress = common.HexToAddress(l1USDCBridgeAddress).Hex()
+		break
+	}
+
+	for {
+		fmt.Print("Please enter the L1 Cross Domain Messenger Address: ")
+		l1CrossDomainMessenger, err = scanner.ScanString()
+		if err != nil {
+			return "", "", "", "", fmt.Errorf("failed to read L1 cross domain messenger address: %w", err)
+		}
+		if l1CrossDomainMessenger == "" {
+			fmt.Println("L1 cross domain messenger address cannot be empty")
+			continue
+		}
+		if !common.IsHexAddress(l1CrossDomainMessenger) {
+			fmt.Println("Invalid L1 cross domain messenger address")
+			continue
+		}
+		l1CrossDomainMessenger = common.HexToAddress(l1CrossDomainMessenger).Hex()
+		break
+	}
+
+	return nativeTokenAddressOnL1, l1StandardBridgeAddress, l1USDCBridgeAddress, l1CrossDomainMessenger, nil
+}
 
 func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode constants.CrossTradeDeployMode) (*DeployCrossTradeInputs, error) {
 	var (
@@ -311,18 +485,33 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 			break
 		}
 
+		// Get token inputs from user
+		l1Tokens, l2Tokens, err := getTokenInputsFromUser()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get token inputs: %w", err)
+		}
+
+		// Get L1 bridge configuration from user
+		nativeTokenAddressOnL1, l1StandardBridgeAddress, l1USDCBridgeAddress, l1CrossDomainMessenger, err := getL1BridgeConfigFromUser()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get L1 bridge configuration: %w", err)
+		}
+
 		l2ChainConfigs = append(l2ChainConfigs, &L2CrossTradeChainInput{
-			RPC:                  l2RPC,
-			ChainID:              l2ChainID,
-			ContractName:         l2ContractFileName,
-			PrivateKey:           privateKey,
-			IsDeployedNew:        deployNewL2,
-			BlockExplorerConfig:  l2BlockExplorerConfig,
-			CrossDomainMessenger: constants.L2CrossDomainMessenger,
-			DeploymentScriptPath: deploymentScriptPath,
-			USDCAddress:          constants.USDCAddress,
-			TONAddress:           constants.TON,
-			ETHAddress:           constants.ETH,
+			RPC:                     l2RPC,
+			ChainID:                 l2ChainID,
+			ContractName:            l2ContractFileName,
+			PrivateKey:              privateKey,
+			IsDeployedNew:           deployNewL2,
+			BlockExplorerConfig:     l2BlockExplorerConfig,
+			L1CrossDomainMessenger:  l1CrossDomainMessenger,
+			CrossDomainMessenger:    constants.L2CrossDomainMessenger,
+			DeploymentScriptPath:    deploymentScriptPath,
+			L1Tokens:                l1Tokens,
+			L2Tokens:                l2Tokens,
+			NativeTokenAddressOnL1:  nativeTokenAddressOnL1,
+			L1StandardBridgeAddress: l1StandardBridgeAddress,
+			L1USDCBridgeAddress:     l1USDCBridgeAddress,
 		})
 	} else {
 		contracts, err := t.getContractAddressFromOutput(ctx, l2ContractFileName, t.deployConfig.L2ChainID)
@@ -372,21 +561,36 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 			l2CrossTradeAddress = common.HexToAddress(l2CrossTradeAddress).Hex()
 		}
 
+		// Get token inputs from user
+		l1Tokens, l2Tokens, err := getTokenInputsFromUser()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get token inputs: %w", err)
+		}
+
+		// Get L1 bridge configuration from user
+		nativeTokenAddressOnL1, l1StandardBridgeAddress, l1USDCBridgeAddress, l1CrossDomainMessenger, err := getL1BridgeConfigFromUser()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get L1 bridge configuration: %w", err)
+		}
+
 		// Read for the deployment file
 		l2ChainConfigs = append(l2ChainConfigs, &L2CrossTradeChainInput{
-			RPC:                    l2RPC,
-			ChainID:                l2ChainID,
-			ContractName:           l2ContractFileName,
-			PrivateKey:             "0x" + privateKey,
-			IsDeployedNew:          false,
-			BlockExplorerConfig:    l2BlockExplorerConfig,
-			CrossDomainMessenger:   constants.L2CrossDomainMessenger,
-			CrossTradeProxyAddress: l2CrossTradeProxyAddress,
-			CrossTradeAddress:      l2CrossTradeAddress,
-			DeploymentScriptPath:   deploymentScriptPath,
-			USDCAddress:            constants.USDCAddress,
-			TONAddress:             constants.TON,
-			ETHAddress:             constants.ETH,
+			RPC:                     l2RPC,
+			ChainID:                 l2ChainID,
+			ContractName:            l2ContractFileName,
+			PrivateKey:              "0x" + privateKey,
+			IsDeployedNew:           false,
+			BlockExplorerConfig:     l2BlockExplorerConfig,
+			L1CrossDomainMessenger:  l1CrossDomainMessenger,
+			CrossDomainMessenger:    constants.L2CrossDomainMessenger,
+			CrossTradeProxyAddress:  l2CrossTradeProxyAddress,
+			CrossTradeAddress:       l2CrossTradeAddress,
+			DeploymentScriptPath:    deploymentScriptPath,
+			L1Tokens:                l1Tokens,
+			L2Tokens:                l2Tokens,
+			NativeTokenAddressOnL1:  nativeTokenAddressOnL1,
+			L1StandardBridgeAddress: l1StandardBridgeAddress,
+			L1USDCBridgeAddress:     l1USDCBridgeAddress,
 		})
 	}
 
@@ -478,42 +682,33 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 				return nil, fmt.Errorf("failed to get chain ID: %w", err)
 			}
 
-			// Ask for tokens addresses
-			fmt.Print("Please enter the USDC address: ")
-			usdcAddress, err := scanner.ScanString()
+			// Get token inputs from user
+			l1Tokens, l2Tokens, err := getTokenInputsFromUser()
 			if err != nil {
-				return nil, fmt.Errorf("failed to read USDC address: %w", err)
-			}
-			fmt.Print("Please enter the TON address: ")
-			tonAddress, err := scanner.ScanString()
-			if err != nil {
-				return nil, fmt.Errorf("failed to read TON address: %w", err)
+				return nil, fmt.Errorf("failed to get token inputs: %w", err)
 			}
 
-			fmt.Print("Please enter the USDT address: ")
-			usdtAddress, err := scanner.ScanString()
+			// Get L1 bridge configuration from user
+			nativeTokenAddressOnL1, l1StandardBridgeAddress, l1USDCBridgeAddress, l1CrossDomainMessenger, err := getL1BridgeConfigFromUser()
 			if err != nil {
-				return nil, fmt.Errorf("failed to read USDT address: %w", err)
-			}
-			fmt.Print("Please enter the ETH address: ")
-			ethAddress, err := scanner.ScanString()
-			if err != nil {
-				return nil, fmt.Errorf("failed to read ETH address: %w", err)
+				return nil, fmt.Errorf("failed to get L1 bridge configuration: %w", err)
 			}
 
 			l2ChainConfigs = append(l2ChainConfigs, &L2CrossTradeChainInput{
-				RPC:                  otherRpc,
-				ChainID:              otherChainID.Uint64(),
-				ContractName:         l2ContractFileName,
-				PrivateKey:           otherPrivateKey,
-				IsDeployedNew:        addOtherL2,
-				BlockExplorerConfig:  otherL2BlockExplorerConfig,
-				CrossDomainMessenger: constants.L2CrossDomainMessenger,
-				DeploymentScriptPath: deploymentScriptPath,
-				USDCAddress:          usdcAddress,
-				TONAddress:           tonAddress,
-				USDTAddress:          usdtAddress,
-				ETHAddress:           ethAddress,
+				RPC:                     otherRpc,
+				ChainID:                 otherChainID.Uint64(),
+				ContractName:            l2ContractFileName,
+				PrivateKey:              otherPrivateKey,
+				IsDeployedNew:           addOtherL2,
+				BlockExplorerConfig:     otherL2BlockExplorerConfig,
+				L1CrossDomainMessenger:  l1CrossDomainMessenger,
+				CrossDomainMessenger:    constants.L2CrossDomainMessenger,
+				DeploymentScriptPath:    deploymentScriptPath,
+				L1Tokens:                l1Tokens,
+				L2Tokens:                l2Tokens,
+				NativeTokenAddressOnL1:  nativeTokenAddressOnL1,
+				L1StandardBridgeAddress: l1StandardBridgeAddress,
+				L1USDCBridgeAddress:     l1USDCBridgeAddress,
 			})
 		} else {
 			var l2CrossTradeProxyAddress string
@@ -567,44 +762,35 @@ func (t *ThanosStack) GetCrossTradeContractsInputs(ctx context.Context, mode con
 				break
 			}
 
-			// Ask for tokens addresses
-			fmt.Print("Please enter the USDC address: ")
-			usdcAddress, err := scanner.ScanString()
+			// Get token inputs from user
+			l1Tokens, l2Tokens, err := getTokenInputsFromUser()
 			if err != nil {
-				return nil, fmt.Errorf("failed to read USDC address: %w", err)
-			}
-			fmt.Print("Please enter the TON address: ")
-			tonAddress, err := scanner.ScanString()
-			if err != nil {
-				return nil, fmt.Errorf("failed to read TON address: %w", err)
+				return nil, fmt.Errorf("failed to get token inputs: %w", err)
 			}
 
-			fmt.Print("Please enter the USDT address: ")
-			usdtAddress, err := scanner.ScanString()
+			// Get L1 bridge configuration from user
+			nativeTokenAddressOnL1, l1StandardBridgeAddress, l1USDCBridgeAddress, l1CrossDomainMessenger, err := getL1BridgeConfigFromUser()
 			if err != nil {
-				return nil, fmt.Errorf("failed to read USDT address: %w", err)
-			}
-			fmt.Print("Please enter the ETH address: ")
-			ethAddress, err := scanner.ScanString()
-			if err != nil {
-				return nil, fmt.Errorf("failed to read ETH address: %w", err)
+				return nil, fmt.Errorf("failed to get L1 bridge configuration: %w", err)
 			}
 
 			l2ChainConfigs = append(l2ChainConfigs, &L2CrossTradeChainInput{
-				RPC:                    l2RPC,
-				ChainID:                uint64(l2ChainID),
-				ContractName:           l2ContractFileName,
-				PrivateKey:             "0x" + privateKey,
-				IsDeployedNew:          false,
-				BlockExplorerConfig:    l2BlockExplorerConfig,
-				CrossDomainMessenger:   constants.L2CrossDomainMessenger,
-				CrossTradeProxyAddress: l2CrossTradeProxyAddress,
-				CrossTradeAddress:      l2CrossTradeAddress,
-				DeploymentScriptPath:   deploymentScriptPath,
-				USDCAddress:            usdcAddress,
-				TONAddress:             tonAddress,
-				USDTAddress:            usdtAddress,
-				ETHAddress:             ethAddress,
+				RPC:                     l2RPC,
+				ChainID:                 uint64(l2ChainID),
+				ContractName:            l2ContractFileName,
+				PrivateKey:              "0x" + privateKey,
+				IsDeployedNew:           false,
+				BlockExplorerConfig:     l2BlockExplorerConfig,
+				L1CrossDomainMessenger:  l1CrossDomainMessenger,
+				CrossDomainMessenger:    constants.L2CrossDomainMessenger,
+				CrossTradeProxyAddress:  l2CrossTradeProxyAddress,
+				CrossTradeAddress:       l2CrossTradeAddress,
+				DeploymentScriptPath:    deploymentScriptPath,
+				L1Tokens:                l1Tokens,
+				L2Tokens:                l2Tokens,
+				NativeTokenAddressOnL1:  nativeTokenAddressOnL1,
+				L1StandardBridgeAddress: l1StandardBridgeAddress,
+				L1USDCBridgeAddress:     l1USDCBridgeAddress,
 			})
 		}
 	}
@@ -622,13 +808,14 @@ func (t *ThanosStack) DeployCrossTrade(ctx context.Context, input *DeployCrossTr
 		return nil, fmt.Errorf("failed to deploy cross trade contracts: %s", err)
 	}
 
-	_, err = t.DeployCrossTradeApplication(ctx, input, deployCrossTradeContractsOutput)
-	if err != nil {
-		return nil, fmt.Errorf("failed to deploy cross trade application: %s", err)
-	}
+	// deployCrossTradeApplicationOutput, err := t.DeployCrossTradeApplication(ctx, input, deployCrossTradeContractsOutput)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed to deploy cross trade application: %s", err)
+	// }
 
 	return &DeployCrossTradeOutput{
 		DeployCrossTradeContractsOutput: deployCrossTradeContractsOutput,
+		// DeployCrossTradeApplicationOutput: deployCrossTradeApplicationOutput,
 	}, nil
 }
 
@@ -641,6 +828,18 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *Depl
 	err := t.cloneSourcecode(ctx, "crossTrade", "https://github.com/tokamak-network/crossTrade.git")
 	if err != nil {
 		return nil, fmt.Errorf("failed to clone cross trade repository: %s", err)
+	}
+
+	// Set current working directory
+	originalDir, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current working directory: %s", err)
+	}
+	defer os.Chdir(originalDir)
+
+	err = os.Chdir(t.deploymentPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to change directory to crossTrade: %s", err)
 	}
 
 	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd crossTrade && git checkout L2toL2Implementation")
@@ -733,7 +932,7 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *Depl
 	for _, l2ChainConfig := range input.L2ChainConfig {
 		if l2ChainConfig.IsDeployedNew {
 			script := fmt.Sprintf(
-				`cd crossTrade && PRIVATE_KEY=%s CHAIN_ID=%d NATIVE_TOKEN=%s CROSS_DOMAIN_MESSENGER=%s L1_CROSS_TRADE=%s forge script %s/%s --rpc-url %s --broadcast`,
+				`cd crossTrade && PRIVATE_KEY=%s CHAIN_ID=%d NATIVE_TOKEN=%s L2_CROSS_DOMAIN_MESSENGER=%s L1_CROSS_TRADE=%s forge script %s/%s --rpc-url %s --broadcast`,
 				l2ChainConfig.PrivateKey,
 				l2ChainConfig.ChainID,
 				constants.NativeToken,
@@ -831,6 +1030,153 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *Depl
 	t.logger.Infof("L1 <> L2 cross trade addresses %v", l1l2CrossTradeAddresses)
 
 	if input.Mode == constants.CrossTradeDeployModeL2ToL1 {
+		l2ChainConfig := input.L2ChainConfig[0]
+		l2ChainID := l2ChainConfig.ChainID
+		// Set chain information for L1
+		script := fmt.Sprintf(
+			`cd crossTrade && PRIVATE_KEY=%s L1_CROSS_TRADE_PROXY=%s L1_CROSS_DOMAIN_MESSENGER=%s L2_CROSS_TRADE_PROXY=%s L2_CHAIN_ID=%d forge script %s --rpc-url %s --broadcast`,
+			input.L1ChainConfig.PrivateKey,
+			l1CrossTradeProxyAddress,
+			l2ChainConfig.L1CrossDomainMessenger,
+			l1l2CrossTradeAddresses[l2ChainID],
+			l2ChainID,
+			"scripts/foundry_scripts/L2L1/SetChainInfoL1_L2L1.sol:SetChainInfoL1_L2L1",
+			input.L1ChainConfig.RPC,
+		)
+		t.logger.Infof("Setting chain information for L1 %s", script)
+		err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", script)
+		if err != nil {
+			return nil, fmt.Errorf("failed to set chain information for L1: %s", err)
+		}
+
+		// Set chain information for L2
+		script = fmt.Sprintf(
+			`cd crossTrade && PRIVATE_KEY=%s L2_CROSS_TRADE_PROXY=%s L1_CROSS_TRADE_PROXY=%s L1_CHAIN_ID=%d forge script %s --rpc-url %s --broadcast`,
+			l2ChainConfig.PrivateKey,
+			l1l2CrossTradeProxyAddresses[l2ChainID],
+			l1CrossTradeProxyAddress,
+			input.L1ChainConfig.ChainID,
+			"scripts/foundry_scripts/L2L1/SetChainInfoL2_L2L1.sol:SetChainInfoL2_L2L1",
+			l2ChainConfig.RPC,
+		)
+		t.logger.Infof("Setting chain information for L2 %s", script)
+		err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", script)
+		if err != nil {
+			return nil, fmt.Errorf("failed to set chain information for L2: %s", err)
+		}
+
+		// Register tokens
+		for name, l2TokenAddress := range l2ChainConfig.L2Tokens {
+			l1TokenAddress, ok := l2ChainConfig.L1Tokens[name]
+			if !ok {
+				continue
+			}
+			if l1TokenAddress == "" || l2TokenAddress == "" {
+				continue
+			}
+			script := fmt.Sprintf(
+				`cd crossTrade && PRIVATE_KEY=%s L2_CROSS_TRADE_PROXY=%s L1_TOKEN=%s L2_TOKEN=%s L1_CHAIN_ID=%d forge script %s --rpc-url %s --broadcast`,
+				l2ChainConfig.PrivateKey,
+				l1l2CrossTradeProxyAddresses[l2ChainID],
+				l1TokenAddress,
+				l2TokenAddress,
+				input.L1ChainConfig.ChainID,
+				"scripts/foundry_scripts/L2L1/RegisterToken_L2L1.sol:RegisterToken_L2L1",
+				l2ChainConfig.RPC,
+			)
+			t.logger.Infof("Registering token %s on L1 %s", l2TokenAddress, script)
+			err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", script)
+			if err != nil {
+				return nil, fmt.Errorf("failed to deploy the contracts: %s", err)
+			}
+
+		}
+	} else if input.Mode == constants.CrossTradeDeployModeL2ToL2 {
+		t.logger.Infof("Setting chain information for L2")
+		for _, l2ChainConfig := range input.L2ChainConfig {
+			// Set chain information for L2
+			script := fmt.Sprintf(
+				`cd crossTrade && PRIVATE_KEY=%s L2_CROSS_TRADE_PROXY=%s L1_CROSS_TRADE_PROXY=%s L1_CHAIN_ID=%d forge script %s --rpc-url %s --broadcast`,
+				l2ChainConfig.PrivateKey,
+				l2l2CrossTradeProxyAddresses[l2ChainConfig.ChainID],
+				l1CrossTradeProxyAddress,
+				input.L1ChainConfig.ChainID,
+				"scripts/foundry_scripts/SetChainInfoL2_L2L2.sol:SetChainInfoL2_L2L2",
+				l2ChainConfig.RPC,
+			)
+			t.logger.Infof("Setting chain information for L2 %s", script)
+			err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", script)
+			if err != nil {
+				return nil, fmt.Errorf("failed to set chain information for L2: %s", err)
+			}
+
+			script = fmt.Sprintf(
+				`cd crossTrade && PRIVATE_KEY=%s L1_CROSS_TRADE_PROXY=%s L1_CROSS_DOMAIN_MESSENGER=%s L2_CROSS_TRADE_PROXY=%s L2_NATIVE_TOKEN_ADDRESS_ON_L1=%s L1_STANDARD_BRIDGE=%s L1_USDC_BRIDGE=%s L2_CHAIN_ID=%d forge script %s --rpc-url %s --broadcast`,
+				input.L1ChainConfig.PrivateKey,
+				l1CrossTradeProxyAddress,
+				l2ChainConfig.L1CrossDomainMessenger,
+				l2l2CrossTradeAddresses[l2ChainConfig.ChainID],
+				l2ChainConfig.NativeTokenAddressOnL1,
+				l2ChainConfig.L1StandardBridgeAddress,
+				l2ChainConfig.L1USDCBridgeAddress,
+				l2ChainConfig.ChainID,
+				"scripts/foundry_scripts/SetChainInfoL1_L2L2.sol:SetChainInfoL1_L2L2",
+				input.L1ChainConfig.RPC,
+			)
+			t.logger.Infof("Setting chain information for L1 %s", script)
+			err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", script)
+			if err != nil {
+				return nil, fmt.Errorf("failed to set chain information for L1: %s", err)
+			}
+
+			// Get other L2 chain config
+			otherL2ChainsConfig := make([]*L2CrossTradeChainInput, 0)
+			for _, otherL2ChainConfig := range input.L2ChainConfig {
+				if otherL2ChainConfig.ChainID != l2ChainConfig.ChainID {
+					otherL2ChainsConfig = append(otherL2ChainsConfig, otherL2ChainConfig)
+				}
+			}
+
+			for _, otherL2ChainConfig := range otherL2ChainsConfig {
+				// Register tokens
+				for name, l2TokenAddress := range l2ChainConfig.L2Tokens {
+					l1TokenAddress, ok := l2ChainConfig.L1Tokens[name]
+					if !ok {
+						continue
+					}
+
+					if l1TokenAddress == "" || l2TokenAddress == "" {
+						continue
+					}
+
+					if otherL2ChainConfig.L2Tokens[name] == "" {
+						continue
+					}
+
+					script := fmt.Sprintf(
+						`cd crossTrade && PRIVATE_KEY=%s L2_CROSS_TRADE_PROXY=%s L1_TOKEN=%s L2_SOURCE_TOKEN=%s L2_DESTINATION_TOKEN=%s L1_CHAIN_ID=%d L2_SOURCE_CHAIN_ID=%d L2_DESTINATION_CHAIN_ID=%d forge script %s --rpc-url %s --broadcast`,
+						l2ChainConfig.PrivateKey,
+						l2l2CrossTradeProxyAddresses[l2ChainConfig.ChainID],
+						l1TokenAddress,
+						l2TokenAddress,
+						otherL2ChainConfig.L2Tokens[name],
+						input.L1ChainConfig.ChainID,
+						l2ChainConfig.ChainID,      // Source chain ID
+						otherL2ChainConfig.ChainID, // Destination chain ID
+						"scripts/foundry_scripts/RegisterToken_L2L2.sol:RegisterToken_L2L2",
+						l2ChainConfig.RPC,
+					)
+					t.logger.Infof("Registering token %s on L2 %s", l2TokenAddress, script)
+					err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", script)
+					if err != nil {
+						return nil, fmt.Errorf("failed to register token on L2: %s", err)
+					}
+				}
+			}
+		}
+	}
+
+	if input.Mode == constants.CrossTradeDeployModeL2ToL1 {
 		return &DeployCrossTradeContractsOutput{
 			Mode:                       input.Mode,
 			L1CrossTradeProxyAddress:   l1CrossTradeProxyAddress,
@@ -912,8 +1258,16 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, input *De
 	}
 
 	l2ChainRPCs := make(map[uint64]string)
+	usdcAddresses := make(map[uint64]string)
+	usdtAddresses := make(map[uint64]string)
+	tonAddresses := make(map[uint64]string)
+	ethAddresses := make(map[uint64]string)
 	for _, l2ChainConfig := range input.L2ChainConfig {
 		l2ChainRPCs[l2ChainConfig.ChainID] = l2ChainConfig.RPC
+		usdcAddresses[l2ChainConfig.ChainID] = l2ChainConfig.L2Tokens["USDC"]
+		usdtAddresses[l2ChainConfig.ChainID] = l2ChainConfig.L2Tokens["USDT"]
+		tonAddresses[l2ChainConfig.ChainID] = l2ChainConfig.L2Tokens["TON"]
+		ethAddresses[l2ChainConfig.ChainID] = l2ChainConfig.L2Tokens["ETH"]
 	}
 
 	// Add L2 chain config
@@ -923,17 +1277,17 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, input *De
 		tonAddress := constants.L2ChainConfigurations[l2ChainID].TONAddress
 		ethAddress := constants.L2ChainConfigurations[l2ChainID].ETHAddress
 
-		if input.L2ChainConfig[l2ChainID].USDCAddress != "" {
-			usdcAddress = input.L2ChainConfig[l2ChainID].USDCAddress
+		if usdcAddresses[l2ChainID] != "" {
+			usdcAddress = usdcAddresses[l2ChainID]
 		}
-		if input.L2ChainConfig[l2ChainID].USDTAddress != "" {
-			usdtAddress = input.L2ChainConfig[l2ChainID].USDTAddress
+		if usdtAddresses[l2ChainID] != "" {
+			usdtAddress = usdtAddresses[l2ChainID]
 		}
-		if input.L2ChainConfig[l2ChainID].TONAddress != "" {
-			tonAddress = input.L2ChainConfig[l2ChainID].TONAddress
+		if tonAddresses[l2ChainID] != "" {
+			tonAddress = tonAddresses[l2ChainID]
 		}
-		if input.L2ChainConfig[l2ChainID].ETHAddress != "" {
-			ethAddress = input.L2ChainConfig[l2ChainID].ETHAddress
+		if ethAddresses[l2ChainID] != "" {
+			ethAddress = ethAddresses[l2ChainID]
 		}
 
 		if l2ChainID == t.deployConfig.L2ChainID {
