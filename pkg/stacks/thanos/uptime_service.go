@@ -103,69 +103,70 @@ func (t *ThanosStack) InstallUptimeService(ctx context.Context, config *types.Up
 		return "", fmt.Errorf("❌ uptime-service values.yaml not found at %s: %w", valuesFilePath, err)
 	}
 
-	// Update helm chart service fields
-	err = utils.UpdateYAMLField(valuesFilePath, "nameOverride", "uptime-service")
-	if err != nil {
-		return "", fmt.Errorf("failed to update nameOverride: %w", err)
+	// Setting up the helm values
+	helmValues := types.UptimeServiceHelmValues{
+		NameOverride:     "uptime-service",
+		FullnameOverride: helmReleaseName,
 	}
 
-	err = utils.UpdateYAMLField(valuesFilePath, "fullnameOverride", helmReleaseName)
-	if err != nil {
-		return "", fmt.Errorf("failed to update fullnameOverride: %w", err)
-	}
-
-	err = utils.UpdateYAMLField(valuesFilePath, "service.type", "LoadBalancer")
-	if err != nil {
-		return "", fmt.Errorf("failed to update service.type: %w", err)
-	}
-
-	err = utils.UpdateYAMLField(valuesFilePath, "service.port", 80)
-	if err != nil {
-		return "", fmt.Errorf("failed to update service.port: %w", err)
-	}
-
-	err = utils.UpdateYAMLField(valuesFilePath, "service.targetPort", 3001)
-	if err != nil {
-		return "", fmt.Errorf("failed to update service.targetPort: %w", err)
-	}
-
-	// Set AWS LoadBalancer annotations
-	annotations := map[string]interface{}{
+	helmValues.Service.Type = "LoadBalancer"
+	helmValues.Service.Port = 80
+	helmValues.Service.TargetPort = 3001
+	helmValues.Service.Annotations = map[string]interface{}{
 		"service.beta.kubernetes.io/aws-load-balancer-type":   "nlb-ip",
 		"service.beta.kubernetes.io/aws-load-balancer-scheme": "internet-facing",
 	}
-	err = utils.UpdateYAMLField(valuesFilePath, "service.annotations", annotations)
-	if err != nil {
+
+	helmValues.PodLabels = map[string]interface{}{
+		"uptime-service": "",
+	}
+
+	helmValues.Volume.Enabled = true
+	helmValues.Volume.ExistingClaim = pvcName
+	helmValues.Volume.StorageClassName = "efs-sc"
+	helmValues.Volume.Size = "4Gi"
+
+	if err := utils.UpdateYAMLField(valuesFilePath, "nameOverride", helmValues.NameOverride); err != nil {
+		return "", fmt.Errorf("failed to update nameOverride: %w", err)
+	}
+
+	if err := utils.UpdateYAMLField(valuesFilePath, "fullnameOverride", helmValues.FullnameOverride); err != nil {
+		return "", fmt.Errorf("failed to update fullnameOverride: %w", err)
+	}
+
+	if err := utils.UpdateYAMLField(valuesFilePath, "service.type", helmValues.Service.Type); err != nil {
+		return "", fmt.Errorf("failed to update service.type: %w", err)
+	}
+
+	if err := utils.UpdateYAMLField(valuesFilePath, "service.port", helmValues.Service.Port); err != nil {
+		return "", fmt.Errorf("failed to update service.port: %w", err)
+	}
+
+	if err := utils.UpdateYAMLField(valuesFilePath, "service.targetPort", helmValues.Service.TargetPort); err != nil {
+		return "", fmt.Errorf("failed to update service.targetPort: %w", err)
+	}
+
+	if err := utils.UpdateYAMLField(valuesFilePath, "service.annotations", helmValues.Service.Annotations); err != nil {
 		return "", fmt.Errorf("failed to update service.annotations: %w", err)
 	}
 
-	// Set pod labels so GetPodNamesByLabel can find pods with "uptime-service" label
-	podLabels := map[string]interface{}{
-		"uptime-service": "",
-	}
-	err = utils.UpdateYAMLField(valuesFilePath, "podLabels", podLabels)
-	if err != nil {
+	if err := utils.UpdateYAMLField(valuesFilePath, "podLabels", helmValues.PodLabels); err != nil {
 		return "", fmt.Errorf("failed to update podLabels: %w", err)
 	}
 
-	// Update helm chart volume fields
-	err = utils.UpdateYAMLField(valuesFilePath, "volume.enabled", true)
-	if err != nil {
+	if err := utils.UpdateYAMLField(valuesFilePath, "volume.enabled", helmValues.Volume.Enabled); err != nil {
 		return "", fmt.Errorf("failed to update volume.enabled: %w", err)
 	}
 
-	err = utils.UpdateYAMLField(valuesFilePath, "volume.existingClaim", pvcName)
-	if err != nil {
+	if err := utils.UpdateYAMLField(valuesFilePath, "volume.existingClaim", helmValues.Volume.ExistingClaim); err != nil {
 		return "", fmt.Errorf("failed to update volume.existingClaim: %w", err)
 	}
 
-	err = utils.UpdateYAMLField(valuesFilePath, "volume.storageClassName", "efs-sc")
-	if err != nil {
+	if err := utils.UpdateYAMLField(valuesFilePath, "volume.storageClassName", helmValues.Volume.StorageClassName); err != nil {
 		return "", fmt.Errorf("failed to update volume.storageClassName: %w", err)
 	}
 
-	err = utils.UpdateYAMLField(valuesFilePath, "volume.size", "4Gi")
-	if err != nil {
+	if err := utils.UpdateYAMLField(valuesFilePath, "volume.size", helmValues.Volume.Size); err != nil {
 		return "", fmt.Errorf("failed to update volume.size: %w", err)
 	}
 

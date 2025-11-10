@@ -8,6 +8,24 @@ type StorageConfig interface {
 	GetHelmReleaseName() string
 }
 
+type UptimeServiceHelmValues struct {
+	NameOverride     string
+	FullnameOverride string
+	Service          struct {
+		Type        string
+		Port        int
+		TargetPort  int
+		Annotations map[string]interface{}
+	}
+	PodLabels map[string]interface{}
+	Volume    struct {
+		Enabled          bool
+		ExistingClaim    string
+		StorageClassName string
+		Size             string
+	}
+}
+
 type UptimeServiceConfig struct {
 	// Basic configuration
 	Namespace       string
