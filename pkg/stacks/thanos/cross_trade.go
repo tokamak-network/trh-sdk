@@ -808,14 +808,14 @@ func (t *ThanosStack) DeployCrossTrade(ctx context.Context, input *DeployCrossTr
 		return nil, fmt.Errorf("failed to deploy cross trade contracts: %s", err)
 	}
 
-	// deployCrossTradeApplicationOutput, err := t.DeployCrossTradeApplication(ctx, input, deployCrossTradeContractsOutput)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("failed to deploy cross trade application: %s", err)
-	// }
+	deployCrossTradeApplicationOutput, err := t.DeployCrossTradeApplication(ctx, input, deployCrossTradeContractsOutput)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deploy cross trade application: %s", err)
+	}
 
 	return &DeployCrossTradeOutput{
-		DeployCrossTradeContractsOutput: deployCrossTradeContractsOutput,
-		// DeployCrossTradeApplicationOutput: deployCrossTradeApplicationOutput,
+		DeployCrossTradeContractsOutput:   deployCrossTradeContractsOutput,
+		DeployCrossTradeApplicationOutput: deployCrossTradeApplicationOutput,
 	}, nil
 }
 
