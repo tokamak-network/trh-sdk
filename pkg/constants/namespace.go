@@ -1,5 +1,6 @@
 package constants
 
 const (
-	MonitoringNamespace = "monitoring"
+	MonitoringNamespace    = "monitoring"
+	UptimeServiceNamespace = "uptime-service"
 )

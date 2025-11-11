@@ -105,6 +105,10 @@ type SvcJSON struct {
 		} `json:"spec"`
 		Status struct {
 			LoadBalancer struct {
+				Ingress []struct {
+					IP       string `json:"ip,omitempty"`
+					Hostname string `json:"hostname,omitempty"`
+				} `json:"ingress"`
 			} `json:"loadBalancer"`
 		} `json:"status"`
 	} `json:"items"`
@@ -260,6 +264,31 @@ func GetAddressByIngress(ctx context.Context, namespace string, ingressName stri
 			// Extract IP or Hostname
 			for _, ingress := range item.Status.LoadBalancer.Ingress {
 				addresses = append(addresses, ingress.Hostname)
+			}
+		}
+	}
+	return addresses, nil
+}
+
+func GetAddressByService(ctx context.Context, namespace string, serviceName string) ([]string, error) {
+	output, err := getK8sSVC(ctx, namespace)
+	if err != nil {
+		return nil, err
+	}
+	var serviceData SvcJSON
+	if err := json.Unmarshal([]byte(output), &serviceData); err != nil {
+		fmt.Println("Error parsing JSON:", err)
+		return nil, err
+	}
+
+	addresses := make([]string, 0)
+	for _, item := range serviceData.Items {
+		if strings.Contains(item.Metadata.Name, serviceName) && item.Spec.Type == "LoadBalancer" {
+			// Extract hostname from LoadBalancer status
+			for _, ingress := range item.Status.LoadBalancer.Ingress {
+				if ingress.Hostname != "" {
+					addresses = append(addresses, ingress.Hostname)
+				}
 			}
 		}
 	}

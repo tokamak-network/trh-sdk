@@ -111,6 +111,16 @@ func ActionInstallationPlugins() cli.ActionFunc {
 						fmt.Printf("Installing plugin: %s in namespace: %s...\n", pluginName, displayNamespace)
 
 						switch pluginName {
+						case constants.PluginUptimeService:
+							config, err := thanosStack.GetUptimeServiceConfig(ctx)
+							if err != nil {
+								return fmt.Errorf("failed to get uptime-service configuration: %w", err)
+							}
+							_, err = thanosStack.InstallUptimeService(ctx, config)
+							if err != nil {
+								return thanosStack.UninstallUptimeService(ctx)
+							}
+							return nil
 						case constants.PluginBlockExplorer:
 							installBlockExplorerInput, err := thanos.InputInstallBlockExplorer()
 							if err != nil || installBlockExplorerInput == nil {
@@ -218,6 +228,8 @@ func ActionInstallationPlugins() cli.ActionFunc {
 						fmt.Printf("Uninstalling plugin: %s in namespace: %s...\n", pluginName, displayNamespace)
 
 						switch pluginName {
+						case constants.PluginUptimeService:
+							return thanosStack.UninstallUptimeService(ctx)
 						case constants.PluginBridge:
 							return thanosStack.UninstallBridge(ctx)
 						case constants.PluginBlockExplorer:
