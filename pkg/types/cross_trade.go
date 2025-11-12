@@ -13,11 +13,13 @@ type CrossTradeTokens struct {
 }
 
 type CrossTradeChainConfig struct {
-	Name        string              `yaml:"name" json:"name"`
-	DisplayName string              `yaml:"displayName" json:"displayName"`
-	Contracts   CrossTradeContracts `yaml:"contracts" json:"contracts"`
-	Tokens      CrossTradeTokens    `yaml:"tokens" json:"tokens"`
-	RPCURL      string              `yaml:"rpcURL" json:"rpcURL"`
+	Name              string              `yaml:"name" json:"name"`
+	DisplayName       string              `yaml:"display_name" json:"display_name"`
+	Contracts         CrossTradeContracts `yaml:"contracts" json:"contracts"`
+	Tokens            CrossTradeTokens    `yaml:"tokens" json:"tokens"`
+	RPCURL            string              `yaml:"rpc_url" json:"rpc_url"`
+	NativeTokenName   string              `yaml:"native_token_name" json:"native_token_name"`
+	NativeTokenSymbol string              `yaml:"native_token_symbol" json:"native_token_symbol"`
 }
 
 type CrossTradeConfigs map[string]CrossTradeChainConfig
