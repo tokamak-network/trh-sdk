@@ -1276,6 +1276,8 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, input *De
 		usdtAddress := constants.L2ChainConfigurations[l2ChainID].USDTAddress
 		tonAddress := constants.L2ChainConfigurations[l2ChainID].TONAddress
 		ethAddress := constants.L2ChainConfigurations[l2ChainID].ETHAddress
+		nativeTokenName := constants.L2ChainConfigurations[l2ChainID].NativeTokenName
+		nativeTokenSymbol := constants.L2ChainConfigurations[l2ChainID].NativeTokenSymbol
 
 		if usdcAddresses[l2ChainID] != "" {
 			usdcAddress = usdcAddresses[l2ChainID]
@@ -1294,6 +1296,8 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, input *De
 			usdcAddress = constants.USDCAddress
 			tonAddress = constants.TON
 			ethAddress = constants.ETH
+			nativeTokenName = "Tokamak Network Token"
+			nativeTokenSymbol = "TON"
 		}
 
 		chainConfig[fmt.Sprintf("%d", l2ChainID)] = types.CrossTradeChainConfig{
@@ -1309,6 +1313,8 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, input *De
 				USDT: usdtAddress,
 				TON:  tonAddress,
 			},
+			NativeTokenName:   nativeTokenName,
+			NativeTokenSymbol: nativeTokenSymbol,
 		}
 	}
 
