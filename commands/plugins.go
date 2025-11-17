@@ -237,7 +237,18 @@ func ActionInstallationPlugins() cli.ActionFunc {
 						case constants.PluginMonitoring:
 							return thanosStack.UninstallMonitoring(ctx)
 						case constants.PluginCrossTrade:
-							return thanosStack.UninstallCrossTrade(ctx)
+							crossTradeType := strings.TrimSpace(strings.ToLower(cmd.String("type")))
+							if crossTradeType == "" {
+								crossTradeType = string(constants.CrossTradeDeployModeL2ToL2)
+							}
+
+							// Validate the cross-trade type
+							if crossTradeType != string(constants.CrossTradeDeployModeL2ToL2) &&
+								crossTradeType != string(constants.CrossTradeDeployModeL2ToL1) {
+								return fmt.Errorf("unsupported cross-trade type: %s. Supported types: %s, %s",
+									crossTradeType, constants.CrossTradeDeployModeL2ToL2, constants.CrossTradeDeployModeL2ToL1)
+							}
+							return thanosStack.UninstallCrossTrade(ctx, constants.CrossTradeDeployMode(crossTradeType))
 						}
 					}
 				default:
