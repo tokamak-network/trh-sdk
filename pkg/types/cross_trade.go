@@ -25,8 +25,9 @@ type CrossTradeChainConfig struct {
 type CrossTradeConfigs map[string]CrossTradeChainConfig
 
 type CrossTradeEnvConfig struct {
-	NextPublicProjectID   string `yaml:"NEXT_PUBLIC_PROJECT_ID" json:"NEXT_PUBLIC_PROJECT_ID"`
-	NextPublicChainConfig string `yaml:"NEXT_PUBLIC_CHAIN_CONFIG_L2_L1" json:"NEXT_PUBLIC_CHAIN_CONFIG_L2_L1"`
+	NextPublicProjectID string `yaml:"NEXT_PUBLIC_PROJECT_ID" json:"NEXT_PUBLIC_PROJECT_ID"`
+	L2L1Config          string `yaml:"NEXT_PUBLIC_CHAIN_CONFIG_L2_L1" json:"NEXT_PUBLIC_CHAIN_CONFIG_L2_L1"`
+	L2L2Config          string `yaml:"NEXT_PUBLIC_CHAIN_CONFIG_L2_L2" json:"NEXT_PUBLIC_CHAIN_CONFIG_L2_L2"`
 }
 type CrossTradeConfig struct {
 	CrossTrade struct {

@@ -1204,9 +1204,10 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, input *De
 	var (
 		namespace = t.deployConfig.K8s.Namespace
 		l1ChainID = t.deployConfig.L1ChainID
+		mode      = input.Mode
 	)
 
-	crossTradePods, err := utils.GetPodsByName(ctx, namespace, "cross-trade")
+	crossTradePods, err := utils.GetPodsByName(ctx, namespace, fmt.Sprintf("cross-trade-%s", mode))
 	if err != nil {
 		t.logger.Error("Error to get cross trade pods", "err", err)
 		return nil, err
@@ -1215,7 +1216,7 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, input *De
 		t.logger.Info("Cross trade is running: \n")
 		var bridgeUrl string
 		for {
-			k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, "cross-trade")
+			k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, fmt.Sprintf("cross-trade-%s", mode))
 			if err != nil {
 				t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
 				return nil, err
@@ -1323,7 +1324,13 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, input *De
 		t.logger.Error("Error marshalling chain config", "err", err)
 		return nil, err
 	}
-	crossTradeConfig.CrossTrade.Env.NextPublicChainConfig = string(chainConfigJSON)
+
+	switch input.Mode {
+	case constants.CrossTradeDeployModeL2ToL1:
+		crossTradeConfig.CrossTrade.Env.L2L1Config = string(chainConfigJSON)
+	case constants.CrossTradeDeployModeL2ToL2:
+		crossTradeConfig.CrossTrade.Env.L2L2Config = string(chainConfigJSON)
+	}
 
 	// input from users
 
@@ -1356,7 +1363,7 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, input *De
 		return nil, nil
 	}
 
-	helmReleaseName := fmt.Sprintf("cross-trade-%d", time.Now().Unix())
+	helmReleaseName := fmt.Sprintf("cross-trade-%s-%d", mode, time.Now().Unix())
 	_, err = utils.ExecuteCommand(ctx, "helm", []string{
 		"install",
 		helmReleaseName,
@@ -1394,7 +1401,7 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, input *De
 	}, nil
 }
 
-func (t *ThanosStack) UninstallCrossTrade(ctx context.Context) error {
+func (t *ThanosStack) UninstallCrossTrade(ctx context.Context, mode constants.CrossTradeDeployMode) error {
 	if t.deployConfig.K8s == nil {
 		t.logger.Error("K8s configuration is not set. Please run the deploy command first")
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
@@ -1409,7 +1416,7 @@ func (t *ThanosStack) UninstallCrossTrade(ctx context.Context) error {
 		return fmt.Errorf("AWS configuration is not set. Please run the deploy command first")
 	}
 
-	releases, err := utils.FilterHelmReleases(ctx, namespace, "cross-trade")
+	releases, err := utils.FilterHelmReleases(ctx, namespace, fmt.Sprintf("cross-trade-%s", mode))
 	if err != nil {
 		t.logger.Error("Error to filter helm releases", "err", err)
 		return err
