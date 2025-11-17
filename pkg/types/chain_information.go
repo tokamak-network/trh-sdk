@@ -8,5 +8,6 @@ type ChainInformation struct {
 	BlockExplorer  string `json:"block_explorer,omitempty"`
 	RollupFilePath string `json:"rollup_file_path,omitempty"`
 	DeploymentPath string `json:"deployment_path,omitempty"`
+	ContractsPath  string `json:"contracts_path,omitempty"`
 	MonitoringUrl  string `json:"monitoring_url,omitempty"`
 }

@@ -140,6 +140,7 @@ func (t *ThanosStack) ShowInformation(ctx context.Context) (*types.ChainInformat
 		DeploymentPath: t.deployConfig.DeploymentFilePath,
 		MonitoringUrl:  monitoringUrl,
 		RollupFilePath: fmt.Sprintf("%s/tokamak-thanos/build/rollup.json", t.deploymentPath),
+		ContractsPath:  fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", t.deploymentPath, t.deployConfig.L1ChainID),
 	}, nil
 }
 
