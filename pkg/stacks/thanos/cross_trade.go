@@ -1204,7 +1204,7 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, input *De
 	var (
 		namespace = t.deployConfig.K8s.Namespace
 		l1ChainID = t.deployConfig.L1ChainID
-		mode      = input.Mode
+		mode      = strings.ReplaceAll(string(input.Mode), "_", "-")
 	)
 
 	crossTradePods, err := utils.GetPodsByName(ctx, namespace, fmt.Sprintf("cross-trade-%s", mode))
@@ -1363,7 +1363,7 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, input *De
 		return nil, nil
 	}
 
-	helmReleaseName := fmt.Sprintf("cross-trade-%s-%d", mode, time.Now().Unix())
+	helmReleaseName := fmt.Sprintf("cross-trade-%s", mode)
 	_, err = utils.ExecuteCommand(ctx, "helm", []string{
 		"install",
 		helmReleaseName,
@@ -1410,13 +1410,14 @@ func (t *ThanosStack) UninstallCrossTrade(ctx context.Context, mode constants.Cr
 	var (
 		namespace = t.deployConfig.K8s.Namespace
 	)
+	modeString := strings.ReplaceAll(string(mode), "_", "-")
 
 	if t.deployConfig.AWS == nil {
 		t.logger.Error("AWS configuration is not set. Please run the deploy command first")
 		return fmt.Errorf("AWS configuration is not set. Please run the deploy command first")
 	}
 
-	releases, err := utils.FilterHelmReleases(ctx, namespace, fmt.Sprintf("cross-trade-%s", mode))
+	releases, err := utils.FilterHelmReleases(ctx, namespace, fmt.Sprintf("cross-trade-%s", modeString))
 	if err != nil {
 		t.logger.Error("Error to filter helm releases", "err", err)
 		return err
