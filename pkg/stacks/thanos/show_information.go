@@ -132,16 +132,16 @@ func (t *ThanosStack) ShowInformation(ctx context.Context) (*types.ChainInformat
 	}
 
 	return &types.ChainInformation{
-		L2ChainID:       int(t.deployConfig.L2ChainID),
-		L2RpcUrl:        l2RpcUrl,
-		BridgeUrl:       bridgeUrl,
-		BlockExplorer:   blockExplorerUrl,
-		L1ChainID:       int(t.deployConfig.L1ChainID),
-		DeploymentPath:  t.deployConfig.DeploymentFilePath,
-		MonitoringUrl:   monitoringUrl,
-		RollupFilePath:  fmt.Sprintf("%s/tokamak-thanos/build/rollup.json", t.deploymentPath),
-		ContractsPath:   fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", t.deploymentPath, t.deployConfig.L1ChainID),
-		DeployConigPath: fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts/deploy-config.json", t.deploymentPath),
+		L2ChainID:        int(t.deployConfig.L2ChainID),
+		L2RpcUrl:         l2RpcUrl,
+		BridgeUrl:        bridgeUrl,
+		BlockExplorer:    blockExplorerUrl,
+		L1ChainID:        int(t.deployConfig.L1ChainID),
+		DeploymentPath:   t.deployConfig.DeploymentFilePath,
+		MonitoringUrl:    monitoringUrl,
+		RollupFilePath:   fmt.Sprintf("%s/tokamak-thanos/build/rollup.json", t.deploymentPath),
+		ContractsPath:    fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", t.deploymentPath, t.deployConfig.L1ChainID),
+		DeployConfigPath: fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts/deploy-config.json", t.deploymentPath),
 	}, nil
 }
 
