@@ -3,10 +3,15 @@ package thanos
 import (
 	"context"
 	"fmt"
+	"io"
+	"log"
+	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	socketio "github.com/maldikhan/go.socket.io/socket.io/v5/client"
+	"github.com/maldikhan/go.socket.io/socket.io/v5/client/emit"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -208,6 +213,22 @@ func (t *ThanosStack) InstallUptimeService(ctx context.Context, config *types.Up
 		time.Sleep(15 * time.Second)
 	}
 	t.logger.Infof("✅ uptime-service is up and running. You can access it at: %s", uptimeURL)
+
+	// Wait for LoadBalancer to be publicly reachable
+	t.logger.Info("⏳ Waiting for LoadBalancer to be publicly reachable...")
+	checkInterval := 5 * time.Second
+
+	for {
+		if t.isURLReachable(uptimeURL) {
+			t.logger.Info("✅ LoadBalancer is publicly reachable, configuring monitors...")
+			// Configure default monitors automatically
+			if err := t.handleDefaultMonitorSetup(ctx, uptimeURL, config.Namespace); err != nil {
+				t.logger.Warn("Failed to configure default monitors, but uptime-service is running", "err", err)
+			}
+			break
+		}
+		time.Sleep(checkInterval)
+	}
 
 	return uptimeURL, nil
 
@@ -417,4 +438,232 @@ func (t *ThanosStack) cleanupExistingUptimeServiceStorage(ctx context.Context, c
 	}
 
 	return nil
+}
+
+// handleDefaultMonitorSetup handles the monitor configuration flow
+func (t *ThanosStack) handleDefaultMonitorSetup(ctx context.Context, uptimeURL string, uptimeNamespace string) error {
+	if t.deployConfig.K8s == nil {
+		return fmt.Errorf("K8s configuration is not set")
+	}
+
+	chainNamespace := t.deployConfig.K8s.Namespace
+	username := "admin"
+	password := "admin@123"
+
+	// Discover services in chain namespace
+	services, err := t.discoverServicesForMonitoring(ctx, chainNamespace)
+	if err != nil {
+		return fmt.Errorf("failed to discover services: %w", err)
+	}
+
+	if len(services) == 0 {
+		t.logger.Warn("No services found to monitor in chain namespace")
+		return nil
+	}
+
+	// Port mapping for components
+	portMap := map[string]int{
+		"op-node":        8545,
+		"op-geth":        8545,
+		"op-batcher":     7300,
+		"op-proposer":    7300,
+		"bridge":         3000,
+		"block-explorer": 3000,
+	}
+
+	// Suppress Socket.IO library's verbose debug logs
+	originalLogOutput := log.Writer()
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(originalLogOutput)
+
+	// Create Socket.IO client
+	client, err := socketio.NewClient(
+		socketio.WithRawURL(uptimeURL),
+	)
+	if err != nil {
+		log.SetOutput(originalLogOutput) // Restore before returning error
+		return fmt.Errorf("failed to create Socket.IO client: %w", err)
+	}
+	defer client.Close()
+
+	// Helper function to add a monitor (similar to main.go)
+	addMonitor := func(componentName, serviceName string, port int) {
+		internalURL := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", serviceName, chainNamespace, port)
+		monitor := map[string]interface{}{
+			"name":                 componentName,
+			"type":                 "http",
+			"url":                  internalURL,
+			"method":               "GET",
+			"interval":             60,
+			"timeout":              48,
+			"accepted_statuscodes": []string{"200-299"},
+			"active":               true,
+		}
+
+		err := client.Emit("add", monitor,
+			emit.WithAck(func(response interface{}) {
+				if resp, ok := response.(map[string]interface{}); ok {
+					if okVal, hasOk := resp["ok"].(bool); hasOk && okVal {
+						t.logger.Infof("✅ Monitor added: %s", componentName)
+					} else {
+						if msg, hasMsg := resp["msg"].(string); hasMsg {
+							t.logger.Warnf("❌ Failed to add monitor: %s", msg)
+						} else {
+							t.logger.Warnf("❌ Failed to add monitor: %v", resp)
+						}
+					}
+				}
+			}),
+			emit.WithTimeout(10*time.Second, func() {
+				t.logger.Warnf("⏰ Monitor %s: acknowledgement timeout", componentName)
+			}),
+		)
+
+		if err != nil {
+			t.logger.Warnf("Error emitting add monitor event: %v", err)
+		}
+	}
+
+	// Set up event handlers BEFORE connecting
+	client.On("connect", func() {
+		t.logger.Info("✅ Connected to Uptime Service!")
+
+		// Setup with default credentials (for initial setup/signup)
+		t.logger.Info("⏳ Setting up Uptime Service with default credentials...")
+		err := client.Emit("setup", username, password,
+			emit.WithAck(func(response interface{}) {
+				if resp, ok := response.(map[string]interface{}); ok {
+					if okVal, hasOk := resp["ok"].(bool); hasOk && okVal {
+						t.logger.Info("✅ Setup successful!")
+
+						// Small delay to ensure setup is complete
+						time.Sleep(500 * time.Millisecond)
+
+						// Login after signup
+						t.logger.Info("🔐 Logging in after setup...")
+						loginData := map[string]interface{}{
+							"username": username,
+							"password": password,
+							"token":    "",
+						}
+						err := client.Emit("login", loginData,
+							emit.WithAck(func(response interface{}) {
+								if resp, ok := response.(map[string]interface{}); ok {
+									if okVal, hasOk := resp["ok"].(bool); hasOk && okVal {
+										t.logger.Info("🔐 Login successful!")
+
+										// Add monitors for each discovered service
+										t.logger.Info("➕ Adding monitors...")
+										monitorsAdded := 0
+										monitorsFailed := 0
+
+										for componentName, serviceName := range services {
+											port, exists := portMap[componentName]
+											if !exists {
+												t.logger.Warn("Unknown component, skipping", "component", componentName)
+												monitorsFailed++
+												continue
+											}
+
+											addMonitor(componentName, serviceName, port)
+											monitorsAdded++
+										}
+										t.logger.Infof("✅ Added %d monitors, %d failed", monitorsAdded, monitorsFailed)
+									} else {
+										msg := "unknown error"
+										if msgVal, hasMsg := resp["msg"].(string); hasMsg {
+											msg = msgVal
+										}
+										t.logger.Warnf("❌ Login failed: %s", msg)
+									}
+								}
+							}),
+							emit.WithTimeout(10*time.Second, func() {
+								t.logger.Warn("⏰ Login acknowledgement timeout")
+							}),
+						)
+						if err != nil {
+							t.logger.Warnf("Error emitting login event: %v", err)
+						}
+					} else {
+						msg := "unknown error"
+						if msgVal, hasMsg := resp["msg"].(string); hasMsg {
+							msg = msgVal
+						}
+						t.logger.Warnf("❌ Setting Default Credentials failed: %s", msg)
+					}
+				}
+			}),
+			emit.WithTimeout(10*time.Second, func() {
+				t.logger.Warn("⏰ Setup acknowledgement timeout")
+			}),
+		)
+		if err != nil {
+			t.logger.Warnf("Error emitting setup event: %v", err)
+		}
+	})
+
+	// Connect to the server
+	connectCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	err = client.Connect(connectCtx)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Uptime Kuma: %w", err)
+	}
+
+	// Small delay to ensure connection is established and connect event fires
+	time.Sleep(1 * time.Second)
+
+	// Wait for operations to complete (setup/login/monitor addition are async)
+	time.Sleep(15 * time.Second)
+
+	t.logger.Info("✅ Monitors configured successfully!")
+	return nil
+}
+
+// discoverServicesForMonitoring discovers services in the chain namespace
+func (t *ThanosStack) discoverServicesForMonitoring(ctx context.Context, chainNamespace string) (map[string]string, error) {
+	services := make(map[string]string)
+
+	components := []struct {
+		pattern string
+		name    string
+	}{
+		{"op-node", "op-node"},
+		{"op-geth", "op-geth"},
+		{"op-batcher", "op-batcher"},
+		{"op-proposer", "op-proposer"},
+		{"bridge", "bridge"},
+		{"block-explorer", "block-explorer"},
+	}
+
+	for _, comp := range components {
+		svcNames, err := utils.GetServiceNames(ctx, chainNamespace, comp.pattern)
+		if err != nil {
+			t.logger.Warn("Failed to get service names", "component", comp.name, "err", err)
+			continue
+		}
+
+		if len(svcNames) > 0 {
+			services[comp.name] = svcNames[0]
+			t.logger.Infof("Discovered service: %s -> %s", comp.name, svcNames[0])
+		}
+	}
+
+	return services, nil
+}
+
+// isURLReachable checks if a URL is publicly reachable via HTTP
+func (t *ThanosStack) isURLReachable(url string) bool {
+	client := &http.Client{
+		Timeout: 3 * time.Second,
+	}
+	resp, err := client.Get(url)
+	if err != nil {
+		t.logger.Infof("⏳ Waiting for LoadBalancer to be publicly reachable...")
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode < 500
 }
