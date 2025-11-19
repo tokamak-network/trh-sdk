@@ -1338,7 +1338,7 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, input *De
 		"alb.ingress.kubernetes.io/target-type":  "ip",
 		"alb.ingress.kubernetes.io/scheme":       "internet-facing",
 		"alb.ingress.kubernetes.io/listen-ports": "[{\"HTTP\": 80}]",
-		"alb.ingress.kubernetes.io/group.name":   "cross-trade",
+		"alb.ingress.kubernetes.io/group.name":   fmt.Sprintf("cross-trade-%s", mode),
 	}, TLS: types.TLS{
 		Enabled: false,
 	}}
