@@ -1211,35 +1211,7 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, input *De
 	var (
 		namespace = t.deployConfig.K8s.Namespace
 		l1ChainID = t.deployConfig.L1ChainID
-		mode      = strings.ReplaceAll(string(input.Mode), "_", "-")
 	)
-
-	crossTradePods, err := utils.GetPodsByName(ctx, namespace, fmt.Sprintf("cross-trade-%s", mode))
-	if err != nil {
-		t.logger.Error("Error to get cross trade pods", "err", err)
-		return nil, err
-	}
-	if len(crossTradePods) > 0 {
-		t.logger.Info("Cross trade is running: \n")
-		var bridgeUrl string
-		for {
-			k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, fmt.Sprintf("cross-trade-%s", mode))
-			if err != nil {
-				t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
-				return nil, err
-			}
-
-			if len(k8sIngresses) > 0 {
-				bridgeUrl = "http://" + k8sIngresses[0]
-				break
-			}
-
-			time.Sleep(15 * time.Second)
-		}
-		return &DeployCrossTradeApplicationOutput{
-			URL: bridgeUrl,
-		}, nil
-	}
 
 	t.logger.Info("Installing a cross trade component...")
 
@@ -1345,7 +1317,7 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, input *De
 		"alb.ingress.kubernetes.io/target-type":  "ip",
 		"alb.ingress.kubernetes.io/scheme":       "internet-facing",
 		"alb.ingress.kubernetes.io/listen-ports": "[{\"HTTP\": 80}]",
-		"alb.ingress.kubernetes.io/group.name":   fmt.Sprintf("cross-trade-%s", mode),
+		"alb.ingress.kubernetes.io/group.name":   "cross-trade",
 	}, TLS: types.TLS{
 		Enabled: false,
 	}}
@@ -1370,9 +1342,20 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, input *De
 		return nil, nil
 	}
 
-	helmReleaseName := fmt.Sprintf("cross-trade-%s", mode)
+	helmReleaseName := "cross-trade"
+
+	releases, err := utils.FilterHelmReleases(ctx, namespace, helmReleaseName)
+	if err != nil {
+		t.logger.Error("Error to filter helm releases", "err", err)
+		return nil, err
+	}
+
+	command := "install"
+	if len(releases) > 0 {
+		command = "upgrade"
+	}
 	_, err = utils.ExecuteCommand(ctx, "helm", []string{
-		"install",
+		command,
 		helmReleaseName,
 		fmt.Sprintf("%s/tokamak-thanos-stack/charts/cross-trade", t.deploymentPath),
 		"--values",
@@ -1417,14 +1400,13 @@ func (t *ThanosStack) UninstallCrossTrade(ctx context.Context, mode constants.Cr
 	var (
 		namespace = t.deployConfig.K8s.Namespace
 	)
-	modeString := strings.ReplaceAll(string(mode), "_", "-")
 
 	if t.deployConfig.AWS == nil {
 		t.logger.Error("AWS configuration is not set. Please run the deploy command first")
 		return fmt.Errorf("AWS configuration is not set. Please run the deploy command first")
 	}
 
-	releases, err := utils.FilterHelmReleases(ctx, namespace, fmt.Sprintf("cross-trade-%s", modeString))
+	releases, err := utils.FilterHelmReleases(ctx, namespace, "cross-trade")
 	if err != nil {
 		t.logger.Error("Error to filter helm releases", "err", err)
 		return err
