@@ -1094,6 +1094,7 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *Depl
 	} else if input.Mode == constants.CrossTradeDeployModeL2ToL2 {
 		t.logger.Infof("Setting chain information for L2")
 		for _, l2ChainConfig := range input.L2ChainConfig {
+
 			// Set chain information for L2
 			script := fmt.Sprintf(
 				`cd crossTrade && PRIVATE_KEY=%s L2_CROSS_TRADE_PROXY=%s L1_CROSS_TRADE_PROXY=%s L1_CHAIN_ID=%d forge script %s --rpc-url %s --broadcast`,
@@ -1110,8 +1111,13 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *Depl
 				return nil, fmt.Errorf("failed to set chain information for L2: %s", err)
 			}
 
+			// If the l2 chain is the current running chain, set USES_SIMPLIFIED_BRIDGE by false
+			usesSimplifiedBridge := true
+			if l2ChainConfig.ChainID == t.deployConfig.L2ChainID {
+				usesSimplifiedBridge = false
+			}
 			script = fmt.Sprintf(
-				`cd crossTrade && PRIVATE_KEY=%s L1_CROSS_TRADE_PROXY=%s L1_CROSS_DOMAIN_MESSENGER=%s L2_CROSS_TRADE_PROXY=%s L2_NATIVE_TOKEN_ADDRESS_ON_L1=%s L1_STANDARD_BRIDGE=%s L1_USDC_BRIDGE=%s L2_CHAIN_ID=%d forge script %s --rpc-url %s --broadcast`,
+				`cd crossTrade && PRIVATE_KEY=%s L1_CROSS_TRADE_PROXY=%s L1_CROSS_DOMAIN_MESSENGER=%s L2_CROSS_TRADE_PROXY=%s L2_NATIVE_TOKEN_ADDRESS_ON_L1=%s L1_STANDARD_BRIDGE=%s L1_USDC_BRIDGE=%s L2_CHAIN_ID=%d USES_SIMPLIFIED_BRIDGE=%t forge script %s --rpc-url %s --broadcast`,
 				input.L1ChainConfig.PrivateKey,
 				l1CrossTradeProxyAddress,
 				l2ChainConfig.L1CrossDomainMessenger,
@@ -1120,6 +1126,7 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *Depl
 				l2ChainConfig.L1StandardBridgeAddress,
 				l2ChainConfig.L1USDCBridgeAddress,
 				l2ChainConfig.ChainID,
+				usesSimplifiedBridge,
 				"scripts/foundry_scripts/SetChainInfoL1_L2L2.sol:SetChainInfoL1_L2L2",
 				input.L1ChainConfig.RPC,
 			)
