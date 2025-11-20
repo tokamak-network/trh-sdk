@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
@@ -171,4 +173,18 @@ func ConvertChainNameToNamespace(chainName string) string {
 	}
 
 	return fmt.Sprintf("%s-%s", processed, string(randomStr))
+}
+
+// IsURLReachable checks if a URL is publicly reachable via HTTP
+func IsURLReachable(url string) bool {
+	client := &http.Client{
+		Timeout: 3 * time.Second,
+	}
+	resp, err := client.Get(url)
+	if err != nil {
+		log.Printf("⏳ Waiting for LoadBalancer to be publicly reachable...")
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode < 500
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -219,7 +218,7 @@ func (t *ThanosStack) InstallUptimeService(ctx context.Context, config *types.Up
 	checkInterval := 5 * time.Second
 
 	for {
-		if t.isURLReachable(uptimeURL) {
+		if utils.IsURLReachable(uptimeURL) {
 			t.logger.Info("✅ LoadBalancer is publicly reachable, configuring monitors...")
 			// Configure default monitors automatically
 			if err := t.handleDefaultMonitorSetup(ctx, uptimeURL, config.Namespace); err != nil {
@@ -447,8 +446,8 @@ func (t *ThanosStack) handleDefaultMonitorSetup(ctx context.Context, uptimeURL s
 	}
 
 	chainNamespace := t.deployConfig.K8s.Namespace
-	username := "admin"
-	password := "admin@123"
+	username := constants.UptimeServiceUsername
+	password := constants.UptimeServicePassword
 
 	// Discover services in chain namespace
 	services, err := t.discoverServicesForMonitoring(ctx, chainNamespace)
@@ -485,44 +484,6 @@ func (t *ThanosStack) handleDefaultMonitorSetup(ctx context.Context, uptimeURL s
 		return fmt.Errorf("failed to create Socket.IO client: %w", err)
 	}
 	defer client.Close()
-
-	// Helper function to add a monitor (similar to main.go)
-	addMonitor := func(componentName, serviceName string, port int) {
-		internalURL := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", serviceName, chainNamespace, port)
-		monitor := map[string]interface{}{
-			"name":                 componentName,
-			"type":                 "http",
-			"url":                  internalURL,
-			"method":               "GET",
-			"interval":             60,
-			"timeout":              48,
-			"accepted_statuscodes": []string{"200-299"},
-			"active":               true,
-		}
-
-		err := client.Emit("add", monitor,
-			emit.WithAck(func(response interface{}) {
-				if resp, ok := response.(map[string]interface{}); ok {
-					if okVal, hasOk := resp["ok"].(bool); hasOk && okVal {
-						t.logger.Infof("✅ Monitor added: %s", componentName)
-					} else {
-						if msg, hasMsg := resp["msg"].(string); hasMsg {
-							t.logger.Warnf("❌ Failed to add monitor: %s", msg)
-						} else {
-							t.logger.Warnf("❌ Failed to add monitor: %v", resp)
-						}
-					}
-				}
-			}),
-			emit.WithTimeout(10*time.Second, func() {
-				t.logger.Warnf("⏰ Monitor %s: acknowledgement timeout", componentName)
-			}),
-		)
-
-		if err != nil {
-			t.logger.Warnf("Error emitting add monitor event: %v", err)
-		}
-	}
 
 	// Set up event handlers BEFORE connecting
 	client.On("connect", func() {
@@ -565,16 +526,12 @@ func (t *ThanosStack) handleDefaultMonitorSetup(ctx context.Context, uptimeURL s
 												continue
 											}
 
-											addMonitor(componentName, serviceName, port)
+											t.addMonitor(client, chainNamespace, componentName, serviceName, port)
 											monitorsAdded++
 										}
 										t.logger.Infof("✅ Added %d monitors, %d failed", monitorsAdded, monitorsFailed)
 									} else {
-										msg := "unknown error"
-										if msgVal, hasMsg := resp["msg"].(string); hasMsg {
-											msg = msgVal
-										}
-										t.logger.Warnf("❌ Login failed: %s", msg)
+										t.logger.Warnf("❌ Login failed: %v", resp["msg"])
 									}
 								}
 							}),
@@ -586,11 +543,7 @@ func (t *ThanosStack) handleDefaultMonitorSetup(ctx context.Context, uptimeURL s
 							t.logger.Warnf("Error emitting login event: %v", err)
 						}
 					} else {
-						msg := "unknown error"
-						if msgVal, hasMsg := resp["msg"].(string); hasMsg {
-							msg = msgVal
-						}
-						t.logger.Warnf("❌ Setting Default Credentials failed: %s", msg)
+						t.logger.Warnf("❌ Setting Default Credentials failed: %v", resp["msg"])
 					}
 				}
 			}),
@@ -620,6 +573,40 @@ func (t *ThanosStack) handleDefaultMonitorSetup(ctx context.Context, uptimeURL s
 
 	t.logger.Info("✅ Monitors configured successfully!")
 	return nil
+}
+
+// addMonitor adds a monitor to Uptime service
+func (t *ThanosStack) addMonitor(client *socketio.Client, chainNamespace, componentName, serviceName string, port int) {
+	internalURL := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", serviceName, chainNamespace, port)
+	monitor := map[string]interface{}{
+		"name":                 componentName,
+		"type":                 "http",
+		"url":                  internalURL,
+		"method":               "GET",
+		"interval":             60,
+		"timeout":              48,
+		"accepted_statuscodes": []string{"200-299"},
+		"active":               true,
+	}
+
+	err := client.Emit("add", monitor,
+		emit.WithAck(func(response interface{}) {
+			if resp, ok := response.(map[string]interface{}); ok {
+				if okVal, hasOk := resp["ok"].(bool); hasOk && okVal {
+					t.logger.Infof("✅ Monitor added: %s", componentName)
+				} else {
+					t.logger.Warnf("❌ Failed to add monitor: %v", resp["msg"])
+				}
+			}
+		}),
+		emit.WithTimeout(10*time.Second, func() {
+			t.logger.Warnf("⏰ Monitor %s: acknowledgement timeout", componentName)
+		}),
+	)
+
+	if err != nil {
+		t.logger.Warnf("Error emitting add monitor event: %v", err)
+	}
 }
 
 // discoverServicesForMonitoring discovers services in the chain namespace
@@ -652,18 +639,4 @@ func (t *ThanosStack) discoverServicesForMonitoring(ctx context.Context, chainNa
 	}
 
 	return services, nil
-}
-
-// isURLReachable checks if a URL is publicly reachable via HTTP
-func (t *ThanosStack) isURLReachable(url string) bool {
-	client := &http.Client{
-		Timeout: 3 * time.Second,
-	}
-	resp, err := client.Get(url)
-	if err != nil {
-		t.logger.Infof("⏳ Waiting for LoadBalancer to be publicly reachable...")
-		return false
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode < 500
 }
