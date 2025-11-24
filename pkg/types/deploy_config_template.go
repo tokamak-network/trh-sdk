@@ -48,6 +48,7 @@ type DeployConfigTemplate struct {
 	L2GenesisCanyonTimeOffset                string   `json:"l2GenesisCanyonTimeOffset"`
 	L2GenesisDeltaTimeOffset                 string   `json:"l2GenesisDeltaTimeOffset"`
 	L2GenesisEcotoneTimeOffset               string   `json:"l2GenesisEcotoneTimeOffset"`
+	L2GenesisFjordTimeOffset                 string   `json:"l2GenesisFjordTimeOffset,omitempty"`
 	SystemConfigStartBlock                   uint64   `json:"systemConfigStartBlock"`
 	RequiredProtocolVersion                  string   `json:"requiredProtocolVersion"`
 	RecommendedProtocolVersion               string   `json:"recommendedProtocolVersion"`
