@@ -75,12 +75,14 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			Network: t.network,
 		}
 
-		if t.network == constants.Testnet {
-			t.deployConfig.TxmgrCellProofTime = constants.L1ChainConfigurations[constants.EthereumSepoliaChainID].TxmgrCellProofTime
-			t.deployConfig.NextPublicRollupL1BaseUrl = constants.L1ChainConfigurations[constants.EthereumSepoliaChainID].BlockExplorerBackendUrl
-		} else if t.network == constants.Mainnet {
-			t.deployConfig.TxmgrCellProofTime = constants.L1ChainConfigurations[constants.EthereumMainnetChainID].TxmgrCellProofTime
-			t.deployConfig.NextPublicRollupL1BaseUrl = constants.L1ChainConfigurations[constants.EthereumMainnetChainID].BlockExplorerBackendUrl
+		networkToChainID := map[string]uint64{
+			constants.Testnet: constants.EthereumSepoliaChainID,
+			constants.Mainnet: constants.EthereumMainnetChainID,
+		}
+		if chainID, ok := networkToChainID[t.network]; ok {
+			chainConfig := constants.L1ChainConfigurations[chainID]
+			t.deployConfig.TxmgrCellProofTime = chainConfig.TxmgrCellProofTime
+			t.deployConfig.NextPublicRollupL1BaseUrl = chainConfig.NextPublicRollupL1BaseUrl
 		}
 	}
 

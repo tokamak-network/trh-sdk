@@ -25,7 +25,7 @@ var L1ChainConfigurations = map[uint64]struct {
 	MaxChannelDuration               uint64 `json:"max_channel_duration"`
 	StakingURL                       string `json:"staking_url"`
 	TxmgrCellProofTime               uint64 `json:"txmgr_cell_proof_time"`
-	BlockExplorerBackendUrl          string `json:"block_explorer_backend_url"`
+	NextPublicRollupL1BaseUrl        string `json:"next_public_rollup_l1_base_url"`
 }{
 	//TODO: Updated the addresses for L1VerificationContractAddress, L2TonAddress, L2ManagerAddress and L1BridgeRegistry for different chains
 	EthereumMainnetChainID: {
@@ -47,7 +47,7 @@ var L1ChainConfigurations = map[uint64]struct {
 		TON:                              "0x0000000000000000000000000000000000000000",
 		MaxChannelDuration:               1500,
 		TxmgrCellProofTime:               1764798551,
-		BlockExplorerBackendUrl:          "https://eth.blockscout.com",
+		NextPublicRollupL1BaseUrl:        "https://eth.blockscout.com",
 	},
 	EthereumSepoliaChainID: {
 		BlockTimeInSeconds:   12,
@@ -70,7 +70,7 @@ var L1ChainConfigurations = map[uint64]struct {
 		MaxChannelDuration:               120,
 		StakingURL:                       "https://sepolia.staking.tokamak.network/staking",
 		TxmgrCellProofTime:               1760427360,
-		BlockExplorerBackendUrl:          "https://eth-sepolia.blockscout.com",
+		NextPublicRollupL1BaseUrl:        "https://eth-sepolia.blockscout.com",
 	},
 	EthereumHoleskyChainID: {
 		BlockTimeInSeconds:   12,
