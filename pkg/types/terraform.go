@@ -35,6 +35,8 @@ type TerraformEnvConfig struct {
 	// EFS backup (op-node, op-geth) - Always enabled for production-ready backup protection
 	EfsBackupScheduleCron    string
 	EfsBackupDeleteAfterDays int
+	// Fusaka Activation Time
+	TxmgrCellProofTime uint64
 }
 
 type BlockExplorerEnvs struct {

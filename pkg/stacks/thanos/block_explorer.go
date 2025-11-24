@@ -176,6 +176,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		export l1_beacon_rpc_url=%s
 		export op_geth_svc=%s
 		export op_geth_public_url=%s
+		export next_public_rollup_l1_base_url=%s
 		`,
 		t.deployConfig.DeploymentFilePath,
 		t.deployConfig.L1RPCURL,
@@ -190,6 +191,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		t.deployConfig.L1BeaconURL,
 		opGethSVC,
 		opGethPublicUrl,
+		t.deployConfig.NextPublicRollupL1BaseUrl,
 	)
 	_, err = utils.ExecuteCommand(ctx,
 		"bash",
@@ -276,6 +278,14 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	if err != nil {
 		t.logger.Error("Error updating frontend.ingress.hostname field", "err", err)
 		return "", err
+	}
+
+	if t.deployConfig.NextPublicRollupL1BaseUrl != "" {
+		err = utils.UpdateYAMLField(fileValue, "frontend.env.NEXT_PUBLIC_ROLLUP_L1_BASE_URL", t.deployConfig.NextPublicRollupL1BaseUrl)
+		if err != nil {
+			t.logger.Error("Error updating NEXT_PUBLIC_ROLLUP_L1_BASE_URL field", "err", err)
+			return "", err
+		}
 	}
 
 	blockExplorerFrontendReleaseName := fmt.Sprintf("%s-%d", "block-explorer-fe", time.Now().Unix())

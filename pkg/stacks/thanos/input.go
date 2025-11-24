@@ -1500,6 +1500,7 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_op_geth_image_tag=\"%s\"\n", config.OpGethImageTag))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_thanos_stack_image_tag=\"%s\"\n", config.ThanosStackImageTag))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_max_channel_duration=\"%d\"\n", config.MaxChannelDuration))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_txmgr_cell_proof_time=\"%d\"\n", config.TxmgrCellProofTime))
 
 	// AWS Backup configuration - Always enabled for production-ready backup protection
 	scheduleCron := config.EfsBackupScheduleCron

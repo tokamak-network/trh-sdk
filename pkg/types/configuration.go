@@ -122,6 +122,9 @@ type Config struct {
 	Network          string `json:"network"`
 	EnableFraudProof bool   `json:"enable_fraud_proof"`
 
+	TxmgrCellProofTime        uint64 `json:"txmgr_cell_proof_time"`
+	NextPublicRollupL1BaseUrl string `json:"next_public_rollup_l1_base_url"`
+
 	// these fields are added after installing the infrastructure successfully
 	L2RpcUrl string `json:"l2_rpc_url"`
 

@@ -74,6 +74,14 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			Stack:   constants.ThanosStack,
 			Network: t.network,
 		}
+
+		if t.network == constants.Testnet {
+			t.deployConfig.TxmgrCellProofTime = constants.L1ChainConfigurations[constants.EthereumSepoliaChainID].TxmgrCellProofTime
+			t.deployConfig.NextPublicRollupL1BaseUrl = constants.L1ChainConfigurations[constants.EthereumSepoliaChainID].BlockExplorerBackendUrl
+		} else if t.network == constants.Mainnet {
+			t.deployConfig.TxmgrCellProofTime = constants.L1ChainConfigurations[constants.EthereumMainnetChainID].TxmgrCellProofTime
+			t.deployConfig.NextPublicRollupL1BaseUrl = constants.L1ChainConfigurations[constants.EthereumMainnetChainID].BlockExplorerBackendUrl
+		}
 	}
 
 	l1Client, err := ethclient.DialContext(ctx, deployContractsConfig.L1RPCurl)
