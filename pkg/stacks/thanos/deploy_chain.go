@@ -183,6 +183,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		ThanosStackImageTag: constants.DockerImageTag[t.deployConfig.Network].ThanosStackImageTag,
 		OpGethImageTag:      constants.DockerImageTag[t.deployConfig.Network].OpGethImageTag,
 		MaxChannelDuration:  chainConfiguration.GetMaxChannelDuration(),
+		TxmgrCellProofTime:  t.deployConfig.TxmgrCellProofTime,
 	})
 	if err != nil {
 		t.logger.Error("Error generating Terraform environment configuration", "err", err)
