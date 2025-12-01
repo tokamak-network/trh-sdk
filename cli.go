@@ -85,6 +85,14 @@ Examples:
 						Usage: "Optional type of the plugin",
 						Value: "",
 					},
+					&cli.BoolFlag{
+						Name:  "register-chain",
+						Usage: "Register a new chain to the cross-trade plugin",
+					},
+					&cli.BoolFlag{
+						Name:  "register-tokens",
+						Usage: "Register new tokens to the cross-trade plugin",
+					},
 				},
 				Action: commands.ActionInstallationPlugins(),
 				Description: `Install plugins
