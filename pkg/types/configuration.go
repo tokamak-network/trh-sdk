@@ -149,6 +149,11 @@ type Config struct {
 
 	// Metadata Registration
 	MetadataPRLink string `json:"metadata_pr_link,omitempty"`
+
+	// Block explorer configuration
+	BlockExplorerURL string `json:"block_explorer_url,omitempty"`
+
+	CrossTrade map[constants.CrossTradeDeployMode]*CrossTrade `json:"cross_trade,omitempty"`
 }
 
 type LoggingConfig struct {

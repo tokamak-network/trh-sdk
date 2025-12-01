@@ -9,6 +9,7 @@ import (
 
 	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
+	crosstrade "github.com/tokamak-network/trh-sdk/pkg/stacks/thanos/cross-trade"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 
@@ -185,6 +186,11 @@ func ActionInstallationPlugins() cli.ActionFunc {
 								crossTradeType = string(constants.CrossTradeDeployModeL2ToL2)
 							}
 
+							mode := constants.CrossTradeDeployMode(crossTradeType)
+
+							registerNewChain := cmd.Bool("register-chain")
+							registerNewTokens := cmd.Bool("register-tokens")
+
 							// Validate the cross-trade type
 							if crossTradeType != string(constants.CrossTradeDeployModeL2ToL2) &&
 								crossTradeType != string(constants.CrossTradeDeployModeL2ToL1) {
@@ -192,15 +198,60 @@ func ActionInstallationPlugins() cli.ActionFunc {
 									crossTradeType, constants.CrossTradeDeployModeL2ToL2, constants.CrossTradeDeployModeL2ToL1)
 							}
 
-							input, err := thanosStack.GetCrossTradeContractsInputs(ctx, constants.CrossTradeDeployMode(crossTradeType))
+							if registerNewChain {
+								// Register new chain only supported for L2 to L2 cross-trade
+								if constants.CrossTradeDeployMode(crossTradeType) != constants.CrossTradeDeployModeL2ToL2 {
+									return fmt.Errorf("register new chain is only supported for L2 to L2 cross-trade")
+								}
+
+								inputs, err := crosstrade.GetNewChainRegistrationInputs(ctx, l, deploymentPath, constants.CrossTradeDeployMode(crossTradeType), config)
+								if err != nil {
+									return err
+								}
+
+								// Register new chain on the existing cross-trade plugin
+								_, err = thanosStack.DeployCrossTradeContracts(ctx, inputs, false)
+								if err != nil {
+									return err
+								}
+
+								return nil
+							}
+
+							if registerNewTokens {
+								// Only register new tokens on the existing cross-trade plugin
+								registerTokenInputs, err := crosstrade.GetRegisterTokensFromPrompt(
+									ctx,
+									l,
+									deploymentPath,
+									constants.CrossTradeDeployMode(crossTradeType),
+									config.CrossTrade[mode],
+								)
+								if err != nil {
+									return err
+								}
+								err = thanosStack.RegisterNewTokensOnExistingCrossTrade(
+									ctx,
+									constants.CrossTradeDeployMode(crossTradeType),
+									registerTokenInputs,
+								)
+								if err != nil {
+									return err
+								}
+								return nil
+							}
+
+							// Otherwise, deploy the cross trade plugin from scratch
+							inputs, err := crosstrade.GetCrossTradeContractsInputs(ctx, l, deploymentPath, constants.CrossTradeDeployMode(crossTradeType), config)
 							if err != nil {
 								return err
 							}
 
-							_, err = thanosStack.DeployCrossTrade(ctx, input)
+							_, err = thanosStack.DeployCrossTrade(ctx, inputs)
 							if err != nil {
 								return err
 							}
+
 							return nil
 
 						default:
