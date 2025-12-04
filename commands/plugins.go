@@ -199,11 +199,6 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							}
 
 							if registerNewChain {
-								// Register new chain only supported for L2 to L2 cross-trade
-								if constants.CrossTradeDeployMode(crossTradeType) != constants.CrossTradeDeployModeL2ToL2 {
-									return fmt.Errorf("register new chain is only supported for L2 to L2 cross-trade")
-								}
-
 								inputs, err := crosstrade.GetNewChainRegistrationInputs(ctx, l, deploymentPath, constants.CrossTradeDeployMode(crossTradeType), config)
 								if err != nil {
 									return err
@@ -243,6 +238,13 @@ func ActionInstallationPlugins() cli.ActionFunc {
 
 							// Otherwise, deploy the cross trade plugin from scratch
 							inputs, err := crosstrade.GetCrossTradeContractsInputs(ctx, l, deploymentPath, constants.CrossTradeDeployMode(crossTradeType), config)
+							if err != nil {
+								return err
+							}
+
+							// Clear the cross trade config before deploying the cross trade plugin from scratch
+							config.CrossTrade = nil
+							err = config.WriteToJSONFile(deploymentPath)
 							if err != nil {
 								return err
 							}

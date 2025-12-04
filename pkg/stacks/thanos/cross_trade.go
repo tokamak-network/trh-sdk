@@ -325,8 +325,8 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 			Mode:                       input.Mode,
 			L1CrossTradeProxyAddress:   l1CrossTradeProxyAddress,
 			L1CrossTradeAddress:        l1CrossTradeAddress,
-			L2CrossTradeProxyAddresses: l2l2CrossTradeProxyAddresses,
-			L2CrossTradeAddresses:      l2l2CrossTradeAddresses,
+			L2CrossTradeProxyAddresses: l1l2CrossTradeProxyAddresses,
+			L2CrossTradeAddresses:      l1l2CrossTradeAddresses,
 		}
 	} else {
 		deployCrossTradeContractsOutput = &types.DeployCrossTradeContractsOutput{
