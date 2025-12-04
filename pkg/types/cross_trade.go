@@ -102,7 +102,7 @@ type DeployCrossTradeContractsOutput struct {
 	L1CrossTradeProxyAddress   string                         `json:"l1_cross_trade_proxy_address"`
 	L1CrossTradeAddress        string                         `json:"l1_cross_trade_address"`
 	L2CrossTradeProxyAddresses map[uint64]string              `json:"l2_cross_trade_proxy_addresses"`
-	L2CrossTradeAddresses      map[uint64]string              `json:"l2_l2_cross_trade_addresses"`
+	L2CrossTradeAddresses      map[uint64]string              `json:"l2_cross_trade_addresses"`
 }
 
 type DeployCrossTradeApplicationOutput struct {

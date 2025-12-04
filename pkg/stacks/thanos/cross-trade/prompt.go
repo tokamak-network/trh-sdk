@@ -111,14 +111,17 @@ func GetRegisterTokensFromPrompt(
 		l2TokenAddresses := make(map[string]string)
 
 		for {
-			if len(l2TokenInputs) >= 2 {
+			// Show the prompt to add an L2 chain mapping for this token if
+			// the mode is L2 to L2 and there are at least two L2 chain mappings for this token
+			// or the mode is L2 to L1 and there is at least one L2 chain mapping for this token
+			if (len(l2TokenInputs) >= 2 && mode == constants.CrossTradeDeployModeL2ToL2) || (len(l2TokenInputs) > 0 && mode == constants.CrossTradeDeployModeL2ToL1) {
 				fmt.Print("\nDo you want to add an L2 chain mapping for this token? (Y/n): ")
 				addL2, err := scanner.ScanBool(true)
 				if err != nil {
 					return nil, fmt.Errorf("failed to read add L2 chain option: %w", err)
 				}
 				if !addL2 {
-					if len(l2TokenInputs) < 2 {
+					if len(l2TokenInputs) < 2 && mode == constants.CrossTradeDeployModeL2ToL2 {
 						fmt.Println("At least two L2 chain mappings are required for each token.")
 						continue
 					}
@@ -147,6 +150,13 @@ func GetRegisterTokensFromPrompt(
 				}
 				l2ChainConfig = l2ChainConfigs[l2ChainName]
 				seenL2ChainNames[l2ChainName] = struct{}{}
+				// Remove the selected chain name from the list of available chains
+				for i, name := range existingL2ChainNames {
+					if name == l2ChainName {
+						existingL2ChainNames = append(existingL2ChainNames[:i], existingL2ChainNames[i+1:]...)
+						break
+					}
+				}
 				break
 			}
 
@@ -199,7 +209,7 @@ func GetRegisterTokensFromPrompt(
 			switch mode {
 			case constants.CrossTradeDeployModeL2ToL1:
 				l2ContractNameFileName = DeployL2CrossTradeL2L1
-				l2ContractName = L1L2CrossTradeProxyL1ContractName
+				l2ContractName = L1L2CrossTradeProxyL2ContractName
 			case constants.CrossTradeDeployModeL2ToL2:
 				l2ContractNameFileName = DeployL2CrossTradeL2L2
 				l2ContractName = L2L2CrossTradeProxyL2ContractName
@@ -212,7 +222,6 @@ func GetRegisterTokensFromPrompt(
 			}
 			if len(contracts) == 0 || contracts[l2ContractName] == "" {
 				logger.Error("No contract address found", "contract_name", l2ContractName, "chain_id", l2ChainID)
-				fmt.Println("Please enter the L2 cross-trade proxy address: ")
 				l2CrossTradeProxyAddress, err = getContractAddressFromPrompt("L2 cross-trade proxy")
 				if err != nil {
 					return nil, fmt.Errorf("failed to get L2 cross-trade proxy address: %w", err)
@@ -720,13 +729,11 @@ func GetNewChainRegistrationInputs(
 
 	l2ChainConfigs := make([]*types.L2CrossTradeChainInput, 0)
 
-	if mode == constants.CrossTradeDeployModeL2ToL2 {
-		l2ChainConfig, err := getNewL2ChainRegistrationInputs(ctx, l2ContractFileName, deploymentScriptPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get new L2 chain registration inputs: %w", err)
-		}
-		l2ChainConfigs = append(l2ChainConfigs, l2ChainConfig)
+	l2ChainConfig, err := getNewL2ChainRegistrationInputs(ctx, l2ContractFileName, deploymentScriptPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get new L2 chain registration inputs: %w", err)
 	}
+	l2ChainConfigs = append(l2ChainConfigs, l2ChainConfig)
 
 	return &types.CrossTrade{
 		Mode:          mode,
