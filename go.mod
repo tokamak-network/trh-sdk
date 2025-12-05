@@ -1,6 +1,6 @@
 module github.com/tokamak-network/trh-sdk
 
-go 1.22.6
+go 1.23.8
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.36.3
@@ -8,6 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.79.1
 	github.com/creack/pty v1.1.24
 	github.com/ethereum/go-ethereum v1.15.2
+	github.com/maldikhan/go.socket.io v0.1.1
 	github.com/stretchr/testify v1.10.0
 	github.com/tyler-smith/go-bip32 v1.0.0
 	github.com/tyler-smith/go-bip39 v1.1.0
@@ -54,7 +55,6 @@ require (
 	github.com/hashicorp/go-bexpr v0.1.11 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/klauspost/compress v1.17.8 // indirect
-	github.com/maldikhan/go.socket.io v0.1.1 // indirect
 	github.com/mattn/go-runewidth v0.0.14 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/mmcloughlin/addchain v0.4.0 // indirect
