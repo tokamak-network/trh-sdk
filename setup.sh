@@ -199,16 +199,16 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
     STEP=$((STEP + 1))
     echo
 
-    # 4. Install Go (v1.23.8)
-    # 4-1. Install Go (v1.23.8)
-    echo "Installing Go (v1.23.8)..."
+    # 4. Install Go (v1.24.11)
+    # 4-1. Install Go (v1.24.11)
+    echo "Installing Go (v1.24.11)..."
     export PATH="$PATH:/usr/local/go/bin"
 
     # Save the current Go version
     current_go_version=$(go version 2>/dev/null)
 
-    # Check if the current version is not v1.23.8
-    if ! echo "$current_go_version" | grep 'go1.23.8' &>/dev/null ; then
+    # Check if the current version is not v1.24.11
+    if ! echo "$current_go_version" | grep 'go1.24.11' &>/dev/null ; then
         # If Go is installed, remove it
         if command -v go &> /dev/null; then
             echo "Go is already installed. Removing the existing version..."
@@ -222,7 +222,7 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
             echo "curl is already installed."
         fi
 
-        GO_FILE_NAME="go1.23.8.darwin-${ARCH}.tar.gz"
+        GO_FILE_NAME="go1.24.11.darwin-${ARCH}.tar.gz"
         GO_DOWNLOAD_URL="https://go.dev/dl/${GO_FILE_NAME}"
 
         sudo curl -L -o "${GO_FILE_NAME}" "${GO_DOWNLOAD_URL}"
@@ -251,7 +251,7 @@ if [[ "$OS_TYPE" == "darwin" ]]; then
 
         export PATH="$PATH:/usr/local/go/bin"
     else
-        echo "Go 1.23.8 is already installed."
+        echo "Go 1.24.11 is already installed."
     fi
 
 echo $OS_TYPE
@@ -299,18 +299,18 @@ elif [[ "$OS_TYPE" == "linux" ]]; then
         STEP=$((STEP + 1))
         echo
 
-        # 4. Install Go (v1.23.8)
-        # 4-1. Install Go (v1.23.8)
-        echo "Installing Go (v1.23.8)..."
+        # 4. Install Go (v1.24.11)
+        # 4-1. Install Go (v1.24.11)
+        echo "Installing Go (v1.24.11)..."
         export PATH="$PATH:/usr/local/go/bin"
 
         # Save the current Go version
         current_go_version=$(go version 2>/dev/null)
 
-        # Check if the current version is not v1.23.8
-        if ! echo "$current_go_version" | grep 'go1.23.8' &>/dev/null ; then
+        # Check if the current version is not v1.24.11
+        if ! echo "$current_go_version" | grep 'go1.24.11' &>/dev/null ; then
 
-            echo "Installing go1.23.8..."
+            echo "Installing go1.24.11..."
             # If Go is installed, remove it
             if command -v go &> /dev/null; then
                 echo "Go is already installed. Removing the existing version..."
@@ -324,7 +324,7 @@ elif [[ "$OS_TYPE" == "linux" ]]; then
                 echo "curl is already installed."
             fi
 
-            GO_FILE_NAME="go1.23.8.linux-${ARCH}.tar.gz"
+            GO_FILE_NAME="go1.24.11.linux-${ARCH}.tar.gz"
             GO_DOWNLOAD_URL="https://go.dev/dl/${GO_FILE_NAME}"
 
             sudo curl -L -o "${GO_FILE_NAME}" "${GO_DOWNLOAD_URL}"
@@ -353,7 +353,7 @@ elif [[ "$OS_TYPE" == "linux" ]]; then
 
             export PATH="$PATH:/usr/local/go/bin"
         else
-            echo "Go 1.23.8 is already installed."
+            echo "Go 1.24.11 is already installed."
         fi
 
         STEP=$((STEP + 1))

@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	expectedVersion = "1.23.8"
+	expectedVersion = "1.24.11"
 )
 
 func main() {
