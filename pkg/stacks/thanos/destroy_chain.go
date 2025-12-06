@@ -56,28 +56,35 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 
 	helmReleases, err := utils.GetHelmReleases(ctx, namespace)
 	if err != nil {
-		t.logger.Error("Error retrieving Helm releases", "err", err)
+		t.logger.Warnf("Failed to retrieve Helm releases: %v. Continuing without uninstalling Helm releases.", err)
+		helmReleases = []string{} // Continue with empty list
 	}
 
 	if len(helmReleases) > 0 {
+		failedReleases := []string{}
 		for _, release := range helmReleases {
 			if strings.Contains(release, namespace) || strings.Contains(release, "op-bridge") || strings.Contains(release, "block-explorer") || strings.Contains(release, constants.MonitoringNamespace) {
 				t.logger.Infof("Uninstalling Helm release: %s in namespace: %s...", release, namespace)
 				_, err := utils.ExecuteCommand(ctx, "helm", "uninstall", release, "--namespace", namespace)
 				if err != nil {
-					t.logger.Error("Error removing Helm release", "err", err)
-					return err
+					t.logger.Warnf("Failed to uninstall Helm release %s in namespace %s: %v. Continuing with other releases.", release, namespace, err)
+					failedReleases = append(failedReleases, release)
 				}
 			}
 		}
 
-		t.logger.Info("Helm release removed successfully")
+		if len(failedReleases) == 0 {
+			t.logger.Info("Helm release removed successfully")
+		} else {
+			t.logger.Warnf("Some Helm releases failed to uninstall: %v", failedReleases)
+		}
 	}
 
 	// Delete monitoring resources
 	err = t.UninstallMonitoring(ctx)
 	if err != nil {
-		t.logger.Error("Error uninstalling monitoring", "err", err)
+		t.logger.Warnf("Failed to uninstall monitoring resources: %v. Continuing with destroy process.", err)
+		// Continue even if monitoring uninstall fails, as monitoring may not exist
 	}
 
 	// Delete namespace before destroying the infrastructure
@@ -86,14 +93,14 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 
 	err = t.tryToDeleteK8sNamespace(ctxTimeout, namespace)
 	if err != nil {
-		t.logger.Error("Error deleting namespace", "err", err)
-	} else {
-		t.logger.Info("✅ Namespace destroyed successfully!")
+		t.logger.Error("❌ Failed to delete namespace", "namespace", namespace, "err", err)
+		return err
 	}
+	t.logger.Info("✅ Namespace destroyed successfully!")
 
 	err = t.clearTerraformState(ctx)
 	if err != nil {
-		t.logger.Error("Failed to clear the existing terraform state", "err", err)
+		t.logger.Error("❌ Failed to clear terraform state", "err", err)
 		return err
 	}
 
@@ -101,8 +108,8 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 	t.deployConfig.ChainName = ""
 	err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
 	if err != nil {
-		t.logger.Error("Failed to write the updated config", "err", err)
-		return err
+		t.logger.Warnf("Failed to write the updated config: %v. Resources are already destroyed.", err)
+		// Continue even if config write fails, as resources are already destroyed
 	}
 
 	t.logger.Info("✅The chain has been destroyed successfully!")

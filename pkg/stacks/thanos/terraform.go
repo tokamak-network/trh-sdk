@@ -13,8 +13,8 @@ func (t *ThanosStack) clearTerraformState(ctx context.Context) error {
 	err := t.destroyTerraform(ctx, fmt.Sprintf("%s/tokamak-thanos-stack/terraform/block-explorer", t.deploymentPath))
 	t.logger.Info("Destroying block-explorer terraform resources")
 	if err != nil {
-		t.logger.Error("Error running block-explorer terraform destroy", "err", err)
-		return err
+		t.logger.Warnf("Failed to destroy block-explorer terraform resources: %v. Continuing with thanos-stack destroy.", err)
+		// Continue even if block-explorer destroy fails, as block-explorer may not exist
 	}
 
 	// STEP 2: Destroy tokamak-thanos-stack/terraform/thanos-stack resources
@@ -49,15 +49,15 @@ func (t *ThanosStack) clearTerraformState(ctx context.Context) error {
 					fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform/thanos-stack && terraform force-unlock -force %s`, t.deploymentPath, lockID),
 				}...)
 				if err != nil {
-					t.logger.Error("Error force-unlocking terraform", "err", err)
+					// Continue to attempt destroy, destroy will fail if lock is still active
+				} else {
+					t.logger.Info("Terraform lock ID force-unlocked", "lockID", lockID)
 				}
-
-				t.logger.Info("Terraform lock ID force-unlocked", "lockID", lockID)
 			}
 
 			err = t.destroyTerraform(ctx, fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", t.deploymentPath))
 			if err != nil {
-				t.logger.Error("Error running thanos-stack terraform destroy:", "err", err)
+				t.logger.Error("❌ Failed to destroy thanos-stack terraform resources", "err", err)
 				return err
 			}
 		}
@@ -67,7 +67,7 @@ func (t *ThanosStack) clearTerraformState(ctx context.Context) error {
 	t.logger.Info("Destroying backend terraform resources")
 	err = t.destroyTerraform(ctx, fmt.Sprintf("%s/tokamak-thanos-stack/terraform/backend", t.deploymentPath))
 	if err != nil {
-		t.logger.Error("Error running backend terraform destroy", "err", err)
+		t.logger.Error("❌ Failed to destroy backend terraform resources", "err", err)
 		return err
 	}
 
@@ -78,8 +78,8 @@ func (t *ThanosStack) clearTerraformState(ctx context.Context) error {
 		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform/thanos-stack && rm -rf terraform.tfstate terraform.tfstate.backup .terraform.lock.hcl .terraform/`, t.deploymentPath),
 	}...)
 	if err != nil {
-		t.logger.Error("Error deleting thanos-stack terraform state", "err", err)
-		return err
+		t.logger.Warnf("Failed to delete thanos-stack terraform state: %v. Resources are already destroyed.", err)
+		// Continue even if state cleanup fails, as resources are already destroyed
 	}
 
 	return nil
@@ -106,6 +106,7 @@ func (t *ThanosStack) destroyTerraform(ctx context.Context, path string) error {
 	}...)
 	if err != nil {
 		t.logger.Error("Error running terraform destroy for", "path", path, "err", err)
+		return fmt.Errorf("terraform destroy failed for %s: %w", path, err)
 	}
 
 	return nil
