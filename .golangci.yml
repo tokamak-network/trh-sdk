@@ -1,7 +1,9 @@
-version: 2
+version: "2"
 
 linters:
-  disable-all: true
   enable:
     - govet
     - unused
+  disable:
+    - errcheck
+    - staticcheck
