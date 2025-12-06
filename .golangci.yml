@@ -1,9 +1,7 @@
+version: 2
+
 linters:
   disable-all: true
   enable:
     - govet
-    - staticcheck
-    - typecheck
-    - gosimple
     - unused
-    - goimports

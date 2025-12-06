@@ -98,7 +98,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 						}
 
 						if config.K8s == nil {
-							return fmt.Errorf("The chain has not been deployed yet. Please deploy the chain first.")
+							return fmt.Errorf("the chain has not been deployed yet, please deploy the chain first")
 						}
 
 						var displayNamespace string

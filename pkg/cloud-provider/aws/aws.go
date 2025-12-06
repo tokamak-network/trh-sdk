@@ -20,7 +20,7 @@ func LoginAWS(ctx context.Context, awsConfig *types.AWSConfig) (*types.AWSProfil
 
 	if awsConfig == nil {
 		fmt.Println("You aren't logged into your AWS account.")
-		return nil, fmt.Errorf("You aren't logged into your AWS account.")
+		return nil, fmt.Errorf("you aren't logged into your AWS account")
 	}
 
 	// Login to AWS account
@@ -96,7 +96,7 @@ func loginAWS(accessKey, secretKey, region, formatFile string) (*types.AccountPr
 	// Step 1: get the table list by the region
 	tables, err := getTablesByRegion(region)
 	if err != nil {
-		return nil, fmt.Errorf("Error getting tables: %s", err)
+		return nil, fmt.Errorf("error getting tables: %s", err)
 	}
 
 	existTerraformLockTable := false
@@ -109,7 +109,7 @@ func loginAWS(accessKey, secretKey, region, formatFile string) (*types.AccountPr
 	if !existTerraformLockTable {
 		err = createDynamoDBTable(region, "terraform-lock")
 		if err != nil {
-			return nil, fmt.Errorf("Error creating terraform-lock table: %s", err)
+			return nil, fmt.Errorf("error creating terraform-lock table: %s", err)
 		}
 	}
 

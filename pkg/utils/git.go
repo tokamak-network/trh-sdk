@@ -116,15 +116,16 @@ func ForkRepository(username, token, repoName string) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 202 {
+	switch resp.StatusCode {
+	case 202:
 		fmt.Println("✅ Fork created successfully!")
 		// Wait a moment for the fork to be ready
 		time.Sleep(3 * time.Second)
 		return nil
-	} else if resp.StatusCode == 200 {
+	case 200:
 		fmt.Println("✅ Fork already exists!")
 		return nil
-	} else {
+	default:
 		return fmt.Errorf("failed to create fork, status code: %d", resp.StatusCode)
 	}
 }
@@ -195,7 +196,8 @@ func CreateGitHubPRFromFork(prTitle, branchName, username, token, repoName strin
 	defer resp.Body.Close()
 
 	// Check response
-	if resp.StatusCode == 201 {
+	switch resp.StatusCode {
+	case 201:
 		// Successfully created
 		var result map[string]interface{}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err == nil {
@@ -207,9 +209,9 @@ func CreateGitHubPRFromFork(prTitle, branchName, username, token, repoName strin
 		}
 		fmt.Println("✅ Pull Request created successfully!")
 		return "", nil
-	} else if resp.StatusCode == 401 {
+	case 401:
 		return "", fmt.Errorf("authentication failed - please check your GitHub token has the correct permissions")
-	} else if resp.StatusCode == 422 {
+	case 422:
 		// Parse error details
 		var errorResp map[string]interface{}
 		if err := json.NewDecoder(resp.Body).Decode(&errorResp); err == nil {
@@ -222,7 +224,7 @@ func CreateGitHubPRFromFork(prTitle, branchName, username, token, repoName strin
 			}
 		}
 		return "", fmt.Errorf("PR creation failed - possibly branch already has a PR or validation error")
-	} else {
+	default:
 		return "", fmt.Errorf("PR creation failed with status %d", resp.StatusCode)
 	}
 }

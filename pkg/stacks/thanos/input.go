@@ -294,15 +294,15 @@ func InputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
 	}
 
 	var (
-		maxChannelDuration               uint64 = constants.L1ChainConfigurations[l1ChainID].MaxChannelDuration
-		l2OutputOracleSubmissionInterval uint64 = constants.L1ChainConfigurations[l1ChainID].L2OutputOracleSubmissionInterval
-		finalizationPeriodSeconds        uint64 = constants.L1ChainConfigurations[l1ChainID].FinalizationPeriodSeconds
-		l1BlockTime                      uint64 = constants.L1ChainConfigurations[l1ChainID].BlockTimeInSeconds
+		maxChannelDuration               = constants.L1ChainConfigurations[l1ChainID].MaxChannelDuration
+		l2OutputOracleSubmissionInterval = constants.L1ChainConfigurations[l1ChainID].L2OutputOracleSubmissionInterval
+		finalizationPeriodSeconds        = constants.L1ChainConfigurations[l1ChainID].FinalizationPeriodSeconds
+		l1BlockTime                      = constants.L1ChainConfigurations[l1ChainID].BlockTimeInSeconds
 
-		l2BlockTime              uint64 = constants.DefaultL2BlockTimeInSeconds
-		batchSubmissionFrequency uint64 = maxChannelDuration * l1BlockTime
-		outputFrequency          uint64 = l2OutputOracleSubmissionInterval * l2BlockTime
-		challengePeriod          uint64 = finalizationPeriodSeconds
+		l2BlockTime              = constants.DefaultL2BlockTimeInSeconds
+		batchSubmissionFrequency = maxChannelDuration * l1BlockTime
+		outputFrequency          = l2OutputOracleSubmissionInterval * l2BlockTime
+		challengePeriod          = finalizationPeriodSeconds
 	)
 
 	if wantAdvancedConfigs {
