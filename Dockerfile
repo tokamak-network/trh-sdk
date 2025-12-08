@@ -4,8 +4,8 @@ FROM golang:1.24.11
 WORKDIR /app
 
 # Install base system packages in a single layer
-RUN apt-get update && apt-get upgrade -y && \
-  apt-get install -y \
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends \
   wget \
   gnupg \
   software-properties-common \
@@ -20,7 +20,8 @@ RUN apt-get update && apt-get upgrade -y && \
   git && \
   # Install Node.js v20.16.0
   curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-  apt-get install -y nodejs && \
+  apt-get update && \
+  apt-get install -y --no-install-recommends nodejs && \
   npm install -g n && \
   n 20.16.0 && \
   # Clean up in the same layer to reduce image size
