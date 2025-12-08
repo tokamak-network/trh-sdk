@@ -9,7 +9,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/ethereum/go-ethereum v1.15.2
 	github.com/maldikhan/go.socket.io v0.1.1
-	github.com/stretchr/testify v1.10.0
+	github.com/stretchr/testify v1.11.1
 	github.com/tyler-smith/go-bip32 v1.0.0
 	github.com/tyler-smith/go-bip39 v1.1.0
 	github.com/urfave/cli/v3 v3.0.0-beta1
