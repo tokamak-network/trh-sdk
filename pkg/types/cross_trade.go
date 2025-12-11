@@ -14,11 +14,17 @@ type CrossTradeTokens struct {
 	TON  string `yaml:"ton" json:"ton"`
 }
 
+type RegisterToken struct {
+	Name              string   `json:"name"`
+	Address           string   `json:"address"`
+	DestinationChains []uint64 `json:"destination_chains"`
+}
+
 type CrossTradeChainConfig struct {
 	Name              string              `yaml:"name" json:"name"`
 	DisplayName       string              `yaml:"display_name" json:"display_name"`
 	Contracts         CrossTradeContracts `yaml:"contracts" json:"contracts"`
-	Tokens            map[string]string   `yaml:"tokens" json:"tokens"` // Token name -> Token address
+	Tokens            []*RegisterToken    `yaml:"tokens" json:"tokens"`
 	RPCURL            string              `yaml:"rpc_url" json:"rpc_url"`
 	NativeTokenName   string              `yaml:"native_token_name" json:"native_token_name"`
 	NativeTokenSymbol string              `yaml:"native_token_symbol" json:"native_token_symbol"`
@@ -62,17 +68,17 @@ type L2CrossTradeChainInput struct {
 	ChainID                 uint64               `json:"chain_id"`
 	PrivateKey              string               `json:"private_key"`
 	IsDeployedNew           bool                 `json:"is_deployed_new"`
-	DeploymentScriptPath    string               `json:"deployment_script_path"`
-	ContractName            string               `json:"contract_name"`
+	ChainName               string               `json:"chain_name"`
 	BlockExplorerConfig     *BlockExplorerConfig `json:"block_explorer_config"`
 	CrossDomainMessenger    string               `json:"cross_domain_messenger"`
+	DeploymentScriptPath    string               `json:"deployment_script_path"`
+	ContractName            string               `json:"contract_name"`
 	CrossTradeProxyAddress  string               `json:"cross_trade_proxy_address,omitempty"`
 	CrossTradeAddress       string               `json:"cross_trade_address,omitempty"`
 	NativeTokenAddressOnL1  string               `json:"native_token_address"`
 	L1StandardBridgeAddress string               `json:"l1_standard_bridge_address"`
 	L1USDCBridgeAddress     string               `json:"l1_usdc_bridge_address"`
 	L1CrossDomainMessenger  string               `json:"l1_cross_domain_messenger"`
-	ChainName               string               `json:"chain_name"`
 }
 
 type L2TokenInput struct {
@@ -112,6 +118,7 @@ type DeployCrossTradeApplicationOutput struct {
 type DeployCrossTradeOutput struct {
 	DeployCrossTradeContractsOutput   *DeployCrossTradeContractsOutput   `json:"deploy_cross_trade_contracts_output,omitempty"`
 	DeployCrossTradeApplicationOutput *DeployCrossTradeApplicationOutput `json:"deploy_cross_trade_application_output,omitempty"`
+	RegisterTokens                    []*RegisterTokenInput              `json:"register_tokens,omitempty"`
 }
 
 type CrossTrade struct {

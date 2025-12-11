@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
@@ -15,36 +17,28 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func (t *ThanosStack) DeployCrossTrade(ctx context.Context, input *types.CrossTrade) (*types.DeployCrossTradeOutput, error) {
-	deployCrossTradeContractsOutput, err := t.DeployCrossTradeContracts(ctx, input, true)
-	if err != nil {
-		return nil, fmt.Errorf("failed to deploy cross trade contracts: %s", err)
-	}
-
-	return deployCrossTradeContractsOutput, nil
-}
-
 func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *types.CrossTrade, scratch bool) (*types.DeployCrossTradeOutput, error) {
 	if input.L1ChainConfig == nil {
 		return nil, fmt.Errorf("l1 chain config is required")
 	}
 
+	err := os.Chdir(t.deploymentPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to change directory to deployment path: %w", err)
+	}
+
 	// Clone cross trade repository
-	err := t.cloneSourcecode(ctx, "crossTrade", "https://github.com/tokamak-network/crossTrade.git")
+	err = t.cloneSourcecode(ctx, "crossTrade", "https://github.com/tokamak-network/crossTrade.git")
 	if err != nil {
 		return nil, fmt.Errorf("failed to clone cross trade repository: %s", err)
 	}
 
-	// Set current working directory
-	originalDir, err := os.Getwd()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get current working directory: %s", err)
-	}
-	defer os.Chdir(originalDir)
-
-	err = os.Chdir(t.deploymentPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to change directory to crossTrade: %s", err)
+	if scratch {
+		t.deployConfig.CrossTrade = nil
+		err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to write cross trade config to file: %s", err)
+		}
 	}
 
 	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd crossTrade && git checkout L2toL2Implementation")
@@ -53,6 +47,41 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 	}
 
 	t.logger.Info("Start to build cross-trade contracts")
+
+	// Before deploying contracts, fill the missing fields in the input
+	l1ContractFileName, l2ContractFileName, err := crosstrade.GetL1L2ContractFileName(input.Mode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get L1 and L2 contract file names: %s", err)
+	}
+
+	deploymentScriptPath, err := crosstrade.GetDeploymentScriptPath(input.Mode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get deployment script path: %s", err)
+	}
+
+	if input.L1ChainConfig.ContractName == "" {
+		input.L1ChainConfig.ContractName = l1ContractFileName
+	}
+	if input.L1ChainConfig.DeploymentScriptPath == "" {
+		input.L1ChainConfig.DeploymentScriptPath = deploymentScriptPath
+	}
+
+	if !strings.HasPrefix(input.L1ChainConfig.PrivateKey, "0x") {
+		input.L1ChainConfig.PrivateKey = "0x" + input.L1ChainConfig.PrivateKey
+	}
+
+	for _, l2ChainConfig := range input.L2ChainConfig {
+		if l2ChainConfig.ContractName == "" {
+			l2ChainConfig.ContractName = l2ContractFileName
+		}
+		if l2ChainConfig.DeploymentScriptPath == "" {
+			l2ChainConfig.DeploymentScriptPath = deploymentScriptPath
+		}
+
+		if !strings.HasPrefix(l2ChainConfig.PrivateKey, "0x") {
+			l2ChainConfig.PrivateKey = "0x" + l2ChainConfig.PrivateKey
+		}
+	}
 
 	// Build the contracts
 	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd crossTrade && pnpm install && forge clean && forge build")
@@ -72,6 +101,7 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 	)
 	if input.L1ChainConfig.IsDeployedNew {
 		t.logger.Info("L1 contracts are not deployed. Deploying new L1 contracts")
+
 		script := fmt.Sprintf(
 			"cd crossTrade && PRIVATE_KEY=%s forge script %s/%s --rpc-url %s --broadcast --chain %s",
 			input.L1ChainConfig.PrivateKey,
@@ -104,8 +134,22 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 			}
 		}
 	} else {
-		l1CrossTradeProxyAddress = input.L1ChainConfig.CrossTradeProxyAddress
-		l1CrossTradeAddress = input.L1ChainConfig.CrossTradeAddress
+		if input.L1ChainConfig.CrossTradeProxyAddress == "" || input.L1ChainConfig.CrossTradeAddress == "" {
+			// Get L1 cross trade proxy and address from the output
+			output := t.deployConfig.CrossTrade[input.Mode].Output.DeployCrossTradeContractsOutput
+			if output == nil {
+				return nil, fmt.Errorf("output is not set. Please run the deploy command first")
+			}
+			if output.L1CrossTradeProxyAddress == "" {
+				return nil, fmt.Errorf("l1 cross trade proxy address is required")
+			}
+
+			l1CrossTradeProxyAddress = output.L1CrossTradeProxyAddress
+			l1CrossTradeAddress = output.L1CrossTradeAddress
+		} else {
+			l1CrossTradeProxyAddress = input.L1ChainConfig.CrossTradeProxyAddress
+			l1CrossTradeAddress = input.L1ChainConfig.CrossTradeAddress
+		}
 	}
 	// Verify the contracts
 	//
@@ -115,11 +159,12 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 				continue
 			}
 			t.logger.Infof("Verifying L1 contract %s with address %s", contractName, address)
+			functionName := contractName
 			script := fmt.Sprintf(
 				"cd crossTrade && forge verify-contract %s contracts/L1/%s.sol:%s --etherscan-api-key %s --chain %s",
 				address,
 				contractName,
-				contractName,
+				functionName,
 				input.L1ChainConfig.BlockExplorerConfig.APIKey,
 				constants.ChainIDToForgeChainName[input.L1ChainConfig.ChainID],
 			)
@@ -136,6 +181,10 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 
 	for _, l2ChainConfig := range input.L2ChainConfig {
 		if l2ChainConfig.IsDeployedNew {
+			if l2ChainConfig.ContractName == "" {
+			}
+			if l2ChainConfig.DeploymentScriptPath == "" {
+			}
 			script := fmt.Sprintf(
 				`cd crossTrade && PRIVATE_KEY=%s CHAIN_ID=%d NATIVE_TOKEN=%s L2_CROSS_DOMAIN_MESSENGER=%s L1_CROSS_TRADE=%s forge script %s/%s --rpc-url %s --broadcast`,
 				l2ChainConfig.PrivateKey,
@@ -221,8 +270,20 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 			}
 		} else {
 			if input.Mode == constants.CrossTradeDeployModeL2ToL1 {
-				l1l2CrossTradeProxyAddresses[l2ChainConfig.ChainID] = l2ChainConfig.CrossTradeProxyAddress
-				l1l2CrossTradeAddresses[l2ChainConfig.ChainID] = l2ChainConfig.CrossTradeAddress
+				// Get L1 cross trade proxy and address from the output
+				output := t.deployConfig.CrossTrade[input.Mode].Output.DeployCrossTradeContractsOutput
+				if output == nil {
+					return nil, fmt.Errorf("output is not set. Please run the deploy command first")
+				}
+				if output.L2CrossTradeProxyAddresses[l2ChainConfig.ChainID] == "" {
+					return nil, fmt.Errorf("l2 cross trade proxy address is required")
+				}
+				if output.L2CrossTradeAddresses[l2ChainConfig.ChainID] == "" {
+					return nil, fmt.Errorf("l2 cross trade address is required")
+				}
+
+				l1l2CrossTradeProxyAddresses[l2ChainConfig.ChainID] = output.L2CrossTradeProxyAddresses[l2ChainConfig.ChainID]
+				l1l2CrossTradeAddresses[l2ChainConfig.ChainID] = output.L2CrossTradeAddresses[l2ChainConfig.ChainID]
 			} else {
 				l2l2CrossTradeProxyAddresses[l2ChainConfig.ChainID] = l2ChainConfig.CrossTradeProxyAddress
 				l2l2CrossTradeAddresses[l2ChainConfig.ChainID] = l2ChainConfig.CrossTradeAddress
@@ -372,14 +433,15 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 	}
 	t.logger.Infof("Saved the cross-trade inputs to the setting file: %s", t.deploymentPath)
 
-	deployCrossTradeApplicationOutput, err := t.DeployCrossTradeApplication(ctx, input.Mode)
+	_, err = t.DeployCrossTradeApplication(ctx, input.Mode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to deploy cross trade application: %s", err)
 	}
 
 	return &types.DeployCrossTradeOutput{
 		DeployCrossTradeContractsOutput:   t.deployConfig.CrossTrade[input.Mode].Output.DeployCrossTradeContractsOutput,
-		DeployCrossTradeApplicationOutput: deployCrossTradeApplicationOutput,
+		DeployCrossTradeApplicationOutput: t.deployConfig.CrossTrade[input.Mode].Output.DeployCrossTradeApplicationOutput,
+		RegisterTokens:                    t.deployConfig.CrossTrade[input.Mode].RegisterTokens,
 	}, nil
 }
 
@@ -421,16 +483,58 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, mode cons
 
 	chainConfig := make(map[string]types.CrossTradeChainConfig)
 
-	l1Tokens := make(map[string]string)            // Token name -> Token address
-	l2Tokens := make(map[uint64]map[string]string) // Chain ID -> Token name -> Token address
+	l1Tokens := make([]*types.RegisterToken, 0)         // Token name -> Token address
+	l2Tokens := make(map[uint64][]*types.RegisterToken) // Chain ID -> Token name -> Token address
 	for _, tokenInput := range input.RegisterTokens {
-		l1Tokens[tokenInput.TokenName] = tokenInput.L1TokenAddress
+		registerL1Token := &types.RegisterToken{
+			Name:              tokenInput.TokenName,
+			Address:           tokenInput.L1TokenAddress,
+			DestinationChains: make([]uint64, 0),
+		}
+		if !slices.ContainsFunc(l1Tokens, func(token *types.RegisterToken) bool {
+			return token.Name == registerL1Token.Name && token.Address == registerL1Token.Address
+		}) {
+			l1Tokens = append(l1Tokens, registerL1Token)
+		}
 
 		for _, l2TokenInput := range tokenInput.L2TokenInputs {
 			if l2Tokens[l2TokenInput.ChainID] == nil {
-				l2Tokens[l2TokenInput.ChainID] = make(map[string]string)
+				l2Tokens[l2TokenInput.ChainID] = make([]*types.RegisterToken, 0)
 			}
-			l2Tokens[l2TokenInput.ChainID][tokenInput.TokenName] = l2TokenInput.TokenAddress
+
+			// Get other destination chains
+			destinationChains := make([]uint64, 0)
+			for _, otherL2TokenInput := range tokenInput.L2TokenInputs {
+				if otherL2TokenInput.ChainID != l2TokenInput.ChainID {
+					destinationChains = append(destinationChains, otherL2TokenInput.ChainID)
+				}
+			}
+
+			// Check if a token with the same name and address already exists
+			var existingToken *types.RegisterToken
+			for _, existing := range l2Tokens[l2TokenInput.ChainID] {
+				if existing.Name == tokenInput.TokenName && existing.Address == l2TokenInput.TokenAddress {
+					existingToken = existing
+					break
+				}
+			}
+
+			if existingToken != nil {
+				// Merge destination chains, avoiding duplicates
+				for _, chainID := range destinationChains {
+					if !slices.Contains(existingToken.DestinationChains, chainID) {
+						existingToken.DestinationChains = append(existingToken.DestinationChains, chainID)
+					}
+				}
+			} else {
+				// Create a new token entry
+				registerL2Token := &types.RegisterToken{
+					Name:              tokenInput.TokenName,
+					Address:           l2TokenInput.TokenAddress,
+					DestinationChains: destinationChains,
+				}
+				l2Tokens[l2TokenInput.ChainID] = append(l2Tokens[l2TokenInput.ChainID], registerL2Token)
+			}
 		}
 	}
 
@@ -519,6 +623,7 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, mode cons
 		t.logger.Error("Error writing file", "err", err)
 		return nil, nil
 	}
+
 	helmReleaseName := "cross-trade"
 
 	releases, err := utils.FilterHelmReleases(ctx, namespace, helmReleaseName)
@@ -563,9 +668,17 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, mode cons
 	}
 	t.logger.Infof("✅ Cross trade component is up and running. You can access it at: %s", bridgeUrl)
 
-	return &types.DeployCrossTradeApplicationOutput{
+	output := &types.DeployCrossTradeApplicationOutput{
 		URL: bridgeUrl,
-	}, nil
+	}
+	t.deployConfig.CrossTrade[mode].Output.DeployCrossTradeApplicationOutput = output
+	err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
+	if err != nil {
+		t.logger.Error("Error saving configuration file", "err", err)
+		return nil, err
+	}
+
+	return output, nil
 }
 
 func (t *ThanosStack) UninstallCrossTrade(ctx context.Context, mode constants.CrossTradeDeployMode) error {
@@ -610,11 +723,45 @@ func (t *ThanosStack) UninstallCrossTrade(ctx context.Context, mode constants.Cr
 func (t *ThanosStack) RegisterNewTokensOnExistingCrossTrade(
 	ctx context.Context, mode constants.CrossTradeDeployMode,
 	inputs []*types.RegisterTokenInput,
-) error {
+) (*types.DeployCrossTradeOutput, error) {
 	crossTradeInput := t.deployConfig.CrossTrade[mode]
 	if crossTradeInput == nil {
-		return fmt.Errorf("cross trade input is not set. Please run the deploy command first")
+		return nil, fmt.Errorf("cross trade input is not set. Please run the deploy command first")
 	}
+	err := os.Chdir(t.deploymentPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to change directory to deployment path: %w", err)
+	}
+
+	l2ChainConfigs := make(map[uint64]*types.L2CrossTradeChainInput)
+	for _, l2ChainConfig := range crossTradeInput.L2ChainConfig {
+		l2ChainConfigs[l2ChainConfig.ChainID] = l2ChainConfig
+	}
+	// Fill out the missing fields in the input
+	for _, tokenInput := range inputs {
+		for _, l2TokenInput := range tokenInput.L2TokenInputs {
+			chainID := l2TokenInput.ChainID
+			l2ChainConfig, ok := l2ChainConfigs[chainID]
+			if !ok {
+				return nil, fmt.Errorf("l2 chain config is not set for chain ID: %d", chainID)
+			}
+
+			if l2TokenInput.L1L2CrossTradeProxyAddress == "" && mode == constants.CrossTradeDeployModeL2ToL1 {
+				l2TokenInput.L1L2CrossTradeProxyAddress = crossTradeInput.Output.DeployCrossTradeContractsOutput.L2CrossTradeProxyAddresses[chainID]
+			} else if l2TokenInput.L2L2CrossTradeProxyAddress == "" && mode == constants.CrossTradeDeployModeL2ToL2 {
+				l2TokenInput.L2L2CrossTradeProxyAddress = crossTradeInput.Output.DeployCrossTradeContractsOutput.L2CrossTradeProxyAddresses[chainID]
+			}
+
+			if l2TokenInput.RPC == "" {
+				l2TokenInput.RPC = l2ChainConfig.RPC
+			}
+
+			if l2TokenInput.PrivateKey == "" {
+				l2TokenInput.PrivateKey = l2ChainConfig.PrivateKey
+			}
+		}
+	}
+
 	switch mode {
 	case constants.CrossTradeDeployModeL2ToL1:
 		t.logger.Infof("Registering new tokens on existing cross-trade contracts for L2 to L1")
@@ -635,7 +782,7 @@ func (t *ThanosStack) RegisterNewTokensOnExistingCrossTrade(
 				t.logger.Infof("Registering token %s on L1 %s", l2TokenAddress, script)
 				err := utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", script)
 				if err != nil {
-					return fmt.Errorf("failed to deploy the contracts: %s", err)
+					return nil, fmt.Errorf("failed to deploy the contracts: %s", err)
 
 				}
 			}
@@ -672,7 +819,7 @@ func (t *ThanosStack) RegisterNewTokensOnExistingCrossTrade(
 					t.logger.Infof("Registering token %s on L2 %s", l2TokenAddress, script)
 					err := utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", script)
 					if err != nil {
-						return fmt.Errorf("failed to register token on L2: %s", err)
+						return nil, fmt.Errorf("failed to register token on L2: %s", err)
 					}
 				}
 			}
@@ -685,21 +832,34 @@ func (t *ThanosStack) RegisterNewTokensOnExistingCrossTrade(
 		t.deployConfig.CrossTrade[mode].RegisterTokens = append(t.deployConfig.CrossTrade[mode].RegisterTokens, inputs...)
 	}
 
-	err := t.deployConfig.WriteToJSONFile(t.deploymentPath)
+	err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
 	if err != nil {
-		return fmt.Errorf("failed to save the inputs to the setting file: %s", err)
+		return nil, fmt.Errorf("failed to save the inputs to the setting file: %s", err)
 	}
 	t.logger.Infof("Saved the cross-trade inputs to the setting file: %s", t.deploymentPath)
 
 	contracts := t.deployConfig.CrossTrade[mode].Output.DeployCrossTradeContractsOutput
 	if contracts == nil {
-		return fmt.Errorf("contracts are not set. Please run the deploy command first")
+		return nil, fmt.Errorf("contracts are not set. Please run the deploy command first")
 	}
 
 	_, err = t.DeployCrossTradeApplication(ctx, mode)
 	if err != nil {
-		return fmt.Errorf("failed to deploy cross trade application: %s", err)
+		return nil, fmt.Errorf("failed to deploy cross trade application: %s", err)
 	}
 
-	return nil
+	return &types.DeployCrossTradeOutput{
+		DeployCrossTradeContractsOutput:   t.deployConfig.CrossTrade[mode].Output.DeployCrossTradeContractsOutput,
+		DeployCrossTradeApplicationOutput: t.deployConfig.CrossTrade[mode].Output.DeployCrossTradeApplicationOutput,
+		RegisterTokens:                    t.deployConfig.CrossTrade[mode].RegisterTokens,
+	}, nil
+}
+
+func (t *ThanosStack) GetCrossTradeConfiguration(ctx context.Context, mode constants.CrossTradeDeployMode) (*types.CrossTrade, error) {
+	crossTradeInput := t.deployConfig.CrossTrade[mode]
+	if crossTradeInput == nil {
+		return nil, fmt.Errorf("cross trade input is not set. Please run the deploy command first")
+	}
+
+	return crossTradeInput, nil
 }
