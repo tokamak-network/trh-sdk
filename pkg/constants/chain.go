@@ -103,6 +103,8 @@ const (
 	OptimismChainID        = 11155420
 	BaseSepoliaChainID     = 84532
 	BaseChainID            = 8453
+	UnichainSepoliaChainID = 1301
+	UnichainChainID        = 130
 )
 
 var L2ChainConfigurations = map[uint64]struct {

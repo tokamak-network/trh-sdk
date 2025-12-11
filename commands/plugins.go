@@ -225,7 +225,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 								if err != nil {
 									return err
 								}
-								err = thanosStack.RegisterNewTokensOnExistingCrossTrade(
+								_, err = thanosStack.RegisterNewTokensOnExistingCrossTrade(
 									ctx,
 									constants.CrossTradeDeployMode(crossTradeType),
 									registerTokenInputs,
@@ -242,14 +242,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 								return err
 							}
 
-							// Clear the cross trade config before deploying the cross trade plugin from scratch
-							config.CrossTrade = nil
-							err = config.WriteToJSONFile(deploymentPath)
-							if err != nil {
-								return err
-							}
-
-							_, err = thanosStack.DeployCrossTrade(ctx, inputs)
+							_, err = thanosStack.DeployCrossTradeContracts(ctx, inputs, true)
 							if err != nil {
 								return err
 							}

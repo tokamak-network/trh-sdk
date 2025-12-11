@@ -287,7 +287,7 @@ func GetL1ContractAddressesFromPrompt(chainID uint64) (*types.L1ContractAddressC
 	var l1CrossDomainMessenger string
 	var err error
 
-	l1ContractAddress, exist := constants.L1ContractAddresses[chainID]
+	l1ContractAddress, exist := constants.DefaultContractAddresses[chainID]
 	if exist {
 		return &types.L1ContractAddressConfig{
 			NativeTokenAddress:            l1ContractAddress.NativeTokenAddress,
@@ -377,6 +377,34 @@ func GetL1ContractAddressesFromPrompt(chainID uint64) (*types.L1ContractAddressC
 		L1USDCBridgeAddress:           l1USDCBridgeAddress,
 		L1CrossDomainMessengerAddress: l1CrossDomainMessenger,
 	}, nil
+}
+
+func GetL1L2ContractFileName(mode constants.CrossTradeDeployMode) (string, string, error) {
+	var l1ContractFileName, l2ContractFileName string
+	switch mode {
+	case constants.CrossTradeDeployModeL2ToL1:
+		l1ContractFileName = DeployL1CrossTradeL2L1
+		l2ContractFileName = DeployL2CrossTradeL2L1
+	case constants.CrossTradeDeployModeL2ToL2:
+		l1ContractFileName = DeployL1CrossTradeL2L2
+		l2ContractFileName = DeployL2CrossTradeL2L2
+	default:
+		return "", "", fmt.Errorf("invalid cross trade deploy mode: %s", mode)
+	}
+	return l1ContractFileName, l2ContractFileName, nil
+}
+
+func GetDeploymentScriptPath(mode constants.CrossTradeDeployMode) (string, error) {
+	var deploymentScriptPath string
+	switch mode {
+	case constants.CrossTradeDeployModeL2ToL1:
+		deploymentScriptPath = L1L2ScriptPath
+	case constants.CrossTradeDeployModeL2ToL2:
+		deploymentScriptPath = L2L2ScriptPath
+	default:
+		return "", fmt.Errorf("invalid cross trade deploy mode: %s", mode)
+	}
+	return deploymentScriptPath, nil
 }
 
 func GetCrossTradeContractsInputs(
