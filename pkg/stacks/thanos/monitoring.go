@@ -18,6 +18,7 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 // Constants for Thanos Stack components
@@ -287,12 +288,12 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 		logger.Warnw("Failed to cleanup RBAC resources", "err", err)
 	}
 
-	// Clean up Grafana database and PVs BEFORE helm uninstall
+	// Clean up Grafana database BEFORE helm uninstall
 	// This must run before helm deletes the Grafana pod, because we need the pod
 	// to execute commands inside it to delete the database files from EFS
-	logger.Info("Cleaning up Grafana database and PersistentVolumes")
-	if err := t.cleanupGrafanaPVs(ctx); err != nil {
-		logger.Warnw("Failed to cleanup Grafana database and PVs", "err", err)
+	logger.Info("Cleaning up Grafana database files")
+	if err := t.cleanupGrafanaDatabaseFiles(ctx); err != nil {
+		logger.Warnw("Failed to cleanup Grafana database files", "err", err)
 		// Don't fail the uninstall if cleanup fails
 	}
 
@@ -958,12 +959,6 @@ func (t *ThanosStack) generatePrometheusStorageSpec(config *types.MonitoringConf
 func (t *ThanosStack) generateGrafanaStorageConfig(config *types.MonitoringConfig) map[string]interface{} {
 	grafanaConfig := map[string]interface{}{
 		"adminPassword": config.AdminPassword,
-		// Disable brute force protection for development environment
-		"grafana.ini": map[string]interface{}{
-			"security": map[string]interface{}{
-				"disable_brute_force_login_protection": true, // Disabled for easier development/testing
-			},
-		},
 	}
 
 	if config.EnablePersistence {
@@ -1090,6 +1085,8 @@ func (t *ThanosStack) getEFSFileSystemId(ctx context.Context, chainName string) 
 
 // deployMonitoringInfrastructure creates PVs for Static Provisioning
 func (t *ThanosStack) deployMonitoringInfrastructure(ctx context.Context, config *types.MonitoringConfig) error {
+	logger := t.getLogger()
+
 	if err := t.ensureNamespaceExists(ctx, config.Namespace); err != nil {
 		return fmt.Errorf("failed to ensure namespace exists: %w", err)
 	}
@@ -1099,8 +1096,20 @@ func (t *ThanosStack) deployMonitoringInfrastructure(ctx context.Context, config
 		return fmt.Errorf("failed to cleanup existing monitoring storage: %w", err)
 	}
 
-	// Wait a moment for PV deletion to complete
-	time.Sleep(2 * time.Second)
+	// Wait for PV deletion to complete with polling
+	logger.Info("Waiting for Grafana PV deletion to complete")
+	err := wait.PollImmediate(500*time.Millisecond, 30*time.Second, func() (bool, error) {
+		// Check if Grafana PVs still exist
+		output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pv", "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
+		if err != nil {
+			return false, nil // Continue polling on error
+		}
+		// Check if any Grafana PV still exists
+		return !strings.Contains(output, "grafana"), nil
+	})
+	if err != nil {
+		logger.Warnw("Timeout waiting for Grafana PV deletion, continuing anyway", "error", err)
+	}
 
 	// Create Prometheus PV and PVC with fixed naming (no timestamp)
 	// This allows automatic reuse of existing PVs to preserve monitoring history
@@ -1137,49 +1146,62 @@ func (t *ThanosStack) deployMonitoringInfrastructure(ctx context.Context, config
 func (t *ThanosStack) cleanupExistingMonitoringStorage(ctx context.Context, config *types.MonitoringConfig) error {
 	logger := t.getLogger()
 
-	// First, delete Grafana PVCs to unbind their PVs
-	logger.Info("Cleaning up Grafana PVCs before PV cleanup")
+	// Get all PVCs once to reduce API calls
+	logger.Info("Fetching all PVCs in namespace")
 	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", "-n", config.Namespace, "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
-	if err == nil {
-		lines := strings.Split(strings.TrimSpace(output), "\n")
-		for _, line := range lines {
-			pvcName := strings.TrimSpace(line)
-			if pvcName == "" {
-				continue
-			}
-			// Delete Grafana PVCs (not Prometheus)
-			if strings.Contains(pvcName, "grafana") {
-				logger.Infow("Deleting Grafana PVC to unbind PV", "pvcName", pvcName)
-				_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "pvc", pvcName, "-n", config.Namespace, "--ignore-not-found=true")
-				if err != nil {
-					logger.Warnw("Failed to delete Grafana PVC", "pvcName", pvcName, "error", err)
-				}
-			}
-		}
-		// Wait for PVCs to be deleted and PVs to be released
-		time.Sleep(2 * time.Second)
-	}
-
-	// Clean up remaining non-Grafana PVCs
-	output, err = utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", "-n", config.Namespace, "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
 	if err != nil {
 		return fmt.Errorf("failed to get existing PVCs: %w", err)
 	}
 
 	lines := strings.Split(strings.TrimSpace(output), "\n")
-	deletedPVCs := 0
+	var grafanaPVCs, otherPVCs []string
 
+	// Separate Grafana PVCs from others
 	for _, line := range lines {
 		pvcName := strings.TrimSpace(line)
 		if pvcName == "" {
 			continue
 		}
-
-		// Skip Grafana PVCs (already deleted above)
 		if strings.Contains(pvcName, "grafana") {
-			continue
+			grafanaPVCs = append(grafanaPVCs, pvcName)
+		} else {
+			otherPVCs = append(otherPVCs, pvcName)
 		}
+	}
 
+	// First, delete Grafana PVCs to unbind their PVs
+	logger.Info("Cleaning up Grafana PVCs before PV cleanup")
+	for _, pvcName := range grafanaPVCs {
+		logger.Infow("Deleting Grafana PVC to unbind PV", "pvcName", pvcName)
+		_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "pvc", pvcName, "-n", config.Namespace, "--ignore-not-found=true")
+		if err != nil {
+			logger.Warnw("Failed to delete Grafana PVC", "pvcName", pvcName, "error", err)
+		}
+	}
+
+	// Wait for PVCs to be deleted and PVs to be released with polling
+	logger.Info("Waiting for Grafana PVC deletion to complete")
+	err = wait.PollImmediate(500*time.Millisecond, 30*time.Second, func() (bool, error) {
+		// Check if Grafana PVCs still exist
+		output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", "-n", config.Namespace, "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
+		if err != nil {
+			return false, nil // Continue polling on error
+		}
+		// Check if any Grafana PVC still exists
+		for _, pvcName := range grafanaPVCs {
+			if strings.Contains(output, pvcName) {
+				return false, nil // Still exists, continue polling
+			}
+		}
+		return true, nil // All deleted
+	})
+	if err != nil {
+		logger.Warnw("Timeout waiting for Grafana PVC deletion, continuing anyway", "error", err)
+	}
+
+	// Clean up remaining non-Grafana PVCs
+	deletedPVCs := 0
+	for _, pvcName := range otherPVCs {
 		// Check if PVC is bound to a pod
 		boundOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", pvcName, "-n", config.Namespace, "-o", "jsonpath={.status.phase}")
 		if err == nil && strings.TrimSpace(boundOutput) == "Bound" {
@@ -1240,8 +1262,10 @@ func (t *ThanosStack) cleanupExistingMonitoringStorage(ctx context.Context, conf
 	return nil
 }
 
-// cleanupGrafanaPVs deletes Grafana database files to prevent password reuse
-func (t *ThanosStack) cleanupGrafanaPVs(ctx context.Context) error {
+// cleanupGrafanaDatabaseFiles deletes Grafana database files to prevent password reuse
+// This function should be called before uninstalling the monitoring stack to ensure
+// the Grafana pod is still running when we try to delete the database files
+func (t *ThanosStack) cleanupGrafanaDatabaseFiles(ctx context.Context) error {
 	logger := t.getLogger()
 
 	// Delete Grafana database files from the running pod
@@ -1273,8 +1297,7 @@ func (t *ThanosStack) deleteGrafanaDatabase(ctx context.Context) error {
 	// Delete DB files directly from running Grafana pod (without shell, just rm command)
 	_, err = utils.ExecuteCommand(ctx, "kubectl", "exec", "-n", constants.MonitoringNamespace, podName, "-c", "grafana", "--", "rm", "-f", "/var/lib/grafana/grafana.db", "/var/lib/grafana/grafana.db-shm", "/var/lib/grafana/grafana.db-wal")
 	if err != nil {
-		logger.Warnw("Failed to delete DB files from running pod", "error", err)
-		return nil // Don't fail uninstall if DB cleanup fails
+		return fmt.Errorf("failed to delete DB files from pod %s: %w", podName, err)
 	}
 
 	logger.Info("✅ Successfully deleted Grafana database files")
