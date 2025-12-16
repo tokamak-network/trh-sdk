@@ -296,6 +296,13 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 		}
 	}
 
+	// Clean up Grafana PVs to prevent password mismatch on reinstall
+	logger.Info("Cleaning up Grafana PersistentVolumes")
+	if err := t.cleanupGrafanaPVs(ctx); err != nil {
+		logger.Warnw("Failed to cleanup Grafana PVs", "err", err)
+		// Don't fail the uninstall if PV cleanup fails
+	}
+
 	// Delete monitoring namespace with timeout and forced cleanup
 	logger.Infow("Deleting monitoring namespace", "namespace", monitoringNamespace)
 	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Minute)
@@ -1113,9 +1120,36 @@ func (t *ThanosStack) deployMonitoringInfrastructure(ctx context.Context, config
 }
 
 // cleanupExistingMonitoringStorage removes existing monitoring PVs and PVCs
+// Grafana PVs are deleted completely to prevent password mismatch on reinstall
+// Prometheus PVs are patched to allow reuse and preserve monitoring history
 func (t *ThanosStack) cleanupExistingMonitoringStorage(ctx context.Context, config *types.MonitoringConfig) error {
-	// Get existing monitoring PVCs
+	logger := t.getLogger()
+
+	// First, delete Grafana PVCs to unbind their PVs
+	logger.Info("Cleaning up Grafana PVCs before PV cleanup")
 	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", "-n", config.Namespace, "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
+	if err == nil {
+		lines := strings.Split(strings.TrimSpace(output), "\n")
+		for _, line := range lines {
+			pvcName := strings.TrimSpace(line)
+			if pvcName == "" {
+				continue
+			}
+			// Delete Grafana PVCs (not Prometheus)
+			if strings.Contains(pvcName, "grafana") {
+				logger.Infow("Deleting Grafana PVC to unbind PV", "pvcName", pvcName)
+				_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "pvc", pvcName, "-n", config.Namespace, "--ignore-not-found=true")
+				if err != nil {
+					logger.Warnw("Failed to delete Grafana PVC", "pvcName", pvcName, "error", err)
+				}
+			}
+		}
+		// Wait for PVCs to be deleted and PVs to be released
+		time.Sleep(2 * time.Second)
+	}
+
+	// Clean up remaining non-Grafana PVCs
+	output, err = utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", "-n", config.Namespace, "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
 	if err != nil {
 		return fmt.Errorf("failed to get existing PVCs: %w", err)
 	}
@@ -1126,6 +1160,11 @@ func (t *ThanosStack) cleanupExistingMonitoringStorage(ctx context.Context, conf
 	for _, line := range lines {
 		pvcName := strings.TrimSpace(line)
 		if pvcName == "" {
+			continue
+		}
+
+		// Skip Grafana PVCs (already deleted above)
+		if strings.Contains(pvcName, "grafana") {
 			continue
 		}
 
@@ -1164,14 +1203,97 @@ func (t *ThanosStack) cleanupExistingMonitoringStorage(ctx context.Context, conf
 		pvName := parts[0]
 		status := parts[1]
 
-		// Only delete Released PVs (not Bound or Available)
-		if status == "Released" && (strings.Contains(pvName, "thanos-stack-grafana") || strings.Contains(pvName, "thanos-stack-prometheus")) {
-			// Remove claimRef to allow reuse
-			_, err = utils.ExecuteCommand(ctx, "kubectl", "patch", "pv", pvName, "-p", `{"spec":{"claimRef":null}}`, "--type=merge")
+		// Handle Grafana PVs: Delete completely to prevent password mismatch on reinstall
+		if strings.Contains(pvName, "thanos-stack-grafana") {
+			// Delete Grafana PV regardless of status (PVC already deleted above)
+			logger.Infow("Deleting Grafana PV to ensure clean reinstall", "pvName", pvName, "status", status)
+			_, err = utils.ExecuteCommand(ctx, "kubectl", "delete", "pv", pvName, "--ignore-not-found=true")
 			if err == nil {
 				deletedPVs++
+				logger.Infow("Successfully deleted Grafana PV", "pvName", pvName)
+			} else {
+				logger.Warnw("Failed to delete Grafana PV", "pvName", pvName, "error", err)
+			}
+		} else if strings.Contains(pvName, "thanos-stack-prometheus") {
+			// Handle Prometheus PVs: Patch to allow reuse (preserve monitoring history)
+			if status == "Released" {
+				_, err = utils.ExecuteCommand(ctx, "kubectl", "patch", "pv", pvName, "-p", `{"spec":{"claimRef":null}}`, "--type=merge")
+				if err == nil {
+					deletedPVs++
+				}
 			}
 		}
+	}
+
+	return nil
+}
+
+// cleanupGrafanaPVs deletes all Grafana PersistentVolumes to ensure clean reinstall
+func (t *ThanosStack) cleanupGrafanaPVs(ctx context.Context) error {
+	logger := t.getLogger()
+
+	// First, delete Grafana PVCs to unbind the PVs
+	logger.Info("Deleting Grafana PVCs first to unbind PVs")
+	pvcOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", "-n", constants.MonitoringNamespace, "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
+	if err == nil {
+		pvcLines := strings.Split(strings.TrimSpace(pvcOutput), "\n")
+		for _, line := range pvcLines {
+			pvcName := strings.TrimSpace(line)
+			if pvcName == "" {
+				continue
+			}
+			// Delete Grafana PVCs
+			if strings.Contains(pvcName, "grafana") {
+				logger.Infow("Deleting Grafana PVC", "pvcName", pvcName)
+				_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "pvc", pvcName, "-n", constants.MonitoringNamespace, "--ignore-not-found=true")
+				if err != nil {
+					logger.Warnw("Failed to delete Grafana PVC", "pvcName", pvcName, "error", err)
+				}
+			}
+		}
+		// Wait a moment for PVCs to be deleted and PVs to be released
+		time.Sleep(2 * time.Second)
+	}
+
+	// Get all PVs with Grafana in the name
+	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pv", "--no-headers", "-o", "custom-columns=NAME:.metadata.name,STATUS:.status.phase")
+	if err != nil {
+		return fmt.Errorf("failed to get PVs: %w", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	deletedCount := 0
+
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+
+		pvName := parts[0]
+		status := parts[1]
+
+		// Delete any Grafana PV regardless of status (Released, Available, or Bound)
+		if strings.Contains(pvName, "thanos-stack-grafana") {
+			logger.Infow("Deleting Grafana PV", "pvName", pvName, "status", status)
+			_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "pv", pvName, "--ignore-not-found=true")
+			if err != nil {
+				logger.Warnw("Failed to delete Grafana PV", "pvName", pvName, "error", err)
+			} else {
+				deletedCount++
+				logger.Infow("Successfully deleted Grafana PV", "pvName", pvName)
+			}
+		}
+	}
+
+	if deletedCount > 0 {
+		logger.Infow("Grafana PV cleanup completed", "deleted", deletedCount)
+	} else {
+		logger.Info("No Grafana PVs found to cleanup")
 	}
 
 	return nil
@@ -1489,6 +1611,7 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *types.MonitoringC
 			"smtp_from":          config.AlertManager.Email.SmtpFrom,
 			"smtp_auth_username": config.AlertManager.Email.SmtpFrom,
 			"smtp_auth_password": config.AlertManager.Email.SmtpAuthPassword,
+			"smtp_require_tls":   true, // Required for Gmail and other secure SMTP servers
 		}
 	}
 
