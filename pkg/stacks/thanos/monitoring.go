@@ -51,6 +51,13 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *types.Monit
 		return nil, fmt.Errorf("failed to ensure monitoring namespace exists: %w", err)
 	}
 
+	// Check and cleanup old Grafana database before installation
+	logger.Info("Checking for old Grafana database files from previous installations")
+	if err := t.cleanupOldGrafanaDatabase(ctx); err != nil {
+		logger.Warnw("Failed to cleanup old Grafana database", "err", err)
+		// Continue installation even if cleanup fails
+	}
+
 	// Deploy infrastructure if persistence is enabled
 	if config.EnablePersistence {
 		logger.Info("Deploying monitoring infrastructure (persistence enabled)")
@@ -278,6 +285,15 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 	logger.Info("Cleaning up RBAC resources")
 	if err := t.cleanupRBACResources(ctx); err != nil {
 		logger.Warnw("Failed to cleanup RBAC resources", "err", err)
+	}
+
+	// Clean up Grafana database BEFORE helm uninstall
+	// This must run before helm deletes the Grafana pod, because we need the pod
+	// to execute commands inside it to delete the database files from EFS
+	logger.Info("Cleaning up Grafana database files")
+	if err := t.cleanupGrafanaDatabaseFiles(ctx); err != nil {
+		logger.Warnw("Failed to cleanup Grafana database files", "err", err)
+		// Don't fail the uninstall if cleanup fails
 	}
 
 	releases, err := utils.FilterHelmReleases(ctx, monitoringNamespace, constants.MonitoringNamespace)
@@ -909,11 +925,8 @@ func (t *ThanosStack) generatePrometheusStorageSpec(config *types.MonitoringConf
 		return map[string]interface{}{}
 	}
 
-	timestamp, err := t.getTimestampFromExistingPV(context.Background(), config.ChainName)
-	if err != nil {
-		timestamp = "static"
-	}
-	pvName := fmt.Sprintf("%s-%s-thanos-stack-prometheus", config.ChainName, timestamp)
+	// Use fixed PV name without timestamp for automatic reuse
+	pvName := fmt.Sprintf("%s-thanos-stack-prometheus", config.ChainName)
 
 	return map[string]interface{}{
 		"volumeClaimTemplate": map[string]interface{}{
@@ -1080,30 +1093,30 @@ func (t *ThanosStack) deployMonitoringInfrastructure(ctx context.Context, config
 		return fmt.Errorf("failed to cleanup existing monitoring storage: %w", err)
 	}
 
-	timestamp, err := t.getTimestampFromExistingPV(ctx, config.ChainName)
-	if err != nil {
-		return fmt.Errorf("failed to get timestamp from existing PV: %w", err)
-	}
+	// Wait a moment for PV deletion to complete
+	time.Sleep(2 * time.Second)
 
-	// Create Prometheus PV and PVC
-	prometheusPV := t.generateStaticPVManifest("prometheus", config, "20Gi", timestamp)
+	// Create Prometheus PV and PVC with fixed naming (no timestamp)
+	// This allows automatic reuse of existing PVs to preserve monitoring history
+	prometheusPV := t.generateStaticPVManifest("prometheus", config, "20Gi")
 	if err := t.applyPVManifest(ctx, "prometheus", prometheusPV); err != nil {
 		return fmt.Errorf("failed to create Prometheus PV: %w", err)
 	}
 
-	prometheusPVC := t.generateStaticPVCManifest("prometheus", config, "20Gi", timestamp)
+	prometheusPVC := t.generateStaticPVCManifest("prometheus", config, "20Gi")
 	if err := t.applyPVCManifest(ctx, "prometheus", prometheusPVC); err != nil {
 		return fmt.Errorf("failed to create Prometheus PVC: %w", err)
 	}
 	fmt.Println("✅ Created Prometheus PV and PVC")
 
-	// Create Grafana PV and PVC
-	grafanaPV := t.generateStaticPVManifest("grafana", config, "10Gi", timestamp)
+	// Create Grafana PV and PVC with fixed naming (no timestamp)
+	// Database files are cleaned up separately during uninstall to prevent password mismatch
+	grafanaPV := t.generateStaticPVManifest("grafana", config, "10Gi")
 	if err := t.applyPVManifest(ctx, "grafana", grafanaPV); err != nil {
 		return fmt.Errorf("failed to create Grafana PV: %w", err)
 	}
 
-	grafanaPVC := t.generateStaticPVCManifest("grafana", config, "10Gi", timestamp)
+	grafanaPVC := t.generateStaticPVCManifest("grafana", config, "10Gi")
 	if err := t.applyPVCManifest(ctx, "grafana", grafanaPVC); err != nil {
 		return fmt.Errorf("failed to create Grafana PVC: %w", err)
 	}
@@ -1113,22 +1126,50 @@ func (t *ThanosStack) deployMonitoringInfrastructure(ctx context.Context, config
 }
 
 // cleanupExistingMonitoringStorage removes existing monitoring PVs and PVCs
+// Grafana PVs are deleted completely to prevent password mismatch on reinstall
+// Prometheus PVs are patched to allow reuse and preserve monitoring history
 func (t *ThanosStack) cleanupExistingMonitoringStorage(ctx context.Context, config *types.MonitoringConfig) error {
-	// Get existing monitoring PVCs
+	logger := t.getLogger()
+
+	// Get all PVCs once to reduce API calls
+	logger.Info("Fetching all PVCs in namespace")
 	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", "-n", config.Namespace, "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
 	if err != nil {
 		return fmt.Errorf("failed to get existing PVCs: %w", err)
 	}
 
 	lines := strings.Split(strings.TrimSpace(output), "\n")
-	deletedPVCs := 0
+	var grafanaPVCs, otherPVCs []string
 
+	// Separate Grafana PVCs from others
 	for _, line := range lines {
 		pvcName := strings.TrimSpace(line)
 		if pvcName == "" {
 			continue
 		}
+		if strings.Contains(pvcName, "grafana") {
+			grafanaPVCs = append(grafanaPVCs, pvcName)
+		} else {
+			otherPVCs = append(otherPVCs, pvcName)
+		}
+	}
 
+	// First, delete Grafana PVCs to unbind their PVs
+	logger.Info("Cleaning up Grafana PVCs before PV cleanup")
+	for _, pvcName := range grafanaPVCs {
+		logger.Infow("Deleting Grafana PVC to unbind PV", "pvcName", pvcName)
+		_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "pvc", pvcName, "-n", config.Namespace, "--ignore-not-found=true")
+		if err != nil {
+			logger.Warnw("Failed to delete Grafana PVC", "pvcName", pvcName, "error", err)
+		}
+	}
+
+	// Wait for PVCs to be deleted and PVs to be released
+	time.Sleep(2 * time.Second)
+
+	// Clean up remaining non-Grafana PVCs
+	deletedPVCs := 0
+	for _, pvcName := range otherPVCs {
 		// Check if PVC is bound to a pod
 		boundOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", pvcName, "-n", config.Namespace, "-o", "jsonpath={.status.phase}")
 		if err == nil && strings.TrimSpace(boundOutput) == "Bound" {
@@ -1164,16 +1205,98 @@ func (t *ThanosStack) cleanupExistingMonitoringStorage(ctx context.Context, conf
 		pvName := parts[0]
 		status := parts[1]
 
-		// Only delete Released PVs (not Bound or Available)
-		if status == "Released" && (strings.Contains(pvName, "thanos-stack-grafana") || strings.Contains(pvName, "thanos-stack-prometheus")) {
-			// Remove claimRef to allow reuse
-			_, err = utils.ExecuteCommand(ctx, "kubectl", "patch", "pv", pvName, "-p", `{"spec":{"claimRef":null}}`, "--type=merge")
+		// Handle Grafana PVs: Delete completely to prevent password mismatch on reinstall
+		if strings.Contains(pvName, "thanos-stack-grafana") {
+			// Delete Grafana PV regardless of status (PVC already deleted above)
+			logger.Infow("Deleting Grafana PV to ensure clean reinstall", "pvName", pvName, "status", status)
+			_, err = utils.ExecuteCommand(ctx, "kubectl", "delete", "pv", pvName, "--ignore-not-found=true")
 			if err == nil {
 				deletedPVs++
+				logger.Infow("Successfully deleted Grafana PV", "pvName", pvName)
+			} else {
+				logger.Warnw("Failed to delete Grafana PV", "pvName", pvName, "error", err)
+			}
+		} else if strings.Contains(pvName, "thanos-stack-prometheus") {
+			// Handle Prometheus PVs: Patch to allow reuse (preserve monitoring history)
+			if status == "Released" {
+				_, err = utils.ExecuteCommand(ctx, "kubectl", "patch", "pv", pvName, "-p", `{"spec":{"claimRef":null}}`, "--type=merge")
+				if err == nil {
+					deletedPVs++
+				}
 			}
 		}
 	}
 
+	return nil
+}
+
+// cleanupGrafanaDatabaseFiles deletes Grafana database files to prevent password reuse
+// This function should be called before uninstalling the monitoring stack to ensure
+// the Grafana pod is still running when we try to delete the database files
+func (t *ThanosStack) cleanupGrafanaDatabaseFiles(ctx context.Context) error {
+	logger := t.getLogger()
+
+	// Delete Grafana database files from the running pod
+	logger.Info("Cleaning up Grafana database files")
+	if err := t.deleteGrafanaDatabase(ctx); err != nil {
+		logger.Warnw("Failed to delete Grafana database", "error", err)
+		return err
+	}
+
+	logger.Info("✅ Grafana database cleanup completed")
+	return nil
+}
+
+// deleteGrafanaDatabase deletes the Grafana SQLite database from running Grafana pod
+// This is called during uninstall to prevent password reuse on next installation
+func (t *ThanosStack) deleteGrafanaDatabase(ctx context.Context) error {
+	logger := t.getLogger()
+
+	// Find running Grafana pod
+	podOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pod", "-n", constants.MonitoringNamespace, "-l", "app.kubernetes.io/name=grafana", "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
+	if err != nil || strings.TrimSpace(podOutput) == "" {
+		logger.Info("No running Grafana pod found, skipping database cleanup")
+		return nil
+	}
+
+	podName := strings.TrimSpace(strings.Split(podOutput, "\n")[0])
+	logger.Infow("Found running Grafana pod, deleting DB files", "podName", podName)
+
+	// Delete DB files directly from running Grafana pod (without shell, just rm command)
+	_, err = utils.ExecuteCommand(ctx, "kubectl", "exec", "-n", constants.MonitoringNamespace, podName, "-c", "grafana", "--", "rm", "-f", "/var/lib/grafana/grafana.db", "/var/lib/grafana/grafana.db-shm", "/var/lib/grafana/grafana.db-wal")
+	if err != nil {
+		return fmt.Errorf("failed to delete DB files from pod %s: %w", podName, err)
+	}
+
+	logger.Info("✅ Successfully deleted Grafana database files")
+	return nil
+}
+
+// cleanupOldGrafanaDatabase checks for existing Grafana pod and cleans up old database
+// This is called during install to ensure a fresh database is created with the new password
+func (t *ThanosStack) cleanupOldGrafanaDatabase(ctx context.Context) error {
+	logger := t.getLogger()
+
+	// Check if there's an existing Grafana pod from a previous installation
+	podOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pod", "-n", constants.MonitoringNamespace, "-l", "app.kubernetes.io/name=grafana", "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
+	if err != nil || strings.TrimSpace(podOutput) == "" {
+		logger.Info("No existing Grafana pod found, skipping database cleanup")
+		return nil
+	}
+
+	podName := strings.TrimSpace(strings.Split(podOutput, "\n")[0])
+	logger.Infow("Found existing Grafana pod from previous installation", "podName", podName)
+
+	// Delete old database files from the existing pod
+	logger.Info("Deleting old Grafana database files...")
+	_, err = utils.ExecuteCommand(ctx, "kubectl", "exec", "-n", constants.MonitoringNamespace, podName, "-c", "grafana", "--", "rm", "-f", "/var/lib/grafana/grafana.db", "/var/lib/grafana/grafana.db-shm", "/var/lib/grafana/grafana.db-wal")
+	if err != nil {
+		logger.Warnw("Failed to delete old database files", "error", err)
+		logger.Info("Continuing with installation anyway")
+		return nil
+	}
+
+	logger.Info("Old database files deleted successfully")
 	return nil
 }
 
@@ -1193,42 +1316,11 @@ func (t *ThanosStack) ensureNamespaceExists(ctx context.Context, namespace strin
 	return nil
 }
 
-// getTimestampFromExistingPV extracts timestamp from existing monitoring PVs
-func (t *ThanosStack) getTimestampFromExistingPV(ctx context.Context, chainName string) (string, error) {
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pv", "-o", "custom-columns=NAME:.metadata.name", "--no-headers")
-	if err != nil {
-		return "", fmt.Errorf("failed to get PVs: %w", err)
-	}
+// generateStaticPVManifest generates PV manifest with fixed naming (no timestamp)
+func (t *ThanosStack) generateStaticPVManifest(component string, config *types.MonitoringConfig, size string) string {
+	pvName := fmt.Sprintf("%s-thanos-stack-%s", config.ChainName, component)
 
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	for _, line := range lines {
-		// Look for existing monitoring PVs (grafana or prometheus) that are Released
-		if strings.Contains(line, chainName) &&
-			(strings.Contains(line, "thanos-stack-grafana") || strings.Contains(line, "thanos-stack-prometheus")) {
-			// Extract timestamp from PV
-			parts := strings.Split(line, "-")
-			if len(parts) >= 2 {
-				return parts[1], nil
-			}
-		}
-	}
-
-	// Fallback to op-geth PV if no monitoring PVs found
-	for _, line := range lines {
-		if strings.Contains(line, chainName) && strings.Contains(line, "thanos-stack-op-geth") {
-			parts := strings.Split(line, "-")
-			if len(parts) >= 2 {
-				return parts[1], nil
-			}
-		}
-	}
-
-	return "", fmt.Errorf("could not find existing PV to extract timestamp")
-}
-
-// generateStaticPVManifest generates PV manifest
-func (t *ThanosStack) generateStaticPVManifest(component string, config *types.MonitoringConfig, size string, timestamp string) string {
-	pvName := fmt.Sprintf("%s-%s-thanos-stack-%s", config.ChainName, timestamp, component)
+	// All components use the same EFS filesystem ID as volumeHandle
 	volumeHandle := config.EFSFileSystemId
 
 	return fmt.Sprintf(`apiVersion: v1
@@ -1267,10 +1359,10 @@ func (t *ThanosStack) applyPVManifest(ctx context.Context, component string, man
 	return nil
 }
 
-// generateStaticPVCManifest generates PVC manifest
-func (t *ThanosStack) generateStaticPVCManifest(component string, config *types.MonitoringConfig, size string, timestamp string) string {
+// generateStaticPVCManifest generates PVC manifest with fixed naming (no timestamp)
+func (t *ThanosStack) generateStaticPVCManifest(component string, config *types.MonitoringConfig, size string) string {
 	pvcName := fmt.Sprintf("%s-%s", config.HelmReleaseName, component)
-	pvName := fmt.Sprintf("%s-%s-thanos-stack-%s", config.ChainName, timestamp, component)
+	pvName := fmt.Sprintf("%s-thanos-stack-%s", config.ChainName, component)
 
 	return fmt.Sprintf(`apiVersion: v1
 kind: PersistentVolumeClaim
@@ -1489,6 +1581,7 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *types.MonitoringC
 			"smtp_from":          config.AlertManager.Email.SmtpFrom,
 			"smtp_auth_username": config.AlertManager.Email.SmtpFrom,
 			"smtp_auth_password": config.AlertManager.Email.SmtpAuthPassword,
+			"smtp_require_tls":   true, // Required for Gmail and other secure SMTP servers
 		}
 	}
 
