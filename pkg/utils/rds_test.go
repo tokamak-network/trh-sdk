@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func Test_IsValidateRDSPassword(t *testing.T) {
+func TestIsValidRDSPassword(t *testing.T) {
 	tests := []struct {
 		name     string
 		password string
