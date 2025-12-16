@@ -18,7 +18,6 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
-	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 // Constants for Thanos Stack components
@@ -1085,8 +1084,6 @@ func (t *ThanosStack) getEFSFileSystemId(ctx context.Context, chainName string) 
 
 // deployMonitoringInfrastructure creates PVs for Static Provisioning
 func (t *ThanosStack) deployMonitoringInfrastructure(ctx context.Context, config *types.MonitoringConfig) error {
-	logger := t.getLogger()
-
 	if err := t.ensureNamespaceExists(ctx, config.Namespace); err != nil {
 		return fmt.Errorf("failed to ensure namespace exists: %w", err)
 	}
@@ -1096,20 +1093,8 @@ func (t *ThanosStack) deployMonitoringInfrastructure(ctx context.Context, config
 		return fmt.Errorf("failed to cleanup existing monitoring storage: %w", err)
 	}
 
-	// Wait for PV deletion to complete with polling
-	logger.Info("Waiting for Grafana PV deletion to complete")
-	err := wait.PollImmediate(500*time.Millisecond, 30*time.Second, func() (bool, error) {
-		// Check if Grafana PVs still exist
-		output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pv", "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
-		if err != nil {
-			return false, nil // Continue polling on error
-		}
-		// Check if any Grafana PV still exists
-		return !strings.Contains(output, "grafana"), nil
-	})
-	if err != nil {
-		logger.Warnw("Timeout waiting for Grafana PV deletion, continuing anyway", "error", err)
-	}
+	// Wait a moment for PV deletion to complete
+	time.Sleep(2 * time.Second)
 
 	// Create Prometheus PV and PVC with fixed naming (no timestamp)
 	// This allows automatic reuse of existing PVs to preserve monitoring history
@@ -1179,25 +1164,8 @@ func (t *ThanosStack) cleanupExistingMonitoringStorage(ctx context.Context, conf
 		}
 	}
 
-	// Wait for PVCs to be deleted and PVs to be released with polling
-	logger.Info("Waiting for Grafana PVC deletion to complete")
-	err = wait.PollImmediate(500*time.Millisecond, 30*time.Second, func() (bool, error) {
-		// Check if Grafana PVCs still exist
-		output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", "-n", config.Namespace, "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
-		if err != nil {
-			return false, nil // Continue polling on error
-		}
-		// Check if any Grafana PVC still exists
-		for _, pvcName := range grafanaPVCs {
-			if strings.Contains(output, pvcName) {
-				return false, nil // Still exists, continue polling
-			}
-		}
-		return true, nil // All deleted
-	})
-	if err != nil {
-		logger.Warnw("Timeout waiting for Grafana PVC deletion, continuing anyway", "error", err)
-	}
+	// Wait for PVCs to be deleted and PVs to be released
+	time.Sleep(2 * time.Second)
 
 	// Clean up remaining non-Grafana PVCs
 	deletedPVCs := 0
