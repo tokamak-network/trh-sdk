@@ -87,6 +87,12 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 		// Continue even if monitoring uninstall fails, as monitoring may not exist
 	}
 
+	// Uninstall uptime-service if needed
+	err = t.UninstallUptimeService(ctx)
+	if err != nil {
+		t.logger.Warnf("Failed to uninstall uptime-service: %v. Continuing with destroy process.", err)
+	}
+
 	// Delete namespace before destroying the infrastructure
 	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
