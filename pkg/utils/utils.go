@@ -29,29 +29,21 @@ import (
 // Gmail app passwords that are displayed with spaces (e.g., "abcd efgh ijkl mnop")
 // but must be used without spaces (e.g., "abcdefghijklmnop")
 func CleanPasswordInput(password string) string {
-	// Remove special whitespace characters (NBSP, etc.)
-	password = strings.ReplaceAll(password, "\u00A0", "") // Remove NBSP
-	password = strings.ReplaceAll(password, "\u200B", "") // Remove zero-width space
-	password = strings.ReplaceAll(password, "\uFEFF", "") // Remove byte order mark
-
-	// Remove ALL whitespace characters (space, tab, newline, carriage return)
-	password = strings.ReplaceAll(password, " ", "")  // Remove regular spaces
-	password = strings.ReplaceAll(password, "\t", "") // Remove tabs
-	password = strings.ReplaceAll(password, "\n", "") // Remove newlines
-	password = strings.ReplaceAll(password, "\r", "") // Remove carriage returns
-
-	password = strings.TrimSpace(password) // Final trim (redundant but safe)
-
-	// Remove any control characters that might cause issues
-	// Note: Changed range from >= 32 to >= 33 to exclude space character (32)
-	var cleaned strings.Builder
-	for _, r := range password {
-		if r >= 33 && r <= 126 { // Printable ASCII excluding space (33-126)
-			cleaned.WriteRune(r)
+	// Use strings.Map for efficient single-pass filtering
+	// Remove whitespace and keep only printable ASCII characters (33-126)
+	return strings.Map(func(r rune) rune {
+		// Remove all whitespace characters
+		switch r {
+		case ' ', '\t', '\n', '\r', '\u00A0', '\u200B', '\uFEFF':
+			return -1
 		}
-	}
-
-	return cleaned.String()
+		// Keep only printable ASCII characters (excluding space and control chars)
+		if r >= 33 && r <= 126 {
+			return r
+		}
+		// Remove control characters and non-ASCII
+		return -1
+	}, password)
 }
 
 func WeiToEther(wei *big.Int) *big.Float {

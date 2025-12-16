@@ -479,6 +479,7 @@ func (a *AlertCustomization) UpdateEmailConfig(ctx context.Context, smtpServer, 
 	global["smtp_from"] = smtpFrom
 	global["smtp_auth_username"] = smtpUsername
 	global["smtp_auth_password"] = smtpPassword
+	global["smtp_require_tls"] = true // Required for Gmail and other secure SMTP servers
 
 	// Find or create the main receiver
 	receiversList, ok := config["receivers"].([]interface{})
@@ -794,6 +795,19 @@ func (a *AlertCustomization) applyAlertManagerConfig(ctx context.Context, config
 
 	if _, err := utils.ExecuteCommand(ctx, "kubectl", patchCmd...); err != nil {
 		return fmt.Errorf("failed to patch AlertManager config secret: %w", err)
+	}
+
+	// Restart AlertManager pod to apply the new configuration
+	// This ensures the updated config is loaded immediately without waiting for auto-reload
+	deleteCmd := []string{
+		"delete", "pod",
+		"-n", constants.MonitoringNamespace,
+		"-l", "app.kubernetes.io/name=alertmanager",
+		"--ignore-not-found=true",
+	}
+
+	if _, err := utils.ExecuteCommand(ctx, "kubectl", deleteCmd...); err != nil {
+		return fmt.Errorf("failed to restart AlertManager pod: %w", err)
 	}
 
 	return nil
