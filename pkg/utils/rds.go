@@ -1,11 +1,14 @@
 package utils
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
+
+var rdsUsernameRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{0,62}$`)
 
 func IsValidRDSUsername(username string) bool {
-	rdsUsernamePattern := `^[a-zA-Z][a-zA-Z0-9_]{0,62}$`
-	matched, _ := regexp.MatchString(rdsUsernamePattern, username)
-	return matched
+	return rdsUsernameRegex.MatchString(username)
 }
 
 // IsValidRDSPassword validates RDS password for PostgreSQL according to AWS requirements:
@@ -29,7 +32,7 @@ func IsValidRDSPassword(password string) bool {
 	}
 
 	// Forbidden characters for PostgreSQL: space, ", ', /, @
-	forbiddenChars := []rune{' ', '"', '\'', '/', '@'}
+	const forbiddenChars = " \"'/@"
 
 	// Validate each character
 	for _, char := range password {
@@ -39,10 +42,8 @@ func IsValidRDSPassword(password string) bool {
 		}
 
 		// Check if it's a forbidden character
-		for _, forbidden := range forbiddenChars {
-			if char == forbidden {
-				return false
-			}
+		if strings.ContainsRune(forbiddenChars, char) {
+			return false
 		}
 	}
 
