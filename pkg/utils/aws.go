@@ -22,18 +22,6 @@ func IsValidAWSSecretKey(secretKey string) bool {
 	return matched
 }
 
-func IsValidRDSUsername(username string) bool {
-	rdsUsernamePattern := `^[a-zA-Z][a-zA-Z0-9_]{0,62}$`
-	matched, _ := regexp.MatchString(rdsUsernamePattern, username)
-	return matched
-}
-
-func IsValidRDSPassword(password string) bool {
-	rdsPasswordPattern := `^[a-zA-Z0-9@\$#%&*\(\)_\+\-!]{8,128}$`
-	matched, _ := regexp.MatchString(rdsPasswordPattern, password)
-	return matched
-}
-
 func BucketExists(ctx context.Context, client *s3.Client, bucketName string) bool {
 	if bucketName == "" {
 		return false
