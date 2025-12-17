@@ -102,7 +102,7 @@ func (t *ThanosStack) destroyTerraform(ctx context.Context, path string) error {
 
 	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
 		"-c",
-		fmt.Sprintf(`cd %s && source ../.envrc && terraform destroy -auto-approve -parallelism=100`, path),
+		fmt.Sprintf(`cd %s && source ../.envrc && terraform destroy -auto-approve -parallelism=1`, path),
 	}...)
 	if err != nil {
 		t.logger.Error("Error running terraform destroy for", "path", path, "err", err)
