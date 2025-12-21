@@ -714,6 +714,14 @@ func (t *ThanosStack) UninstallCrossTrade(ctx context.Context, mode constants.Cr
 
 	t.logger.Info("✅ Uninstall a cross-trade component successfully!")
 
+	// Delete the cross trade config
+	t.deployConfig.CrossTrade[mode] = nil
+	err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
+	if err != nil {
+		t.logger.Error("Error saving configuration file", "err", err)
+		return err
+	}
+
 	return nil
 }
 
