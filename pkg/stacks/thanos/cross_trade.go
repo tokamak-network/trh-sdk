@@ -41,9 +41,9 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 		}
 	}
 
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd crossTrade && git checkout L2toL2Implementation")
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd crossTrade && git checkout main")
 	if err != nil {
-		return nil, fmt.Errorf("failed to checkout L2toL2Implementation: %s", err)
+		return nil, fmt.Errorf("failed to checkout main: %s", err)
 	}
 
 	t.logger.Info("Start to build cross-trade contracts")
