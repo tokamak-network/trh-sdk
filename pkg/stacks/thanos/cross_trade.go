@@ -2,19 +2,14 @@ package thanos
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
-	"slices"
 	"strings"
-	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	crosstrade "github.com/tokamak-network/trh-sdk/pkg/stacks/thanos/cross-trade"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
-	"gopkg.in/yaml.v3"
 )
 
 func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *types.CrossTrade, scratch bool) (*types.DeployCrossTradeOutput, error) {
@@ -34,7 +29,7 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 	}
 
 	if scratch {
-		t.deployConfig.CrossTrade = nil
+		t.deployConfig.CrossTrade[input.Mode] = nil
 		err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to write cross trade config to file: %s", err)
@@ -446,228 +441,230 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 }
 
 func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, mode constants.CrossTradeDeployMode) (*types.DeployCrossTradeApplicationOutput, error) {
-	if t.deployConfig.K8s == nil {
-		t.logger.Error("K8s configuration is not set. Please run the deploy command first")
-		return nil, fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
-	}
+	// if t.deployConfig.K8s == nil {
+	// 	t.logger.Error("K8s configuration is not set. Please run the deploy command first")
+	// 	return nil, fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+	// }
 
-	// STEP 1. Clone the charts repository
-	err := t.cloneSourcecode(ctx, "tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git")
-	if err != nil {
-		t.logger.Error("Error cloning repository", "err", err)
-		return nil, err
-	}
+	// // STEP 1. Clone the charts repository
+	// err := t.cloneSourcecode(ctx, "tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git")
+	// if err != nil {
+	// 	t.logger.Error("Error cloning repository", "err", err)
+	// 	return nil, err
+	// }
 
-	input := t.deployConfig.CrossTrade[mode]
-	if input == nil {
-		return nil, fmt.Errorf("cross trade input is not set. Please run the deploy command first")
-	}
+	// input := t.deployConfig.CrossTrade[mode]
+	// if input == nil {
+	// 	return nil, fmt.Errorf("cross trade input is not set. Please run the deploy command first")
+	// }
 
-	contracts := t.deployConfig.CrossTrade[mode].Output.DeployCrossTradeContractsOutput
-	if contracts == nil {
-		return nil, fmt.Errorf("contracts are not set. Please run the deploy command first")
-	}
+	// contracts := t.deployConfig.CrossTrade[mode].Output.DeployCrossTradeContractsOutput
+	// if contracts == nil {
+	// 	return nil, fmt.Errorf("contracts are not set. Please run the deploy command first")
+	// }
 
-	var (
-		namespace = t.deployConfig.K8s.Namespace
-		l1ChainID = t.deployConfig.L1ChainID
-	)
+	// var (
+	// 	namespace = t.deployConfig.K8s.Namespace
+	// 	l1ChainID = t.deployConfig.L1ChainID
+	// )
 
-	t.logger.Info("Installing a cross trade component...")
+	// t.logger.Info("Installing a cross trade component...")
 
-	// make yaml file at {cwd}/tokamak-thanos-stack/terraform/thanos-stack/cross-trade-values.yaml
-	crossTradeConfig := types.CrossTradeConfig{}
+	// // make yaml file at {cwd}/tokamak-thanos-stack/terraform/thanos-stack/cross-trade-values.yaml
+	// crossTradeConfig := types.CrossTradeConfig{}
 
-	// Add L1 chain config
-	crossTradeConfig.CrossTrade.Env.NextPublicProjectID = "568b8d3d0528e743b0e2c6c92f54d721"
+	// // Add L1 chain config
+	// crossTradeConfig.CrossTrade.Env.NextPublicProjectID = "568b8d3d0528e743b0e2c6c92f54d721"
 
-	chainConfig := make(map[string]types.CrossTradeChainConfig)
+	// chainConfig := make(map[string]types.CrossTradeChainConfig)
 
-	l1Tokens := make([]*types.RegisterToken, 0)         // Token name -> Token address
-	l2Tokens := make(map[uint64][]*types.RegisterToken) // Chain ID -> Token name -> Token address
-	for _, tokenInput := range input.RegisterTokens {
-		registerL1Token := &types.RegisterToken{
-			Name:              tokenInput.TokenName,
-			Address:           tokenInput.L1TokenAddress,
-			DestinationChains: make([]uint64, 0),
-		}
-		if !slices.ContainsFunc(l1Tokens, func(token *types.RegisterToken) bool {
-			return token.Name == registerL1Token.Name && token.Address == registerL1Token.Address
-		}) {
-			l1Tokens = append(l1Tokens, registerL1Token)
-		}
+	// l1Tokens := make([]*types.RegisterToken, 0)         // Token name -> Token address
+	// l2Tokens := make(map[uint64][]*types.RegisterToken) // Chain ID -> Token name -> Token address
+	// for _, tokenInput := range input.RegisterTokens {
+	// 	registerL1Token := &types.RegisterToken{
+	// 		Name:              tokenInput.TokenName,
+	// 		Address:           tokenInput.L1TokenAddress,
+	// 		DestinationChains: make([]uint64, 0),
+	// 	}
+	// 	if !slices.ContainsFunc(l1Tokens, func(token *types.RegisterToken) bool {
+	// 		return token.Name == registerL1Token.Name && token.Address == registerL1Token.Address
+	// 	}) {
+	// 		l1Tokens = append(l1Tokens, registerL1Token)
+	// 	}
 
-		for _, l2TokenInput := range tokenInput.L2TokenInputs {
-			if l2Tokens[l2TokenInput.ChainID] == nil {
-				l2Tokens[l2TokenInput.ChainID] = make([]*types.RegisterToken, 0)
-			}
+	// 	for _, l2TokenInput := range tokenInput.L2TokenInputs {
+	// 		if l2Tokens[l2TokenInput.ChainID] == nil {
+	// 			l2Tokens[l2TokenInput.ChainID] = make([]*types.RegisterToken, 0)
+	// 		}
 
-			// Get other destination chains
-			destinationChains := make([]uint64, 0)
-			for _, otherL2TokenInput := range tokenInput.L2TokenInputs {
-				if otherL2TokenInput.ChainID != l2TokenInput.ChainID {
-					destinationChains = append(destinationChains, otherL2TokenInput.ChainID)
-				}
-			}
+	// 		// Get other destination chains
+	// 		destinationChains := make([]uint64, 0)
+	// 		for _, otherL2TokenInput := range tokenInput.L2TokenInputs {
+	// 			if otherL2TokenInput.ChainID != l2TokenInput.ChainID {
+	// 				destinationChains = append(destinationChains, otherL2TokenInput.ChainID)
+	// 			}
+	// 		}
 
-			// Check if a token with the same name and address already exists
-			var existingToken *types.RegisterToken
-			for _, existing := range l2Tokens[l2TokenInput.ChainID] {
-				if existing.Name == tokenInput.TokenName && existing.Address == l2TokenInput.TokenAddress {
-					existingToken = existing
-					break
-				}
-			}
+	// 		// Check if a token with the same name and address already exists
+	// 		var existingToken *types.RegisterToken
+	// 		for _, existing := range l2Tokens[l2TokenInput.ChainID] {
+	// 			if existing.Name == tokenInput.TokenName && existing.Address == l2TokenInput.TokenAddress {
+	// 				existingToken = existing
+	// 				break
+	// 			}
+	// 		}
 
-			if existingToken != nil {
-				// Merge destination chains, avoiding duplicates
-				for _, chainID := range destinationChains {
-					if !slices.Contains(existingToken.DestinationChains, chainID) {
-						existingToken.DestinationChains = append(existingToken.DestinationChains, chainID)
-					}
-				}
-			} else {
-				// Create a new token entry
-				registerL2Token := &types.RegisterToken{
-					Name:              tokenInput.TokenName,
-					Address:           l2TokenInput.TokenAddress,
-					DestinationChains: destinationChains,
-				}
-				l2Tokens[l2TokenInput.ChainID] = append(l2Tokens[l2TokenInput.ChainID], registerL2Token)
-			}
-		}
-	}
+	// 		if existingToken != nil {
+	// 			// Merge destination chains, avoiding duplicates
+	// 			for _, chainID := range destinationChains {
+	// 				if !slices.Contains(existingToken.DestinationChains, chainID) {
+	// 					existingToken.DestinationChains = append(existingToken.DestinationChains, chainID)
+	// 				}
+	// 			}
+	// 		} else {
+	// 			// Create a new token entry
+	// 			registerL2Token := &types.RegisterToken{
+	// 				Name:              tokenInput.TokenName,
+	// 				Address:           l2TokenInput.TokenAddress,
+	// 				DestinationChains: destinationChains,
+	// 			}
+	// 			l2Tokens[l2TokenInput.ChainID] = append(l2Tokens[l2TokenInput.ChainID], registerL2Token)
+	// 		}
+	// 	}
+	// }
 
-	chainConfig[fmt.Sprintf("%d", l1ChainID)] = types.CrossTradeChainConfig{
-		Name:        constants.L1ChainConfigurations[l1ChainID].ChainName,
-		DisplayName: constants.L1ChainConfigurations[l1ChainID].ChainName,
-		Contracts: types.CrossTradeContracts{
-			L1CrossTrade: &contracts.L1CrossTradeProxyAddress,
-		},
-		RPCURL:            input.L1ChainConfig.RPC,
-		Tokens:            l1Tokens,
-		NativeTokenName:   constants.L1ChainConfigurations[l1ChainID].NativeTokenName,
-		NativeTokenSymbol: constants.L1ChainConfigurations[l1ChainID].NativeTokenSymbol,
-	}
+	// chainConfig[fmt.Sprintf("%d", l1ChainID)] = types.CrossTradeChainConfig{
+	// 	Name:        constants.L1ChainConfigurations[l1ChainID].ChainName,
+	// 	DisplayName: constants.L1ChainConfigurations[l1ChainID].ChainName,
+	// 	Contracts: types.CrossTradeContracts{
+	// 		L1CrossTrade: &contracts.L1CrossTradeProxyAddress,
+	// 	},
+	// 	RPCURL:            input.L1ChainConfig.RPC,
+	// 	Tokens:            l1Tokens,
+	// 	NativeTokenName:   constants.L1ChainConfigurations[l1ChainID].NativeTokenName,
+	// 	NativeTokenSymbol: constants.L1ChainConfigurations[l1ChainID].NativeTokenSymbol,
+	// }
 
-	l2ChainRPCs := make(map[uint64]string)
+	// l2ChainRPCs := make(map[uint64]string)
 
-	// Add L2 chain config
-	for _, chain := range input.L2ChainConfig {
-		l2ChainID := chain.ChainID
-		nativeTokenName := constants.L2ChainConfigurations[l2ChainID].NativeTokenName
-		nativeTokenSymbol := constants.L2ChainConfigurations[l2ChainID].NativeTokenSymbol
-		if l2ChainID == t.deployConfig.L2ChainID {
-			nativeTokenName = "Tokamak Network Token"
-			nativeTokenSymbol = "TON"
-		} else if nativeTokenName == "" || nativeTokenSymbol == "" {
-			nativeTokenName = "Ether"
-			nativeTokenSymbol = "ETH"
-		}
-		l2Tokens := l2Tokens[l2ChainID]
-		l2CrossTradeProxyAddress := contracts.L2CrossTradeProxyAddresses[l2ChainID]
+	// // Add L2 chain config
+	// for _, chain := range input.L2ChainConfig {
+	// 	l2ChainID := chain.ChainID
+	// 	nativeTokenName := constants.L2ChainConfigurations[l2ChainID].NativeTokenName
+	// 	nativeTokenSymbol := constants.L2ChainConfigurations[l2ChainID].NativeTokenSymbol
+	// 	if l2ChainID == t.deployConfig.L2ChainID {
+	// 		nativeTokenName = "Tokamak Network Token"
+	// 		nativeTokenSymbol = "TON"
+	// 	} else if nativeTokenName == "" || nativeTokenSymbol == "" {
+	// 		nativeTokenName = "Ether"
+	// 		nativeTokenSymbol = "ETH"
+	// 	}
+	// 	l2Tokens := l2Tokens[l2ChainID]
+	// 	l2CrossTradeProxyAddress := contracts.L2CrossTradeProxyAddresses[l2ChainID]
 
-		chainConfig[fmt.Sprintf("%d", l2ChainID)] = types.CrossTradeChainConfig{
-			Name:        chain.ChainName,
-			DisplayName: chain.ChainName,
-			Contracts: types.CrossTradeContracts{
-				L2CrossTrade: &l2CrossTradeProxyAddress,
-			},
-			RPCURL:            l2ChainRPCs[l2ChainID],
-			Tokens:            l2Tokens,
-			NativeTokenName:   nativeTokenName,
-			NativeTokenSymbol: nativeTokenSymbol,
-		}
-	}
+	// 	chainConfig[fmt.Sprintf("%d", l2ChainID)] = types.CrossTradeChainConfig{
+	// 		Name:        chain.ChainName,
+	// 		DisplayName: chain.ChainName,
+	// 		Contracts: types.CrossTradeContracts{
+	// 			L2CrossTrade: &l2CrossTradeProxyAddress,
+	// 		},
+	// 		RPCURL:            l2ChainRPCs[l2ChainID],
+	// 		Tokens:            l2Tokens,
+	// 		NativeTokenName:   nativeTokenName,
+	// 		NativeTokenSymbol: nativeTokenSymbol,
+	// 	}
+	// }
 
-	chainConfigJSON, err := json.Marshal(chainConfig)
-	if err != nil {
-		t.logger.Error("Error marshalling chain config", "err", err)
-		return nil, err
-	}
+	// chainConfigJSON, err := json.Marshal(chainConfig)
+	// if err != nil {
+	// 	t.logger.Error("Error marshalling chain config", "err", err)
+	// 	return nil, err
+	// }
 
-	switch input.Mode {
-	case constants.CrossTradeDeployModeL2ToL1:
-		crossTradeConfig.CrossTrade.Env.L2L1Config = string(chainConfigJSON)
-	case constants.CrossTradeDeployModeL2ToL2:
-		crossTradeConfig.CrossTrade.Env.L2L2Config = string(chainConfigJSON)
-	}
+	// switch input.Mode {
+	// case constants.CrossTradeDeployModeL2ToL1:
+	// 	crossTradeConfig.CrossTrade.Env.L2L1Config = string(chainConfigJSON)
+	// case constants.CrossTradeDeployModeL2ToL2:
+	// 	crossTradeConfig.CrossTrade.Env.L2L2Config = string(chainConfigJSON)
+	// }
 
-	// input from users
+	// // input from users
 
-	crossTradeConfig.CrossTrade.Ingress = types.Ingress{Enabled: true, ClassName: "alb", Annotations: map[string]string{
-		"alb.ingress.kubernetes.io/target-type":  "ip",
-		"alb.ingress.kubernetes.io/scheme":       "internet-facing",
-		"alb.ingress.kubernetes.io/listen-ports": "[{\"HTTP\": 80}]",
-		"alb.ingress.kubernetes.io/group.name":   "cross-trade",
-	}, TLS: types.TLS{
-		Enabled: false,
-	}}
+	// crossTradeConfig.CrossTrade.Ingress = types.Ingress{Enabled: true, ClassName: "alb", Annotations: map[string]string{
+	// 	"alb.ingress.kubernetes.io/target-type":  "ip",
+	// 	"alb.ingress.kubernetes.io/scheme":       "internet-facing",
+	// 	"alb.ingress.kubernetes.io/listen-ports": "[{\"HTTP\": 80}]",
+	// 	"alb.ingress.kubernetes.io/group.name":   "cross-trade",
+	// }, TLS: types.TLS{
+	// 	Enabled: false,
+	// }}
 
-	data, err := yaml.Marshal(&crossTradeConfig)
-	if err != nil {
-		t.logger.Error("Error marshalling cross-trade values YAML file", "err", err)
-		return nil, err
-	}
+	// data, err := yaml.Marshal(&crossTradeConfig)
+	// if err != nil {
+	// 	t.logger.Error("Error marshalling cross-trade values YAML file", "err", err)
+	// 	return nil, err
+	// }
 
-	configFileDir := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", t.deploymentPath)
-	if err := os.MkdirAll(configFileDir, os.ModePerm); err != nil {
-		t.logger.Error("Error creating directory", "err", err)
-		return nil, err
-	}
+	// configFileDir := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", t.deploymentPath)
+	// if err := os.MkdirAll(configFileDir, os.ModePerm); err != nil {
+	// 	t.logger.Error("Error creating directory", "err", err)
+	// 	return nil, err
+	// }
 
-	// Write to file
-	filePath := filepath.Join(configFileDir, "/cross-trade-values.yaml")
-	err = os.WriteFile(filePath, data, 0644)
-	if err != nil {
-		t.logger.Error("Error writing file", "err", err)
-		return nil, nil
-	}
+	// // Write to file
+	// filePath := filepath.Join(configFileDir, "/cross-trade-values.yaml")
+	// err = os.WriteFile(filePath, data, 0644)
+	// if err != nil {
+	// 	t.logger.Error("Error writing file", "err", err)
+	// 	return nil, nil
+	// }
 
-	helmReleaseName := "cross-trade"
+	// helmReleaseName := "cross-trade"
 
-	releases, err := utils.FilterHelmReleases(ctx, namespace, helmReleaseName)
-	if err != nil {
-		t.logger.Error("Error to filter helm releases", "err", err)
-		return nil, err
-	}
+	// releases, err := utils.FilterHelmReleases(ctx, namespace, helmReleaseName)
+	// if err != nil {
+	// 	t.logger.Error("Error to filter helm releases", "err", err)
+	// 	return nil, err
+	// }
 
-	command := "install"
-	if len(releases) > 0 {
-		command = "upgrade"
-	}
-	_, err = utils.ExecuteCommand(ctx, "helm", []string{
-		command,
-		helmReleaseName,
-		fmt.Sprintf("%s/tokamak-thanos-stack/charts/cross-trade", t.deploymentPath),
-		"--values",
-		filePath,
-		"--namespace",
-		namespace,
-	}...)
-	if err != nil {
-		t.logger.Error("Error installing Helm charts", "err", err)
-		return nil, err
-	}
+	// command := "install"
+	// if len(releases) > 0 {
+	// 	command = "upgrade"
+	// }
+	// _, err = utils.ExecuteCommand(ctx, "helm", []string{
+	// 	command,
+	// 	helmReleaseName,
+	// 	fmt.Sprintf("%s/tokamak-thanos-stack/charts/cross-trade", t.deploymentPath),
+	// 	"--values",
+	// 	filePath,
+	// 	"--namespace",
+	// 	namespace,
+	// }...)
+	// if err != nil {
+	// 	t.logger.Error("Error installing Helm charts", "err", err)
+	// 	return nil, err
+	// }
 
-	t.logger.Info("✅ Cross trade component installed successfully and is being initialized. Please wait for the ingress address to become available...")
-	var bridgeUrl string
-	for {
-		k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, helmReleaseName)
-		if err != nil {
-			t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
-			return nil, err
-		}
+	// t.logger.Info("✅ Cross trade component installed successfully and is being initialized. Please wait for the ingress address to become available...")
+	// var bridgeUrl string
+	// for {
+	// 	k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, helmReleaseName)
+	// 	if err != nil {
+	// 		t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
+	// 		return nil, err
+	// 	}
 
-		if len(k8sIngresses) > 0 {
-			bridgeUrl = "http://" + k8sIngresses[0]
-			break
-		}
+	// 	if len(k8sIngresses) > 0 {
+	// 		bridgeUrl = "http://" + k8sIngresses[0]
+	// 		break
+	// 	}
 
-		time.Sleep(15 * time.Second)
-	}
-	t.logger.Infof("✅ Cross trade component is up and running. You can access it at: %s", bridgeUrl)
+	// 	time.Sleep(15 * time.Second)
+	// }
+	// t.logger.Infof("✅ Cross trade component is up and running. You can access it at: %s", bridgeUrl)
 
+	bridgeUrl := "http://localhost:8080"
+	var err error
 	output := &types.DeployCrossTradeApplicationOutput{
 		URL: bridgeUrl,
 	}
