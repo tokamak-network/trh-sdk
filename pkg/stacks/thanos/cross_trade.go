@@ -29,6 +29,9 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 	}
 
 	if scratch {
+		if t.deployConfig.CrossTrade == nil {
+			t.deployConfig.CrossTrade = make(map[constants.CrossTradeDeployMode]*types.CrossTrade)
+		}
 		t.deployConfig.CrossTrade[input.Mode] = nil
 		err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
 		if err != nil {
