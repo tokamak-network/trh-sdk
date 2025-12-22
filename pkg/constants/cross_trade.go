@@ -2,6 +2,10 @@ package constants
 
 type CrossTradeDeployMode string
 
+func IsSupportedCrossTradeDeployMode(mode CrossTradeDeployMode) bool {
+	return mode == CrossTradeDeployModeL2ToL1 || mode == CrossTradeDeployModeL2ToL2
+}
+
 type DefaultContractAddress struct {
 	L2CrossDomainMessengerAddress string `json:"l2_cross_domain_messenger_address"`
 	NativeTokenAddress            string `json:"native_token_address"`

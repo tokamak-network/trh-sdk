@@ -36,11 +36,6 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 		}
 	}
 
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd crossTrade && git checkout main")
-	if err != nil {
-		return nil, fmt.Errorf("failed to checkout main: %s", err)
-	}
-
 	t.logger.Info("Start to build cross-trade contracts")
 
 	// Before deploying contracts, fill the missing fields in the input
@@ -154,12 +149,11 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 				continue
 			}
 			t.logger.Infof("Verifying L1 contract %s with address %s", contractName, address)
-			functionName := contractName
 			script := fmt.Sprintf(
 				"cd crossTrade && forge verify-contract %s contracts/L1/%s.sol:%s --etherscan-api-key %s --chain %s",
 				address,
 				contractName,
-				functionName,
+				contractName,
 				input.L1ChainConfig.BlockExplorerConfig.APIKey,
 				constants.ChainIDToForgeChainName[input.L1ChainConfig.ChainID],
 			)
@@ -176,10 +170,6 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 
 	for _, l2ChainConfig := range input.L2ChainConfig {
 		if l2ChainConfig.IsDeployedNew {
-			if l2ChainConfig.ContractName == "" {
-			}
-			if l2ChainConfig.DeploymentScriptPath == "" {
-			}
 			script := fmt.Sprintf(
 				`cd crossTrade && PRIVATE_KEY=%s CHAIN_ID=%d NATIVE_TOKEN=%s L2_CROSS_DOMAIN_MESSENGER=%s L1_CROSS_TRADE=%s forge script %s/%s --rpc-url %s --broadcast`,
 				l2ChainConfig.PrivateKey,

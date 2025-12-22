@@ -191,9 +191,12 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							registerNewChain := cmd.Bool("register-chain")
 							registerNewTokens := cmd.Bool("register-tokens")
 
+							if registerNewChain && registerNewTokens {
+								return fmt.Errorf("flags --register-chain and --register-tokens cannot be used at the same time")
+							}
+
 							// Validate the cross-trade type
-							if crossTradeType != string(constants.CrossTradeDeployModeL2ToL2) &&
-								crossTradeType != string(constants.CrossTradeDeployModeL2ToL1) {
+							if !constants.IsSupportedCrossTradeDeployMode(constants.CrossTradeDeployMode(crossTradeType)) {
 								return fmt.Errorf("unsupported cross-trade type: %s. Supported types: %s, %s",
 									crossTradeType, constants.CrossTradeDeployModeL2ToL2, constants.CrossTradeDeployModeL2ToL1)
 							}
@@ -289,11 +292,11 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							}
 
 							// Validate the cross-trade type
-							if crossTradeType != string(constants.CrossTradeDeployModeL2ToL2) &&
-								crossTradeType != string(constants.CrossTradeDeployModeL2ToL1) {
+							if !constants.IsSupportedCrossTradeDeployMode(constants.CrossTradeDeployMode(crossTradeType)) {
 								return fmt.Errorf("unsupported cross-trade type: %s. Supported types: %s, %s",
 									crossTradeType, constants.CrossTradeDeployModeL2ToL2, constants.CrossTradeDeployModeL2ToL1)
 							}
+
 							return thanosStack.UninstallCrossTrade(ctx, constants.CrossTradeDeployMode(crossTradeType))
 						}
 					}
