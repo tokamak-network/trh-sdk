@@ -21,11 +21,15 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 	if input.L1ChainConfig == nil {
 		return nil, fmt.Errorf("l1 chain config is required")
 	}
-
-	err := os.Chdir(t.deploymentPath)
+	currentDir, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current directory: %w", err)
+	}
+	err = os.Chdir(t.deploymentPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to change directory to deployment path: %w", err)
 	}
+	defer os.Chdir(currentDir)
 
 	// Clone cross trade repository
 	err = t.cloneSourcecode(ctx, "crossTrade", "https://github.com/tokamak-network/crossTrade.git")
@@ -468,11 +472,24 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, mode cons
 
 	t.logger.Info("Installing a cross trade component...")
 
+	helmReleaseName := "cross-trade"
+
+	releases, err := utils.FilterHelmReleases(ctx, namespace, helmReleaseName)
+	if err != nil {
+		t.logger.Error("Error to filter helm releases", "err", err)
+		return nil, err
+	}
+
+	isInstalled := len(releases) > 0
+
+	configFileDir := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", t.deploymentPath)
+	filePath := filepath.Join(configFileDir, "/cross-trade-values.yaml")
+
 	// make yaml file at {cwd}/tokamak-thanos-stack/terraform/thanos-stack/cross-trade-values.yaml
 	crossTradeConfig := types.CrossTradeConfig{}
 
 	// Add L1 chain config
-	crossTradeConfig.CrossTrade.Env.NextPublicProjectID = "568b8d3d0528e743b0e2c6c92f54d721"
+	crossTradeConfig.CrossTrade.Env.NextPublicProjectID = input.ProjectID
 
 	chainConfig := make(map[string]types.CrossTradeChainConfig)
 
@@ -558,6 +575,9 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, mode cons
 			nativeTokenSymbol = "ETH"
 		}
 		l2Tokens := l2Tokens[l2ChainID]
+		if len(l2Tokens) == 0 {
+			l2Tokens = make([]*types.RegisterToken, 0)
+		}
 		l2CrossTradeProxyAddress := contracts.L2CrossTradeProxyAddresses[l2ChainID]
 
 		chainConfig[fmt.Sprintf("%d", l2ChainID)] = types.CrossTradeChainConfig{
@@ -586,8 +606,6 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, mode cons
 		crossTradeConfig.CrossTrade.Env.L2L2Config = string(chainConfigJSON)
 	}
 
-	// input from users
-
 	crossTradeConfig.CrossTrade.Ingress = types.Ingress{Enabled: true, ClassName: "alb", Annotations: map[string]string{
 		"alb.ingress.kubernetes.io/target-type":  "ip",
 		"alb.ingress.kubernetes.io/scheme":       "internet-facing",
@@ -597,36 +615,42 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, mode cons
 		Enabled: false,
 	}}
 
-	data, err := yaml.Marshal(&crossTradeConfig)
-	if err != nil {
-		t.logger.Error("Error marshalling cross-trade values YAML file", "err", err)
-		return nil, err
-	}
+	if !isInstalled {
+		data, err := yaml.Marshal(&crossTradeConfig)
+		if err != nil {
+			t.logger.Error("Error marshalling cross-trade values YAML file", "err", err)
+			return nil, err
+		}
 
-	configFileDir := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", t.deploymentPath)
-	if err := os.MkdirAll(configFileDir, os.ModePerm); err != nil {
-		t.logger.Error("Error creating directory", "err", err)
-		return nil, err
-	}
+		if err := os.MkdirAll(configFileDir, os.ModePerm); err != nil {
+			t.logger.Error("Error creating directory", "err", err)
+			return nil, err
+		}
 
-	// Write to file
-	filePath := filepath.Join(configFileDir, "/cross-trade-values.yaml")
-	err = os.WriteFile(filePath, data, 0644)
-	if err != nil {
-		t.logger.Error("Error writing file", "err", err)
-		return nil, nil
-	}
-
-	helmReleaseName := "cross-trade"
-
-	releases, err := utils.FilterHelmReleases(ctx, namespace, helmReleaseName)
-	if err != nil {
-		t.logger.Error("Error to filter helm releases", "err", err)
-		return nil, err
+		// Write to file
+		err = os.WriteFile(filePath, data, 0644)
+		if err != nil {
+			t.logger.Error("Error writing file", "err", err)
+			return nil, nil
+		}
+	} else {
+		if mode == constants.CrossTradeDeployModeL2ToL1 {
+			err = utils.UpdateYAMLField(filePath, "cross_trade.env.NEXT_PUBLIC_CHAIN_CONFIG_L2_L1", string(chainConfigJSON))
+			if err != nil {
+				t.logger.Error("Error updating YAML file", "err", err)
+				return nil, err
+			}
+		} else if mode == constants.CrossTradeDeployModeL2ToL2 {
+			err = utils.UpdateYAMLField(filePath, "cross_trade.env.NEXT_PUBLIC_CHAIN_CONFIG_L2_L2", string(chainConfigJSON))
+			if err != nil {
+				t.logger.Error("Error updating YAML file", "err", err)
+				return nil, err
+			}
+		}
 	}
 
 	command := "install"
-	if len(releases) > 0 {
+	if isInstalled {
 		command = "upgrade"
 	}
 	_, err = utils.ExecuteCommand(ctx, "helm", []string{
@@ -689,38 +713,70 @@ func (t *ThanosStack) UninstallCrossTrade(ctx context.Context, mode constants.Cr
 		return fmt.Errorf("AWS configuration is not set. Please run the deploy command first")
 	}
 
-	releases, err := utils.FilterHelmReleases(ctx, namespace, "cross-trade")
-	if err != nil {
-		t.logger.Error("Error to filter helm releases", "err", err)
-		return err
-	}
+	filePath := filepath.Join(t.deploymentPath, "tokamak-thanos-stack/terraform/thanos-stack/cross-trade-values.yaml")
 
-	for _, release := range releases {
-		_, err = utils.ExecuteCommand(ctx, "helm", []string{
-			"uninstall",
-			release,
-			"--namespace",
-			namespace,
-		}...)
+	if mode == constants.CrossTradeDeployModeL2ToL1 {
+		err := utils.UpdateYAMLField(filePath, "cross_trade.env.NEXT_PUBLIC_CHAIN_CONFIG_L2_L1", "")
 		if err != nil {
-			t.logger.Error("❌ Error uninstalling cross-trade helm chart", "err", err)
+			t.logger.Error("Error updating YAML file", "err", err)
+			return err
+		}
+	} else if mode == constants.CrossTradeDeployModeL2ToL2 {
+		err := utils.UpdateYAMLField(filePath, "cross_trade.env.NEXT_PUBLIC_CHAIN_CONFIG_L2_L2", "")
+		if err != nil {
+			t.logger.Error("Error updating YAML file", "err", err)
 			return err
 		}
 	}
-
-	t.logger.Info("✅ Uninstall a cross-trade component successfully!")
 
 	// Delete the cross trade config
 	if t.deployConfig.CrossTrade == nil {
 		t.deployConfig.CrossTrade = make(map[constants.CrossTradeDeployMode]*types.CrossTrade)
 	}
 	t.deployConfig.CrossTrade[mode] = nil
-	err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
+	err := t.deployConfig.WriteToJSONFile(t.deploymentPath)
 	if err != nil {
 		t.logger.Error("Error saving configuration file", "err", err)
 		return err
 	}
 
+	// Update the helm release
+	oneOfTwoInstalled := false
+	if mode == constants.CrossTradeDeployModeL2ToL1 && t.deployConfig.CrossTrade[constants.CrossTradeDeployModeL2ToL2] != nil {
+		oneOfTwoInstalled = true
+	} else if mode == constants.CrossTradeDeployModeL2ToL2 && t.deployConfig.CrossTrade[constants.CrossTradeDeployModeL2ToL1] != nil {
+		oneOfTwoInstalled = true
+	} else {
+		oneOfTwoInstalled = false
+	}
+	if oneOfTwoInstalled {
+		_, err = utils.ExecuteCommand(ctx, "helm", []string{
+			"upgrade",
+			"cross-trade",
+			fmt.Sprintf("%s/tokamak-thanos-stack/charts/cross-trade", t.deploymentPath),
+			"--values",
+			filePath,
+			"--namespace",
+			namespace,
+		}...)
+		if err != nil {
+			t.logger.Error("Error updating helm release", "err", err)
+			return err
+		}
+	} else {
+		_, err = utils.ExecuteCommand(ctx, "helm", []string{
+			"uninstall",
+			"cross-trade",
+			"--namespace",
+			namespace,
+		}...)
+		if err != nil {
+			t.logger.Error("Error uninstalling helm release", "err", err)
+			return err
+		}
+	}
+
+	t.logger.Info("✅ Uninstall a cross-trade component successfully!")
 	return nil
 }
 
@@ -732,10 +788,15 @@ func (t *ThanosStack) RegisterNewTokensOnExistingCrossTrade(
 	if crossTradeInput == nil {
 		return nil, fmt.Errorf("cross trade input is not set. Please run the deploy command first")
 	}
-	err := os.Chdir(t.deploymentPath)
+	currentDir, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current directory: %w", err)
+	}
+	err = os.Chdir(t.deploymentPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to change directory to deployment path: %w", err)
 	}
+	defer os.Chdir(currentDir)
 
 	l2ChainConfigs := make(map[uint64]*types.L2CrossTradeChainInput)
 	for _, l2ChainConfig := range crossTradeInput.L2ChainConfig {
