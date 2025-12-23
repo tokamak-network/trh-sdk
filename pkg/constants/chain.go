@@ -99,8 +99,8 @@ var BaseBatchInboxAddress = "0xff00000000000000000000000000000000000000"
 var DefaultL2BlockTimeInSeconds uint64 = 2
 
 const (
-	OptimismSepoliaChainID = 10
-	OptimismChainID        = 11155420
+	OptimismSepoliaChainID = 11155420
+	OptimismChainID        = 10
 	BaseSepoliaChainID     = 84532
 	BaseChainID            = 8453
 	UnichainSepoliaChainID = 1301
