@@ -203,6 +203,17 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							}
 							return nil
 
+						case constants.PluginDRB:
+							input, err := thanosStack.GetDRBInput(ctx)
+							if err != nil {
+								return err
+							}
+							_, err = thanosStack.DeployDRB(ctx, input)
+							if err != nil {
+								return err
+							}
+							return nil
+
 						default:
 							return nil
 						}
