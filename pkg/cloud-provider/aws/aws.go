@@ -8,6 +8,8 @@ import (
 	"os/exec"
 
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -206,22 +208,27 @@ func createDynamoDBTable(region, tableName string) error {
 }
 
 func GetAvailableRegions(accessKey string, secretKey string, region string) ([]string, error) {
-	configureAWS("aws", "configure", "set", "region", region)
-	configureAWS("aws", "configure", "set", "aws_access_key_id", accessKey)
-	configureAWS("aws", "configure", "set", "aws_secret_access_key", secretKey)
+	ctx := context.Background()
 
-	cmd := exec.Command("aws", "ec2", "describe-regions", "--query", "Regions[].RegionName", "--output", "json")
-	output, err := cmd.CombinedOutput()
+	cfg, err := config.LoadDefaultConfig(ctx,
+		config.WithRegion(region),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
+	)
 	if err != nil {
-		fmt.Println("Error fetching AWS regions:", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
-	var availableRegions []string
-	err = json.Unmarshal(output, &availableRegions)
+	ec2Client := ec2.NewFromConfig(cfg)
+	result, err := ec2Client.DescribeRegions(ctx, &ec2.DescribeRegionsInput{})
 	if err != nil {
-		fmt.Printf("❌ Error parsing JSON: %v\n", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to describe regions: %w", err)
+	}
+
+	availableRegions := make([]string, 0, len(result.Regions))
+	for _, r := range result.Regions {
+		if r.RegionName != nil {
+			availableRegions = append(availableRegions, *r.RegionName)
+		}
 	}
 
 	return availableRegions, nil
