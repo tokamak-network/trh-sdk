@@ -675,7 +675,9 @@ func (t *ThanosStack) GetRegistrationAdditionalInfo(ctx context.Context, registe
 	if contracts.SystemOwnerSafe != "" {
 		safeAddress := ethCommon.HexToAddress(contracts.SystemOwnerSafe)
 		safeContract, err := abis.NewSafe(safeAddress, l1Client)
-		if err == nil {
+		if err != nil {
+			t.logger.Errorf("failed to initialize the safe wallet, err: %w", err)
+		} else {
 			callOpts := &bind.CallOpts{Context: ctx}
 
 			// Get owners
