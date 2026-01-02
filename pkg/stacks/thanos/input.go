@@ -622,30 +622,10 @@ func InputInstallBlockExplorer() (*InstallBlockExplorerInput, error) {
 }
 
 func InputInstallMonitoring() (*InstallMonitoringInput, error) {
-	var (
-		adminPassword string
-		err           error
-	)
-
-	for {
-		// Get admin password from user
-		fmt.Print("🔐 Enter Grafana admin password: ")
-		adminPassword, err = scanner.ScanString()
-		if err != nil {
-			fmt.Printf("Error while reading admin password: %s", err)
-			continue
-		}
-
-		// Remove special whitespace characters (NBSP, etc.)
-		adminPassword = strings.ReplaceAll(adminPassword, "\u00A0", " ") // Replace NBSP with regular space
-		adminPassword = strings.TrimSpace(adminPassword)                 // Trim again after replacement
-
-		// Validate admin password
-		if adminPassword == "" {
-			fmt.Println("⚠️  Admin password cannot be empty")
-			continue
-		}
-		break
+	// Get Grafana admin password from user using shared function
+	adminPassword, err := InputGrafanaPassword()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Grafana admin password: %w", err)
 	}
 
 	// Get AlertManager configuration from user input
@@ -667,6 +647,37 @@ func InputInstallMonitoring() (*InstallMonitoringInput, error) {
 		AlertManager:   alertManagerConfig,
 		LoggingEnabled: loggingEnabled,
 	}, nil
+}
+
+// InputGrafanaPassword prompts for Grafana password required for Thanos logs and default grafana installation
+func InputGrafanaPassword() (string, error) {
+	var (
+		grafanaPassword string
+		err             error
+	)
+
+	for {
+		// Get Grafana password from user
+		fmt.Print("🔐 Enter Grafana admin password: ")
+		grafanaPassword, err = scanner.ScanString()
+		if err != nil {
+			fmt.Printf("Error while reading Grafana password: %s\n", err)
+			continue
+		}
+
+		// Remove special whitespace characters (NBSP, etc.)
+		grafanaPassword = strings.ReplaceAll(grafanaPassword, "\u00A0", " ") // Replace NBSP with regular space
+		grafanaPassword = strings.TrimSpace(grafanaPassword)                 // Trim again after replacement
+
+		// Validate Grafana password
+		if grafanaPassword == "" {
+			fmt.Println("⚠️  Grafana password cannot be empty")
+			continue
+		}
+		break
+	}
+
+	return grafanaPassword, nil
 }
 
 // getAlertManagerConfigFromUser gets AlertManager configuration from user input
