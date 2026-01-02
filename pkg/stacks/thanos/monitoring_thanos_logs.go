@@ -362,9 +362,7 @@ func (t *ThanosStack) configureLokiDatasourceInGrafana(ctx context.Context, conf
 
 	grafanaPassword := config.GrafanaPassword
 	if grafanaPassword == "" {
-		// Fallback to default if not provided
-		grafanaPassword = "admin"
-		logger.Warn("Grafana password not provided in config, using default 'admin'")
+		return fmt.Errorf("Grafana password is required in config")
 	}
 
 	logger.Infow("Adding Loki datasource to Grafana", "lokiURL", lokiURL, "grafanaPod", grafanaPodName)
@@ -455,7 +453,7 @@ func (t *ThanosStack) configureLokiDatasourceInGrafana(ctx context.Context, conf
 }
 
 // UninstallMonitoringThanosLogsStack removes Thanos logs stack
-func (t *ThanosStack) UninstallMonitoringThanosLogsStack(ctx context.Context) error {
+func (t *ThanosStack) UninstallMonitoringThanosLogsStack(ctx context.Context, grafanaPassword string) error {
 	logger := t.getLogger()
 
 	if t.deployConfig.K8s == nil {
@@ -516,7 +514,7 @@ func (t *ThanosStack) UninstallMonitoringThanosLogsStack(ctx context.Context) er
 
 	// Optionally remove Loki datasource from Grafana (warn but don't fail)
 	logger.Info("Attempting to remove Loki datasource from Grafana...")
-	if err := t.removeLokiDatasourceFromGrafana(ctx); err != nil {
+	if err := t.removeLokiDatasourceFromGrafana(ctx, grafanaPassword); err != nil {
 		logger.Warnw("Failed to remove Loki datasource from Grafana (non-fatal)", "err", err)
 		// Don't fail the uninstall if datasource removal fails
 	} else {
@@ -543,8 +541,14 @@ func (t *ThanosStack) UninstallMonitoringThanosLogsStack(ctx context.Context) er
 }
 
 // removeLokiDatasourceFromGrafana removes the Loki datasource from Grafana
-func (t *ThanosStack) removeLokiDatasourceFromGrafana(ctx context.Context) error {
+func (t *ThanosStack) removeLokiDatasourceFromGrafana(ctx context.Context, grafanaPassword string) error {
 	logger := t.getLogger()
+
+	// Skip if password is not provided
+	if grafanaPassword == "" {
+		logger.Info("Grafana password not provided, skipping datasource removal")
+		return nil
+	}
 
 	// Get Grafana pod name
 	grafanaPods, err := utils.GetPodNamesByLabel(ctx, constants.MonitoringNamespace, "app.kubernetes.io/name=grafana")
@@ -555,7 +559,6 @@ func (t *ThanosStack) removeLokiDatasourceFromGrafana(ctx context.Context) error
 
 	grafanaPodName := grafanaPods[0]
 	grafanaInternalURL := "http://localhost:3000"
-	grafanaPassword := "admin" // Use default password
 
 	logger.Infow("Removing Loki datasource from Grafana", "grafanaPod", grafanaPodName)
 

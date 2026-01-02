@@ -252,7 +252,13 @@ func ActionInstallationPlugins() cli.ActionFunc {
 						case constants.PluginUptimeService:
 							return thanosStack.UninstallUptimeService(ctx)
 						case constants.PluginMonitoringThanosLogs:
-							return thanosStack.UninstallMonitoringThanosLogsStack(ctx)
+							// Get Grafana password from user
+							grafanaPassword, err := thanos.InputGrafanaPassword()
+							if err != nil {
+								fmt.Println("Error getting Grafana password:", err)
+								return err
+							}
+							return thanosStack.UninstallMonitoringThanosLogsStack(ctx, grafanaPassword)
 						case constants.PluginBridge:
 							return thanosStack.UninstallBridge(ctx)
 						case constants.PluginBlockExplorer:

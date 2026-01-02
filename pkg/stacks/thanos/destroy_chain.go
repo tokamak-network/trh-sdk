@@ -94,7 +94,7 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 	}
 
 	// Uninstall thanos-logs stack
-	err = t.UninstallMonitoringThanosLogsStack(ctx)
+	err = t.UninstallMonitoringThanosLogsStack(ctx, "")
 	if err != nil {
 		t.logger.Warnf("Failed to uninstall thanos-logs stack: %v. Continuing with destroy process.", err)
 	}
