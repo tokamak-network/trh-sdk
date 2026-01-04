@@ -38,6 +38,9 @@ func (t *ThanosStack) VerifyAndCleanupResources(ctx context.Context, namespace s
 		t.logger.Infof("Cleanup complete: %d deleted, %d failed", cleaned, failed)
 	}
 
+	if failed > 0 {
+		return fmt.Errorf("cleanup failed for %d resource(s)", failed)
+	}
 	return nil
 }
 
@@ -301,7 +304,7 @@ func (t *ThanosStack) deleteOrphanedS3(ctx context.Context, region, namespace st
 	}
 
 	for _, bucket := range buckets {
-		if !strings.Contains(bucket, namespace) {
+		if !strings.HasPrefix(bucket, namespace) {
 			continue
 		}
 
