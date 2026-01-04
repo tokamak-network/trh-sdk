@@ -2,15 +2,19 @@ package aws
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	dynamodbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
@@ -67,24 +71,38 @@ func loginAWS(accessKey, secretKey, region, formatFile string) (*types.AccountPr
 		formatFile = "json"
 	}
 
+	// Configure AWS CLI for other tools that may need it (terraform, kubectl, etc.)
 	configureAWS("aws", "configure", "set", "aws_access_key_id", accessKey)
 	configureAWS("aws", "configure", "set", "aws_secret_access_key", secretKey)
 	configureAWS("aws", "configure", "set", "region", region)
 	configureAWS("aws", "configure", "set", "output", formatFile)
 
-	cmd := exec.Command("aws", "sts", "get-caller-identity")
-	output, err := cmd.CombinedOutput()
+	ctx := context.Background()
+
+	// Load AWS config with static credentials
+	cfg, err := config.LoadDefaultConfig(ctx,
+		config.WithRegion(region),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	// Get caller identity using STS SDK
+	stsClient := sts.NewFromConfig(cfg)
+	identity, err := stsClient.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
 	if err != nil {
 		fmt.Println("Error fetching AWS caller identity:", err)
 		return nil, err
 	}
 
-	var profile types.AccountProfile
-	if err := json.Unmarshal(output, &profile); err != nil {
-		return nil, err
+	profile := types.AccountProfile{
+		UserId:  aws.ToString(identity.UserId),
+		Account: aws.ToString(identity.Account),
+		Arn:     aws.ToString(identity.Arn),
 	}
 
-	availabilityZones, err := getAvailabilityZones(region)
+	availabilityZones, err := getAvailabilityZones(ctx, cfg, region)
 	if err != nil {
 		fmt.Println("Error fetching AWS availability zones:", err)
 		return nil, err
@@ -96,7 +114,7 @@ func loginAWS(accessKey, secretKey, region, formatFile string) (*types.AccountPr
 	// before making the thanos-stack terraform up, check the `terraform-lock` table creation first
 	// https://github.com/tokamak-network/tokamak-thanos-stack/blob/main/terraform/thanos-stack/backend.tf#L7
 	// Step 1: get the table list by the region
-	tables, err := getTablesByRegion(region)
+	tables, err := getTablesByRegion(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("error getting tables: %s", err)
 	}
@@ -109,7 +127,7 @@ func loginAWS(accessKey, secretKey, region, formatFile string) (*types.AccountPr
 	}
 
 	if !existTerraformLockTable {
-		err = createDynamoDBTable(region, "terraform-lock")
+		err = createDynamoDBTable(ctx, cfg, "terraform-lock")
 		if err != nil {
 			return nil, fmt.Errorf("error creating terraform-lock table: %s", err)
 		}
@@ -128,17 +146,12 @@ func configureAWS(command ...string) {
 	}
 }
 
-func getAvailabilityZones(region string) ([]string, error) {
-	cmd := exec.Command("aws", "ec2", "describe-availability-zones", "--region", region, "--output", "json")
-	output, err := cmd.CombinedOutput()
+func getAvailabilityZones(ctx context.Context, cfg aws.Config, region string) ([]string, error) {
+	ec2Client := ec2.NewFromConfig(cfg)
+
+	result, err := ec2Client.DescribeAvailabilityZones(ctx, &ec2.DescribeAvailabilityZonesInput{})
 	if err != nil {
 		fmt.Println("Error fetching AWS availability zones:", err)
-		return nil, err
-	}
-	var awsResponse types.AWSAvailabilityZoneResponse
-	err = json.Unmarshal([]byte(output), &awsResponse)
-	if err != nil {
-		fmt.Printf("❌ Error parsing JSON: %v\n", err)
 		return nil, err
 	}
 
@@ -160,50 +173,53 @@ func getAvailabilityZones(region string) ([]string, error) {
 
 	// Extract only available zones and filter out EKS unsupported zones
 	availabilityZones := make([]string, 0)
-	for _, zone := range awsResponse.AvailabilityZones {
-		if zone.State == "available" && !isUnsupported(zone.ZoneName) {
-			availabilityZones = append(availabilityZones, zone.ZoneName)
+	for _, zone := range result.AvailabilityZones {
+		zoneName := aws.ToString(zone.ZoneName)
+		if zone.State == ec2types.AvailabilityZoneStateAvailable && !isUnsupported(zoneName) {
+			availabilityZones = append(availabilityZones, zoneName)
 		}
 	}
 
 	return availabilityZones, nil
 }
 
-func getTablesByRegion(region string) ([]string, error) {
-	cmd := exec.Command("aws", "dynamodb", "list-tables", "--region", region, "--output", "json")
-	output, err := cmd.CombinedOutput()
+func getTablesByRegion(ctx context.Context, cfg aws.Config) ([]string, error) {
+	dynamoClient := dynamodb.NewFromConfig(cfg)
+
+	result, err := dynamoClient.ListTables(ctx, &dynamodb.ListTablesInput{})
 	if err != nil {
 		fmt.Println("Error fetching the table list:", err)
 		return nil, err
 	}
-	var awsResponse types.AWSTableListResponse
-	err = json.Unmarshal(output, &awsResponse)
-	if err != nil {
-		fmt.Printf("❌ Error parsing JSON: %v\n", err)
-		return nil, err
-	}
 
-	return awsResponse.TableNames, nil
+	return result.TableNames, nil
 }
 
-func createDynamoDBTable(region, tableName string) error {
-	cmd := exec.Command(
-		"aws", "dynamodb", "create-table",
-		"--table-name", tableName,
-		"--attribute-definitions", "AttributeName=LockID,AttributeType=S",
-		"--key-schema", "AttributeName=LockID,KeyType=HASH",
-		"--billing-mode", "PAY_PER_REQUEST",
-		"--region", region,
-		"--output", "json",
-	)
+func createDynamoDBTable(ctx context.Context, cfg aws.Config, tableName string) error {
+	dynamoClient := dynamodb.NewFromConfig(cfg)
 
-	output, err := cmd.CombinedOutput()
+	_, err := dynamoClient.CreateTable(ctx, &dynamodb.CreateTableInput{
+		TableName: aws.String(tableName),
+		AttributeDefinitions: []dynamodbtypes.AttributeDefinition{
+			{
+				AttributeName: aws.String("LockID"),
+				AttributeType: dynamodbtypes.ScalarAttributeTypeS,
+			},
+		},
+		KeySchema: []dynamodbtypes.KeySchemaElement{
+			{
+				AttributeName: aws.String("LockID"),
+				KeyType:       dynamodbtypes.KeyTypeHash,
+			},
+		},
+		BillingMode: dynamodbtypes.BillingModePayPerRequest,
+	})
 	if err != nil {
-		fmt.Printf("❌ Error creating table: %v\nDetails: %s\n", err, string(output))
+		fmt.Printf("❌ Error creating table: %v\n", err)
 		return err
 	}
 
-	fmt.Println("✅ Table created successfully:", string(output))
+	fmt.Println("✅ Table created successfully")
 	return nil
 }
 
