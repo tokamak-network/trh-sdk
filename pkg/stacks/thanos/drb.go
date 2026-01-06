@@ -29,7 +29,8 @@ type DeployDRBContractsOutput struct {
 }
 
 type DeployDRBApplicationOutput struct {
-	URL string `json:"url"`
+	LeaderNodeURL   string   `json:"leader_node_url"`
+	RegularNodeURLs []string `json:"regular_node_urls"`
 }
 
 type DeployDRBOutput struct {
@@ -195,20 +196,53 @@ func (t *ThanosStack) deployDRBApplication(ctx context.Context, inputs *DeployDR
 	// For now, return a placeholder output
 	// This can be extended later to deploy a DRB application similar to cross-trade
 
-	// Clone the drb-node repository
-	err := t.cloneSourcecode(ctx, "drb-node", "https://github.com/tokamak-network/DRB-node.git")
+	// Clone the tokamak-thanos-stack repository
+	err := t.cloneSourcecode(ctx, "tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git")
 	if err != nil {
-		return nil, fmt.Errorf("failed to clone drb-node repository: %s", err)
+		return nil, fmt.Errorf("failed to clone tokamak-thanos-stack repository: %s", err)
 	}
 
-	// Checkout to `service`
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd DRB-node && git checkout dispute-mechanism")
+	// Checkout to `feat/add-drb-node`
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd tokamak-thanos-stack && git checkout feat/add-drb-node")
 	if err != nil {
-		return nil, fmt.Errorf("failed to checkout dispute-mechanism: %s", err)
+		return nil, fmt.Errorf("failed to checkout feat/add-drb-node: %s", err)
 	}
+
+	// Create postgres database
+
+	// Create .env
+	// Leader node configuration
+	/**
+	# 	Leader Node Configuration
+		LEADER_PRIVATE_KEY=<Your Leader Node Private Key>
+		LEADER_EOA=<Your Leader Ethereum Address>
+		ETH_RPC_URLS=<Your Ethereum RPC URLs separated by , (comma)>
+		CONTRACT_ADDRESS=<Deployed DRB Contract Address>
+		POSTGRES_PASSWORD=password
+	**/
+
+	// Run leader node and get the address of the leader node
+
+	// Create .env file for regular nodes
+	/**
+	# Regular Node Configuration
+	LEADER_PEER_ID=<Leader Node Peer ID>
+	LEADER_EOA=<Leader Ethereum Address>
+	EOA_PRIVATE_KEY_1=<Your Regular Node Private Key for Account 1>
+	EOA_PRIVATE_KEY_2=<Your Regular Node Private Key for Account 2>
+	EOA_PRIVATE_KEY_3=<Your Regular Node Private Key for Account 3>
+	CHAIN_ID=<Chain_ID>
+	POSTGRES_PASSWORD=password
+
+	ETH_RPC_URLS=<Your Ethereum RPC URLs separated by , (comma)>
+	CONTRACT_ADDRESS=<Deployed DRB Contract Address>
+	**/
+
+	// Run regular nodes and get the addresses of the regular nodes
 
 	return &DeployDRBApplicationOutput{
-		URL: "",
+		LeaderNodeURL:   "",
+		RegularNodeURLs: []string{},
 	}, nil
 }
 
