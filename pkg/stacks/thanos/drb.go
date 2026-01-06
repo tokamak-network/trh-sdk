@@ -16,10 +16,20 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
-type DeployDRBInput struct {
-	RPC        string `json:"rpc"`
-	ChainID    uint64 `json:"chain_id"`
+type LeaderNodeInput struct {
 	PrivateKey string `json:"private_key"`
+}
+
+type RegularNodeInput struct {
+	PrivateKey string `json:"private_key"`
+}
+
+type DeployDRBInput struct {
+	RPC              string              `json:"rpc"`
+	ChainID          uint64              `json:"chain_id"`
+	PrivateKey       string              `json:"private_key"`
+	LeaderNodeInput  *LeaderNodeInput    `json:"leader_node_input"`
+	RegularNodeInput []*RegularNodeInput `json:"regular_node_input"`
 }
 
 type DeployDRBContractsOutput struct {
