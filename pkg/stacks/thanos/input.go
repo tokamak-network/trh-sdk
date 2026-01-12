@@ -1604,7 +1604,7 @@ func updateTerraformEnvFile(dirPath string, config types.UpdateTerraformEnvConfi
 	return nil
 }
 
-func makeBlockExplorerEnvs(dirPath string, filename string, config types.BlockExplorerEnvs) error {
+func makeBlockExplorerEnvs(dirPath string, filename string, config types.AwsDatabaseEnvs) error {
 	if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
 		fmt.Println("Error creating directory:", err)
 		return err
@@ -1622,9 +1622,9 @@ func makeBlockExplorerEnvs(dirPath string, filename string, config types.BlockEx
 	writer := bufio.NewWriter(output)
 
 	envVars := []string{
-		fmt.Sprintf("export TF_VAR_db_username=\"%s\"\n", config.BlockExplorerDatabaseUserName),
-		fmt.Sprintf("export TF_VAR_db_password=\"%s\"\n", config.BlockExplorerDatabasePassword),
-		fmt.Sprintf("export TF_VAR_db_name=\"%s\"\n", config.BlockExplorerDatabaseName),
+		fmt.Sprintf("export TF_VAR_db_username=\"%s\"\n", config.DatabaseUserName),
+		fmt.Sprintf("export TF_VAR_db_password=\"%s\"\n", config.DatabasePassword),
+		fmt.Sprintf("export TF_VAR_db_name=\"%s\"\n", config.DatabaseName),
 		fmt.Sprintf("export TF_VAR_vpc_id=\"%s\"\n", config.VpcId),
 		fmt.Sprintf("export TF_VAR_aws_region=\"%s\"\n", config.AwsRegion),
 	}
@@ -1642,6 +1642,11 @@ func makeBlockExplorerEnvs(dirPath string, filename string, config types.BlockEx
 
 	fmt.Println("Environment configuration file (.envrc) has been successfully updated!")
 	return nil
+}
+
+// makeDRBEnvs creates .envrc file for DRB Terraform deployment
+func (t *ThanosStack) makeDRBEnvs(dirPath string, filename string, config types.AwsDatabaseEnvs) error {
+	return makeBlockExplorerEnvs(dirPath, filename, config)
 }
 
 func (t *ThanosStack) cloneSourcecode(ctx context.Context, repositoryName, url string) error {
