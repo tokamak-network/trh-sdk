@@ -415,6 +415,14 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 		t.deployConfig.CrossTrade[input.Mode].Output.DeployCrossTradeContractsOutput.L1CrossTradeAddress = deployCrossTradeContractsOutput.L1CrossTradeAddress
 		t.deployConfig.CrossTrade[input.Mode].Output.DeployCrossTradeContractsOutput.L1CrossTradeProxyAddress = deployCrossTradeContractsOutput.L1CrossTradeProxyAddress
 
+		// Initialize maps if nil
+		if t.deployConfig.CrossTrade[input.Mode].Output.DeployCrossTradeContractsOutput.L2CrossTradeProxyAddresses == nil {
+			t.deployConfig.CrossTrade[input.Mode].Output.DeployCrossTradeContractsOutput.L2CrossTradeProxyAddresses = make(map[uint64]string)
+		}
+		if t.deployConfig.CrossTrade[input.Mode].Output.DeployCrossTradeContractsOutput.L2CrossTradeAddresses == nil {
+			t.deployConfig.CrossTrade[input.Mode].Output.DeployCrossTradeContractsOutput.L2CrossTradeAddresses = make(map[uint64]string)
+		}
+
 		// Add new chain to the output
 		for chainID, proxyAddress := range deployCrossTradeContractsOutput.L2CrossTradeProxyAddresses {
 			t.deployConfig.CrossTrade[input.Mode].Output.DeployCrossTradeContractsOutput.L2CrossTradeProxyAddresses[chainID] = proxyAddress
