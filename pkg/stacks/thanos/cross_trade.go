@@ -85,8 +85,8 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 		}
 	}
 
-	// Build the contracts
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd crossTrade && pnpm install && forge clean && forge build")
+	// Build the contracts (remove Mock folder with old Solidity versions that Foundry can't compile)
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd crossTrade && rm -rf contracts/Mock && pnpm install && forge clean && forge build")
 	if err != nil {
 		return nil, fmt.Errorf("failed to build the contracts: %s", err)
 	}
@@ -560,8 +560,6 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, mode cons
 		NativeTokenSymbol: constants.L1ChainConfigurations[l1ChainID].NativeTokenSymbol,
 	}
 
-	l2ChainRPCs := make(map[uint64]string)
-
 	// Add L2 chain config
 	for _, chain := range input.L2ChainConfig {
 		l2ChainID := chain.ChainID
@@ -586,7 +584,7 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, mode cons
 			Contracts: types.CrossTradeContracts{
 				L2CrossTrade: &l2CrossTradeProxyAddress,
 			},
-			RPCURL:            l2ChainRPCs[l2ChainID],
+			RPCURL:            chain.RPC,
 			Tokens:            l2Tokens,
 			NativeTokenName:   nativeTokenName,
 			NativeTokenSymbol: nativeTokenSymbol,
