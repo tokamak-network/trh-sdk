@@ -568,16 +568,19 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, mode cons
 		NativeTokenSymbol: constants.L1ChainConfigurations[l1ChainID].NativeTokenSymbol,
 	}
 
-	l2ChainRPCs := make(map[uint64]string)
-
 	// Add L2 chain config
 	for _, chain := range input.L2ChainConfig {
 		l2ChainID := chain.ChainID
 		nativeTokenName := constants.L2ChainConfigurations[l2ChainID].NativeTokenName
 		nativeTokenSymbol := constants.L2ChainConfigurations[l2ChainID].NativeTokenSymbol
+		rpcURL := chain.RPC
 		if l2ChainID == t.deployConfig.L2ChainID {
 			nativeTokenName = "Tokamak Network Token"
 			nativeTokenSymbol = "TON"
+			// platform chain should use its own rpc from deploy config
+			if t.deployConfig.L2RpcUrl != "" {
+				rpcURL = t.deployConfig.L2RpcUrl
+			}
 		} else if nativeTokenName == "" || nativeTokenSymbol == "" {
 			nativeTokenName = "Ether"
 			nativeTokenSymbol = "ETH"
@@ -594,7 +597,7 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, mode cons
 			Contracts: types.CrossTradeContracts{
 				L2CrossTrade: &l2CrossTradeProxyAddress,
 			},
-			RPCURL:            l2ChainRPCs[l2ChainID],
+			RPCURL:            rpcURL,
 			Tokens:            l2Tokens,
 			NativeTokenName:   nativeTokenName,
 			NativeTokenSymbol: nativeTokenSymbol,
