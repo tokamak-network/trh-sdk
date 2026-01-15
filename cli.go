@@ -334,6 +334,162 @@ Examples:
 				Usage:  "Register L2 Metadata",
 				Action: commands.ActionRegisterMetadata(),
 			},
+			{
+				Name:  "shutdown",
+				Usage: "Manage L2 shutdown and force withdrawal process",
+				Description: `Manage L2 chain shutdown and force withdrawal operations in 5 steps:
+1. gen: Scan L2 assets and generate snapshot
+2. deploy-storage: Deploy FW storage contracts containing hashes
+3. register: Register storage positions to the L1 bridge
+4. activate: Activate force withdrawal on the bridge
+5. send: Execute actual withdrawal claims on L1
+
+Examples:
+  trh-sdk shutdown run --network sepolia (Run all steps)
+  trh-sdk shutdown run --gen --deploy (Run specific steps)
+  trh-sdk shutdown gen --l2-start-block 0 --l2-end-block latest`,
+				Action: commands.ActionShutdown(),
+				Commands: []*cli.Command{
+					{
+						Name:  "run",
+						Usage: "Run the entire shutdown process or coordinated steps",
+						Flags: []cli.Flag{
+							&cli.BoolFlag{Name: "gen", Usage: "Run Step 1 (Asset Generation)"},
+							&cli.BoolFlag{Name: "deploy", Usage: "Run Step 2 (Storage Deployment)"},
+							&cli.BoolFlag{Name: "register", Usage: "Run Step 3 (Position Registration)"},
+							&cli.BoolFlag{Name: "activate", Usage: "Run Step 4 (Bridge Activation)"},
+							&cli.BoolFlag{Name: "send", Usage: "Run Step 5 (Asset Withdrawal)"},
+							&cli.BoolFlag{Name: "use-script", Usage: "Execute using e2e-shutdown-test.sh script"},
+							&cli.StringFlag{Name: "l2-start-block", Usage: "L2 start block (for Step 1)"},
+							&cli.StringFlag{Name: "l2-end-block", Usage: "L2 end block (for Step 1)"},
+							&cli.StringFlag{Name: "count", Usage: "Storage contract count (for Step 2)", Value: "50"},
+						},
+						Action: commands.ActionShutdownRun(),
+					},
+					{
+						Name:     "gen",
+						Usage:    "Step 1: Generate force withdrawal assets snapshot",
+						HideHelp: true,
+						Flags: []cli.Flag{
+							&cli.StringFlag{
+								Name:  "l2-start-block",
+								Usage: "L2 start block number (default: 0)",
+							},
+							&cli.StringFlag{
+								Name:  "l2-end-block",
+								Usage: "L2 end block number (default: latest)",
+							},
+							&cli.StringFlag{
+								Name:  "output",
+								Usage: "Output file path (default: data-dir/generate-assets3.json)",
+							},
+							&cli.BoolFlag{
+								Name:  "skip-verify",
+								Usage: "Skip on-chain verification after generation (faster)",
+								Value: false,
+							},
+						},
+						Action: commands.ActionShutdownGen(),
+					},
+					{
+						Name:  "deploy-storage",
+						Usage: "Step 2: Deploy FW storage contracts containing hashes",
+						Flags: []cli.Flag{
+							&cli.StringFlag{
+								Name:  "input",
+								Usage: "Input JSON file path",
+							},
+							&cli.StringFlag{
+								Name:  "output",
+								Usage: "Output JSON file for deployed addresses",
+							},
+							&cli.StringFlag{
+								Name:  "count",
+								Usage: "Maximum hashes per storage contract",
+								Value: "50",
+							},
+							&cli.StringFlag{
+								Name:  "data-dir",
+								Usage: "Data directory",
+							},
+						},
+						Action: commands.ActionShutdownDeployStorage(),
+					},
+					{
+						Name:  "register",
+						Usage: "Step 3: Register storage positions to the L1 bridge",
+						Flags: []cli.Flag{
+							&cli.StringFlag{
+								Name:  "input",
+								Usage: "Input JSON file containing storage addresses",
+							},
+							&cli.StringFlag{
+								Name:  "data-dir",
+								Usage: "Data directory",
+							},
+						},
+						Action: commands.ActionShutdownRegister(),
+					},
+					{
+						Name:   "activate",
+						Usage:  "Step 4: Activate force withdrawal on the bridge",
+						Action: commands.ActionShutdownActivate(),
+					},
+					{
+						Name:  "dry-run",
+						Usage: "Gas Check: Estimate gas without sending transactions",
+						Flags: []cli.Flag{
+							&cli.StringFlag{
+								Name:  "input",
+								Usage: "Input JSON file path (default: data-dir/generate-assets3.json)",
+							},
+							&cli.StringFlag{
+								Name:  "max",
+								Usage: "Maximum number of transactions to estimate",
+								Value: "20",
+							},
+							&cli.StringFlag{
+								Name:  "data-dir",
+								Usage: "Data directory for snapshot and results",
+							},
+						},
+						Action: commands.ActionShutdownDryRun(),
+					},
+					{
+						Name:  "send",
+						Usage: "Step 5: Execute force withdrawal on L1",
+						Flags: []cli.Flag{
+							&cli.StringFlag{
+								Name:  "input",
+								Usage: "Input JSON file path",
+							},
+							&cli.StringFlag{
+								Name:  "max",
+								Usage: "Maximum number of transactions to send",
+								Value: "20",
+							},
+							&cli.StringFlag{
+								Name:  "position-contract",
+								Usage: "Position contract address or JSON file",
+							},
+							&cli.StringFlag{
+								Name:  "force-owner-key",
+								Usage: "Private key for L1 Force Owner",
+							},
+							&cli.StringFlag{
+								Name:  "data-dir",
+								Usage: "Data directory",
+							},
+						},
+						Action: commands.ActionShutdownSend(),
+					},
+					{
+						Name:   "status",
+						Usage:  "Show current shutdown status",
+						Action: commands.ActionShutdownStatus(),
+					},
+				},
+			},
 		},
 	}
 
