@@ -401,9 +401,9 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 		t.deployConfig.CrossTrade = make(map[constants.CrossTradeDeployMode]*types.CrossTrade)
 	}
 
-	if scratch {
+	if scratch || t.deployConfig.CrossTrade[input.Mode] == nil {
 		t.deployConfig.CrossTrade[input.Mode] = input
-	} else { // Deploy new chain
+	} else { // Deploy new chain on to existing config...
 		t.deployConfig.CrossTrade[input.Mode].L2ChainConfig = append(t.deployConfig.CrossTrade[input.Mode].L2ChainConfig, input.L2ChainConfig...)
 	}
 
