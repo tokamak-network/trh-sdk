@@ -388,8 +388,10 @@ func RestoreEFS(ctx context.Context, region string, recoveryPointArn string, get
 	// Generate a unique filesystem ID and creation token using current timestamp
 	fsID := fmt.Sprintf("fs-restored-%d", time.Now().Unix())
 	creationToken := fmt.Sprintf("restore-token-%d", time.Now().Unix())
-	// Use the same KMS key as the original EFS for consistency
-	kmsKeyId := "arn:aws:kms:ap-northeast-2:778187209079:key/2dcda2df-c6f8-4d75-a2d5-e4d964f57f21"
+
+	// Use AWS managed EFS encryption key (always available in all AWS accounts)
+	kmsKeyId := "alias/aws/elasticfilesystem"
+
 	meta := fmt.Sprintf(`{"file-system-id":"%s","newfilesystem":"true","creationtoken":"%s","kmskeyid":"%s","performancemode":"generalPurpose","encrypted":"true"}`, fsID, creationToken, kmsKeyId)
 	jobId, err := utils.ExecuteCommand(ctx,
 		"aws", "backup", "start-restore-job",
