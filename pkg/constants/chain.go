@@ -99,36 +99,48 @@ var BaseBatchInboxAddress = "0xff00000000000000000000000000000000000000"
 var DefaultL2BlockTimeInSeconds uint64 = 2
 
 const (
-	OptimismSepoliaChainID = 10
-	OptimismChainID        = 11155420
+	OptimismSepoliaChainID = 11155420
+	OptimismChainID        = 10
 	BaseSepoliaChainID     = 84532
 	BaseChainID            = 8453
+	UnichainSepoliaChainID = 1301
+	UnichainChainID        = 130
 )
 
 var L2ChainConfigurations = map[uint64]struct {
-	ETHAddress  string `json:"eth_address"`
-	USDCAddress string `json:"usdc_address"`
-	USDTAddress string `json:"usdt_address"`
-	TONAddress  string `json:"ton_address"`
+	ETHAddress        string `json:"eth_address"`
+	NativeTokenName   string `json:"native_token_name"`
+	NativeTokenSymbol string `json:"native_token_symbol"`
+	USDCAddress       string `json:"usdc_address"`
+	USDTAddress       string `json:"usdt_address"`
+	TONAddress        string `json:"ton_address"`
 }{
 	OptimismSepoliaChainID: {
-		ETHAddress:  "0x0000000000000000000000000000000000000000",
-		USDCAddress: "0x5fd84259d66cd46123540766be93dfe6d43130d7",
+		ETHAddress:        "0x0000000000000000000000000000000000000000",
+		USDCAddress:       "0x5fd84259d66cd46123540766be93dfe6d43130d7",
+		NativeTokenName:   "ETH",
+		NativeTokenSymbol: "ETH",
 	},
 	OptimismChainID: {
-		ETHAddress:  "0x0000000000000000000000000000000000000000",
-		USDCAddress: "0x0b2c639c533813f4aa9d7837caf62653d097ff85",
-		USDTAddress: "0x94b008aa00579c1307b0ef2c499ad98a8ce58e58",
+		ETHAddress:        "0x0000000000000000000000000000000000000000",
+		USDCAddress:       "0x0b2c639c533813f4aa9d7837caf62653d097ff85",
+		USDTAddress:       "0x94b008aa00579c1307b0ef2c499ad98a8ce58e58",
+		NativeTokenName:   "ETH",
+		NativeTokenSymbol: "ETH",
 	},
 	BaseSepoliaChainID: {
-		ETHAddress:  "0x0000000000000000000000000000000000000000",
-		USDCAddress: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-		USDTAddress: "0x323e78f944A9a1FcF3a10efcC5319DBb0bB6e673",
+		ETHAddress:        "0x0000000000000000000000000000000000000000",
+		USDCAddress:       "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+		USDTAddress:       "0x323e78f944A9a1FcF3a10efcC5319DBb0bB6e673",
+		NativeTokenName:   "ETH",
+		NativeTokenSymbol: "ETH",
 	},
 	BaseChainID: {
-		ETHAddress:  "0x0000000000000000000000000000000000000000",
-		USDCAddress: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-		USDTAddress: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
+		ETHAddress:        "0x0000000000000000000000000000000000000000",
+		USDCAddress:       "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+		USDTAddress:       "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
+		NativeTokenName:   "ETH",
+		NativeTokenSymbol: "ETH",
 	},
 }
 
