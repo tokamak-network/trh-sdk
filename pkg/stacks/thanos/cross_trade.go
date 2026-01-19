@@ -401,9 +401,9 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 		t.deployConfig.CrossTrade = make(map[constants.CrossTradeDeployMode]*types.CrossTrade)
 	}
 
-	if scratch {
+	if scratch || t.deployConfig.CrossTrade[input.Mode] == nil {
 		t.deployConfig.CrossTrade[input.Mode] = input
-	} else { // Deploy new chain
+	} else { // Deploy new chain on to existing config...
 		t.deployConfig.CrossTrade[input.Mode].L2ChainConfig = append(t.deployConfig.CrossTrade[input.Mode].L2ChainConfig, input.L2ChainConfig...)
 	}
 
@@ -414,6 +414,14 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 	} else {
 		t.deployConfig.CrossTrade[input.Mode].Output.DeployCrossTradeContractsOutput.L1CrossTradeAddress = deployCrossTradeContractsOutput.L1CrossTradeAddress
 		t.deployConfig.CrossTrade[input.Mode].Output.DeployCrossTradeContractsOutput.L1CrossTradeProxyAddress = deployCrossTradeContractsOutput.L1CrossTradeProxyAddress
+
+		// Initialize maps if nil
+		if t.deployConfig.CrossTrade[input.Mode].Output.DeployCrossTradeContractsOutput.L2CrossTradeProxyAddresses == nil {
+			t.deployConfig.CrossTrade[input.Mode].Output.DeployCrossTradeContractsOutput.L2CrossTradeProxyAddresses = make(map[uint64]string)
+		}
+		if t.deployConfig.CrossTrade[input.Mode].Output.DeployCrossTradeContractsOutput.L2CrossTradeAddresses == nil {
+			t.deployConfig.CrossTrade[input.Mode].Output.DeployCrossTradeContractsOutput.L2CrossTradeAddresses = make(map[uint64]string)
+		}
 
 		// Add new chain to the output
 		for chainID, proxyAddress := range deployCrossTradeContractsOutput.L2CrossTradeProxyAddresses {
@@ -590,6 +598,7 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, mode cons
 				L2CrossTrade: &l2CrossTradeProxyAddress,
 			},
 			RPCURL:            rpcURL,
+			RPCURL:            chain.RPC,
 			Tokens:            l2Tokens,
 			NativeTokenName:   nativeTokenName,
 			NativeTokenSymbol: nativeTokenSymbol,
