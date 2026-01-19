@@ -598,7 +598,6 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, mode cons
 				L2CrossTrade: &l2CrossTradeProxyAddress,
 			},
 			RPCURL:            rpcURL,
-			RPCURL:            chain.RPC,
 			Tokens:            l2Tokens,
 			NativeTokenName:   nativeTokenName,
 			NativeTokenSymbol: nativeTokenSymbol,
