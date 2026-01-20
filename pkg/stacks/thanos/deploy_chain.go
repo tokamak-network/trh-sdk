@@ -374,6 +374,18 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	t.deployConfig.L2RpcUrl = l2RPCUrl
 	t.deployConfig.L1BeaconURL = inputs.L1BeaconURL
 
+	backupEnabled := false
+	if t.network == constants.Mainnet {
+		// Mainnet always has backup enabled
+		backupEnabled = true
+	} else if inputs.BackupConfig != nil {
+		backupEnabled = inputs.BackupConfig.Enabled
+	}
+
+	t.deployConfig.BackupConfig = &types.BackupConfiguration{
+		Enabled: backupEnabled,
+	}
+
 	err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
 	if err != nil {
 		t.logger.Error("Error saving configuration file", "err", err)
@@ -382,7 +394,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	t.logger.Infof("Configuration saved successfully to: %s/settings.json", t.deploymentPath)
 
 	// Step 8.3. Initialize backup system (conditional - only if BackupConfig.Enabled is true)
-	if inputs.BackupConfig != nil && inputs.BackupConfig.Enabled {
+	if backupEnabled {
 		fmt.Println("Initializing backup system...")
 		err = t.initializeBackupSystem(ctx, inputs.ChainName)
 		if err != nil {
