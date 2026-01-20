@@ -18,7 +18,8 @@ func InteractiveRestoreWithSelection(
 	ctx context.Context,
 	l *zap.SugaredLogger,
 	region, namespace string,
-	executeRestore func(context.Context, string) (*types.BackupRestoreInfo, error),
+	attachWorkloads bool,
+	executeRestore func(context.Context, string, bool) (*types.BackupRestoreInfo, error),
 ) error {
 	// Get AWS account ID and EFS ID
 	accountID, err := utils.DetectAWSAccountID(ctx)
@@ -89,7 +90,7 @@ func InteractiveRestoreWithSelection(
 	selectedArn := availablePoints[sel-1].RecoveryPointARN // Convert to 0-based array index
 
 	// Execute restore with selected ARN
-	_, err = executeRestore(ctx, selectedArn)
+	_, err = executeRestore(ctx, selectedArn, attachWorkloads)
 	return err
 }
 
@@ -99,6 +100,7 @@ func DirectRestore(
 	l *zap.SugaredLogger,
 	region, namespace string,
 	recoveryPointArn string,
+	attachWorkloads bool,
 	restoreEFS func(context.Context, string) (string, error),
 	monitorRestore func(context.Context, string) (string, error),
 	handleCompletion func(context.Context, string) (string, error),
@@ -151,17 +153,8 @@ func DirectRestore(
 		Status:           "COMPLETED",
 	}
 
-	// Step 4: Ask user if they want to attach (only for CLI)
-	l.Info("")
-	var response string
-	fmt.Print("Would you like to attach the restored EFS to workloads now? (y/n) ")
-	if _, err := fmt.Scanf("%s", &response); err != nil {
-		l.Warnf("Failed to read input: %v", err)
-		response = "n"
-	}
-
-	response = strings.ToLower(strings.TrimSpace(response))
-	if response == "y" || response == "yes" {
+	// Step 4: Attach to workloads if configured
+	if attachWorkloads {
 		l.Info("")
 		l.Info("🔗 Starting attach process...")
 
@@ -181,6 +174,7 @@ func DirectRestore(
 		restoreInfo.Status = "COMPLETED_WITH_ATTACH"
 	} else {
 		l.Info("")
+		l.Info("⏭️  Skipping attach workloads (not requested)")
 		l.Info("You can attach workloads to the restored EFS later with:")
 		l.Infof("  ./trh-sdk backup-manager --attach --efs-id %s --pvc op-geth,op-node --sts op-geth,op-node", newEfsID)
 	}
