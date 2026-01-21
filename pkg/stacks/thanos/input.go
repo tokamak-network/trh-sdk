@@ -79,10 +79,15 @@ func (c *DeployContractsInput) Validate(ctx context.Context, registerCandidate b
 	return nil
 }
 
+type BackupConfig struct {
+	Enabled bool
+}
+
 type DeployInfraInput struct {
 	ChainName           string
 	L1BeaconURL         string
 	IgnoreInstallBridge bool
+	BackupConfig        *BackupConfig
 
 	// register metadata
 	GithubCredentials *types.GitHubCredentials

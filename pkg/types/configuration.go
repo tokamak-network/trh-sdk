@@ -149,6 +149,13 @@ type Config struct {
 
 	// Metadata Registration
 	MetadataPRLink string `json:"metadata_pr_link,omitempty"`
+
+	// Backup configuration
+	BackupConfig *BackupConfiguration `json:"backup_config,omitempty"`
+}
+
+type BackupConfiguration struct {
+	Enabled bool `json:"enabled"` // Whether automatic backup is enabled
 }
 
 type LoggingConfig struct {

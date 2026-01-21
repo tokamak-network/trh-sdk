@@ -69,7 +69,7 @@ func (t *ThanosStack) BackupList(ctx context.Context, limit string) (*types.Back
 }
 
 // BackupRestore executes EFS restore from a recovery point ARN and returns restore information
-func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string) (*types.BackupRestoreInfo, error) {
+func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string, attachWorkloads bool) (*types.BackupRestoreInfo, error) {
 	// Validate ARN
 	if !strings.Contains(recoveryPointArn, "arn:aws:backup:") {
 		return nil, fmt.Errorf("invalid recovery point ARN format: %s", recoveryPointArn)
@@ -87,6 +87,7 @@ func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string
 		t.deployConfig.AWS.Region,
 		t.deployConfig.K8s.Namespace,
 		recoveryPointArn,
+		attachWorkloads,
 		func(c context.Context, arn string) (string, error) {
 			return backup.RestoreEFS(c, t.deployConfig.AWS.Region, arn, func(c2 context.Context) (string, error) {
 				acct, err := utils.DetectAWSAccountID(c2)
@@ -130,14 +131,15 @@ func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string
 }
 
 // BackupRestoreInteractive provides interactive recovery point selection and restoration
-func (t *ThanosStack) BackupRestoreInteractive(ctx context.Context) error {
+func (t *ThanosStack) BackupRestoreInteractive(ctx context.Context, attachWorkloads bool) error {
 	return backup.InteractiveRestoreWithSelection(
 		ctx,
 		t.logger,
 		t.deployConfig.AWS.Region,
 		t.deployConfig.K8s.Namespace,
-		func(c context.Context, arn string) (*types.BackupRestoreInfo, error) {
-			return t.BackupRestore(c, arn)
+		attachWorkloads,
+		func(c context.Context, arn string, attach bool) (*types.BackupRestoreInfo, error) {
+			return t.BackupRestore(c, arn, attach)
 		},
 	)
 }
