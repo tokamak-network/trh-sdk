@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"strconv"
 
 	"github.com/tokamak-network/trh-sdk/pkg/logging"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
@@ -223,14 +223,40 @@ func ActionShutdown() cli.ActionFunc {
 	}
 }
 
+// ActionShutdownBlock blocks deposits and withdrawals
+func ActionShutdownBlock() cli.ActionFunc {
+	return func(ctx context.Context, cmd *cli.Command) error {
+		fmt.Println("🚫 Blocking L1 Deposits and Withdrawals...")
+		sc, err := NewShutdownContext(ctx)
+		if err != nil {
+			return err
+		}
+		client, _ := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
+		return client.ShutdownBlock(ctx, cmd.Bool("dry-run"))
+	}
+}
+
+// ActionShutdownFetch collects L2 asset information
+func ActionShutdownFetch() cli.ActionFunc {
+	return func(ctx context.Context, cmd *cli.Command) error {
+		fmt.Println("🔍 Collecting L2 Asset Information...")
+		sc, err := NewShutdownContext(ctx)
+		if err != nil {
+			return err
+		}
+		client, _ := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
+		return client.ShutdownFetch(ctx, cmd.Bool("dry-run"))
+	}
+}
+
 // ActionShutdownGen generates force withdrawal assets snapshot
 func ActionShutdownGen() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
-		fmt.Println("🚀 Starting ForceWithdraw Asset Generation...")
+		fmt.Println("🚀 Generating L2 Asset Snapshot...")
 
 		sc, err := NewShutdownContext(ctx)
 		if err != nil {
-			return fmt.Errorf("initialization failed: %w", err)
+			return err
 		}
 
 		l2StartBlock := cmd.String("l2-start-block")
@@ -242,272 +268,112 @@ func ActionShutdownGen() cli.ActionFunc {
 			l2EndBlock = "latest"
 		}
 
-		dataDir := filepath.Join(sc.SDKPath, "data")
+		client, _ := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
 
-		output := cmd.String("output")
-		if output == "" {
-			output = filepath.Join(dataDir, "generate-assets3.json")
-		}
-
-		// Create SDK Client
-		client, err := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
-		if err != nil {
-			return err
-		}
-
-		input := &thanos.ShutdownGenInput{
-			L2StartBlock: l2StartBlock,
+		l2StartBlockInt, _ := strconv.ParseUint(l2StartBlock, 10, 64)
+		input := types.ShutdownConfig{
+			L2StartBlock: l2StartBlockInt,
 			L2EndBlock:   l2EndBlock,
-			Output:       output,
-			SkipVerify:   cmd.Bool("skip-verify"),
 		}
 
-		if err := client.ShutdownGen(ctx, input); err != nil {
-			return err
-		}
-
-		sc.State.UpdateAfterGen(output)
-		_ = sc.State.Save()
-
-		sc.Logger.Info("✅ Asset generation completed and state updated")
-		return nil
+		return client.ShutdownGen(ctx, input, cmd.Bool("dry-run"))
 	}
 }
 
-// ActionShutdownDryRun estimates gas without sending transactions
-func ActionShutdownDryRun() cli.ActionFunc {
-	return func(ctx context.Context, cmd *cli.Command) error {
-		fmt.Println("🔍 Starting ForceWithdraw Dry-Run...")
-
-		sc, err := NewShutdownContext(ctx)
-		if err != nil {
-			return err
-		}
-
-		dataDir := cmd.String("data-dir")
-		if dataDir == "" {
-			dataDir = filepath.Join(sc.SDKPath, "data")
-		}
-
-		input := cmd.String("input")
-		if input == "" {
-			input = filepath.Join(dataDir, "generate-assets3.json")
-		}
-
-		contracts, _ := sc.readDeploymentContracts()
-		bridgeAddr := ""
-		if contracts != nil {
-			bridgeAddr = contracts.L1StandardBridgeProxy
-		}
-
-		client, _ := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
-		if err := client.ShutdownSend(ctx, bridgeAddr, input, "0x0000000000000000000000000000000000000000"); err != nil {
-			return err
-		}
-
-		sc.State.UpdateAfterDryRun()
-		_ = sc.State.Save()
-		return nil
-	}
-}
-
-// ActionShutdownSend executes force withdrawal on L1
-func ActionShutdownSend() cli.ActionFunc {
-	return func(ctx context.Context, cmd *cli.Command) error {
-		sc, err := NewShutdownContext(ctx)
-		if err != nil {
-			return err
-		}
-
-		dataDir := cmd.String("data-dir")
-		if dataDir == "" {
-			dataDir = filepath.Join(sc.SDKPath, "data")
-		}
-
-		input := cmd.String("input")
-		if input == "" {
-			input = filepath.Join(dataDir, "generate-assets3.json")
-		}
-
-		positionAddr := cmd.String("position-contract")
-		if positionAddr == "" {
-			positionAddr = "0x0000000000000000000000000000000000000000"
-		}
-
-		contracts, _ := sc.readDeploymentContracts()
-		bridgeAddr := ""
-		if contracts != nil {
-			bridgeAddr = contracts.L1StandardBridgeProxy
-		}
-
-		client, _ := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
-		if err := client.ShutdownSend(ctx, bridgeAddr, input, positionAddr); err != nil {
-			return err
-		}
-
-		sc.State.UpdateAfterSend()
-		_ = sc.State.Save()
-		return nil
-	}
-}
-
-// ActionShutdownDeployStorage deploys FW storage contracts (Step 2)
-func ActionShutdownDeployStorage() cli.ActionFunc {
-	return func(ctx context.Context, cmd *cli.Command) error {
-		sc, err := NewShutdownContext(ctx)
-		if err != nil {
-			return err
-		}
-
-		dataDir := cmd.String("data-dir")
-		if dataDir == "" {
-			dataDir = filepath.Join(sc.SDKPath, "data")
-		}
-
-		input := cmd.String("input")
-		if input == "" {
-			input = filepath.Join(dataDir, "generate-assets3.json")
-		}
-
-		client, _ := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
-		if err := client.ShutdownDeployStorage(ctx, input); err != nil {
-			return err
-		}
-
-		sc.Logger.Info("✅ Storage contracts deployed successfully")
-		return nil
-	}
-}
-
-// ActionShutdownRegister registers positions to the bridge (Step 3)
-func ActionShutdownRegister() cli.ActionFunc {
-	return func(ctx context.Context, cmd *cli.Command) error {
-		sc, err := NewShutdownContext(ctx)
-		if err != nil {
-			return err
-		}
-
-		dataDir := cmd.String("data-dir")
-		if dataDir == "" {
-			dataDir = filepath.Join(sc.SDKPath, "data")
-		}
-
-		input := cmd.String("input")
-		if input == "" {
-			input = filepath.Join(dataDir, "genstorage-addresses.json")
-		}
-
-		contracts, _ := sc.readDeploymentContracts()
-		bridgeAddr := ""
-		if contracts != nil {
-			bridgeAddr = contracts.L1StandardBridgeProxy
-		}
-
-		client, _ := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
-		if err := client.ShutdownRegister(ctx, bridgeAddr, input); err != nil {
-			return err
-		}
-
-		sc.Logger.Info("✅ Positions registered successfully")
-		return nil
-	}
-}
-
-// ActionShutdownActivate activates the bridge shutdown functionality (Step 4)
+// ActionShutdownActivate prepares L1 withdrawal (Phase 1)
 func ActionShutdownActivate() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
+		fmt.Println("⚙️ Preparing L1 Withdrawal (Phase 1)...")
 		sc, err := NewShutdownContext(ctx)
 		if err != nil {
 			return err
 		}
-
-		contracts, _ := sc.readDeploymentContracts()
-		bridgeAddr := ""
-		if contracts != nil {
-			bridgeAddr = contracts.L1StandardBridgeProxy
+		assetsPath := cmd.String("input")
+		if assetsPath == "" {
+			if sc.Config.Shutdown != nil && sc.Config.Shutdown.AssetsDataPath != "" {
+				assetsPath = sc.Config.Shutdown.AssetsDataPath
+			} else {
+				assetsPath = fmt.Sprintf("data/generate-assets-%d.json", sc.Config.L2ChainID)
+			}
 		}
-
 		client, _ := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
-		if err := client.ShutdownActivate(ctx, bridgeAddr, true); err != nil {
-			return err
-		}
-
-		sc.Logger.Info("✅ Bridge shutdown activated successfully")
-		return nil
+		return client.ShutdownActivate(ctx, assetsPath, cmd.Bool("dry-run"))
 	}
 }
 
-// ActionShutdownRun orchestrates the entire shutdown process or specific steps
-func ActionShutdownRun() cli.ActionFunc {
+// ActionShutdownWithdraw executes liquidity sweep and claims (Phase 2)
+func ActionShutdownWithdraw() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
-		fmt.Println("🏁 Starting Integrated Shutdown Process...")
-
+		fmt.Println("💰 Executing L1 Asset Withdrawal (Phase 2)...")
 		sc, err := NewShutdownContext(ctx)
 		if err != nil {
-			return fmt.Errorf("initialization failed: %w", err)
+			return err
 		}
-
-		// Check if we should run the integrated shell script or individual Go actions
-		if cmd.Bool("use-script") {
-			sc.Logger.Info("🚀 Running integrated shell script: e2e-shutdown-test.sh")
-			scriptPath := filepath.Join(sc.SDKPath, "scripts", "e2e-shutdown-test.sh")
-
-			// Build environment variables from config
-			envVars := []string{
-				fmt.Sprintf("L1_RPC_URL=%s", sc.Config.L1RPCURL),
-				fmt.Sprintf("L2_RPC_URL=%s", sc.Config.L2RpcUrl),
-				fmt.Sprintf("PRIVATE_KEY=%s", sc.Config.AdminPrivateKey),
-				fmt.Sprintf("NETWORK=%s", sc.Config.Network),
-			}
-
-			cmdStr := fmt.Sprintf("%s %s %s", strings.Join(envVars, " "), scriptPath, sc.Config.Network)
-			return utils.ExecuteCommandStream(ctx, sc.Logger, "bash", "-c", cmdStr)
-		}
-
-		// Individual steps orchestrated via flags
-		all := !cmd.Bool("gen") && !cmd.Bool("deploy") && !cmd.Bool("register") && !cmd.Bool("activate") && !cmd.Bool("send")
-
-		// Ensure defaults for block range if genius is running and flags are missing
-		l2Start := cmd.String("l2-start-block")
-		if l2Start == "" {
-			l2Start = "0"
-		}
-		l2End := cmd.String("l2-end-block")
-		if l2End == "" {
-			l2End = "latest"
-		}
-
-		if all || cmd.Bool("gen") {
-			if err := ActionShutdownGen()(ctx, cmd); err != nil {
-				return err
+		assetsPath := cmd.String("input")
+		if assetsPath == "" {
+			if sc.Config.Shutdown != nil && sc.Config.Shutdown.AssetsDataPath != "" {
+				assetsPath = sc.Config.Shutdown.AssetsDataPath
+			} else {
+				assetsPath = fmt.Sprintf("data/generate-assets-%d.json", sc.Config.L2ChainID)
 			}
 		}
+		client, _ := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
+		return client.ShutdownWithdraw(ctx, assetsPath, cmd.Bool("dry-run"))
+	}
+}
 
-		if all || cmd.Bool("deploy") {
-			if err := ActionShutdownDeployStorage()(ctx, cmd); err != nil {
-				return err
-			}
+// ActionShutdownRun orchestrates the entire shutdown process sequentially
+func ActionShutdownRun() cli.ActionFunc {
+	return func(ctx context.Context, cmd *cli.Command) error {
+		fmt.Println("🏁 Starting Integrated Shutdown Process (Sequential)...")
+		sc, err := NewShutdownContext(ctx)
+		if err != nil {
+			return err
 		}
 
-		if all || cmd.Bool("register") {
-			if err := ActionShutdownRegister()(ctx, cmd); err != nil {
-				return err
+		// 1. Block
+		if err := ActionShutdownBlock()(ctx, cmd); err != nil {
+			return fmt.Errorf("Step [BLOCK] failed: %w", err)
+		}
+		fmt.Println("✅ Step [BLOCK] completed successfully.")
+
+		// 2. Fetch
+		if cmd.Bool("skip-fetch") {
+			fmt.Println("⏭️ Skipping Step [FETCH] as requested (using existing data).")
+		} else {
+			if err := ActionShutdownFetch()(ctx, cmd); err != nil {
+				return fmt.Errorf("Step [FETCH] failed: %w", err)
 			}
+			fmt.Println("✅ Step [FETCH] completed successfully.")
 		}
 
-		if all || cmd.Bool("activate") {
-			if err := ActionShutdownActivate()(ctx, cmd); err != nil {
-				return err
-			}
+		// 3. Gen
+		err = ActionShutdownGen()(ctx, cmd)
+		if err != nil {
+			return fmt.Errorf("Step [GEN] failed: %w", err)
 		}
 
-		if all || cmd.Bool("send") {
-			if err := ActionShutdownSend()(ctx, cmd); err != nil {
-				return err
-			}
+		// Persistence: Save the path to settings.json
+		if sc.Config.Shutdown == nil {
+			sc.Config.Shutdown = &types.ShutdownConfig{}
+		}
+		sc.Config.Shutdown.AssetsDataPath = fmt.Sprintf("data/generate-assets-%d.json", sc.Config.L2ChainID)
+		sc.Config.WriteToJSONFile(sc.DeploymentPath)
+
+		fmt.Println("✅ Step [GEN] completed successfully (Path saved to settings.json).")
+
+		// 4. Activate
+		if err := ActionShutdownActivate()(ctx, cmd); err != nil {
+			return fmt.Errorf("Step [ACTIVATE] failed: %w", err)
+		}
+		fmt.Println("✅ Step [ACTIVATE] completed successfully.")
+
+		// 5. Withdraw
+		if err := ActionShutdownWithdraw()(ctx, cmd); err != nil {
+			return fmt.Errorf("Step [WITHDRAW] failed: %w", err)
 		}
 
-		fmt.Println("\n✅ Integrated Shutdown Process Completed!")
+		fmt.Println("\n🎉 Integrated Shutdown Process Completed Successfully!")
 		return nil
 	}
 }
@@ -567,11 +433,12 @@ func ActionShutdownStatus() cli.ActionFunc {
 		}
 
 		// Check for generated assets file
-		dataDir := sc.State.DataDir
-		if dataDir == "" {
-			dataDir = filepath.Join(sc.SDKPath, "data")
+		assetsPath := ""
+		if sc.Config.Shutdown != nil && sc.Config.Shutdown.AssetsDataPath != "" {
+			assetsPath = sc.Config.Shutdown.AssetsDataPath
+		} else {
+			assetsPath = fmt.Sprintf("data/generate-assets-%d.json", sc.Config.L2ChainID)
 		}
-		assetsPath := filepath.Join(dataDir, "generate-assets3.json")
 
 		fmt.Printf("\n📁 Assets File:\n")
 		if utils.CheckFileExists(assetsPath) {
@@ -579,7 +446,7 @@ func ActionShutdownStatus() cli.ActionFunc {
 			fmt.Printf("   ✅ Found: %s\n", assetsPath)
 			fmt.Printf("   Last modified: %s\n", info.ModTime().Format("2006-01-02 15:04:05"))
 		} else {
-			fmt.Printf("   ❌ Not found. Run 'trh-sdk shutdown gen' first.\n")
+			fmt.Printf("   ❌ Not found (%s). Run 'trh-sdk shutdown gen' first.\n", assetsPath)
 		}
 
 		return nil

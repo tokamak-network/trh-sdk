@@ -149,6 +149,15 @@ type Config struct {
 
 	// Metadata Registration
 	MetadataPRLink string `json:"metadata_pr_link,omitempty"`
+
+	// Shutdown configuration state (not for storing static addresses)
+	Shutdown *ShutdownConfig `json:"shutdown,omitempty"`
+}
+
+type ShutdownConfig struct {
+	L2StartBlock   uint64 `json:"l2_start_block"`
+	L2EndBlock     string `json:"l2_end_block,omitempty"`
+	AssetsDataPath string `json:"assets_data_path,omitempty"`
 }
 
 type LoggingConfig struct {

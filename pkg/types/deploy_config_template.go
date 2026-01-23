@@ -87,4 +87,5 @@ type DeployConfigTemplate struct {
 	PoolInitCodeHash                         string   `json:"poolInitCodeHash"`
 	UniversalRouterRewardsDistributor        string   `json:"universalRouterRewardsDistributor"`
 	ReuseDeployment                          bool     `json:"reuseDeployment"`
+	L2StartBlock                             uint64   `json:"l2StartBlock"`
 }
