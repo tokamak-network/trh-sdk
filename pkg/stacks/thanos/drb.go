@@ -506,6 +506,12 @@ func (t *ThanosStack) deployDRBInfrastructure(ctx context.Context) (*types.DRBIn
 		return nil, fmt.Errorf("failed to clone tokamak-thanos-stack repository: %w", err)
 	}
 
+	// Checkout to `feat/add-drb-node` branch for alpha release and pull latest changes
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd tokamak-thanos-stack && git checkout feat/add-drb-node && git pull origin feat/add-drb-node")
+	if err != nil {
+		return nil, fmt.Errorf("failed to checkout and pull feat/add-drb-node: %w", err)
+	}
+
 	t.logger.Info("Deploying DRB infrastructure (EKS cluster with separate VPC)...")
 
 	// Create dummy deployment file with all required contract fields for Terraform script
@@ -722,10 +728,10 @@ func (t *ThanosStack) deployDRBApplication(ctx context.Context, inputs *types.De
 		return nil, fmt.Errorf("failed to clone tokamak-thanos-stack repository: %s", err)
 	}
 
-	// Checkout to `feat/add-drb-node`
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd tokamak-thanos-stack && git checkout feat/add-drb-node")
+	// Checkout to `feat/add-drb-node` and pull latest changes
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd tokamak-thanos-stack && git checkout feat/add-drb-node && git pull origin feat/add-drb-node")
 	if err != nil {
-		return nil, fmt.Errorf("failed to checkout feat/add-drb-node: %s", err)
+		return nil, fmt.Errorf("failed to checkout and pull feat/add-drb-node: %s", err)
 	}
 
 	// Generate leader node ID
