@@ -28,6 +28,21 @@ func ActionInstallationPlugins() cli.ActionFunc {
 		if err != nil {
 			return err
 		}
+
+		// Validate plugins FIRST before doing any setup
+		plugins := cmd.Args().Slice()
+		if len(plugins) == 0 {
+			fmt.Print("Please specify at least one plugin to install(e.g: bridge)")
+			return nil
+		}
+
+		// Validate all plugin names before proceeding
+		for _, pluginName := range plugins {
+			if !constants.SupportedPlugins[pluginName] {
+				return fmt.Errorf("plugin '%s' is not supported. Supported plugins: %v", pluginName, constants.SupportedPluginsList)
+			}
+		}
+
 		config, err = utils.ReadConfigFromJSONFile(deploymentPath)
 		if err != nil {
 			fmt.Println("Error reading settings.json")
@@ -38,17 +53,18 @@ func ActionInstallationPlugins() cli.ActionFunc {
 			network = constants.LocalDevnet
 			stack = constants.ThanosStack
 		} else {
-			network = config.Network
-			stack = config.Stack
-			awsConfig = config.AWS
-		}
-
-		if awsConfig == nil {
-			awsConfig, err = thanos.InputAWSLogin()
-			if err != nil {
-				fmt.Printf("Failed to login AWS: %s \n", err)
-				return err
+			// Handle empty strings - treat as if not set
+			if config.Network == "" {
+				network = constants.LocalDevnet
+			} else {
+				network = config.Network
 			}
+			if config.Stack == "" {
+				stack = constants.ThanosStack
+			} else {
+				stack = config.Stack
+			}
+			awsConfig = config.AWS
 		}
 
 		if !constants.SupportedStacks[stack] {
@@ -58,15 +74,39 @@ func ActionInstallationPlugins() cli.ActionFunc {
 			return fmt.Errorf("unsupported network: %s", network)
 		}
 
+		// DRB can work independently and doesn't need existing chain or specific network
+		// Check if DRB is the only plugin being installed
+		isDRBOnly := len(plugins) == 1 && plugins[0] == constants.PluginDRB
+
+		// For DRB, use Testnet as default network since it needs AWS infrastructure
+		// The actual network is determined by user's RPC URL input during DRB installation
 		if network == constants.LocalDevnet {
-			fmt.Println("You are in local devnet mode. Please specify the network and stack.")
-			return nil
+			if isDRBOnly {
+				network = constants.Testnet // DRB needs AWS, so use Testnet as default
+			} else {
+				fmt.Println("You are in local devnet mode. Please specify the network and stack.")
+				return nil
+			}
 		}
 
-		plugins := cmd.Args().Slice()
-		if len(plugins) == 0 {
-			fmt.Print("Please specify at least one plugin to install(e.g: bridge)")
-			return nil
+		// Only prompt for AWS login if needed (after all validations)
+		// Check if awsConfig is nil OR if credentials are empty
+		if awsConfig == nil || awsConfig.AccessKey == "" || awsConfig.SecretKey == "" {
+			awsConfig, err = thanos.InputAWSLogin()
+			if err != nil {
+				fmt.Printf("Failed to login AWS: %s \n", err)
+				return err
+			}
+			// Save AWS credentials to settings.json
+			if config == nil {
+				config = &types.Config{}
+			}
+			config.AWS = awsConfig
+			if err := config.WriteToJSONFile(deploymentPath); err != nil {
+				fmt.Printf("Warning: Failed to save AWS credentials to settings.json: %s\n", err)
+			} else {
+				fmt.Println("✅ AWS credentials saved to settings.json")
+			}
 		}
 
 		// Initialize the logger
@@ -84,7 +124,10 @@ func ActionInstallationPlugins() cli.ActionFunc {
 				return err
 			}
 
-			if network == constants.LocalDevnet {
+			// DRB can work independently without existing chain
+			isDRBOnly := len(plugins) == 1 && plugins[0] == constants.PluginDRB
+
+			if network == constants.LocalDevnet && !isDRBOnly {
 				return fmt.Errorf("network %s does not support plugin installation", constants.LocalDevnet)
 			}
 
@@ -97,14 +140,20 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							continue
 						}
 
-						if config.K8s == nil {
+						// DRB doesn't need existing chain deployment - it creates its own infrastructure
+						if (config == nil || config.K8s == nil) && pluginName != constants.PluginDRB {
 							return fmt.Errorf("the chain has not been deployed yet, please deploy the chain first")
 						}
 
 						var displayNamespace string
 						if pluginName == constants.PluginMonitoring {
 							displayNamespace = constants.MonitoringNamespace
+						} else if pluginName == constants.PluginDRB {
+							displayNamespace = constants.DRBNamespace
 						} else {
+							if config == nil || config.K8s == nil {
+								return fmt.Errorf("the chain has not been deployed yet, please deploy the chain first")
+							}
 							displayNamespace = config.K8s.Namespace
 						}
 
@@ -210,7 +259,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							}
 							_, err = thanosStack.DeployDRB(ctx, input)
 							if err != nil {
-								return err
+								return thanosStack.UninstallDRB(ctx)
 							}
 							return nil
 
@@ -232,6 +281,8 @@ func ActionInstallationPlugins() cli.ActionFunc {
 						var displayNamespace string
 						if pluginName == constants.PluginMonitoring {
 							displayNamespace = constants.MonitoringNamespace
+						} else if pluginName == constants.PluginDRB {
+							displayNamespace = constants.DRBNamespace
 						} else {
 							displayNamespace = config.K8s.Namespace
 						}
@@ -249,6 +300,8 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							return thanosStack.UninstallMonitoring(ctx)
 						case constants.PluginCrossTrade:
 							return thanosStack.UninstallCrossTrade(ctx)
+						case constants.PluginDRB:
+							return thanosStack.UninstallDRB(ctx)
 						}
 					}
 				default:

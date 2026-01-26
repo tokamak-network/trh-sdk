@@ -6,6 +6,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"golang.org/x/term"
 )
 
 func ScanBool(defaultResponse bool) (bool, error) {
@@ -76,4 +78,43 @@ func ScanInt() (int, error) {
 	}
 
 	return num, nil
+}
+
+// ScanPassword reads a password/secret from stdin with masked input (no echo)
+func ScanPassword() (string, error) {
+	bytePassword, err := term.ReadPassword(int(os.Stdin.Fd()))
+	if err != nil {
+		return "", fmt.Errorf("failed to read password: %w", err)
+	}
+	fmt.Println() // Print newline after password input
+	return strings.TrimSpace(string(bytePassword)), nil
+}
+
+// ScanPasswordWithConfirmation reads a password with confirmation (both masked)
+func ScanPasswordWithConfirmation() (string, error) {
+	for {
+		fmt.Print("Enter password: ")
+		password, err := ScanPassword()
+		if err != nil {
+			return "", err
+		}
+
+		if password == "" {
+			fmt.Println("Password cannot be empty. Please try again.")
+			continue
+		}
+
+		fmt.Print("Confirm password: ")
+		confirmPassword, err := ScanPassword()
+		if err != nil {
+			return "", err
+		}
+
+		if password != confirmPassword {
+			fmt.Println("Passwords do not match. Please try again.")
+			continue
+		}
+
+		return password, nil
+	}
 }

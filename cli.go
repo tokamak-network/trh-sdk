@@ -334,6 +334,23 @@ Examples:
 				Usage:  "Register L2 Metadata",
 				Action: commands.ActionRegisterMetadata(),
 			},
+			{
+				Name:  "drb",
+				Usage: "DRB (Distributed Resource Broker) commands",
+				Commands: []*cli.Command{
+					{
+						Name:   "leader-info",
+						Usage:  "Display DRB leader node connection information",
+						Action: commands.ActionDRBLeaderInfo(),
+						Description: `Display DRB leader node connection information from drb-leader-info.json
+
+Examples:
+  # Display leader node information
+  trh-sdk drb leader-info
+  `,
+					},
+				},
+			},
 		},
 	}
 
