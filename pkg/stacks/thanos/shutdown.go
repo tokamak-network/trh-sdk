@@ -464,22 +464,3 @@ func (s *ThanosStack) extractStorageAddress(output string) (string, error) {
 	}
 	return match[1], nil
 }
-
-func redactEnvVars(envVars []string) []string {
-	redacted := make([]string, 0, len(envVars))
-	for _, env := range envVars {
-		parts := strings.SplitN(env, "=", 2)
-		if len(parts) != 2 {
-			redacted = append(redacted, env)
-			continue
-		}
-		key := parts[0]
-		val := parts[1]
-		switch key {
-		case "PRIVATE_KEY", "L1_RPC_URL", "L2_RPC_URL":
-			val = "<redacted>"
-		}
-		redacted = append(redacted, fmt.Sprintf("%s=%s", key, val))
-	}
-	return redacted
-}

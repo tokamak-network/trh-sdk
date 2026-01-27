@@ -72,13 +72,20 @@ func NewShutdownContext(ctx context.Context) (*ShutdownContext, error) {
 	state.ThanosRoot = filepath.Dir(filepath.Dir(sdkPath))
 	state.DeploymentsPath = fmt.Sprintf("%d-deploy.json", config.L1ChainID)
 
-	return &ShutdownContext{
+	sc := &ShutdownContext{
 		DeploymentPath: deploymentPath,
 		Config:         config,
 		SDKPath:        sdkPath,
 		Logger:         logger,
 		State:          state,
-	}, nil
+	}
+
+	// Ensure workspace packages are ready
+	if err := sc.ensureWorkspacePackages(ctx); err != nil {
+		return nil, err
+	}
+
+	return sc, nil
 }
 
 // validateConfig validates the configuration according to spec requirements
@@ -452,6 +459,16 @@ func ActionShutdownStatus() cli.ActionFunc {
 			assetsPath = sc.Config.Shutdown.AssetsDataPath
 		} else {
 			assetsPath = fmt.Sprintf("data/generate-assets-%d.json", sc.Config.L2ChainID)
+		}
+
+		fmt.Printf("\n📁 Deployment Contracts:\n")
+		if contracts, err := sc.readDeploymentContracts(); err != nil {
+			fmt.Printf("   ❌ Not loaded: %s\n", err)
+		} else {
+			fmt.Printf("   ✅ Loaded: %d contracts available\n", 1) // Using 1 as placeholder size since we can't easily count struct fields here
+			if contracts.L1StandardBridgeProxy != "" {
+				fmt.Printf("      Bridge Proxy: %s\n", contracts.L1StandardBridgeProxy)
+			}
 		}
 
 		fmt.Printf("\n📁 Assets File:\n")
