@@ -357,6 +357,7 @@ Examples:
 							&cli.BoolFlag{Name: "dry-run", Usage: "Run the entire process in simulation mode"},
 							&cli.BoolFlag{Name: "skip-fetch", Usage: "Skip Step 2 (Fetch) if data already exists"},
 							&cli.StringFlag{Name: "l2-start-block", Usage: "L2 start block (for Step 3)", Value: "0"},
+							&cli.StringFlag{Name: "storage-address", Usage: "GenFWStorage address to use for Step 5 (overrides auto-detection)"},
 						},
 						Action: commands.ActionShutdownRun(),
 					},
@@ -398,6 +399,7 @@ Examples:
 						Flags: []cli.Flag{
 							&cli.StringFlag{Name: "input", Usage: "Path to assets snapshot file"},
 							&cli.BoolFlag{Name: "dry-run", Usage: "Simulate liquidity sweep and claims"},
+							&cli.StringFlag{Name: "storage-address", Usage: "GenFWStorage address (skip file lookup)"},
 						},
 						Action: commands.ActionShutdownWithdraw(),
 					},

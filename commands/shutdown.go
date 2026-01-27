@@ -68,6 +68,7 @@ func NewShutdownContext(ctx context.Context) (*ShutdownContext, error) {
 	// Update state with current context
 	state.ChainID = config.L1ChainID
 	state.L2ChainID = config.L2ChainID
+	// Always derive ThanosRoot from SDKPath to avoid dependency on settings.json
 	state.ThanosRoot = filepath.Dir(filepath.Dir(sdkPath))
 	state.DeploymentsPath = fmt.Sprintf("%d-deploy.json", config.L1ChainID)
 
@@ -297,7 +298,8 @@ func ActionShutdownActivate() cli.ActionFunc {
 			}
 		}
 		client, _ := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
-		return client.ShutdownActivate(ctx, assetsPath, cmd.Bool("dry-run"))
+		_, err = client.ShutdownActivate(ctx, assetsPath, cmd.Bool("dry-run"))
+		return err
 	}
 }
 
@@ -318,7 +320,8 @@ func ActionShutdownWithdraw() cli.ActionFunc {
 			}
 		}
 		client, _ := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
-		return client.ShutdownWithdraw(ctx, assetsPath, cmd.Bool("dry-run"))
+		storageAddr := cmd.String("storage-address")
+		return client.ShutdownWithdraw(ctx, assetsPath, cmd.Bool("dry-run"), storageAddr)
 	}
 }
 
@@ -363,13 +366,24 @@ func ActionShutdownRun() cli.ActionFunc {
 		fmt.Println("✅ Step [GEN] completed successfully (Path saved to settings.json).")
 
 		// 4. Activate
-		if err := ActionShutdownActivate()(ctx, cmd); err != nil {
-			return fmt.Errorf("Step [ACTIVATE] failed: %w", err)
+		storageAddr := cmd.String("storage-address")
+		if storageAddr == "" {
+			activateClient, _ := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
+			activateAddr, err := activateClient.ShutdownActivate(ctx, sc.Config.Shutdown.AssetsDataPath, cmd.Bool("dry-run"))
+			if err != nil {
+				return fmt.Errorf("Step [ACTIVATE] failed: %w", err)
+			}
+			storageAddr = activateAddr
+		} else {
+			if err := ActionShutdownActivate()(ctx, cmd); err != nil {
+				return fmt.Errorf("Step [ACTIVATE] failed: %w", err)
+			}
 		}
 		fmt.Println("✅ Step [ACTIVATE] completed successfully.")
 
 		// 5. Withdraw
-		if err := ActionShutdownWithdraw()(ctx, cmd); err != nil {
+		withdrawClient, _ := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
+		if err := withdrawClient.ShutdownWithdraw(ctx, sc.Config.Shutdown.AssetsDataPath, cmd.Bool("dry-run"), storageAddr); err != nil {
 			return fmt.Errorf("Step [WITHDRAW] failed: %w", err)
 		}
 
