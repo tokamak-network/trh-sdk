@@ -456,11 +456,33 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, mode cons
 		return nil, fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
-	// STEP 1. Clone the charts repository
+	// backup values file - cloneSourcecode might nuke it if git pull fails
+	configFileDir := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", t.deploymentPath)
+	valuesFilePath := filepath.Join(configFileDir, "/cross-trade-values.yaml")
+	var savedValuesFile []byte
+	if existingData, err := os.ReadFile(valuesFilePath); err == nil {
+		savedValuesFile = existingData
+	}
+
 	err := t.cloneSourcecode(ctx, "tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git")
 	if err != nil {
 		t.logger.Error("Error cloning repository", "err", err)
 		return nil, err
+	}
+
+	// put it back if it got deleted
+	if savedValuesFile != nil {
+		if _, statErr := os.Stat(valuesFilePath); os.IsNotExist(statErr) {
+			if mkdirErr := os.MkdirAll(configFileDir, os.ModePerm); mkdirErr != nil {
+				t.logger.Error("failed to create dir for values file", "err", mkdirErr)
+				return nil, mkdirErr
+			}
+			if writeErr := os.WriteFile(valuesFilePath, savedValuesFile, 0644); writeErr != nil {
+				t.logger.Error("failed to restore values file", "err", writeErr)
+				return nil, writeErr
+			}
+			t.logger.Info("restored values file after repo re-clone")
+		}
 	}
 
 	input := t.deployConfig.CrossTrade[mode]
@@ -490,8 +512,7 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, mode cons
 
 	isInstalled := len(releases) > 0
 
-	configFileDir := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", t.deploymentPath)
-	filePath := filepath.Join(configFileDir, "/cross-trade-values.yaml")
+	filePath := valuesFilePath
 
 	// make yaml file at {cwd}/tokamak-thanos-stack/terraform/thanos-stack/cross-trade-values.yaml
 	crossTradeConfig := types.CrossTradeConfig{}
@@ -626,6 +647,11 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, mode cons
 		Enabled: false,
 	}}
 
+	if err := os.MkdirAll(configFileDir, os.ModePerm); err != nil {
+		t.logger.Error("Error creating directory", "err", err)
+		return nil, err
+	}
+
 	if !isInstalled {
 		data, err := yaml.Marshal(&crossTradeConfig)
 		if err != nil {
@@ -633,29 +659,43 @@ func (t *ThanosStack) DeployCrossTradeApplication(ctx context.Context, mode cons
 			return nil, err
 		}
 
-		if err := os.MkdirAll(configFileDir, os.ModePerm); err != nil {
-			t.logger.Error("Error creating directory", "err", err)
-			return nil, err
-		}
-
-		// Write to file
 		err = os.WriteFile(filePath, data, 0644)
 		if err != nil {
 			t.logger.Error("Error writing file", "err", err)
-			return nil, nil
+			return nil, err
 		}
 	} else {
-		if mode == constants.CrossTradeDeployModeL2ToL1 {
-			err = utils.UpdateYAMLField(filePath, "cross_trade.env.NEXT_PUBLIC_CHAIN_CONFIG_L2_L1", string(chainConfigJSON))
+		_, fileErr := os.Stat(filePath)
+		fileExists := fileErr == nil
+
+		if !fileExists {
+			// shouldn't happen but just in case
+			t.logger.Warn("values file missing, creating new one", "path", filePath)
+			data, err := yaml.Marshal(&crossTradeConfig)
 			if err != nil {
-				t.logger.Error("Error updating YAML file", "err", err)
+				t.logger.Error("Error marshalling cross-trade values YAML file", "err", err)
 				return nil, err
 			}
-		} else if mode == constants.CrossTradeDeployModeL2ToL2 {
-			err = utils.UpdateYAMLField(filePath, "cross_trade.env.NEXT_PUBLIC_CHAIN_CONFIG_L2_L2", string(chainConfigJSON))
+
+			err = os.WriteFile(filePath, data, 0644)
 			if err != nil {
-				t.logger.Error("Error updating YAML file", "err", err)
+				t.logger.Error("Error writing file", "err", err)
 				return nil, err
+			}
+		} else {
+			// only update our field, don't clobber the other mode's config
+			if mode == constants.CrossTradeDeployModeL2ToL1 {
+				err = utils.UpdateYAMLField(filePath, "cross_trade.env.NEXT_PUBLIC_CHAIN_CONFIG_L2_L1", string(chainConfigJSON))
+				if err != nil {
+					t.logger.Error("Error updating YAML file", "err", err)
+					return nil, err
+				}
+			} else if mode == constants.CrossTradeDeployModeL2ToL2 {
+				err = utils.UpdateYAMLField(filePath, "cross_trade.env.NEXT_PUBLIC_CHAIN_CONFIG_L2_L2", string(chainConfigJSON))
+				if err != nil {
+					t.logger.Error("Error updating YAML file", "err", err)
+					return nil, err
+				}
 			}
 		}
 	}
