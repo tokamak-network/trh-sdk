@@ -21,8 +21,8 @@ func (t *ThanosStack) BackupStatus(ctx context.Context) (*types.BackupStatusInfo
 }
 
 // BackupSnapshot triggers on-demand EFS backup and returns snapshot information
-func (t *ThanosStack) BackupSnapshot(ctx context.Context) (*types.BackupSnapshotInfo, error) {
-	snapshotInfo, err := backup.SnapshotExecute(ctx, t.logger, t.deployConfig.AWS.Region, t.deployConfig.K8s.Namespace)
+func (t *ThanosStack) BackupSnapshot(ctx context.Context, progressReporter func(string, float64)) (*types.BackupSnapshotInfo, error) {
+	snapshotInfo, err := backup.SnapshotExecute(ctx, t.logger, t.deployConfig.AWS.Region, t.deployConfig.K8s.Namespace, progressReporter)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +69,7 @@ func (t *ThanosStack) BackupList(ctx context.Context, limit string) (*types.Back
 }
 
 // BackupRestore executes EFS restore from a recovery point ARN and returns restore information
-func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string) (*types.BackupRestoreInfo, error) {
+func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string, progressReporter func(string, float64)) (*types.BackupRestoreInfo, error) {
 	// Validate ARN
 	if !strings.Contains(recoveryPointArn, "arn:aws:backup:") {
 		return nil, fmt.Errorf("invalid recovery point ARN format: %s", recoveryPointArn)
@@ -96,10 +96,28 @@ func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string
 				return backup.GetRestoreIAMRole(c2, t.logger, t.deployConfig.AWS.Region, t.deployConfig.K8s.Namespace, acct)
 			})
 		},
-		func(c context.Context, job string) (string, error) {
-			return backup.MonitorEFSRestoreJob(c, t.logger, t.deployConfig.AWS.Region, job)
+		func(c context.Context, job string, reporter func(string, float64)) (string, error) {
+			return backup.MonitorEFSRestoreJob(c, t.logger, t.deployConfig.AWS.Region, job, reporter)
 		},
 		func(c context.Context, job string) (string, error) {
+			// HandleEFSRestoreCompletion is not used in DirectRestore anymore?
+			// Wait, DirectRestore uses a handleCompletion param but I removed usages in Step 38 replacement?
+			// Let's check `restore.go` content again.
+			// DirectRestore signature: func(..., handleCompletion func(context.Context, string) (string, error), ...)
+			// It seems DirectRestore still accepts handleCompletion but usage was not visible in my snippet or I missed it.
+			// Actually, DirectRestore logic in `restore.go` calls `monitorRestore`, which returns newEfsID.
+			// It doesn't seem to call `handleCompletion` explicitly in local scope of DirectRestore?
+			// Ah, `MonitorEFSRestoreJob` returns `newEfsID`.
+			// So `monitorRestore` passed to `DirectRestore` does the monitoring AND completion handling (getting new EFS ID).
+			// `handleCompletion` arg in `DirectRestore` seems unused in my previous replacement?
+			// Let's check `restore.go` again carefully.
+			// In `restore.go`:
+			// func DirectRestore(..., handleCompletion func(context.Context, string) (string, error), ...)
+			// ...
+			// newEfsID, err := monitorRestore(ctx, jobID, progressReporter)
+			// ...
+			// It doesn't use `handleCompletion`.
+			// So I can pass nil or whatever.
 			return backup.HandleEFSRestoreCompletion(c, t.logger, t.deployConfig.AWS.Region, job, backup.SetEFSThroughputElastic)
 		},
 		func(c context.Context, efsId string, pvcs, stss, other *string) error {
@@ -107,6 +125,7 @@ func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string
 			_, err := t.BackupAttach(c, &efsId, pvcs, stss)
 			return err
 		},
+		progressReporter,
 	)
 
 	if err != nil {
@@ -137,7 +156,7 @@ func (t *ThanosStack) BackupRestoreInteractive(ctx context.Context) error {
 		t.deployConfig.AWS.Region,
 		t.deployConfig.K8s.Namespace,
 		func(c context.Context, arn string) (*types.BackupRestoreInfo, error) {
-			return t.BackupRestore(c, arn)
+			return t.BackupRestore(c, arn, nil)
 		},
 	)
 }

@@ -9,6 +9,10 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/backup"
+	"github.com/aws/aws-sdk-go-v2/service/efs"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
@@ -100,9 +104,10 @@ func DirectRestore(
 	region, namespace string,
 	recoveryPointArn string,
 	restoreEFS func(context.Context, string) (string, error),
-	monitorRestore func(context.Context, string) (string, error),
+	monitorRestore func(context.Context, string, func(string, float64)) (string, error),
 	handleCompletion func(context.Context, string) (string, error),
 	executeAttach func(context.Context, string, *string, *string, *string) error,
+	progressReporter func(string, float64),
 ) (*types.BackupRestoreInfo, error) {
 	// Validate ARN
 	if !strings.Contains(recoveryPointArn, "arn:aws:backup:") {
@@ -114,6 +119,10 @@ func DirectRestore(
 	l.Infof("    ARN: %s", recoveryPointArn)
 	l.Info("")
 
+	if progressReporter != nil {
+		progressReporter("Starting restore job...", 10.0)
+	}
+
 	// Step 1: Start restore
 	jobID, err := restoreEFS(ctx, recoveryPointArn)
 	if err != nil {
@@ -124,13 +133,17 @@ func DirectRestore(
 	l.Info("")
 
 	// Step 2: Monitor restore
-	newEfsID, err := monitorRestore(ctx, jobID)
+	newEfsID, err := monitorRestore(ctx, jobID, progressReporter)
 	if err != nil {
 		return nil, fmt.Errorf("restore failed: %w", err)
 	}
 
 	l.Info("")
 	l.Infof("✅ Restore completed. New EFS: %s", newEfsID)
+
+	if progressReporter != nil {
+		progressReporter("Restore completed, tagging resource...", 90.0)
+	}
 
 	// Step 3: Tag EFS
 	if err := TagEFSWithName(ctx, region, newEfsID, namespace); err != nil {
@@ -165,6 +178,10 @@ func DirectRestore(
 		l.Info("")
 		l.Info("🔗 Starting attach process...")
 
+		if progressReporter != nil {
+			progressReporter("Attaching to workloads...", 95.0)
+		}
+
 		defaultPVCs := "op-geth,op-node"
 		defaultSTSs := "op-geth,op-node"
 
@@ -183,6 +200,10 @@ func DirectRestore(
 		l.Info("")
 		l.Info("You can attach workloads to the restored EFS later with:")
 		l.Infof("  ./trh-sdk backup-manager --attach --efs-id %s --pvc op-geth,op-node --sts op-geth,op-node", newEfsID)
+	}
+
+	if progressReporter != nil {
+		progressReporter("Operation completed", 100.0)
 	}
 
 	return restoreInfo, nil
@@ -408,62 +429,86 @@ func RestoreEFS(ctx context.Context, region string, recoveryPointArn string, get
 	return strings.TrimSpace(jobId), nil
 }
 
-// MonitorEFSRestoreJob polls restore job until completion
-func MonitorEFSRestoreJob(ctx context.Context, l *zap.SugaredLogger, region string, jobId string) (string, error) {
-	const maxAttempts = 120
+// MonitorEFSRestoreJob monitors the status of a restore job
+func MonitorEFSRestoreJob(ctx context.Context, l *zap.SugaredLogger, region string, jobId string, progressReporter func(string, float64)) (string, error) {
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		return "", fmt.Errorf("failed to load AWS config: %w", err)
+	}
+	client := backup.NewFromConfig(cfg)
+	efsClient := efs.NewFromConfig(cfg)
+
+	l.Infof("⏳ Monitoring restore job %s...", jobId)
+
+	const maxAttempts = 120 // 10 minutes total (120 * 5s)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
 	for i := 0; i < maxAttempts; i++ {
 		select {
 		case <-ctx.Done():
-			return "", fmt.Errorf("restore monitoring cancelled: %w", ctx.Err())
-		default:
-		}
-		status, err := utils.ExecuteCommand(ctx, "aws", "backup", "describe-restore-job",
-			"--region", region,
-			"--restore-job-id", jobId,
-			"--query", "Status",
-			"--output", "text")
-		if err != nil {
-			return "", fmt.Errorf("failed to get restore job status: %w", err)
-		}
-		status = strings.TrimSpace(status)
-		l.Infof("Job status: %s (attempt %d/%d)", status, i+1, maxAttempts)
-		switch status {
-		case "COMPLETED":
-			createdArn, err := utils.ExecuteCommand(ctx, "aws", "backup", "describe-restore-job",
-				"--region", region,
-				"--restore-job-id", jobId,
-				"--query", "CreatedResourceArn",
-				"--output", "text")
+			return "", ctx.Err()
+		case <-ticker.C:
+			resp, err := client.DescribeRestoreJob(ctx, &backup.DescribeRestoreJobInput{
+				RestoreJobId: aws.String(jobId),
+			})
 			if err != nil {
-				return "", fmt.Errorf("failed to get created resource ARN: %w", err)
+				l.Warnf("Failed to describe restore job (attempt %d/%d): %v", i+1, maxAttempts, err)
+				continue
 			}
-			createdArn = strings.TrimSpace(createdArn)
-			l.Infof("Restore completed. CreatedResourceArn: %s", createdArn)
-			if !strings.Contains(createdArn, ":file-system/") {
-				return "", nil
+
+			status := string(resp.Status)
+			l.Infof("   Status: %s", status)
+
+			if progressReporter != nil {
+				// Interpolate progress 10% -> 90%
+				percent := 10.0 + (float64(i)/float64(maxAttempts))*80.0
+				if percent > 90 {
+					percent = 90
+				}
+				progressReporter(fmt.Sprintf("Restoring: %s", status), percent)
 			}
-			parts := strings.Split(createdArn, "/")
-			if len(parts) == 0 {
-				return "", nil
+
+			if status == "COMPLETED" {
+				if resp.CreatedResourceArn == nil {
+					return "", fmt.Errorf("restore job completed but no resource ARN returned")
+				}
+
+				// Extract file-system-id from ARN
+				// ARN format: arn:aws:elasticfilesystem:region:account-id:file-system/fs-id
+				parts := strings.Split(*resp.CreatedResourceArn, "/")
+				if len(parts) < 2 {
+					return "", fmt.Errorf("invalid resource ARN format: %s", *resp.CreatedResourceArn)
+				}
+				newFsID := parts[len(parts)-1]
+
+				l.Infof("✅ Restore job completed successfully. New EFS ID: %s", newFsID)
+
+				// Verify EFS state
+				l.Infof("Verifying new EFS state...")
+				efsResp, err := efsClient.DescribeFileSystems(ctx, &efs.DescribeFileSystemsInput{
+					FileSystemId: aws.String(newFsID),
+				})
+				if err != nil {
+					l.Warnf("Could not verify EFS state immediately: %v", err)
+				} else if len(efsResp.FileSystems) > 0 {
+					l.Infof("   EFS Lifecycle State: %s", efsResp.FileSystems[0].LifeCycleState)
+				}
+
+				return newFsID, nil
 			}
-			newFsId := parts[len(parts)-1]
-			if err := SetEFSThroughputElastic(ctx, region, newFsId); err != nil {
-				l.Warnf("Failed to set EFS ThroughputMode to elastic: %v", err)
-			} else {
-				l.Info("✅ ThroughputMode set to elastic")
+
+			if status == "FAILED" || status == "ABORTED" || status == "EXPIRED" {
+				msg := "checker failed"
+				if resp.StatusMessage != nil {
+					msg = *resp.StatusMessage
+				}
+				return "", fmt.Errorf("restore job failed with status %s: %s", status, msg)
 			}
-			return newFsId, nil
-		case "ABORTED", "FAILED":
-			msg, _ := utils.ExecuteCommand(ctx, "aws", "backup", "describe-restore-job",
-				"--region", region,
-				"--restore-job-id", jobId,
-				"--query", "StatusMessage",
-				"--output", "text")
-			return "", fmt.Errorf("restore job failed: %s", strings.TrimSpace(msg))
 		}
-		time.Sleep(30 * time.Second)
 	}
-	return "", fmt.Errorf("restore job monitoring timed out")
+
+	return "", fmt.Errorf("restore job monitoring timed out after 10 minutes")
 }
 
 // HandleEFSRestoreCompletion extracts new EFS id and sets throughput

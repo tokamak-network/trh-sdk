@@ -213,7 +213,7 @@ func ExecuteBackupAttach(
 	}
 
 	l.Info("Creating recovery point for attached EFS...")
-	snapshotInfo, err := SnapshotExecute(ctx, l, attachInfo.Region, attachInfo.Namespace)
+	snapshotInfo, err := SnapshotExecute(ctx, l, attachInfo.Region, attachInfo.Namespace, nil)
 	if err != nil {
 		l.Warnf("Failed to create recovery point: %v", err)
 		return nil
