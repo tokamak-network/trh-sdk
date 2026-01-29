@@ -36,6 +36,11 @@ func ActionInstallationPlugins() cli.ActionFunc {
 			return nil
 		}
 
+		if len(plugins) >= 2 && plugins[0] == constants.PluginDRB && plugins[1] == constants.PluginDRBRegularNode {
+			// Replace with just regular-node, but keep the rest if any
+			plugins = append([]string{constants.PluginDRBRegularNode}, plugins[2:]...)
+		}
+
 		// Validate all plugin names before proceeding
 		for _, pluginName := range plugins {
 			if !constants.SupportedPlugins[pluginName] {
@@ -74,15 +79,16 @@ func ActionInstallationPlugins() cli.ActionFunc {
 			return fmt.Errorf("unsupported network: %s", network)
 		}
 
-		// DRB can work independently and doesn't need existing chain or specific network
-		// Check if DRB is the only plugin being installed
+		// DRB and regular-node can work independently and don't need existing chain or specific network
+		// Check if DRB or regular-node is the only plugin being installed
 		isDRBOnly := len(plugins) == 1 && plugins[0] == constants.PluginDRB
+		isRegularNodeOnly := len(plugins) == 1 && plugins[0] == constants.PluginDRBRegularNode
 
-		// For DRB, use Testnet as default network since it needs AWS infrastructure
-		// The actual network is determined by user's RPC URL input during DRB installation
+		// For DRB and regular-node, use Testnet as default network for logging
+		// The actual chain config is not required for these plugins
 		if network == constants.LocalDevnet {
-			if isDRBOnly {
-				network = constants.Testnet // DRB needs AWS, so use Testnet as default
+			if isDRBOnly || isRegularNodeOnly {
+				network = constants.Testnet
 			} else {
 				fmt.Println("You are in local devnet mode. Please specify the network and stack.")
 				return nil
@@ -91,6 +97,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 
 		// Only prompt for AWS login if needed (after all validations)
 		// Check if awsConfig is nil OR if credentials are empty
+		// Regular-node also needs AWS for EC2 provisioning
 		if awsConfig == nil || awsConfig.AccessKey == "" || awsConfig.SecretKey == "" {
 			awsConfig, err = thanos.InputAWSLogin()
 			if err != nil {
@@ -124,10 +131,11 @@ func ActionInstallationPlugins() cli.ActionFunc {
 				return err
 			}
 
-			// DRB can work independently without existing chain
+			// DRB and regular-node can work independently without existing chain
 			isDRBOnly := len(plugins) == 1 && plugins[0] == constants.PluginDRB
+			isRegularNodeOnly := len(plugins) == 1 && plugins[0] == constants.PluginDRBRegularNode
 
-			if network == constants.LocalDevnet && !isDRBOnly {
+			if network == constants.LocalDevnet && !isDRBOnly && !isRegularNodeOnly {
 				return fmt.Errorf("network %s does not support plugin installation", constants.LocalDevnet)
 			}
 
@@ -140,8 +148,8 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							continue
 						}
 
-						// DRB doesn't need existing chain deployment - it creates its own infrastructure
-						if (config == nil || config.K8s == nil) && pluginName != constants.PluginDRB {
+						// DRB and regular-node don't need existing chain deployment
+						if (config == nil || config.K8s == nil) && pluginName != constants.PluginDRB && pluginName != constants.PluginDRBRegularNode {
 							return fmt.Errorf("the chain has not been deployed yet, please deploy the chain first")
 						}
 
@@ -150,6 +158,8 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							displayNamespace = constants.MonitoringNamespace
 						} else if pluginName == constants.PluginDRB {
 							displayNamespace = constants.DRBNamespace
+						} else if pluginName == constants.PluginDRBRegularNode {
+							displayNamespace = "ec2"
 						} else {
 							if config == nil || config.K8s == nil {
 								return fmt.Errorf("the chain has not been deployed yet, please deploy the chain first")
@@ -263,6 +273,16 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							}
 							return nil
 
+						case constants.PluginDRBRegularNode:
+							input, err := thanosStack.GetDRBRegularNodeInput(ctx)
+							if err != nil {
+								return err
+							}
+							if err := thanosStack.InstallDRBRegularNode(ctx, input); err != nil {
+								return err
+							}
+							return nil
+
 						default:
 							return nil
 						}
@@ -283,6 +303,8 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							displayNamespace = constants.MonitoringNamespace
 						} else if pluginName == constants.PluginDRB {
 							displayNamespace = constants.DRBNamespace
+						} else if pluginName == constants.PluginDRBRegularNode {
+							displayNamespace = "ec2"
 						} else {
 							displayNamespace = config.K8s.Namespace
 						}
@@ -302,6 +324,8 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							return thanosStack.UninstallCrossTrade(ctx)
 						case constants.PluginDRB:
 							return thanosStack.UninstallDRB(ctx)
+						case constants.PluginDRBRegularNode:
+							return thanosStack.UninstallDRBRegularNode(ctx)
 						}
 					}
 				default:

@@ -5,6 +5,7 @@ const PluginBlockExplorer = "block-explorer"
 const PluginMonitoring = "monitoring"
 const PluginCrossTrade = "cross-trade"
 const PluginDRB = "drb"
+const PluginDRBRegularNode = "regular-node"
 const PluginUptimeService = "uptime-service"
 
 var SupportedPlugins = map[string]bool{
@@ -13,6 +14,7 @@ var SupportedPlugins = map[string]bool{
 	PluginMonitoring:    true,
 	PluginCrossTrade:    true,
 	PluginDRB:           true,
+	PluginDRBRegularNode: true,
 	PluginUptimeService: true,
 }
 
@@ -22,5 +24,6 @@ var SupportedPluginsList = []string{
 	PluginMonitoring,
 	PluginCrossTrade,
 	PluginDRB,
+	PluginDRBRegularNode,
 	PluginUptimeService,
 }

@@ -92,6 +92,12 @@ Examples:
 Examples:
   # Install block-explorer and bridge plugins
   trh-sdk install block-explorer bridge
+  
+  # Install DRB leader node
+  trh-sdk install drb
+  
+  # Install DRB regular node
+  trh-sdk install drb regular-node
   `,
 			},
 			{
@@ -104,6 +110,12 @@ Examples:
 Examples:
   # Uninstall block-explorer and bridge plugins
   trh-sdk uninstall block-explorer bridge
+
+  # Uninstall DRB leader node
+  trh-sdk uninstall drb
+  
+  # Uninstall DRB regular node
+  trh-sdk uninstall drb regular-node
   `,
 			},
 			{

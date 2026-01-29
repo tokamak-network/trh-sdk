@@ -97,3 +97,30 @@ type DRBLeaderInfo struct {
 	ClusterName              string `json:"cluster_name"`
 	Namespace                string `json:"namespace"`
 }
+
+// DRBRegularNodeInput represents the input for a regular node setup
+type DRBRegularNodeInput struct {
+	EnvFilePath      string `json:"env_file_path,omitempty"`
+	EnvFileContent   string `json:"-"` // cached .env content when loaded from file, to avoid re-reading
+	LeaderIP         string `json:"leader_ip"`
+	LeaderPort       int    `json:"leader_port"`
+	LeaderPeerID     string `json:"leader_peer_id"`
+	LeaderEOA        string `json:"leader_eoa"` 
+	NodePort         int    `json:"node_port"`
+	EOAPrivateKey    string `json:"eoa_private_key"`
+	NodeType         string `json:"node_type"`
+	DatabaseConfig *DRBDatabaseConfig `json:"database_config"`
+	DrbNodeImage   string             `json:"drb_node_image"`
+
+	ChainID         string `json:"chain_id"`          // e.g. "11155111"
+	EthRpcUrls      string `json:"eth_rpc_urls"`      // comma-separated RPC URLs
+	ContractAddress string `json:"contract_address"`  // CommitReveal2L2 contract address
+
+	Region         string `json:"region"`
+	VpcID          string `json:"vpc_id,omitempty"`
+	SubnetID       string `json:"subnet_id,omitempty"`
+	InstanceType string `json:"instance_type"`
+	KeyPairName  string `json:"key_pair_name"`
+	AmiID        string `json:"ami_id,omitempty"`
+	InstanceName string `json:"instance_name"`
+}
