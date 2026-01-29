@@ -107,6 +107,9 @@ func DirectRestore(
 	monitorRestore func(context.Context, string, func(string, float64)) (string, error),
 	handleCompletion func(context.Context, string) (string, error),
 	executeAttach func(context.Context, string, *string, *string, *string) error,
+	attach *bool,
+	pvcs *string,
+	stss *string,
 	progressReporter func(string, float64),
 ) (*types.BackupRestoreInfo, error) {
 	// Validate ARN
@@ -152,6 +155,15 @@ func DirectRestore(
 		l.Infof("✅ Tagged EFS %s with Name=%s", newEfsID, namespace)
 	}
 
+	defaultPVCs := "op-geth,op-node"
+	defaultSTSs := "op-geth,op-node"
+	if pvcs != nil && strings.TrimSpace(*pvcs) != "" {
+		defaultPVCs = strings.TrimSpace(*pvcs)
+	}
+	if stss != nil && strings.TrimSpace(*stss) != "" {
+		defaultSTSs = strings.TrimSpace(*stss)
+	}
+
 	// Build restore info for API response
 	restoreInfo := &types.BackupRestoreInfo{
 		Region:           region,
@@ -162,28 +174,35 @@ func DirectRestore(
 		NewEFSID:         newEfsID,
 		JobID:            jobID,
 		Status:           "COMPLETED",
+		SuggestedEFSID:   newEfsID,
+		SuggestedPVCs:    defaultPVCs,
+		SuggestedSTSs:    defaultSTSs,
 	}
 
 	// Step 4: Ask user if they want to attach (only for CLI)
 	l.Info("")
-	var response string
-	fmt.Print("Would you like to attach the restored EFS to workloads now? (y/n) ")
-	if _, err := fmt.Scanf("%s", &response); err != nil {
-		l.Warnf("Failed to read input: %v", err)
-		response = "n"
+	shouldAttach := false
+	if attach != nil {
+		shouldAttach = *attach
+	} else if progressReporter == nil {
+		response := "n"
+		fmt.Print("Would you like to attach the restored EFS to workloads now? (y/n) ")
+		if _, err := fmt.Scanf("%s", &response); err != nil {
+			l.Warnf("Failed to read input: %v", err)
+			response = "n"
+		}
+		response = strings.ToLower(strings.TrimSpace(response))
+		shouldAttach = response == "y" || response == "yes"
+	} else {
+		l.Info("Non-interactive mode: skipping attach prompt.")
 	}
-
-	response = strings.ToLower(strings.TrimSpace(response))
-	if response == "y" || response == "yes" {
+	if shouldAttach {
 		l.Info("")
 		l.Info("🔗 Starting attach process...")
 
 		if progressReporter != nil {
 			progressReporter("Attaching to workloads...", 95.0)
 		}
-
-		defaultPVCs := "op-geth,op-node"
-		defaultSTSs := "op-geth,op-node"
 
 		if err := executeAttach(ctx, newEfsID, &defaultPVCs, &defaultSTSs, nil); err != nil {
 			l.Errorf("❌ Attach failed: %v", err)

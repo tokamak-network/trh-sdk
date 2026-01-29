@@ -3,6 +3,8 @@ package thanos
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 
 	backup "github.com/tokamak-network/trh-sdk/pkg/stacks/thanos/backup"
@@ -69,7 +71,7 @@ func (t *ThanosStack) BackupList(ctx context.Context, limit string) (*types.Back
 }
 
 // BackupRestore executes EFS restore from a recovery point ARN and returns restore information
-func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string, progressReporter func(string, float64)) (*types.BackupRestoreInfo, error) {
+func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string, attach *bool, pvcs *string, stss *string, progressReporter func(string, float64)) (*types.BackupRestoreInfo, error) {
 	// Validate ARN
 	if !strings.Contains(recoveryPointArn, "arn:aws:backup:") {
 		return nil, fmt.Errorf("invalid recovery point ARN format: %s", recoveryPointArn)
@@ -125,6 +127,9 @@ func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string
 			_, err := t.BackupAttach(c, &efsId, pvcs, stss)
 			return err
 		},
+		attach,
+		pvcs,
+		stss,
 		progressReporter,
 	)
 
@@ -156,7 +161,7 @@ func (t *ThanosStack) BackupRestoreInteractive(ctx context.Context) error {
 		t.deployConfig.AWS.Region,
 		t.deployConfig.K8s.Namespace,
 		func(c context.Context, arn string) (*types.BackupRestoreInfo, error) {
-			return t.BackupRestore(c, arn, nil)
+			return t.BackupRestore(c, arn, nil, nil, nil, nil)
 		},
 	)
 }
@@ -254,7 +259,14 @@ func (t *ThanosStack) CleanupUnusedBackupResources(ctx context.Context) error {
 	region := t.deployConfig.AWS.Region
 	namespace := t.deployConfig.K8s.Namespace
 
-	return backup.CleanupUnusedBackupResources(ctx, t.logger, region, namespace)
+	retentionDays := 14
+	if v := os.Getenv("TRH_EFS_CLEANUP_RETENTION_DAYS"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			retentionDays = parsed
+		}
+	}
+
+	return backup.CleanupUnusedBackupResources(ctx, t.logger, region, namespace, retentionDays)
 }
 
 // initializeBackupSystem initializes or reconciles the AWS Backup configuration for the current stack

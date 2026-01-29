@@ -115,7 +115,7 @@ func ActionBackupManager() cli.ActionFunc {
 func handleRestore(ctx context.Context, thanosStack *thanos.ThanosStack, flags *BackupManagerFlags) error {
 	// If ARN is provided, use direct restore mode
 	if flags.RestoreArn != "" {
-		_, err := thanosStack.BackupRestore(ctx, flags.RestoreArn, nil)
+		_, err := thanosStack.BackupRestore(ctx, flags.RestoreArn, nil, nil, nil, nil)
 		return err
 	}
 
