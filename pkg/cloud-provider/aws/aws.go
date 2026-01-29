@@ -65,10 +65,24 @@ func loginAWS(accessKey, secretKey, region, formatFile string) (*types.AccountPr
 		formatFile = "json"
 	}
 
-	configureAWS("aws", "configure", "set", "aws_access_key_id", accessKey)
-	configureAWS("aws", "configure", "set", "aws_secret_access_key", secretKey)
-	configureAWS("aws", "configure", "set", "region", region)
-	configureAWS("aws", "configure", "set", "output", formatFile)
+	// Prefer per-deployment credential/config files when provided.
+	if credPath := os.Getenv("AWS_SHARED_CREDENTIALS_FILE"); credPath != "" {
+		if err := utils.WriteAWSCredentialsFile(credPath, accessKey, secretKey); err != nil {
+			return nil, err
+		}
+		if cfgPath := os.Getenv("AWS_CONFIG_FILE"); cfgPath != "" {
+			if err := utils.WriteAWSConfigFile(cfgPath, region, formatFile); err != nil {
+				return nil, err
+			}
+		}
+		os.Setenv("AWS_REGION", region)
+		os.Setenv("AWS_DEFAULT_REGION", region)
+	} else {
+		configureAWS("aws", "configure", "set", "aws_access_key_id", accessKey)
+		configureAWS("aws", "configure", "set", "aws_secret_access_key", secretKey)
+		configureAWS("aws", "configure", "set", "region", region)
+		configureAWS("aws", "configure", "set", "output", formatFile)
+	}
 
 	cmd := exec.Command("aws", "sts", "get-caller-identity")
 	output, err := cmd.CombinedOutput()
