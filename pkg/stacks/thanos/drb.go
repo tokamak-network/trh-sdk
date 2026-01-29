@@ -1030,7 +1030,8 @@ func (t *ThanosStack) generateLeaderNodeID(ctx context.Context) (string, error) 
 		return "", fmt.Errorf("failed to checkout branch %s: %w", branch, err)
 	}
 
-	leaderNodeBinPath := fmt.Sprintf("%s/DRB-node/static-key/leadernode.bin", t.deploymentPath)
+	// New path after DRB-node refactor: deployment/leader/generate-peer-id.sh, output at deployment/leader/static-key/leadernode.bin
+	leaderNodeBinPath := fmt.Sprintf("%s/DRB-node/deployment/leader/static-key/leadernode.bin", t.deploymentPath)
 
 	// Always delete existing file to ensure we get peer ID in output
 	if _, err := os.Stat(leaderNodeBinPath); err == nil {
@@ -1040,9 +1041,9 @@ func (t *ThanosStack) generateLeaderNodeID(ctx context.Context) (string, error) 
 		}
 	}
 
-	// Run the generator script
+	// Run the generator script 
 	t.logger.Info("Running leader node generator script...")
-	generatorScriptPath := fmt.Sprintf("%s/DRB-node/run_generator.sh", t.deploymentPath)
+	generatorScriptPath := fmt.Sprintf("%s/DRB-node/deployment/leader/generate-peer-id.sh", t.deploymentPath)
 
 	// Make script executable
 	_, err = utils.ExecuteCommand(ctx, "chmod", "+x", generatorScriptPath)
@@ -1050,8 +1051,8 @@ func (t *ThanosStack) generateLeaderNodeID(ctx context.Context) (string, error) 
 		return "", fmt.Errorf("failed to make generator script executable: %w", err)
 	}
 
-	// Execute the generator script and capture output to extract peer ID
-	output, err := utils.ExecuteCommand(ctx, "bash", "-c", fmt.Sprintf("cd DRB-node && ./run_generator.sh"))
+	// Execute the generator script from deployment/leader 
+	output, err := utils.ExecuteCommand(ctx, "bash", "-c", fmt.Sprintf("cd DRB-node/deployment/leader && ./generate-peer-id.sh"))
 	if err != nil {
 		return "", fmt.Errorf("failed to run generator script: %w", err)
 	}
@@ -1089,14 +1090,11 @@ func (t *ThanosStack) generateLeaderNodeID(ctx context.Context) (string, error) 
 	var peerID string
 	lines := strings.Split(output, "\n")
 	for _, line := range lines {
-		if strings.Contains(line, "New PeerID Generated:") {
-			// Extract peer ID after the colon
-			parts := strings.Split(line, "New PeerID Generated:")
-			if len(parts) == 2 {
-				peerID = strings.TrimSpace(parts[1])
-				if peerID != "" {
-					return peerID, nil
-				}
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "LEADER_PEER_ID=") {
+			peerID = strings.TrimSpace(strings.TrimPrefix(line, "LEADER_PEER_ID="))
+			if peerID != "" {
+				return peerID, nil
 			}
 		}
 	}
