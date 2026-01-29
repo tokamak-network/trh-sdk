@@ -339,7 +339,7 @@ func BackupPvPvcWithUserChoice(ctx context.Context, l *zap.SugaredLogger, namesp
 	fmt.Scanf("%s", &choice)
 	choice = strings.ToLower(strings.TrimSpace(choice))
 	if choice == "y" || choice == "yes" {
-		if err := backupPvPvc(ctx, l, namespace); err != nil {
+		if _, err := backupPvPvc(ctx, l, namespace); err != nil {
 			return fmt.Errorf("PV/PVC backup required but failed: %w", err)
 		}
 	} else {
@@ -348,8 +348,26 @@ func BackupPvPvcWithUserChoice(ctx context.Context, l *zap.SugaredLogger, namesp
 	return nil
 }
 
+// BackupPvPvc executes the PV/PVC backup script and returns the output directory.
+func BackupPvPvc(ctx context.Context, l *zap.SugaredLogger, namespace string) (string, error) {
+	return backupPvPvc(ctx, l, namespace)
+}
+
+// BackupPvPvcToDir executes the PV/PVC backup script and writes to the provided directory.
+func BackupPvPvcToDir(ctx context.Context, l *zap.SugaredLogger, namespace string, backupDir string) (string, error) {
+	backupDir = strings.TrimSpace(backupDir)
+	if backupDir == "" {
+		return "", fmt.Errorf("backup directory is required")
+	}
+	return backupPvPvcWithDir(ctx, l, namespace, &backupDir)
+}
+
 // backupPvPvc executes the PV/PVC backup script
-func backupPvPvc(ctx context.Context, l *zap.SugaredLogger, namespace string) error {
+func backupPvPvc(ctx context.Context, l *zap.SugaredLogger, namespace string) (string, error) {
+	return backupPvPvcWithDir(ctx, l, namespace, nil)
+}
+
+func backupPvPvcWithDir(ctx context.Context, l *zap.SugaredLogger, namespace string, backupDir *string) (string, error) {
 	scriptPath := "./scripts/backup_pv_pvc.sh"
 	if _, err := os.Stat(scriptPath); err != nil {
 		// Attempt to auto-download the script from a configurable raw URL
@@ -360,21 +378,38 @@ func backupPvPvc(ctx context.Context, l *zap.SugaredLogger, namespace string) er
 		l.Infof("Backup script not found. Attempting download from %s", rawURL)
 		downloadCmd := fmt.Sprintf("mkdir -p ./scripts && curl -fsSL %s -o %s && chmod +x %s", rawURL, scriptPath, scriptPath)
 		if _, dErr := utils.ExecuteCommand(ctx, "bash", "-lc", downloadCmd); dErr != nil {
-			return fmt.Errorf("failed to download backup script from %s: %w", rawURL, dErr)
+			return "", fmt.Errorf("failed to download backup script from %s: %w", rawURL, dErr)
 		}
 		if _, sErr := os.Stat(scriptPath); sErr != nil {
-			return fmt.Errorf("backup script still missing at %s after download", scriptPath)
+			return "", fmt.Errorf("backup script still missing at %s after download", scriptPath)
 		}
 	}
 	l.Infof("Running backup script for namespace %s...", namespace)
 	// Ensure NAMESPACE env is passed to the script
-	runCmd := fmt.Sprintf("NAMESPACE=%s bash %s", namespace, scriptPath)
+	envParts := []string{
+		fmt.Sprintf("NAMESPACE=%q", namespace),
+	}
+	if backupDir != nil && strings.TrimSpace(*backupDir) != "" {
+		envParts = append(envParts, fmt.Sprintf("BACKUP_DIR=%q", strings.TrimSpace(*backupDir)))
+		envParts = append(envParts, "BACKUP_SKIP_SUMMARY=1")
+	}
+	runCmd := fmt.Sprintf("%s bash %s", strings.Join(envParts, " "), scriptPath)
 	output, err := utils.ExecuteCommand(ctx, "bash", "-lc", runCmd)
 	if err != nil {
-		return fmt.Errorf("backup script failed: %w\nOutput: %s", err, output)
+		return "", fmt.Errorf("backup script failed: %w\nOutput: %s", err, output)
 	}
 	l.Info(strings.TrimSpace(output))
-	return nil
+	outDir := ""
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, "[+] Backup dir: ") {
+			outDir = strings.TrimSpace(strings.TrimPrefix(line, "[+] Backup dir: "))
+			break
+		}
+	}
+	if outDir == "" {
+		return "", fmt.Errorf("backup output directory not found in script output")
+	}
+	return outDir, nil
 }
 
 // UpdatePVVolumeHandles recreates PV/PVCs pointing to the new EFS ID
@@ -576,6 +611,7 @@ func ExecuteEFSOperationsFull(
 	l *zap.SugaredLogger,
 	attachInfo *types.BackupAttachInfo,
 	verify func(context.Context, string) error,
+	backupPvPvcFlag *bool,
 ) error {
 	// Replicate mount targets from current EFS to the new one (best effort)
 	srcEfs, err := utils.DetectEFSId(ctx, attachInfo.Namespace)
@@ -606,8 +642,17 @@ func ExecuteEFSOperationsFull(
 	}
 
 	// Backup PV/PVC definitions before destructive changes
-	if err := BackupPvPvcWithUserChoice(ctx, l, attachInfo.Namespace); err != nil {
-		return err
+	switch {
+	case backupPvPvcFlag == nil:
+		if err := BackupPvPvcWithUserChoice(ctx, l, attachInfo.Namespace); err != nil {
+			return err
+		}
+	case *backupPvPvcFlag:
+		if _, err := backupPvPvc(ctx, l, attachInfo.Namespace); err != nil {
+			return err
+		}
+	default:
+		l.Info("Skipped PV/PVC backup by user choice")
 	}
 
 	// Update PV volume handles

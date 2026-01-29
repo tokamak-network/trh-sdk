@@ -95,7 +95,8 @@ func ActionBackupManager() cli.ActionFunc {
 			return err
 
 		case flags.DoAttach:
-			_, err := thanosStack.BackupAttach(ctx, &flags.AttachEfs, &flags.AttachPVCs, &flags.AttachSTSs)
+			backup := true
+			_, err := thanosStack.BackupAttach(ctx, &flags.AttachEfs, &flags.AttachPVCs, &flags.AttachSTSs, &backup)
 			return err
 
 		case flags.DoRestore:
