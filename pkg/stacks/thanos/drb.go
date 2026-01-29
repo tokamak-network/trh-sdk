@@ -830,7 +830,7 @@ func (t *ThanosStack) saveDRBLeaderInfo(ctx context.Context, inputs *types.Deplo
 	fmt.Printf("RPC URL:                 %s\n", leaderInfo.RPCURL)
 	fmt.Println("--------------------------------")
 	fmt.Println("Use 'trh-sdk drb leader-info' to view this information later")
-	fmt.Println("--------------------------------\n")
+	fmt.Println("--------------------------------")
 
 	return nil
 }

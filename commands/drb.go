@@ -55,7 +55,7 @@ func ActionDRBLeaderInfo() cli.ActionFunc {
 		fmt.Printf("Deployed At:       %s\n", leaderInfo.DeploymentTimestamp)
 		fmt.Println("--------------------------------")
 		fmt.Printf("\nFile location: %s\n", infoFilePath)
-		fmt.Println("--------------------------------\n")
+		fmt.Println("--------------------------------")
 
 		return nil
 	}
