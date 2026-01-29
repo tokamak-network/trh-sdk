@@ -9,13 +9,13 @@ const PluginDRBRegularNode = "regular-node"
 const PluginUptimeService = "uptime-service"
 
 var SupportedPlugins = map[string]bool{
-	PluginBridge:        true,
-	PluginBlockExplorer: true,
-	PluginMonitoring:    true,
-	PluginCrossTrade:    true,
-	PluginDRB:           true,
+	PluginBridge:         true,
+	PluginBlockExplorer:  true,
+	PluginMonitoring:     true,
+	PluginCrossTrade:     true,
+	PluginDRB:            true,
 	PluginDRBRegularNode: true,
-	PluginUptimeService: true,
+	PluginUptimeService:  true,
 }
 
 var SupportedPluginsList = []string{

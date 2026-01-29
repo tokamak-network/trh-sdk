@@ -81,7 +81,7 @@ func (t *ThanosStack) GetDRBRegularNodeInput(_ context.Context) (*types.DRBRegul
 	input.EOAPrivateKey = env["EOA_PRIVATE_KEY"]
 	input.DrbNodeImage = env["DRB_NODE_IMAGE"]
 	input.ChainID = strings.TrimSpace(env["CHAIN_ID"])
-	input.EthRpcUrls = strings.TrimSpace(env["ETH_RPC_URLS"])   // comma-separated URLs
+	input.EthRpcUrls = strings.TrimSpace(env["ETH_RPC_URLS"]) // comma-separated URLs
 	input.ContractAddress = strings.TrimSpace(env["CONTRACT_ADDRESS"])
 
 	fmt.Println("\n--------------------------------")
@@ -425,7 +425,7 @@ func buildRegularNodeEnvContent(input *types.DRBRegularNodeInput) (string, error
 		fmt.Sprintf("POSTGRES_PORT=%d", port),
 		fmt.Sprintf("DRB_NODE_IMAGE=%s", input.DrbNodeImage),
 		fmt.Sprintf("CHAIN_ID=%s", input.ChainID),
-		fmt.Sprintf("ETH_RPC_URLS=%s", input.EthRpcUrls),       // comma-separated RPC URLs
+		fmt.Sprintf("ETH_RPC_URLS=%s", input.EthRpcUrls), // comma-separated RPC URLs
 		fmt.Sprintf("CONTRACT_ADDRESS=%s", input.ContractAddress),
 	}
 	if input.DatabaseConfig.Password != "" {

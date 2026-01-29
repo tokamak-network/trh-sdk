@@ -1041,7 +1041,7 @@ func (t *ThanosStack) generateLeaderNodeID(ctx context.Context) (string, error) 
 		}
 	}
 
-	// Run the generator script 
+	// Run the generator script
 	t.logger.Info("Running leader node generator script...")
 	generatorScriptPath := fmt.Sprintf("%s/DRB-node/deployment/leader/generate-peer-id.sh", t.deploymentPath)
 
@@ -1051,7 +1051,7 @@ func (t *ThanosStack) generateLeaderNodeID(ctx context.Context) (string, error) 
 		return "", fmt.Errorf("failed to make generator script executable: %w", err)
 	}
 
-	// Execute the generator script from deployment/leader 
+	// Execute the generator script from deployment/leader
 	output, err := utils.ExecuteCommand(ctx, "bash", "-c", fmt.Sprintf("cd DRB-node/deployment/leader && ./generate-peer-id.sh"))
 	if err != nil {
 		return "", fmt.Errorf("failed to run generator script: %w", err)
