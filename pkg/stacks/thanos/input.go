@@ -87,6 +87,12 @@ type DeployInfraInput struct {
 	// register metadata
 	GithubCredentials *types.GitHubCredentials
 	MetadataInfo      *types.MetadataInfo
+
+	BackupConfig *BackupConfig
+}
+
+type BackupConfig struct {
+	Enabled bool
 }
 
 func (c *DeployInfraInput) Validate(ctx context.Context) error {
