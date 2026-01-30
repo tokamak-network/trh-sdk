@@ -177,8 +177,14 @@ func ExecuteBackupAttach(
 	validatePrereq func(context.Context) error,
 	verify func(context.Context, string) error,
 	restart func(context.Context, string, string) error,
-	execOps func(context.Context, *types.BackupAttachInfo) error,
+	execOps func(context.Context, *types.BackupAttachInfo, func(string, float64)) error,
+	progressReporter func(string, float64),
 ) error {
+	if progressReporter == nil {
+		progressReporter = func(string, float64) {}
+	}
+
+	progressReporter("Verifying prerequisites...", 5.0)
 	l.Info("Verifying restored data and switching workloads...")
 	if err := validatePrereq(ctx); err != nil {
 		return fmt.Errorf("attach prerequisites validation failed: %w", err)
@@ -186,10 +192,12 @@ func ExecuteBackupAttach(
 
 	// Handle EFS operations
 	if attachInfo.EFSID != "" {
-		if err := execOps(ctx, attachInfo); err != nil {
+		progressReporter("Executing EFS operations...", 10.0)
+		if err := execOps(ctx, attachInfo, progressReporter); err != nil {
 			return err
 		}
 	} else {
+		progressReporter("Verifying current EFS data...", 10.0)
 		l.Info("Skipped PV update (no --efs-id provided).")
 		if err := verify(ctx, attachInfo.Namespace); err != nil {
 			l.Warnf("Current EFS data verification failed: %v", err)
@@ -199,6 +207,7 @@ func ExecuteBackupAttach(
 
 	// Handle StatefulSet restarts
 	if len(attachInfo.STSs) > 0 {
+		progressReporter("Restarting StatefulSets...", 70.0)
 		stsList := strings.Join(attachInfo.STSs, ",")
 		if err := restart(ctx, attachInfo.Namespace, stsList); err != nil {
 			return fmt.Errorf("failed to restart StatefulSets: %w", err)
@@ -209,18 +218,23 @@ func ExecuteBackupAttach(
 
 	// Create recovery point after successful attach
 	if attachInfo.EFSID == "" {
+		progressReporter("Attach completed", 100.0)
 		return nil
 	}
 
+	progressReporter("Creating recovery point...", 90.0)
 	l.Info("Creating recovery point for attached EFS...")
 	snapshotInfo, err := SnapshotExecute(ctx, l, attachInfo.Region, attachInfo.Namespace, nil)
 	if err != nil {
 		l.Warnf("Failed to create recovery point: %v", err)
+		// Don't fail the whole operation if snapshot fails
+		progressReporter("Attach completed (snapshot failed)", 100.0)
 		return nil
 	}
 
 	l.Info("✅ Recovery point created successfully")
 	l.Infof("   Job ID: %s", snapshotInfo.JobID)
+	progressReporter("Attach completed successfully", 100.0)
 	return nil
 }
 
@@ -612,29 +626,38 @@ func ExecuteEFSOperationsFull(
 	attachInfo *types.BackupAttachInfo,
 	verify func(context.Context, string) error,
 	backupPvPvcFlag *bool,
+	progressReporter func(string, float64),
 ) error {
+	if progressReporter == nil {
+		progressReporter = func(string, float64) {}
+	}
+
 	// Replicate mount targets from current EFS to the new one (best effort)
 	srcEfs, err := utils.DetectEFSId(ctx, attachInfo.Namespace)
 	if err != nil || strings.TrimSpace(srcEfs) == "" {
 		l.Warnf("Could not detect source EFS in namespace %s. Skipping mount-target replication.", attachInfo.Namespace)
-		return nil
+		// continue to next steps
+	} else {
+		progressReporter("Replicating mount targets...", 20.0)
+		if err := ReplicateEFSMountTargets(ctx, l, attachInfo.Region, strings.TrimSpace(srcEfs), attachInfo.EFSID); err != nil {
+			l.Warnf("Failed to replicate EFS mount targets from %s to %s: %v", srcEfs, attachInfo.EFSID, err)
+			// continue even if replication fails
+		} else {
+			l.Infof("✅ Replicated mount targets from %s to %s (region: %s)", srcEfs, attachInfo.EFSID, attachInfo.Region)
+		}
 	}
 
-	if err := ReplicateEFSMountTargets(ctx, l, attachInfo.Region, strings.TrimSpace(srcEfs), attachInfo.EFSID); err != nil {
-		l.Warnf("Failed to replicate EFS mount targets from %s to %s: %v", srcEfs, attachInfo.EFSID, err)
-		return nil
-	}
-
-	l.Infof("✅ Replicated mount targets from %s to %s (region: %s)", srcEfs, attachInfo.EFSID, attachInfo.Region)
+	progressReporter("Validating mount targets...", 25.0)
 	if vErr := ValidateEFSMountTargets(ctx, l, attachInfo.Region, attachInfo.EFSID); vErr != nil {
 		l.Warnf("Mount target validation for %s reported issues: %v", attachInfo.EFSID, vErr)
-		return nil
+		// continue? usually yes, let kubelet handle attach errors
+	} else {
+		l.Infof("✅ Mount targets validated for %s", attachInfo.EFSID)
 	}
-
-	l.Infof("✅ Mount targets validated for %s", attachInfo.EFSID)
 
 	// Verify EFS data using injected verifier (best effort)
 	if verify != nil {
+		progressReporter("Verifying EFS data...", 30.0)
 		if err := verify(ctx, attachInfo.Namespace); err != nil {
 			l.Warnf("EFS data verification failed: %v", err)
 		}
@@ -642,6 +665,7 @@ func ExecuteEFSOperationsFull(
 	}
 
 	// Backup PV/PVC definitions before destructive changes
+	progressReporter("Backing up PV/PVC configurations...", 40.0)
 	switch {
 	case backupPvPvcFlag == nil:
 		if err := BackupPvPvcWithUserChoice(ctx, l, attachInfo.Namespace); err != nil {
@@ -660,6 +684,7 @@ func ExecuteEFSOperationsFull(
 		return nil
 	}
 
+	progressReporter("Updating PV/PVC volume handles...", 60.0)
 	pvcList := strings.Join(attachInfo.PVCs, ",")
 	if err := UpdatePVVolumeHandles(ctx, l, attachInfo.Namespace, attachInfo.EFSID, &pvcList); err != nil {
 		return fmt.Errorf("failed to update PV volume handles: %w", err)

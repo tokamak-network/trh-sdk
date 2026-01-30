@@ -126,7 +126,7 @@ func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string
 		func(c context.Context, efsId string, pvcs, stss, other *string) error {
 			// Use the same attach logic as BackupAttach
 			defaultBackup := true
-			_, err := t.BackupAttach(c, &efsId, pvcs, stss, &defaultBackup)
+			_, err := t.BackupAttach(c, &efsId, pvcs, stss, &defaultBackup, progressReporter)
 			return err
 		},
 		attach,
@@ -172,7 +172,7 @@ func (t *ThanosStack) BackupRestoreInteractive(ctx context.Context) error {
 }
 
 // BackupAttach switches workloads to use the new EFS and verifies readiness, returns attach information
-func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *string, stss *string, backupPvPvc *bool) (*types.BackupAttachInfo, error) {
+func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *string, stss *string, backupPvPvc *bool, progressReporter func(string, float64)) (*types.BackupAttachInfo, error) {
 	// gather info via backup subpackage
 	info, err := backup.GatherBackupAttachInfo(
 		ctx,
@@ -200,11 +200,12 @@ func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *str
 		func(c context.Context, ns string, stsCSV string) error {
 			return backup.RestartStatefulSets(c, t.logger, ns, stsCSV)
 		},
-		func(c context.Context, ai *types.BackupAttachInfo) error {
+		func(c context.Context, ai *types.BackupAttachInfo, pr func(string, float64)) error {
 			return backup.ExecuteEFSOperationsFull(c, t.logger, ai, func(ctx context.Context, namespace string) error {
 				return backup.VerifyEFSDataImpl(ctx, t.logger, namespace)
-			}, backupPvPvc)
+			}, backupPvPvc, pr)
 		},
+		progressReporter,
 	)
 	if err != nil {
 		return nil, err

@@ -96,7 +96,10 @@ func ActionBackupManager() cli.ActionFunc {
 
 		case flags.DoAttach:
 			backup := true
-			_, err := thanosStack.BackupAttach(ctx, &flags.AttachEfs, &flags.AttachPVCs, &flags.AttachSTSs, &backup)
+			reporter := func(msg string, pct float64) {
+				fmt.Printf(">> [%.1f%%] %s\n", pct, msg)
+			}
+			_, err := thanosStack.BackupAttach(ctx, &flags.AttachEfs, &flags.AttachPVCs, &flags.AttachSTSs, &backup, reporter)
 			return err
 
 		case flags.DoRestore:
