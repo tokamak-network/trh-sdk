@@ -152,6 +152,9 @@ func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string
 		NewEFSID:         restoreInfo.NewEFSID,
 		JobID:            restoreInfo.JobID,
 		Status:           restoreInfo.Status,
+		SuggestedEFSID:   restoreInfo.SuggestedEFSID,
+		SuggestedPVCs:    restoreInfo.SuggestedPVCs,
+		SuggestedSTSs:    restoreInfo.SuggestedSTSs,
 	}, nil
 }
 
