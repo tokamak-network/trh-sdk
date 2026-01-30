@@ -231,59 +231,96 @@ func (t *ThanosStack) UninstallDRB(ctx context.Context) error {
 	t.logger.Info("Starting DRB uninstallation...")
 
 	// Check if namespace exists first
-	exists, err := utils.CheckNamespaceExists(ctx, namespace)
+	// exists, err := utils.CheckNamespaceExists(ctx, namespace)
+	// if err != nil {
+	// 	t.logger.Errorw("Failed to check DRB namespace existence", "err", err)
+	// 	return err
+	// }
+	// if !exists {
+	// 	t.logger.Info("DRB namespace does not exist, skipping uninstallation")
+	// 	return nil
+	// }
+	namespaceExists, err := utils.CheckNamespaceExists(ctx, namespace)
 	if err != nil {
-		t.logger.Errorw("Failed to check DRB namespace existence", "err", err)
-		return err
+		t.logger.Warnw("Failed to check DRB namespace existence, will still attempt cleanup", "err", err)
+		namespaceExists = false
 	}
 
-	if !exists {
-		t.logger.Info("DRB namespace does not exist, skipping uninstallation")
-		return nil
-	}
+	// only clean up k8s resources if namespace exists
+	if namespaceExists {
+		t.logger.Info("DRB namespace exists, cleaning up Kubernetes resources...")
 
-	// Uninstall Helm releases
-	releases, err := utils.FilterHelmReleases(ctx, namespace, "drb-node")
-	if err != nil {
-		t.logger.Error("Error to filter helm releases", "err", err)
-		return err
-	}
-
-	for _, release := range releases {
-		t.logger.Infow("Uninstalling Helm release", "release", release, "namespace", namespace)
-		_, err = utils.ExecuteCommand(ctx, "helm", []string{
-			"uninstall",
-			release,
-			"--namespace",
-			namespace,
-		}...)
+		// Uninstall Helm releases
+		// releases, err := utils.FilterHelmReleases(ctx, namespace, "drb-node")
+		// if err != nil {
+		// 	t.logger.Error("Error to filter helm releases", "err", err)
+		// 	return err
+		// }
+		// for _, release := range releases {
+		// 	t.logger.Infow("Uninstalling Helm release", "release", release, "namespace", namespace)
+		// 	_, err = utils.ExecuteCommand(ctx, "helm", []string{
+		// 		"uninstall",
+		// 		release,
+		// 		"--namespace",
+		// 		namespace,
+		// 	}...)
+		// 	if err != nil {
+		// 		t.logger.Error("❌ Error uninstalling DRB helm chart", "err", err)
+		// 		return err
+		// 	}
+		// }
+		releases, err := utils.FilterHelmReleases(ctx, namespace, "drb-node")
 		if err != nil {
-			t.logger.Error("❌ Error uninstalling DRB helm chart", "err", err)
-			return err
+			t.logger.Warnw("Error filtering helm releases, continuing with cleanup", "err", err)
+		} else {
+			for _, release := range releases {
+				t.logger.Infow("Uninstalling Helm release", "release", release, "namespace", namespace)
+				_, err = utils.ExecuteCommand(ctx, "helm", []string{
+					"uninstall",
+					release,
+					"--namespace",
+					namespace,
+				}...)
+				if err != nil {
+					t.logger.Warnw("Error uninstalling DRB helm chart, continuing", "err", err)
+				}
+			}
 		}
+
+		// Delete Kubernetes Secret
+		secretName := "drb-leader-static-key"
+		_, _ = utils.ExecuteCommand(ctx, "kubectl", "delete", "secret", secretName, "-n", namespace, "--ignore-not-found=true")
+
+		// Delete namespace
+		// t.logger.Info(fmt.Sprintf("Deleting DRB namespace: %s", namespace))
+		// err = t.tryToDeleteK8sNamespace(ctx, namespace)
+		// if err != nil {
+		// 	t.logger.Errorw("Failed to delete DRB namespace", "err", err, "namespace", namespace)
+		// 	return err
+		// }
+		t.logger.Info(fmt.Sprintf("Deleting DRB namespace: %s", namespace))
+		err = t.tryToDeleteK8sNamespace(ctx, namespace)
+		if err != nil {
+			t.logger.Warnw("Failed to delete DRB namespace, continuing with terraform cleanup", "err", err, "namespace", namespace)
+		}
+
+		// Clean up storage that might be left behind
+		if err := t.cleanupExistingDRBStorage(ctx, namespace); err != nil {
+			t.logger.Warnw("Failed to cleanup DRB storage", "err", err)
+		}
+	} else {
+		t.logger.Info("DRB namespace does not exist, skipping Kubernetes cleanup")
 	}
 
-	// Delete Kubernetes Secret
-	secretName := "drb-leader-static-key"
-	_, _ = utils.ExecuteCommand(ctx, "kubectl", "delete", "secret", secretName, "-n", namespace, "--ignore-not-found=true")
-
-	// Destroy RDS database (if using RDS)
+	// always try to destroy RDS terraform resources
+	// err = t.destroyTerraform(ctx, fmt.Sprintf("%s/tokamak-thanos-stack/terraform/drb", t.deploymentPath))
+	// if err != nil {
+	// 	t.logger.Warnf("Failed to destroy DRB RDS terraform resources: %v. Continuing with uninstall.", err)
+	// }
+	t.logger.Info("Destroying DRB RDS terraform resources (if any)...")
 	err = t.destroyTerraform(ctx, fmt.Sprintf("%s/tokamak-thanos-stack/terraform/drb", t.deploymentPath))
 	if err != nil {
-		t.logger.Warnf("Failed to destroy DRB RDS terraform resources: %v. Continuing with uninstall.", err)
-	}
-
-	// Delete namespace before destroying infrastructure
-	t.logger.Info(fmt.Sprintf("Deleting DRB namespace: %s", namespace))
-	err = t.tryToDeleteK8sNamespace(ctx, namespace)
-	if err != nil {
-		t.logger.Errorw("Failed to delete DRB namespace", "err", err, "namespace", namespace)
-		return err
-	}
-
-	// Clean up storage that might be left behind
-	if err := t.cleanupExistingDRBStorage(ctx, namespace); err != nil {
-		t.logger.Warnw("Failed to cleanup DRB storage", "err", err)
+		t.logger.Warnf("Failed to destroy DRB RDS terraform resources: %v. Continuing with infrastructure cleanup.", err)
 	}
 
 	// Destroy DRB infrastructure (EKS cluster and VPC)
