@@ -864,7 +864,7 @@ func (t *ThanosStack) saveDRBLeaderInfo(ctx context.Context, inputs *types.Deplo
 	return nil
 }
 
-// deployDRBDatabaseRDS deploys AWS RDS PostgreSQL for DRB leader node
+// deployDRBDatabaseRDS deploys AWS RDS PostgreSQL for DRB node
 func (t *ThanosStack) deployDRBDatabaseRDS(ctx context.Context, dbConfig *types.DRBDatabaseConfig) (string, error) {
 	if t.deployConfig == nil || t.deployConfig.AWS == nil {
 		return "", fmt.Errorf("AWS configuration is not set in deploy config")
@@ -880,7 +880,7 @@ func (t *ThanosStack) deployDRBDatabaseRDS(ctx context.Context, dbConfig *types.
 		return "", fmt.Errorf("AWS region is not set in deploy config")
 	}
 
-	t.logger.Infof("Deploying AWS RDS PostgreSQL for DRB leader node...")
+	t.logger.Infof("Deploying AWS RDS PostgreSQL for DRB node...")
 
 	envrcPath := fmt.Sprintf("%s/tokamak-thanos-stack/terraform", t.deploymentPath)
 
@@ -901,7 +901,7 @@ func (t *ThanosStack) deployDRBDatabaseRDS(ctx context.Context, dbConfig *types.
 	}
 
 	// Deploy RDS
-	t.logger.Info("Deploying AWS RDS PostgreSQL for DRB leader node...")
+	t.logger.Info("Deploying AWS RDS PostgreSQL for DRB node...")
 	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
 		"-c",
 		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
@@ -929,7 +929,7 @@ func (t *ThanosStack) deployDRBDatabaseRDS(ctx context.Context, dbConfig *types.
 	}
 
 	rdsConnectionUrl = strings.Trim(rdsConnectionUrl, `"`)
-	t.logger.Infof("✅ RDS PostgreSQL deployed successfully for leader node")
+	t.logger.Infof("✅ RDS PostgreSQL deployed successfully")
 	return rdsConnectionUrl, nil
 }
 
