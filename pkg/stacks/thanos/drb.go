@@ -327,15 +327,20 @@ func (t *ThanosStack) deployDRBContracts(ctx context.Context, inputs *types.Depl
 		return nil, fmt.Errorf("failed to clone drb repository: %s", err)
 	}
 
+	// use full path to avoid issues with working directory
+	commitReveal2Path := filepath.Join(t.deploymentPath, "Commit-Reveal2")
+
 	// Checkout to `service`
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd Commit-Reveal2 && git checkout service")
+	// err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd Commit-Reveal2 && git checkout service")
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && git checkout service", commitReveal2Path))
 	if err != nil {
 		return nil, fmt.Errorf("failed to checkout service: %s", err)
 	}
 
 	t.logger.Info("Clearing Forge cache to ensure fresh build...")
 	// Clear Forge cache to avoid stale artifacts from previous deployments
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd Commit-Reveal2 && forge clean")
+	// err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd Commit-Reveal2 && forge clean")
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && forge clean", commitReveal2Path))
 	if err != nil {
 		t.logger.Warnf("Failed to clear Forge cache (non-critical): %v. Continuing with build.", err)
 		// Continue even if cache clear fails - not critical
@@ -344,7 +349,8 @@ func (t *ThanosStack) deployDRBContracts(ctx context.Context, inputs *types.Depl
 	t.logger.Info("Start to build drb contracts")
 
 	// Build the contracts
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd Commit-Reveal2 && make install && make build")
+	// err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd Commit-Reveal2 && make install && make build")
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && make install && make build", commitReveal2Path))
 	if err != nil {
 		return nil, fmt.Errorf("failed to build the contracts: %s", err)
 	}
@@ -378,8 +384,14 @@ func (t *ThanosStack) deployDRBContracts(ctx context.Context, inputs *types.Depl
 	t.logger.Info("Deploying DRB contracts")
 
 	// Run forge script to deploy the contracts (use first RPC URL)
+	// script := fmt.Sprintf(
+	// 	"cd Commit-Reveal2 && forge script script/DeployCommitReveal2.s.sol:DeployCommitReveal2 --rpc-url %s --private-key %s --broadcast -vv",
+	// 	firstRpcUrl,
+	// 	privateKey,
+	// )
 	script := fmt.Sprintf(
-		"cd Commit-Reveal2 && forge script script/DeployCommitReveal2.s.sol:DeployCommitReveal2 --rpc-url %s --private-key %s --broadcast -vv",
+		"cd %s && forge script script/DeployCommitReveal2.s.sol:DeployCommitReveal2 --rpc-url %s --private-key %s --broadcast -vv",
+		commitReveal2Path,
 		firstRpcUrl,
 		privateKey,
 	)
@@ -439,9 +451,18 @@ func (t *ThanosStack) deployConsumerExampleV2(ctx context.Context, inputs *types
 	firstRpcUrl := strings.Split(inputs.RPC, ",")[0]
 	firstRpcUrl = strings.TrimSpace(firstRpcUrl)
 
+	// use absolute path to avoid issues with working directory
+	commitReveal2Path := filepath.Join(t.deploymentPath, "Commit-Reveal2")
+
 	// Deploy ConsumerExampleV2 using forge script
+	// script := fmt.Sprintf(
+	// 	"cd Commit-Reveal2 && forge script script/DeployConsumerExampleV2.s.sol:DeployConsumerExampleV2 --sig 'run()' --rpc-url %s --private-key %s --broadcast -vv",
+	// 	firstRpcUrl,
+	// 	privateKey,
+	// )
 	script := fmt.Sprintf(
-		"cd Commit-Reveal2 && forge script script/DeployConsumerExampleV2.s.sol:DeployConsumerExampleV2 --sig 'run()' --rpc-url %s --private-key %s --broadcast -vv",
+		"cd %s && forge script script/DeployConsumerExampleV2.s.sol:DeployConsumerExampleV2 --sig 'run()' --rpc-url %s --private-key %s --broadcast -vv",
+		commitReveal2Path,
 		firstRpcUrl,
 		privateKey,
 	)
@@ -506,8 +527,12 @@ func (t *ThanosStack) deployDRBInfrastructure(ctx context.Context) (*types.DRBIn
 		return nil, fmt.Errorf("failed to clone tokamak-thanos-stack repository: %w", err)
 	}
 
+	// use absolute path for tokamak-thanos-stack
+	thanosStackPath := filepath.Join(t.deploymentPath, "tokamak-thanos-stack")
+
 	// Checkout to `feat/add-drb-node` branch for alpha release and pull latest changes
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd tokamak-thanos-stack && git checkout feat/add-drb-node && git pull origin feat/add-drb-node")
+	// err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd tokamak-thanos-stack && git checkout feat/add-drb-node && git pull origin feat/add-drb-node")
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && git checkout feat/add-drb-node && git pull origin feat/add-drb-node", thanosStackPath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to checkout and pull feat/add-drb-node: %w", err)
 	}
@@ -728,8 +753,12 @@ func (t *ThanosStack) deployDRBApplication(ctx context.Context, inputs *types.De
 		return nil, fmt.Errorf("failed to clone tokamak-thanos-stack repository: %s", err)
 	}
 
+	// use absolute path for tokamak-thanos-stack
+	thanosStackPath := filepath.Join(t.deploymentPath, "tokamak-thanos-stack")
+
 	// Checkout to `feat/add-drb-node` and pull latest changes
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd tokamak-thanos-stack && git checkout feat/add-drb-node && git pull origin feat/add-drb-node")
+	// err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd tokamak-thanos-stack && git checkout feat/add-drb-node && git pull origin feat/add-drb-node")
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && git checkout feat/add-drb-node && git pull origin feat/add-drb-node", thanosStackPath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to checkout and pull feat/add-drb-node: %s", err)
 	}
@@ -1023,9 +1052,13 @@ func (t *ThanosStack) generateLeaderNodeID(ctx context.Context) (string, error) 
 		return "", fmt.Errorf("failed to clone DRB-node repository: %w", err)
 	}
 
+	// use absolute path to avoid issues with working directory
+	drbNodePath := filepath.Join(t.deploymentPath, "DRB-node")
+
 	// Checkout to dispute-mechanism branch
 	t.logger.Infof("Checking out branch: %s", branch)
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd DRB-node && git checkout %s", branch))
+	// err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd DRB-node && git checkout %s", branch))
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && git checkout %s", drbNodePath, branch))
 	if err != nil {
 		return "", fmt.Errorf("failed to checkout branch %s: %w", branch, err)
 	}
@@ -1052,7 +1085,9 @@ func (t *ThanosStack) generateLeaderNodeID(ctx context.Context) (string, error) 
 	}
 
 	// Execute the generator script from deployment/leader
-	output, err := utils.ExecuteCommand(ctx, "bash", "-c", fmt.Sprintf("cd DRB-node/deployment/leader && ./generate-peer-id.sh"))
+	leaderDeployPath := filepath.Join(drbNodePath, "deployment", "leader")
+	// output, err := utils.ExecuteCommand(ctx, "bash", "-c", fmt.Sprintf("cd DRB-node/deployment/leader && ./generate-peer-id.sh"))
+	output, err := utils.ExecuteCommand(ctx, "bash", "-c", fmt.Sprintf("cd %s && ./generate-peer-id.sh", leaderDeployPath))
 	if err != nil {
 		return "", fmt.Errorf("failed to run generator script: %w", err)
 	}
