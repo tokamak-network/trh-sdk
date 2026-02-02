@@ -20,6 +20,19 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
+func toWSS(urls string) string {
+	var out []string
+	for _, u := range strings.Split(urls, ",") {
+		u = strings.TrimSpace(u)
+		u = strings.Replace(u, "https://", "wss://", 1)
+		u = strings.Replace(u, "http://", "ws://", 1)
+		if u != "" {
+			out = append(out, u)
+		}
+	}
+	return strings.Join(out, ",")
+}
+
 func (t *ThanosStack) GetDRBInput(ctx context.Context) (*types.DeployDRBInput, error) {
 	fmt.Println("\n--------------------------------")
 	fmt.Println("Network Selection for DRB Deployment")
@@ -1393,7 +1406,7 @@ func (t *ThanosStack) deployDRBLeaderNodeWithHelm(ctx context.Context, inputs *t
 	if err := utils.UpdateYAMLField(valuesFilePath, "leader.env.CHAIN_ID", fmt.Sprintf("%d", inputs.ChainID)); err != nil {
 		return nil, fmt.Errorf("failed to update leader.env.CHAIN_ID: %w", err)
 	}
-	if err := utils.UpdateYAMLField(valuesFilePath, "leader.env.ETH_RPC_URLS", inputs.RPC); err != nil {
+	if err := utils.UpdateYAMLField(valuesFilePath, "leader.env.ETH_RPC_URLS", toWSS(inputs.RPC)); err != nil {
 		return nil, fmt.Errorf("failed to update leader.env.ETH_RPC_URLS: %w", err)
 	}
 	if err := utils.UpdateYAMLField(valuesFilePath, "leader.env.CONTRACT_ADDRESS", contracts.ContractAddress); err != nil {
