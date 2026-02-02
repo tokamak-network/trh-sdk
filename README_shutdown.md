@@ -80,10 +80,67 @@ Retrieves system liquidity and processes unclaimed withdrawals either in bulk or
 
 ## 📊 Status Check (Dashboard)
 
+The `status` command provides a comprehensive dashboard of the current shutdown process, including configuration validity, execution history, and resource availability.
+
 ```bash
 ./trh-sdk shutdown status
 ```
--   Displays a summary of currently configured RPC info, execution history, existence of asset files, etc.
+
+### 1. Output Example
+
+```text
+📊 Shutdown Status
+==================
+Reading config from: /path/to/settings.json
+
+🔧 Current Configuration:
+   Deployment Path: /Users/theo/workspace_tokamak/trh-sdk
+   SDK Path: /Users/theo/workspace_tokamak/tokamak-thanos/packages/tokamak/sdk
+   L1 Chain ID: 11155111
+   L2 Chain ID: 111551119090
+   Network: testnet
+   Thanos Root: /Users/theo/workspace_tokamak/tokamak-thanos/packages
+   Deployments Path: 11155111-deploy.json
+
+📜 Execution History:
+   Last Command: gen
+   Last Gen: 2026-02-02T18:30:00Z
+   Last Snapshot: data/generate-assets-111551119090.json
+   Last Dry-Run: 2026-02-02T18:35:00Z
+   Last Send: (never)
+
+📁 Deployment Contracts:
+   ✅ Loaded: 20 contracts available
+      Bridge Proxy: 0x1234...abcd
+
+📁 Assets File:
+   ✅ Found: data/generate-assets-111551119090.json
+   Last modified: 2026-02-02 18:30:00
+```
+
+### 2. Execution History & State File
+
+The SDK maintains an execution history to ensure **process continuity** and **prevent redundant operations**. This state is stored locally in `~/.trh/thanos_shutdown_state.json`.
+
+**Why it is stored:**
+- **Resume Capability:** Allows operators to pick up where they left off (e.g., after `fetch` or `gen`).
+- **Audit:** Records when critical actions (Dry-Run, Send) were last performed.
+- **Path Caching:** Remembers the location of the generated asset snapshot for subsequent steps.
+
+**State File Example (`~/.trh/thanos_shutdown_state.json`):**
+```json
+{
+  "chainId": 11155111,
+  "l2ChainId": 111551119090,
+  "thanosRoot": "/Users/theo/workspace_tokamak/tokamak-thanos/packages",
+  "deploymentsPath": "11155111-deploy.json",
+  "dataDir": "",
+  "lastGenAt": "2026-02-02T18:30:00Z",
+  "lastDryRunAt": "2026-02-02T18:35:00Z",
+  "lastSnapshotPath": "data/generate-assets-111551119090.json",
+  "lastCommand": "dry-run"
+}
+```
 
 ---
 

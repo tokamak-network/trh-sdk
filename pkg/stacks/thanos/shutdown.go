@@ -87,14 +87,14 @@ func (s *ThanosStack) ShutdownFetch(ctx context.Context, dryRun bool) error {
 	s.logger.Info(" -> Running fetch_explorer_assets.py")
 	fetchArgs := []string{fmt.Sprintf("%d", s.deployConfig.L2ChainID)}
 	if err := s.runPythonScript(ctx, filepath.Join(scriptsDir, "fetch_explorer_assets.py"), fetchArgs, envVars, false); err != nil {
-		return err
+		return fmt.Errorf("fetch_explorer_assets.py failed: %w", err)
 	}
 
 	// 2. Compute L2 Burns
 	s.logger.Info(" -> Running compute_l2_burns.py")
 	l2BurnsArgs := []string{s.deployConfig.L2RpcUrl, fmt.Sprintf("%d", s.deployConfig.L2ChainID)}
 	if err := s.runPythonScript(ctx, filepath.Join(scriptsDir, "compute_l2_burns.py"), l2BurnsArgs, envVars, false); err != nil {
-		return err
+		return fmt.Errorf("compute_l2_burns.py failed: %w", err)
 	}
 
 	// 3. Compute Finalized Native Withdrawals
@@ -103,7 +103,7 @@ func (s *ThanosStack) ShutdownFetch(ctx context.Context, dryRun bool) error {
 	scriptArgs := []string{s.deployConfig.L1RPCURL, contracts.L1StandardBridgeProxy}
 
 	if err := s.runPythonScript(ctx, filepath.Join(scriptsDir, "compute_finalized_native_withdrawals.py"), scriptArgs, envVars, false); err != nil {
-		return err
+		return fmt.Errorf("compute_finalized_native_withdrawals.py failed: %w", err)
 	}
 
 	return nil
@@ -168,10 +168,23 @@ func (s *ThanosStack) getBedrockPath() (string, error) {
 	return "", fmt.Errorf("contracts-bedrock directory not found at: %s", p)
 }
 
-// runForgeScript is an internal engine for executing Forge scripts with RPC and Env flexibility.
-func (s *ThanosStack) runForgeScript(ctx context.Context, scriptPath string, sig string, args []string, useL2 bool, envVars []string, dryRun bool) error {
+// forgeScriptParams holds common parameters for forge script execution
+type forgeScriptParams struct {
+	bedrockPath  string
+	scriptPath   string
+	contractName string
+	rpcUrl       string
+	broadcast    string
+	sig          string
+	senderFlag   string
+	argStr       string
+	filteredEnv  []string
+}
+
+// buildForgeScriptParams builds common parameters for forge script execution
+func (s *ThanosStack) buildForgeScriptParams(scriptPath string, sig string, args []string, useL2 bool, envVars []string, dryRun bool) (*forgeScriptParams, error) {
 	if s.deployConfig == nil {
-		return fmt.Errorf("deployConfig is nil")
+		return nil, fmt.Errorf("deployConfig is nil")
 	}
 
 	bedrockPath, err := s.getBedrockPath()
@@ -184,9 +197,6 @@ func (s *ThanosStack) runForgeScript(ctx context.Context, scriptPath string, sig
 		rpcUrl = s.deployConfig.L2RpcUrl
 	}
 
-	// Handle Impersonation during Dry-Run
-	senderFlag := ""
-
 	adminKey := s.deployConfig.AdminPrivateKey
 	if !strings.HasPrefix(adminKey, "0x") {
 		adminKey = "0x" + adminKey
@@ -198,6 +208,7 @@ func (s *ThanosStack) runForgeScript(ctx context.Context, scriptPath string, sig
 		fmt.Sprintf("L2_RPC_URL=%s", s.deployConfig.L2RpcUrl),
 	}
 
+	senderFlag := ""
 	for _, env := range envVars {
 		if strings.HasPrefix(env, "IMPERSONATE_SENDER=") && dryRun {
 			senderFlag = fmt.Sprintf("--sender %s", strings.TrimPrefix(env, "IMPERSONATE_SENDER="))
@@ -219,21 +230,44 @@ func (s *ThanosStack) runForgeScript(ctx context.Context, scriptPath string, sig
 		broadcast = ""
 	}
 
-	cmdStr := fmt.Sprintf("cd %s && %s forge script %s:%s --rpc-url %s %s --sig \"%s\" %s %s",
-		bedrockPath,
-		strings.Join(filteredEnv, " "),
-		scriptPath,
-		contractName,
-		rpcUrl,
-		broadcast,
-		sig,
-		senderFlag,
-		argStr,
-	)
+	return &forgeScriptParams{
+		bedrockPath:  bedrockPath,
+		scriptPath:   scriptPath,
+		contractName: contractName,
+		rpcUrl:       rpcUrl,
+		broadcast:    broadcast,
+		sig:          sig,
+		senderFlag:   senderFlag,
+		argStr:       argStr,
+		filteredEnv:  filteredEnv,
+	}, nil
+}
 
-	s.logger.Infof("🚀 Bedrock Path: %s", bedrockPath)
-	s.logger.Infof("🚀 Running Forge Script: %s (RPC: %s, DryRun: %v)", scriptPath, rpcUrl, dryRun)
-	return utils.ExecuteCommandStream(ctx, s.logger, "bash", "-c", cmdStr)
+// buildForgeCommand builds the forge script command string
+func (p *forgeScriptParams) buildCommand() string {
+	return fmt.Sprintf("cd %s && %s forge script %s:%s --rpc-url %s %s --sig \"%s\" %s %s",
+		p.bedrockPath,
+		strings.Join(p.filteredEnv, " "),
+		p.scriptPath,
+		p.contractName,
+		p.rpcUrl,
+		p.broadcast,
+		p.sig,
+		p.senderFlag,
+		p.argStr,
+	)
+}
+
+// runForgeScript is an internal engine for executing Forge scripts with RPC and Env flexibility.
+func (s *ThanosStack) runForgeScript(ctx context.Context, scriptPath string, sig string, args []string, useL2 bool, envVars []string, dryRun bool) error {
+	params, err := s.buildForgeScriptParams(scriptPath, sig, args, useL2, envVars, dryRun)
+	if err != nil {
+		return err
+	}
+
+	s.logger.Infof("🚀 Bedrock Path: %s", params.bedrockPath)
+	s.logger.Infof("🚀 Running Forge Script: %s (RPC: %s, DryRun: %v)", scriptPath, params.rpcUrl, dryRun)
+	return utils.ExecuteCommandStream(ctx, s.logger, "bash", "-c", params.buildCommand())
 }
 
 // readDeploymentContracts reads L1 deployment contract addresses.
@@ -384,68 +418,14 @@ func (s *ThanosStack) ShutdownWithdraw(ctx context.Context, assetsPath string, d
 
 // runForgeScriptCapture executes a Forge script and returns its combined output.
 func (s *ThanosStack) runForgeScriptCapture(ctx context.Context, scriptPath string, sig string, args []string, useL2 bool, envVars []string, dryRun bool) (string, error) {
-	if s.deployConfig == nil {
-		return "", fmt.Errorf("deployConfig is nil")
-	}
-
-	bedrockPath, err := s.getBedrockPath()
+	params, err := s.buildForgeScriptParams(scriptPath, sig, args, useL2, envVars, dryRun)
 	if err != nil {
-		bedrockPath = filepath.Join(s.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock")
+		return "", err
 	}
 
-	rpcUrl := s.deployConfig.L1RPCURL
-	if useL2 {
-		rpcUrl = s.deployConfig.L2RpcUrl
-	}
-
-	adminKey := s.deployConfig.AdminPrivateKey
-	if !strings.HasPrefix(adminKey, "0x") {
-		adminKey = "0x" + adminKey
-	}
-
-	filteredEnv := []string{
-		fmt.Sprintf("PRIVATE_KEY=%s", adminKey),
-		fmt.Sprintf("L1_RPC_URL=%s", s.deployConfig.L1RPCURL),
-		fmt.Sprintf("L2_RPC_URL=%s", s.deployConfig.L2RpcUrl),
-	}
-
-	senderFlag := ""
-	for _, env := range envVars {
-		if strings.HasPrefix(env, "IMPERSONATE_SENDER=") && dryRun {
-			senderFlag = fmt.Sprintf("--sender %s", strings.TrimPrefix(env, "IMPERSONATE_SENDER="))
-			continue
-		}
-		filteredEnv = append(filteredEnv, env)
-	}
-
-	argStr := ""
-	if len(args) > 0 {
-		argStr = strings.Join(args, " ")
-	}
-
-	base := filepath.Base(scriptPath)
-	contractName := strings.TrimSuffix(base, ".s.sol")
-
-	broadcast := "--broadcast"
-	if dryRun {
-		broadcast = ""
-	}
-
-	cmdStr := fmt.Sprintf("cd %s && %s forge script %s:%s --rpc-url %s %s --sig \"%s\" %s %s",
-		bedrockPath,
-		strings.Join(filteredEnv, " "),
-		scriptPath,
-		contractName,
-		rpcUrl,
-		broadcast,
-		sig,
-		senderFlag,
-		argStr,
-	)
-
-	s.logger.Infof("🚀 Bedrock Path: %s", bedrockPath)
-	s.logger.Infof("🚀 Running Forge Script: %s (RPC: %s, DryRun: %v)", scriptPath, rpcUrl, dryRun)
-	output, err := utils.ExecuteCommand(ctx, "bash", "-c", cmdStr)
+	s.logger.Infof("🚀 Bedrock Path: %s", params.bedrockPath)
+	s.logger.Infof("🚀 Running Forge Script: %s (RPC: %s, DryRun: %v)", scriptPath, params.rpcUrl, dryRun)
+	output, err := utils.ExecuteCommand(ctx, "bash", "-c", params.buildCommand())
 	if output != "" {
 		for _, line := range strings.Split(output, "\n") {
 			if strings.TrimSpace(line) != "" {

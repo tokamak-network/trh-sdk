@@ -239,7 +239,10 @@ func ActionShutdownBlock() cli.ActionFunc {
 		if err != nil {
 			return err
 		}
-		client, _ := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
+		client, err := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create thanos stack: %w", err)
+		}
 		return client.ShutdownBlock(ctx, cmd.Bool("dry-run"))
 	}
 }
@@ -252,7 +255,10 @@ func ActionShutdownFetch() cli.ActionFunc {
 		if err != nil {
 			return err
 		}
-		client, _ := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
+		client, err := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create thanos stack: %w", err)
+		}
 		return client.ShutdownFetch(ctx, cmd.Bool("dry-run"))
 	}
 }
@@ -276,7 +282,10 @@ func ActionShutdownGen() cli.ActionFunc {
 			l2EndBlock = "latest"
 		}
 
-		client, _ := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
+		client, err := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create thanos stack: %w", err)
+		}
 
 		l2StartBlockInt, _ := strconv.ParseUint(l2StartBlock, 10, 64)
 		input := types.ShutdownConfig{
@@ -304,7 +313,10 @@ func ActionShutdownActivate() cli.ActionFunc {
 				assetsPath = fmt.Sprintf("data/generate-assets-%d.json", sc.Config.L2ChainID)
 			}
 		}
-		client, _ := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
+		client, err := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create thanos stack: %w", err)
+		}
 		_, err = client.ShutdownActivate(ctx, assetsPath, cmd.Bool("dry-run"))
 		return err
 	}
@@ -326,7 +338,10 @@ func ActionShutdownWithdraw() cli.ActionFunc {
 				assetsPath = fmt.Sprintf("data/generate-assets-%d.json", sc.Config.L2ChainID)
 			}
 		}
-		client, _ := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
+		client, err := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create thanos stack: %w", err)
+		}
 		storageAddr := cmd.String("storage-address")
 		return client.ShutdownWithdraw(ctx, assetsPath, cmd.Bool("dry-run"), storageAddr)
 	}
@@ -375,7 +390,10 @@ func ActionShutdownRun() cli.ActionFunc {
 		// 4. Activate
 		storageAddr := cmd.String("storage-address")
 		if storageAddr == "" {
-			activateClient, _ := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
+			activateClient, err := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
+			if err != nil {
+				return fmt.Errorf("failed to create thanos stack for activate: %w", err)
+			}
 			activateAddr, err := activateClient.ShutdownActivate(ctx, sc.Config.Shutdown.AssetsDataPath, cmd.Bool("dry-run"))
 			if err != nil {
 				return fmt.Errorf("Step [ACTIVATE] failed: %w", err)
@@ -389,7 +407,10 @@ func ActionShutdownRun() cli.ActionFunc {
 		fmt.Println("✅ Step [ACTIVATE] completed successfully.")
 
 		// 5. Withdraw
-		withdrawClient, _ := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
+		withdrawClient, err := thanos.NewThanosStack(ctx, sc.Logger, sc.Config.Network, false, sc.DeploymentPath, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create thanos stack for withdraw: %w", err)
+		}
 		if err := withdrawClient.ShutdownWithdraw(ctx, sc.Config.Shutdown.AssetsDataPath, cmd.Bool("dry-run"), storageAddr); err != nil {
 			return fmt.Errorf("Step [WITHDRAW] failed: %w", err)
 		}
