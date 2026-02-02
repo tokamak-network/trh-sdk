@@ -230,60 +230,57 @@ func (t *ThanosStack) UninstallDRB(ctx context.Context) error {
 	namespace := constants.DRBNamespace
 	t.logger.Info("Starting DRB uninstallation...")
 
-	// Check if namespace exists first
-	exists, err := utils.CheckNamespaceExists(ctx, namespace)
+	// Check if DRB namespace exists
+	namespaceExists, err := utils.CheckNamespaceExists(ctx, namespace)
 	if err != nil {
-		t.logger.Errorw("Failed to check DRB namespace existence", "err", err)
-		return err
+		t.logger.Warnw("Failed to check DRB namespace existence, will still attempt cleanup", "err", err)
+		namespaceExists = false
 	}
 
-	if !exists {
-		t.logger.Info("DRB namespace does not exist, skipping uninstallation")
-		return nil
-	}
+	// only clean up k8s resources if namespace exists
+	if namespaceExists {
+		t.logger.Info("DRB namespace exists, cleaning up Kubernetes resources...")
 
-	// Uninstall Helm releases
-	releases, err := utils.FilterHelmReleases(ctx, namespace, "drb-node")
-	if err != nil {
-		t.logger.Error("Error to filter helm releases", "err", err)
-		return err
-	}
-
-	for _, release := range releases {
-		t.logger.Infow("Uninstalling Helm release", "release", release, "namespace", namespace)
-		_, err = utils.ExecuteCommand(ctx, "helm", []string{
-			"uninstall",
-			release,
-			"--namespace",
-			namespace,
-		}...)
+		releases, err := utils.FilterHelmReleases(ctx, namespace, "drb-node")
 		if err != nil {
-			t.logger.Error("❌ Error uninstalling DRB helm chart", "err", err)
-			return err
+			t.logger.Warnw("Error filtering helm releases, continuing with cleanup", "err", err)
+		} else {
+			for _, release := range releases {
+				t.logger.Infow("Uninstalling Helm release", "release", release, "namespace", namespace)
+				_, err = utils.ExecuteCommand(ctx, "helm", []string{
+					"uninstall",
+					release,
+					"--namespace",
+					namespace,
+				}...)
+				if err != nil {
+					t.logger.Warnw("Error uninstalling DRB helm chart, continuing", "err", err)
+				}
+			}
 		}
+
+		// Delete Kubernetes Secret
+		secretName := "drb-leader-static-key"
+		_, _ = utils.ExecuteCommand(ctx, "kubectl", "delete", "secret", secretName, "-n", namespace, "--ignore-not-found=true")
+
+		t.logger.Info(fmt.Sprintf("Deleting DRB namespace: %s", namespace))
+		err = t.tryToDeleteK8sNamespace(ctx, namespace)
+		if err != nil {
+			t.logger.Warnw("Failed to delete DRB namespace, continuing with terraform cleanup", "err", err, "namespace", namespace)
+		}
+
+		// Clean up storage that might be left behind
+		if err := t.cleanupExistingDRBStorage(ctx, namespace); err != nil {
+			t.logger.Warnw("Failed to cleanup DRB storage", "err", err)
+		}
+	} else {
+		t.logger.Info("DRB namespace does not exist, skipping Kubernetes cleanup")
 	}
 
-	// Delete Kubernetes Secret
-	secretName := "drb-leader-static-key"
-	_, _ = utils.ExecuteCommand(ctx, "kubectl", "delete", "secret", secretName, "-n", namespace, "--ignore-not-found=true")
-
-	// Destroy RDS database (if using RDS)
+	t.logger.Info("Destroying DRB RDS terraform resources (if any)...")
 	err = t.destroyTerraform(ctx, fmt.Sprintf("%s/tokamak-thanos-stack/terraform/drb", t.deploymentPath))
 	if err != nil {
-		t.logger.Warnf("Failed to destroy DRB RDS terraform resources: %v. Continuing with uninstall.", err)
-	}
-
-	// Delete namespace before destroying infrastructure
-	t.logger.Info(fmt.Sprintf("Deleting DRB namespace: %s", namespace))
-	err = t.tryToDeleteK8sNamespace(ctx, namespace)
-	if err != nil {
-		t.logger.Errorw("Failed to delete DRB namespace", "err", err, "namespace", namespace)
-		return err
-	}
-
-	// Clean up storage that might be left behind
-	if err := t.cleanupExistingDRBStorage(ctx, namespace); err != nil {
-		t.logger.Warnw("Failed to cleanup DRB storage", "err", err)
+		t.logger.Warnf("Failed to destroy DRB RDS terraform resources: %v. Continuing with infrastructure cleanup.", err)
 	}
 
 	// Destroy DRB infrastructure (EKS cluster and VPC)
@@ -327,15 +324,18 @@ func (t *ThanosStack) deployDRBContracts(ctx context.Context, inputs *types.Depl
 		return nil, fmt.Errorf("failed to clone drb repository: %s", err)
 	}
 
-	// Checkout to `service`
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd Commit-Reveal2 && git checkout service")
+	// use full path to avoid issues with working directory
+	commitReveal2Path := filepath.Join(t.deploymentPath, "Commit-Reveal2")
+
+	// Checkout to `service` branch
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && git checkout service", commitReveal2Path))
 	if err != nil {
 		return nil, fmt.Errorf("failed to checkout service: %s", err)
 	}
 
 	t.logger.Info("Clearing Forge cache to ensure fresh build...")
-	// Clear Forge cache to avoid stale artifacts from previous deployments
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd Commit-Reveal2 && forge clean")
+	// Clear Forge cache to ensure fresh build
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && forge clean", commitReveal2Path))
 	if err != nil {
 		t.logger.Warnf("Failed to clear Forge cache (non-critical): %v. Continuing with build.", err)
 		// Continue even if cache clear fails - not critical
@@ -344,7 +344,7 @@ func (t *ThanosStack) deployDRBContracts(ctx context.Context, inputs *types.Depl
 	t.logger.Info("Start to build drb contracts")
 
 	// Build the contracts
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd Commit-Reveal2 && make install && make build")
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && make install && make build", commitReveal2Path))
 	if err != nil {
 		return nil, fmt.Errorf("failed to build the contracts: %s", err)
 	}
@@ -379,7 +379,8 @@ func (t *ThanosStack) deployDRBContracts(ctx context.Context, inputs *types.Depl
 
 	// Run forge script to deploy the contracts (use first RPC URL)
 	script := fmt.Sprintf(
-		"cd Commit-Reveal2 && forge script script/DeployCommitReveal2.s.sol:DeployCommitReveal2 --rpc-url %s --private-key %s --broadcast -vv",
+		"cd %s && forge script script/DeployCommitReveal2.s.sol:DeployCommitReveal2 --rpc-url %s --private-key %s --broadcast -vv",
+		commitReveal2Path,
 		firstRpcUrl,
 		privateKey,
 	)
@@ -439,9 +440,13 @@ func (t *ThanosStack) deployConsumerExampleV2(ctx context.Context, inputs *types
 	firstRpcUrl := strings.Split(inputs.RPC, ",")[0]
 	firstRpcUrl = strings.TrimSpace(firstRpcUrl)
 
+	// use absolute path to avoid issues with working directory
+	commitReveal2Path := filepath.Join(t.deploymentPath, "Commit-Reveal2")
+
 	// Deploy ConsumerExampleV2 using forge script
 	script := fmt.Sprintf(
-		"cd Commit-Reveal2 && forge script script/DeployConsumerExampleV2.s.sol:DeployConsumerExampleV2 --sig 'run()' --rpc-url %s --private-key %s --broadcast -vv",
+		"cd %s && forge script script/DeployConsumerExampleV2.s.sol:DeployConsumerExampleV2 --sig 'run()' --rpc-url %s --private-key %s --broadcast -vv",
+		commitReveal2Path,
 		firstRpcUrl,
 		privateKey,
 	)
@@ -506,8 +511,11 @@ func (t *ThanosStack) deployDRBInfrastructure(ctx context.Context) (*types.DRBIn
 		return nil, fmt.Errorf("failed to clone tokamak-thanos-stack repository: %w", err)
 	}
 
+	// use absolute path for tokamak-thanos-stack
+	thanosStackPath := filepath.Join(t.deploymentPath, "tokamak-thanos-stack")
+
 	// Checkout to `feat/add-drb-node` branch for alpha release and pull latest changes
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd tokamak-thanos-stack && git checkout feat/add-drb-node && git pull origin feat/add-drb-node")
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && git checkout feat/add-drb-node && git pull origin feat/add-drb-node", thanosStackPath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to checkout and pull feat/add-drb-node: %w", err)
 	}
@@ -728,8 +736,12 @@ func (t *ThanosStack) deployDRBApplication(ctx context.Context, inputs *types.De
 		return nil, fmt.Errorf("failed to clone tokamak-thanos-stack repository: %s", err)
 	}
 
+	// use absolute path for tokamak-thanos-stack
+	thanosStackPath := filepath.Join(t.deploymentPath, "tokamak-thanos-stack")
+
 	// Checkout to `feat/add-drb-node` and pull latest changes
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd tokamak-thanos-stack && git checkout feat/add-drb-node && git pull origin feat/add-drb-node")
+	// err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd tokamak-thanos-stack && git checkout feat/add-drb-node && git pull origin feat/add-drb-node")
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && git checkout feat/add-drb-node && git pull origin feat/add-drb-node", thanosStackPath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to checkout and pull feat/add-drb-node: %s", err)
 	}
@@ -835,7 +847,7 @@ func (t *ThanosStack) saveDRBLeaderInfo(ctx context.Context, inputs *types.Deplo
 	return nil
 }
 
-// deployDRBDatabaseRDS deploys AWS RDS PostgreSQL for DRB leader node
+// deployDRBDatabaseRDS deploys AWS RDS PostgreSQL for DRB node
 func (t *ThanosStack) deployDRBDatabaseRDS(ctx context.Context, dbConfig *types.DRBDatabaseConfig) (string, error) {
 	if t.deployConfig == nil || t.deployConfig.AWS == nil {
 		return "", fmt.Errorf("AWS configuration is not set in deploy config")
@@ -851,7 +863,7 @@ func (t *ThanosStack) deployDRBDatabaseRDS(ctx context.Context, dbConfig *types.
 		return "", fmt.Errorf("AWS region is not set in deploy config")
 	}
 
-	t.logger.Infof("Deploying AWS RDS PostgreSQL for DRB leader node...")
+	t.logger.Infof("Deploying AWS RDS PostgreSQL for DRB node...")
 
 	envrcPath := fmt.Sprintf("%s/tokamak-thanos-stack/terraform", t.deploymentPath)
 
@@ -872,7 +884,7 @@ func (t *ThanosStack) deployDRBDatabaseRDS(ctx context.Context, dbConfig *types.
 	}
 
 	// Deploy RDS
-	t.logger.Info("Deploying AWS RDS PostgreSQL for DRB leader node...")
+	t.logger.Info("Deploying AWS RDS PostgreSQL for DRB node...")
 	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
 		"-c",
 		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
@@ -900,7 +912,7 @@ func (t *ThanosStack) deployDRBDatabaseRDS(ctx context.Context, dbConfig *types.
 	}
 
 	rdsConnectionUrl = strings.Trim(rdsConnectionUrl, `"`)
-	t.logger.Infof("✅ RDS PostgreSQL deployed successfully for leader node")
+	t.logger.Infof("✅ RDS PostgreSQL deployed successfully")
 	return rdsConnectionUrl, nil
 }
 
@@ -1023,9 +1035,12 @@ func (t *ThanosStack) generateLeaderNodeID(ctx context.Context) (string, error) 
 		return "", fmt.Errorf("failed to clone DRB-node repository: %w", err)
 	}
 
+	// use absolute path to avoid issues with working directory
+	drbNodePath := filepath.Join(t.deploymentPath, "DRB-node")
+
 	// Checkout to dispute-mechanism branch
 	t.logger.Infof("Checking out branch: %s", branch)
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd DRB-node && git checkout %s", branch))
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && git checkout %s", drbNodePath, branch))
 	if err != nil {
 		return "", fmt.Errorf("failed to checkout branch %s: %w", branch, err)
 	}
@@ -1052,7 +1067,8 @@ func (t *ThanosStack) generateLeaderNodeID(ctx context.Context) (string, error) 
 	}
 
 	// Execute the generator script from deployment/leader
-	output, err := utils.ExecuteCommand(ctx, "bash", "-c", fmt.Sprintf("cd DRB-node/deployment/leader && ./generate-peer-id.sh"))
+	leaderDeployPath := filepath.Join(drbNodePath, "deployment", "leader")
+	output, err := utils.ExecuteCommand(ctx, "bash", "-c", fmt.Sprintf("cd %s && ./generate-peer-id.sh", leaderDeployPath))
 	if err != nil {
 		return "", fmt.Errorf("failed to run generator script: %w", err)
 	}
