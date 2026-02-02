@@ -384,7 +384,6 @@ func (t *ThanosStack) deployDRBContracts(ctx context.Context, inputs *types.Depl
 		firstRpcUrl,
 		privateKey,
 	)
-	t.logger.Infof("Deploying DRB contracts with script: %s", script)
 	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", script)
 	if err != nil {
 		return nil, fmt.Errorf("failed to deploy the contracts. Please check: 1) Leader account has sufficient balance, 2) Gas price is reasonable (use 'cast gas-price --rpc-url %s'), 3) RPC endpoint is accessible, 4) Chain ID (%d) matches the network. Error: %w", firstRpcUrl, inputs.ChainID, err)

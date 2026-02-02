@@ -3,6 +3,7 @@ package thanos
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -446,6 +447,10 @@ func buildRegularNodeUserData(installDir, envContent, composeContent string) str
 	if installDir == "" {
 		installDir = "/home/ubuntu/drb-regular"
 	}
+	// Base64-encode to prevent heredoc injection
+	envB64 := base64.StdEncoding.EncodeToString([]byte(envContent))
+	composeB64 := base64.StdEncoding.EncodeToString([]byte(composeContent))
+
 	logPath := "/var/log/drb-regular-bootstrap.log"
 	var builder strings.Builder
 	builder.WriteString("#!/bin/bash\n")
@@ -463,12 +468,8 @@ func buildRegularNodeUserData(installDir, envContent, composeContent string) str
 	builder.WriteString("systemctl enable --now docker\n")
 	builder.WriteString("usermod -aG docker ubuntu\n")
 	builder.WriteString(fmt.Sprintf("mkdir -p %s\n", installDir))
-	builder.WriteString(fmt.Sprintf("cat <<'EOF_ENV' > %s/.env\n", installDir))
-	builder.WriteString(envContent)
-	builder.WriteString("EOF_ENV\n")
-	builder.WriteString(fmt.Sprintf("cat <<'EOF_COMPOSE' > %s/docker-compose.yaml\n", installDir))
-	builder.WriteString(composeContent)
-	builder.WriteString("EOF_COMPOSE\n")
+	builder.WriteString(fmt.Sprintf("echo '%s' | base64 -d > %s/.env\n", envB64, installDir))
+	builder.WriteString(fmt.Sprintf("echo '%s' | base64 -d > %s/docker-compose.yaml\n", composeB64, installDir))
 	builder.WriteString(fmt.Sprintf("chown -R ubuntu:ubuntu %s\n", installDir))
 	builder.WriteString("echo 'Creating systemd unit to start DRB containers after Docker is ready...'\n")
 	builder.WriteString("cat > /etc/systemd/system/drb-regular-start.service << EOF_UNIT\n")
