@@ -105,7 +105,6 @@ func DirectRestore(
 	recoveryPointArn string,
 	restoreEFS func(context.Context, string) (string, error),
 	monitorRestore func(context.Context, string, func(string, float64)) (string, error),
-	handleCompletion func(context.Context, string) (string, error),
 	executeAttach func(context.Context, string, *string, *string, *string) error,
 	attach *bool,
 	pvcs *string,
@@ -512,6 +511,13 @@ func MonitorEFSRestoreJob(ctx context.Context, l *zap.SugaredLogger, region stri
 					l.Warnf("Could not verify EFS state immediately: %v", err)
 				} else if len(efsResp.FileSystems) > 0 {
 					l.Infof("   EFS Lifecycle State: %s", efsResp.FileSystems[0].LifeCycleState)
+				}
+
+				// Set EFS throughput mode to elastic for better performance
+				if err := SetEFSThroughputElastic(ctx, region, newFsID); err != nil {
+					l.Warnf("Failed to set EFS ThroughputMode to elastic: %v", err)
+				} else {
+					l.Info("✅ ThroughputMode set to elastic")
 				}
 
 				return newFsID, nil

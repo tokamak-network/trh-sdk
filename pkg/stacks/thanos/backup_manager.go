@@ -102,29 +102,7 @@ func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string
 		func(c context.Context, job string, reporter func(string, float64)) (string, error) {
 			return backup.MonitorEFSRestoreJob(c, t.logger, t.deployConfig.AWS.Region, job, reporter)
 		},
-		func(c context.Context, job string) (string, error) {
-			// HandleEFSRestoreCompletion is not used in DirectRestore anymore?
-			// Wait, DirectRestore uses a handleCompletion param but I removed usages in Step 38 replacement?
-			// Let's check `restore.go` content again.
-			// DirectRestore signature: func(..., handleCompletion func(context.Context, string) (string, error), ...)
-			// It seems DirectRestore still accepts handleCompletion but usage was not visible in my snippet or I missed it.
-			// Actually, DirectRestore logic in `restore.go` calls `monitorRestore`, which returns newEfsID.
-			// It doesn't seem to call `handleCompletion` explicitly in local scope of DirectRestore?
-			// Ah, `MonitorEFSRestoreJob` returns `newEfsID`.
-			// So `monitorRestore` passed to `DirectRestore` does the monitoring AND completion handling (getting new EFS ID).
-			// `handleCompletion` arg in `DirectRestore` seems unused in my previous replacement?
-			// Let's check `restore.go` again carefully.
-			// In `restore.go`:
-			// func DirectRestore(..., handleCompletion func(context.Context, string) (string, error), ...)
-			// ...
-			// newEfsID, err := monitorRestore(ctx, jobID, progressReporter)
-			// ...
-			// It doesn't use `handleCompletion`.
-			// So I can pass nil or whatever.
-			return backup.HandleEFSRestoreCompletion(c, t.logger, t.deployConfig.AWS.Region, job, backup.SetEFSThroughputElastic)
-		},
 		func(c context.Context, efsId string, pvcs, stss, other *string) error {
-			// Use the same attach logic as BackupAttach
 			defaultBackup := true
 			_, err := t.BackupAttach(c, &efsId, pvcs, stss, &defaultBackup, progressReporter)
 			return err

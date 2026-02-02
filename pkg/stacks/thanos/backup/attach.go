@@ -390,25 +390,37 @@ func backupPvPvcWithDir(ctx context.Context, l *zap.SugaredLogger, namespace str
 			rawURL = DefaultBackupPvPvcRawURL
 		}
 		l.Infof("Backup script not found. Attempting download from %s", rawURL)
-		downloadCmd := fmt.Sprintf("mkdir -p ./scripts && curl -fsSL %s -o %s && chmod +x %s", rawURL, scriptPath, scriptPath)
-		if _, dErr := utils.ExecuteCommand(ctx, "bash", "-lc", downloadCmd); dErr != nil {
+
+		// Create scripts directory using Go's os package (safer than shell)
+		if mkErr := os.MkdirAll("./scripts", 0755); mkErr != nil {
+			return "", fmt.Errorf("failed to create scripts directory: %w", mkErr)
+		}
+
+		// Download script using curl with separate arguments (prevents command injection)
+		if _, dErr := utils.ExecuteCommand(ctx, "curl", "-fsSL", rawURL, "-o", scriptPath); dErr != nil {
 			return "", fmt.Errorf("failed to download backup script from %s: %w", rawURL, dErr)
 		}
+
+		// Set executable permission using Go's os package (safer than shell)
+		if chErr := os.Chmod(scriptPath, 0755); chErr != nil {
+			return "", fmt.Errorf("failed to set executable permission on %s: %w", scriptPath, chErr)
+		}
+
 		if _, sErr := os.Stat(scriptPath); sErr != nil {
 			return "", fmt.Errorf("backup script still missing at %s after download", scriptPath)
 		}
 	}
 	l.Infof("Running backup script for namespace %s...", namespace)
-	// Ensure NAMESPACE env is passed to the script
-	envParts := []string{
-		fmt.Sprintf("NAMESPACE=%q", namespace),
-	}
+
+	// Build environment variables for the script
+	env := []string{fmt.Sprintf("NAMESPACE=%s", namespace)}
 	if backupDir != nil && strings.TrimSpace(*backupDir) != "" {
-		envParts = append(envParts, fmt.Sprintf("BACKUP_DIR=%q", strings.TrimSpace(*backupDir)))
-		envParts = append(envParts, "BACKUP_SKIP_SUMMARY=1")
+		env = append(env, fmt.Sprintf("BACKUP_DIR=%s", strings.TrimSpace(*backupDir)))
+		env = append(env, "BACKUP_SKIP_SUMMARY=1")
 	}
-	runCmd := fmt.Sprintf("%s bash %s", strings.Join(envParts, " "), scriptPath)
-	output, err := utils.ExecuteCommand(ctx, "bash", "-lc", runCmd)
+
+	// Execute script with environment variables (safer than shell command construction)
+	output, err := utils.ExecuteCommandWithEnv(ctx, env, "bash", "-l", scriptPath)
 	if err != nil {
 		return "", fmt.Errorf("backup script failed: %w\nOutput: %s", err, output)
 	}
