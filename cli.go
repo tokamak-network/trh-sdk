@@ -369,6 +369,82 @@ Examples:
 					},
 				},
 			},
+			{
+				Name:  "shutdown",
+				Usage: "Manage L2 shutdown and force withdrawal process",
+				Description: `Manage L2 chain shutdown and force withdrawal operations in 5 steps:
+1. block: Block L1 deposits and withdrawals
+2. fetch: Collect L2 asset information from explorer
+3. gen: Generate assets snapshot for force withdrawal
+4. activate: Prepare L1 bridge (upgrade and registration)
+5. withdraw: Execute liquidity sweep and withdrawal claims
+
+Examples:
+  trh-sdk shutdown run --dry-run (Sequentially run all steps in simulation mode)
+  trh-sdk shutdown block
+  trh-sdk shutdown gen --l2-start-block 0`,
+				Action: commands.ActionShutdown(),
+				Commands: []*cli.Command{
+					{
+						Name:  "run",
+						Usage: "Run the entire shutdown process sequentially (1->2->3->4->5)",
+						Flags: []cli.Flag{
+							&cli.BoolFlag{Name: "dry-run", Usage: "Run the entire process in simulation mode"},
+							&cli.BoolFlag{Name: "skip-fetch", Usage: "Skip Step 2 (Fetch) if data already exists"},
+							&cli.StringFlag{Name: "l2-start-block", Usage: "L2 start block (for Step 3)", Value: "0"},
+							&cli.StringFlag{Name: "storage-address", Usage: "GenFWStorage address to use for Step 5 (overrides auto-detection)"},
+						},
+						Action: commands.ActionShutdownRun(),
+					},
+					{
+						Name:  "block",
+						Usage: "Step 1: Block L1 deposits and withdrawals",
+						Flags: []cli.Flag{
+							&cli.BoolFlag{Name: "dry-run", Usage: "Simulate without broadcasting"},
+						},
+						Action: commands.ActionShutdownBlock(),
+					},
+					{
+						Name:   "fetch",
+						Usage:  "Step 2: Collect L2 asset information via Python script",
+						Action: commands.ActionShutdownFetch(),
+					},
+					{
+						Name:  "gen",
+						Usage: "Step 3: Generate force withdrawal assets snapshot",
+						Flags: []cli.Flag{
+							&cli.StringFlag{Name: "l2-start-block", Usage: "L2 start block number", Value: "0"},
+							&cli.StringFlag{Name: "l2-end-block", Usage: "L2 end block number", Value: "latest"},
+							&cli.BoolFlag{Name: "dry-run", Usage: "Simulate snapshot generation"},
+						},
+						Action: commands.ActionShutdownGen(),
+					},
+					{
+						Name:  "activate",
+						Usage: "Step 4: Prepare L1 bridge (Phase 1)",
+						Flags: []cli.Flag{
+							&cli.StringFlag{Name: "input", Usage: "Path to assets snapshot file"},
+							&cli.BoolFlag{Name: "dry-run", Usage: "Simulate upgrades and registration"},
+						},
+						Action: commands.ActionShutdownActivate(),
+					},
+					{
+						Name:  "withdraw",
+						Usage: "Step 5: Execute L1 withdrawals and claims (Phase 2)",
+						Flags: []cli.Flag{
+							&cli.StringFlag{Name: "input", Usage: "Path to assets snapshot file"},
+							&cli.BoolFlag{Name: "dry-run", Usage: "Simulate liquidity sweep and claims"},
+							&cli.StringFlag{Name: "storage-address", Usage: "GenFWStorage address (skip file lookup)"},
+						},
+						Action: commands.ActionShutdownWithdraw(),
+					},
+					{
+						Name:   "status",
+						Usage:  "Show current shutdown status",
+						Action: commands.ActionShutdownStatus(),
+					},
+				},
+			},
 		},
 	}
 
