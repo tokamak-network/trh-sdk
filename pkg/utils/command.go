@@ -33,7 +33,20 @@ func ExecuteCommand(ctx context.Context, command string, args ...string) (string
 }
 
 func ExecuteCommandStream(ctx context.Context, l *zap.SugaredLogger, command string, args ...string) error {
+	return executeCommandStreamWithDir(ctx, l, "", command, args...)
+}
+
+// ExecuteCommandStreamWithDir runs a command with streaming output and sets the working directory.
+// Use this instead of bash -c when passing user input to avoid shell injection.
+func ExecuteCommandStreamWithDir(ctx context.Context, l *zap.SugaredLogger, dir, command string, args ...string) error {
+	return executeCommandStreamWithDir(ctx, l, dir, command, args...)
+}
+
+func executeCommandStreamWithDir(ctx context.Context, l *zap.SugaredLogger, dir, command string, args ...string) error {
 	cmd := exec.CommandContext(ctx, command, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
 
 	var (
 		ptmx    *os.File

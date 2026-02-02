@@ -370,21 +370,17 @@ func (t *ThanosStack) deployDRBContracts(ctx context.Context, inputs *types.Depl
 	RPC_URL=%s`, privateKey, leaderAddress.Hex(), firstRpcUrl)
 
 	envFilePath := filepath.Join(t.deploymentPath, "Commit-Reveal2", ".env")
-	err = os.WriteFile(envFilePath, []byte(envContent), 0644)
+	err = os.WriteFile(envFilePath, []byte(envContent), 0600)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create .env file: %w", err)
 	}
 
 	t.logger.Info("Deploying DRB contracts")
 
-	// Run forge script to deploy the contracts (use first RPC URL)
-	script := fmt.Sprintf(
-		"cd %s && forge script script/DeployCommitReveal2.s.sol:DeployCommitReveal2 --rpc-url %s --private-key %s --broadcast -vv",
-		commitReveal2Path,
-		firstRpcUrl,
-		privateKey,
-	)
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", script)
+	// Run forge script with direct exec (no shell) to avoid injection from user-controlled RPC URL/private key
+	err = utils.ExecuteCommandStreamWithDir(ctx, t.logger, commitReveal2Path, "forge",
+		"script", "script/DeployCommitReveal2.s.sol:DeployCommitReveal2",
+		"--rpc-url", firstRpcUrl, "--private-key", privateKey, "--broadcast", "-vv")
 	if err != nil {
 		return nil, fmt.Errorf("failed to deploy the contracts. Please check: 1) Leader account has sufficient balance, 2) Gas price is reasonable (use 'cast gas-price --rpc-url %s'), 3) RPC endpoint is accessible, 4) Chain ID (%d) matches the network. Error: %w", firstRpcUrl, inputs.ChainID, err)
 	}
@@ -442,14 +438,10 @@ func (t *ThanosStack) deployConsumerExampleV2(ctx context.Context, inputs *types
 	// use absolute path to avoid issues with working directory
 	commitReveal2Path := filepath.Join(t.deploymentPath, "Commit-Reveal2")
 
-	// Deploy ConsumerExampleV2 using forge script
-	script := fmt.Sprintf(
-		"cd %s && forge script script/DeployConsumerExampleV2.s.sol:DeployConsumerExampleV2 --sig 'run()' --rpc-url %s --private-key %s --broadcast -vv",
-		commitReveal2Path,
-		firstRpcUrl,
-		privateKey,
-	)
-	err := utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", script)
+	// Run forge script with direct exec (no shell) to avoid injection from user-controlled RPC URL/private key
+	err := utils.ExecuteCommandStreamWithDir(ctx, t.logger, commitReveal2Path, "forge",
+		"script", "script/DeployConsumerExampleV2.s.sol:DeployConsumerExampleV2",
+		"--sig", "run()", "--rpc-url", firstRpcUrl, "--private-key", privateKey, "--broadcast", "-vv")
 	if err != nil {
 		return "", fmt.Errorf("failed to deploy ConsumerExampleV2: %w", err)
 	}

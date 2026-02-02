@@ -82,7 +82,7 @@ Examples:
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:  "type",
-						Usage: "Optional type of the plugin",
+						Usage: "Plugin type (e.g. drb: leader|regular, cross-trade)",
 						Value: "",
 					},
 				},
@@ -94,16 +94,22 @@ Examples:
   trh-sdk install block-explorer bridge
   
   # Install DRB leader node
-  trh-sdk install drb
+  trh-sdk install drb --type leader
   
   # Install DRB regular node
-  trh-sdk install drb regular-node
+  trh-sdk install drb --type regular
   `,
 			},
 			{
 				Name:   "uninstall",
 				Usage:  fmt.Sprintf("Uninstall plugins(allowed: %s)", strings.Join(constants.SupportedPluginsList, ", ")),
-				Flags:  []cli.Flag{},
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:  "type",
+						Usage: "Optional type of the plugin (e.g. drb: leader|regular)",
+						Value: "",
+					},
+				},
 				Action: commands.ActionInstallationPlugins(),
 				Description: `Uninstall plugins
 
@@ -112,10 +118,10 @@ Examples:
   trh-sdk uninstall block-explorer bridge
 
   # Uninstall DRB leader node
-  trh-sdk uninstall drb
+  trh-sdk uninstall drb --type leader
   
   # Uninstall DRB regular node
-  trh-sdk uninstall drb regular-node
+  trh-sdk uninstall drb --type regular
   `,
 			},
 			{
@@ -348,12 +354,12 @@ Examples:
 			},
 			{
 				Name:  "drb",
-				Usage: "DRB (Distributed Resource Broker) commands",
+				Usage: "DRB (Distributed Random Beacon) commands",
 				Commands: []*cli.Command{
 					{
 						Name:   "leader-info",
 						Usage:  "Display DRB leader node connection information",
-						Action: commands.ActionDRBLeaderInfo(),
+						Action: commands.ActionDisplayDRBLeaderInfo(),
 						Description: `Display DRB leader node connection information from drb-leader-info.json
 
 Examples:

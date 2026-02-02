@@ -16,6 +16,16 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+// allPluginsCanWorkWithoutChain returns true if every plugin in the list can be installed without a deployed chain.
+func allPluginsCanWorkWithoutChain(plugins []string) bool {
+	for _, p := range plugins {
+		if !constants.CanPluginWorkWithoutChain(p) {
+			return false
+		}
+	}
+	return len(plugins) > 0
+}
+
 func ActionInstallationPlugins() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
 		var network, stack string
@@ -34,11 +44,6 @@ func ActionInstallationPlugins() cli.ActionFunc {
 		if len(plugins) == 0 {
 			fmt.Print("Please specify at least one plugin to install(e.g: bridge)")
 			return nil
-		}
-
-		if len(plugins) >= 2 && plugins[0] == constants.PluginDRB && plugins[1] == constants.PluginDRBRegularNode {
-			// Replace with just regular-node, but keep the rest if any
-			plugins = append([]string{constants.PluginDRBRegularNode}, plugins[2:]...)
 		}
 
 		// Validate all plugin names before proceeding
@@ -79,15 +84,11 @@ func ActionInstallationPlugins() cli.ActionFunc {
 			return fmt.Errorf("unsupported network: %s", network)
 		}
 
-		// DRB and regular-node can work independently and don't need existing chain or specific network
-		// Check if DRB or regular-node is the only plugin being installed
-		isDRBOnly := len(plugins) == 1 && plugins[0] == constants.PluginDRB
-		isRegularNodeOnly := len(plugins) == 1 && plugins[0] == constants.PluginDRBRegularNode
+		// Plugins that work without chain can use Testnet for logging when in LocalDevnet
+		allPluginsWorkWithoutChain := allPluginsCanWorkWithoutChain(plugins)
 
-		// For DRB and regular-node, use Testnet as default network for logging
-		// The actual chain config is not required for these plugins
 		if network == constants.LocalDevnet {
-			if isDRBOnly || isRegularNodeOnly {
+			if allPluginsWorkWithoutChain {
 				network = constants.Testnet
 			} else {
 				fmt.Println("You are in local devnet mode. Please specify the network and stack.")
@@ -131,11 +132,10 @@ func ActionInstallationPlugins() cli.ActionFunc {
 				return err
 			}
 
-			// DRB and regular-node can work independently without existing chain
-			isDRBOnly := len(plugins) == 1 && plugins[0] == constants.PluginDRB
-			isRegularNodeOnly := len(plugins) == 1 && plugins[0] == constants.PluginDRBRegularNode
+			// Plugins that work without chain can proceed in LocalDevnet
+			allPluginsWorkWithoutChain := allPluginsCanWorkWithoutChain(plugins)
 
-			if network == constants.LocalDevnet && !isDRBOnly && !isRegularNodeOnly {
+			if network == constants.LocalDevnet && !allPluginsWorkWithoutChain {
 				return fmt.Errorf("network %s does not support plugin installation", constants.LocalDevnet)
 			}
 
@@ -148,8 +148,8 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							continue
 						}
 
-						// DRB and regular-node don't need existing chain deployment
-						if (config == nil || config.K8s == nil) && pluginName != constants.PluginDRB && pluginName != constants.PluginDRBRegularNode {
+						// Some plugins can work without existing chain deployment
+						if (config == nil || config.K8s == nil) && !constants.CanPluginWorkWithoutChain(pluginName) {
 							return fmt.Errorf("the chain has not been deployed yet, please deploy the chain first")
 						}
 
@@ -157,11 +157,14 @@ func ActionInstallationPlugins() cli.ActionFunc {
 						if pluginName == constants.PluginMonitoring {
 							displayNamespace = constants.MonitoringNamespace
 						} else if pluginName == constants.PluginDRB {
-							displayNamespace = constants.DRBNamespace
-						} else if pluginName == constants.PluginDRBRegularNode {
-							displayNamespace = "ec2"
+							drbType := strings.TrimSpace(strings.ToLower(cmd.String("type")))
+							if drbType == constants.DRBTypeRegular {
+								displayNamespace = "ec2"
+							} else {
+								displayNamespace = constants.DRBNamespace
+							}
 						} else {
-							if config == nil || config.K8s == nil {
+							if !constants.CanPluginWorkWithoutChain(pluginName) && (config == nil || config.K8s == nil) {
 								return fmt.Errorf("the chain has not been deployed yet, please deploy the chain first")
 							}
 							displayNamespace = config.K8s.Namespace
@@ -263,17 +266,25 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							return nil
 
 						case constants.PluginDRB:
-							input, err := thanosStack.GetDRBInput(ctx)
-							if err != nil {
-								return err
+							drbType := strings.TrimSpace(strings.ToLower(cmd.String("type")))
+							if drbType == "" {
+								drbType = constants.DRBTypeLeader // default for backwards compat
 							}
-							_, err = thanosStack.DeployDRB(ctx, input)
-							if err != nil {
-								return thanosStack.UninstallDRB(ctx)
+							if drbType != constants.DRBTypeLeader && drbType != constants.DRBTypeRegular {
+								return fmt.Errorf("unsupported DRB type: %s. Use --type leader or --type regular", drbType)
 							}
-							return nil
-
-						case constants.PluginDRBRegularNode:
+							if drbType == constants.DRBTypeLeader {
+								input, err := thanosStack.GetDRBInput(ctx)
+								if err != nil {
+									return err
+								}
+								_, err = thanosStack.DeployDRB(ctx, input)
+								if err != nil {
+									return thanosStack.UninstallDRB(ctx)
+								}
+								return nil
+							}
+							// regular
 							input, err := thanosStack.GetDRBRegularNodeInput(ctx)
 							if err != nil {
 								return err
@@ -302,9 +313,12 @@ func ActionInstallationPlugins() cli.ActionFunc {
 						if pluginName == constants.PluginMonitoring {
 							displayNamespace = constants.MonitoringNamespace
 						} else if pluginName == constants.PluginDRB {
-							displayNamespace = constants.DRBNamespace
-						} else if pluginName == constants.PluginDRBRegularNode {
-							displayNamespace = "ec2"
+							drbType := strings.TrimSpace(strings.ToLower(cmd.String("type")))
+							if drbType == constants.DRBTypeRegular {
+								displayNamespace = "ec2"
+							} else {
+								displayNamespace = constants.DRBNamespace
+							}
 						} else {
 							displayNamespace = config.K8s.Namespace
 						}
@@ -323,8 +337,16 @@ func ActionInstallationPlugins() cli.ActionFunc {
 						case constants.PluginCrossTrade:
 							return thanosStack.UninstallCrossTrade(ctx)
 						case constants.PluginDRB:
-							return thanosStack.UninstallDRB(ctx)
-						case constants.PluginDRBRegularNode:
+							drbType := strings.TrimSpace(strings.ToLower(cmd.String("type")))
+							if drbType == "" {
+								drbType = constants.DRBTypeLeader // default for backwards compat
+							}
+							if drbType != constants.DRBTypeLeader && drbType != constants.DRBTypeRegular {
+								return fmt.Errorf("unsupported DRB type: %s. Use --type leader or --type regular", drbType)
+							}
+							if drbType == constants.DRBTypeLeader {
+								return thanosStack.UninstallDRB(ctx)
+							}
 							return thanosStack.UninstallDRBRegularNode(ctx)
 						}
 					}

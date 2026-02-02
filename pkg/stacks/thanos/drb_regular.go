@@ -117,7 +117,7 @@ func (t *ThanosStack) GetDRBRegularNodeInput(_ context.Context) (*types.DRBRegul
 	input.KeyPairName = keyPairName
 
 	if t.awsProfile == nil || t.awsProfile.AwsConfig == nil {
-		return nil, fmt.Errorf("AWS credentials and region are required; run install from the plugin command (e.g. trh-sdk install drb regular-node)")
+		return nil, fmt.Errorf("AWS credentials and region are required; run install from the plugin command (e.g. trh-sdk install drb --type regular)")
 	}
 	input.Region = t.awsProfile.AwsConfig.Region
 	input.InstanceType = "t3.small"
@@ -186,6 +186,7 @@ func (t *ThanosStack) InstallDRBRegularNode(ctx context.Context, input *types.DR
 	if err := t.cloneSourcecode(ctx, "tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git"); err != nil {
 		return fmt.Errorf("failed to clone tokamak-thanos-stack: %w", err)
 	}
+	// Checkout to feat/add-drb-node for alpha. TODO: change to main once this PR is merged.
 	if err := utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos-stack && git fetch origin && git checkout feat/add-drb-node && git pull origin feat/add-drb-node", t.deploymentPath)); err != nil {
 		return fmt.Errorf("failed to checkout feat/add-drb-node: %w", err)
 	}
@@ -223,7 +224,7 @@ func (t *ThanosStack) InstallDRBRegularNode(ctx context.Context, input *types.DR
 		return err
 	}
 	envOutputPath := filepath.Join(outputDir, ".env")
-	if err := os.WriteFile(envOutputPath, []byte(envContent), 0644); err != nil {
+	if err := os.WriteFile(envOutputPath, []byte(envContent), 0600); err != nil {
 		return fmt.Errorf("failed to write .env file: %w", err)
 	}
 
@@ -469,6 +470,7 @@ func buildRegularNodeUserData(installDir, envContent, composeContent string) str
 	builder.WriteString("usermod -aG docker ubuntu\n")
 	builder.WriteString(fmt.Sprintf("mkdir -p %s\n", installDir))
 	builder.WriteString(fmt.Sprintf("echo '%s' | base64 -d > %s/.env\n", envB64, installDir))
+	builder.WriteString(fmt.Sprintf("chmod 600 %s/.env\n", installDir))
 	builder.WriteString(fmt.Sprintf("echo '%s' | base64 -d > %s/docker-compose.yaml\n", composeB64, installDir))
 	builder.WriteString(fmt.Sprintf("chown -R ubuntu:ubuntu %s\n", installDir))
 	builder.WriteString("echo 'Creating systemd unit to start DRB containers after Docker is ready...'\n")
