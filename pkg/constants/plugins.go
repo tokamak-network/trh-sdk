@@ -8,16 +8,16 @@ const PluginDRB = "drb"
 const PluginUptimeService = "uptime-service"
 
 // DRB type values for --type flag (trh-sdk install drb --type leader|regular)
-const DRBTypeLeader  = "leader"
+const DRBTypeLeader = "leader"
 const DRBTypeRegular = "regular"
 
 var SupportedPlugins = map[string]bool{
-	PluginBridge:         true,
-	PluginBlockExplorer:  true,
-	PluginMonitoring:     true,
-	PluginCrossTrade:     true,
-	PluginDRB:            true,
-	PluginUptimeService:  true,
+	PluginBridge:        true,
+	PluginBlockExplorer: true,
+	PluginMonitoring:    true,
+	PluginCrossTrade:    true,
+	PluginDRB:           true,
+	PluginUptimeService: true,
 }
 
 var SupportedPluginsList = []string{

@@ -101,8 +101,8 @@ Examples:
   `,
 			},
 			{
-				Name:   "uninstall",
-				Usage:  fmt.Sprintf("Uninstall plugins(allowed: %s)", strings.Join(constants.SupportedPluginsList, ", ")),
+				Name:  "uninstall",
+				Usage: fmt.Sprintf("Uninstall plugins(allowed: %s)", strings.Join(constants.SupportedPluginsList, ", ")),
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:  "type",
