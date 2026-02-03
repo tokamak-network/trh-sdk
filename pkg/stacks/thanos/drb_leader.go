@@ -871,7 +871,7 @@ func (t *ThanosStack) deployDRBDatabaseRDS(ctx context.Context, dbConfig *types.
 
 	envrcPath := fmt.Sprintf("%s/tokamak-thanos-stack/terraform", t.deploymentPath)
 
-	// generate unique stack name from deployment path to avoid RDS naming conflicts
+	// use stack id for unique rds naming
 	stackName := "drb"
 	pathParts := strings.Split(t.deploymentPath, string(filepath.Separator))
 	for i, part := range pathParts {
