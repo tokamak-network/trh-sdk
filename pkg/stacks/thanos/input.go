@@ -1628,6 +1628,9 @@ func makeBlockExplorerEnvs(dirPath string, filename string, config types.AwsData
 		fmt.Sprintf("export TF_VAR_vpc_id=\"%s\"\n", config.VpcId),
 		fmt.Sprintf("export TF_VAR_aws_region=\"%s\"\n", config.AwsRegion),
 	}
+	if config.StackName != "" {
+		envVars = append(envVars, fmt.Sprintf("export TF_VAR_thanos_stack_name=\"%s\"\n", config.StackName))
+	}
 
 	for _, envVar := range envVars {
 		_, err = writer.WriteString(envVar)
