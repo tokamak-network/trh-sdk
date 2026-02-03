@@ -427,7 +427,7 @@ func buildRegularNodeEnvContent(input *types.DRBRegularNodeInput) (string, error
 		fmt.Sprintf("POSTGRES_PORT=%d", port),
 		fmt.Sprintf("DRB_NODE_IMAGE=%s", input.DrbNodeImage),
 		fmt.Sprintf("CHAIN_ID=%s", input.ChainID),
-		fmt.Sprintf("ETH_RPC_URLS=%s", toWSS(input.EthRpcUrls)),
+		fmt.Sprintf("ETH_RPC_URLS=%s", input.EthRpcUrls), // comma-separated RPC URLs
 		fmt.Sprintf("CONTRACT_ADDRESS=%s", input.ContractAddress),
 	}
 	if input.DatabaseConfig.Password != "" {
