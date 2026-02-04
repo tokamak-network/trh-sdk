@@ -92,16 +92,38 @@ The tokamak rollup hub SDK allows anyone to quickly deploy customized and autono
 
 The first step is to deploy the L1 contracts to the L1 network. The output of this step is we generate the rollup, genesis file, and deployment file.
 
+#### Basic Command
 
 ```bash
-trh-sdk deploy-contracts --network [] --stack []
+trh-sdk deploy-contracts --network [testnet|mainnet] --stack [thanos] [options]
 ```
 
-Example:
+#### Examples
 
+**Basic Deployment (with Candidate Registration)**
 ```bash
 trh-sdk deploy-contracts --network testnet --stack thanos
 ```
+
+**Deployment without Candidate Registration**
+```bash
+trh-sdk deploy-contracts --network testnet --stack thanos --no-candidate
+```
+
+#### Advanced Options
+
+**`--reuse-deployment`**: Reuse existing deployment artifacts (default: true)
+- Skips repository cloning, smart contract building, and contract deployment steps.
+- Enabled by default. To perform a full deployment, disable it with `--reuse-deployment=false`.
+```bash
+# Default behavior (Reuse artifacts)
+trh-sdk deploy-contracts --network testnet --stack thanos
+
+# Full deployment (Regenerate artifacts)
+trh-sdk deploy-contracts --network testnet --stack thanos --reuse-deployment=false
+```
+
+For detailed usage and verification methods, refer to the [Deploy Contracts Guide](docs/deploy-contracts-guide.md).
 
 ### Deploy stack
 To deploy the testnet/mainnet network, we must deploy the L1 contracts successfully first.

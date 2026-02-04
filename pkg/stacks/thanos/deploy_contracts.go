@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
+	"path/filepath"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
@@ -174,6 +176,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			t.logger.Error("at least 5 operators are required for deploying contracts")
 			return fmt.Errorf("at least 5 operators are required for deploying contracts")
 		}
+
 		adminAccount, err := utils.GetAddressFromPrivateKey(operators.AdminPrivateKey)
 		if err != nil {
 			t.logger.Error("failed to get admin address from private key", "err", err)
@@ -214,10 +217,14 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		}
 
 		// STEP 2. Clone the repository
-		err = t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
-		if err != nil {
-			t.logger.Error("failed to clone the repository", "err", err)
-			return err
+		if !deployContractsConfig.ReuseDeployment {
+			err = t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
+			if err != nil {
+				t.logger.Error("failed to clone the repository", "err", err)
+				return err
+			}
+		} else {
+			t.logger.Info("ℹ️ ReuseDeployment: Skipping repository cloning")
 		}
 
 		t.deployConfig.AdminPrivateKey = operators.AdminPrivateKey
@@ -247,17 +254,22 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		}
 
 		// STEP 3. Build the contracts
-		t.logger.Info("Building smart contracts...")
-		err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh build", t.deploymentPath))
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				t.logger.Error("Deployment canceled")
+		if !deployContractsConfig.ReuseDeployment {
+			t.logger.Info("Building smart contracts...")
+			scriptsDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "scripts")
+			err = utils.ExecuteCommandStreamInDir(ctx, t.logger, scriptsDir, "bash", "./start-deploy.sh", "build")
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					t.logger.Error("Deployment canceled")
+					return err
+				}
+				t.logger.Error("❌ Build the contracts failed!")
 				return err
 			}
-			t.logger.Error("❌ Build the contracts failed!")
-			return err
+			t.logger.Info("✅ Build the contracts completed!")
+		} else {
+			t.logger.Info("ℹ️ ReuseDeployment: Skipping contracts build")
 		}
-		t.logger.Info("✅ Build the contracts completed!")
 
 		// STEP 4. Deploy the contracts
 		// Check admin balance and estimated deployment cost
@@ -298,15 +310,20 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			return err
 		}
 
-		err = t.deployContracts(ctx, l1Client, false)
-		if err != nil {
-			t.logger.Error("failed to deploy contracts", "err", err)
-			return err
+		if !deployContractsConfig.ReuseDeployment {
+			err = t.deployContracts(ctx, l1Client, false)
+			if err != nil {
+				t.logger.Error("failed to deploy contracts", "err", err)
+				return err
+			}
+		} else {
+			t.logger.Info("ℹ️ ReuseDeployment: Skipping contracts deployment")
 		}
 	}
 
 	// STEP 5: Generate the genesis and rollup files
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh generate -e .env -c deploy-config.json", t.deploymentPath))
+	scriptsDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "scripts")
+	err = utils.ExecuteCommandStreamInDir(ctx, t.logger, scriptsDir, "bash", "./start-deploy.sh", "generate", "-e", ".env", "-c", "deploy-config.json")
 	t.logger.Info("Generating the rollup and genesis files...")
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -366,12 +383,10 @@ func (t *ThanosStack) deployContracts(ctx context.Context,
 		envValues += fmt.Sprintf("export GAS_PRICE=%d\n", gasPriceWei.Uint64()*2)
 	}
 
-	// STEP 4.1. Generate the .env file
-	_, err = utils.ExecuteCommand(ctx,
-		"bash",
-		"-c",
-		fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && echo '%s' > .env", t.deploymentPath, envValues),
-	)
+	// STEP 4.1. Generate the .env file using native Go file write (avoids shell injection)
+	scriptsDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "scripts")
+	envFilePath := filepath.Join(scriptsDir, ".env")
+	err = os.WriteFile(envFilePath, []byte(envValues), 0600)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			t.logger.Warn("Deployment canceled")
@@ -383,7 +398,7 @@ func (t *ThanosStack) deployContracts(ctx context.Context,
 
 	// STEP 4.3. Deploy contracts
 	if isResume {
-		err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh redeploy -e .env -c deploy-config.json", t.deploymentPath))
+		err = utils.ExecuteCommandStreamInDir(ctx, t.logger, scriptsDir, "bash", "./start-deploy.sh", "redeploy", "-e", ".env", "-c", "deploy-config.json")
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				t.logger.Warn("Deployment canceled")
@@ -393,7 +408,7 @@ func (t *ThanosStack) deployContracts(ctx context.Context,
 			return err
 		}
 	} else {
-		err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh deploy -e .env -c deploy-config.json", t.deploymentPath))
+		err = utils.ExecuteCommandStreamInDir(ctx, t.logger, scriptsDir, "bash", "./start-deploy.sh", "deploy", "-e", ".env", "-c", "deploy-config.json")
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				t.logger.Warn("Deployment canceled")
