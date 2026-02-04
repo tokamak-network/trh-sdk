@@ -149,12 +149,3 @@ This is reflected in `DeployConfigTemplate.ReuseDeployment` which must match use
 - **docs/uptime-service.md**: Uptime monitoring service details
 
 When modifying deployment behavior, update both code AND docs/deploy-contracts-guide.md.
-
-## Global Guidelines Adoption
-
-This repository follows the conventions in `/Users/theo/.claude/CLAUDE.md`:
-- **Korean responses** with English variable/function names
-- **UI messages in Korean** within code
-- **Conventional Commits** format (type: description)
-- **Root cause analysis** for all bugs (not just symptoms)
-- **Explicit error handling** for all operations

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
+	"path/filepath"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
@@ -254,7 +256,8 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		// STEP 3. Build the contracts
 		if !deployContractsConfig.ReuseDeployment {
 			t.logger.Info("Building smart contracts...")
-			err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh build", t.deploymentPath))
+			scriptsDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "scripts")
+			err = utils.ExecuteCommandStreamInDir(ctx, t.logger, scriptsDir, "bash", "./start-deploy.sh", "build")
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
 					t.logger.Error("Deployment canceled")
@@ -319,7 +322,8 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 	}
 
 	// STEP 5: Generate the genesis and rollup files
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh generate -e .env -c deploy-config.json", t.deploymentPath))
+	scriptsDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "scripts")
+	err = utils.ExecuteCommandStreamInDir(ctx, t.logger, scriptsDir, "bash", "./start-deploy.sh", "generate", "-e", ".env", "-c", "deploy-config.json")
 	t.logger.Info("Generating the rollup and genesis files...")
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -382,12 +386,10 @@ func (t *ThanosStack) deployContracts(ctx context.Context,
 		envValues += fmt.Sprintf("export GAS_PRICE=%d\n", gasPriceWei.Uint64()*2)
 	}
 
-	// STEP 4.1. Generate the .env file
-	_, err = utils.ExecuteCommand(ctx,
-		"bash",
-		"-c",
-		fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && echo '%s' > .env", t.deploymentPath, envValues),
-	)
+	// STEP 4.1. Generate the .env file using native Go file write (avoids shell injection)
+	scriptsDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "scripts")
+	envFilePath := filepath.Join(scriptsDir, ".env")
+	err = os.WriteFile(envFilePath, []byte(envValues), 0600)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			t.logger.Warn("Deployment canceled")
@@ -399,7 +401,7 @@ func (t *ThanosStack) deployContracts(ctx context.Context,
 
 	// STEP 4.3. Deploy contracts
 	if isResume {
-		err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh redeploy -e .env -c deploy-config.json", t.deploymentPath))
+		err = utils.ExecuteCommandStreamInDir(ctx, t.logger, scriptsDir, "bash", "./start-deploy.sh", "redeploy", "-e", ".env", "-c", "deploy-config.json")
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				t.logger.Warn("Deployment canceled")
@@ -409,7 +411,7 @@ func (t *ThanosStack) deployContracts(ctx context.Context,
 			return err
 		}
 	} else {
-		err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh deploy -e .env -c deploy-config.json", t.deploymentPath))
+		err = utils.ExecuteCommandStreamInDir(ctx, t.logger, scriptsDir, "bash", "./start-deploy.sh", "deploy", "-e", ".env", "-c", "deploy-config.json")
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				t.logger.Warn("Deployment canceled")
