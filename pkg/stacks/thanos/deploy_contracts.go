@@ -310,14 +310,17 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			return err
 		}
 
-		if !deployContractsConfig.ReuseDeployment {
-			err = t.deployContracts(ctx, l1Client, false)
-			if err != nil {
-				t.logger.Error("failed to deploy contracts", "err", err)
-				return err
-			}
-		} else {
-			t.logger.Info("ℹ️ ReuseDeployment: Skipping contracts deployment")
+		if deployContractsConfig.ReuseDeployment {
+			t.logger.Info("ℹ️ ReuseDeployment: Proceeding with deployment using existing implementation contracts (if available)...")
+		}
+
+		// Always execute deployment step.
+		// If ReuseDeployment is true, cloning/building were skipped, so 'start-deploy.sh deploy'
+		// will use existing artifacts/broadcasts to reuse implementation contracts.
+		err = t.deployContracts(ctx, l1Client, false)
+		if err != nil {
+			t.logger.Error("failed to deploy contracts", "err", err)
+			return err
 		}
 	}
 
