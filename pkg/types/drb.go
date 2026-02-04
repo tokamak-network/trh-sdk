@@ -112,7 +112,7 @@ type DRBRegularNodeInput struct {
 	DatabaseConfig *DRBDatabaseConfig `json:"database_config"`
 	DrbNodeImage   string             `json:"drb_node_image"`
 
-	ChainID         string `json:"chain_id"`         // e.g. "11155111"
+	ChainID         uint64 `json:"chain_id"`         // e.g. 11155111 (Sepolia)
 	EthRpcUrls      string `json:"eth_rpc_urls"`     // comma-separated RPC URLs
 	ContractAddress string `json:"contract_address"` // CommitReveal2L2 contract address
 

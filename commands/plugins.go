@@ -89,7 +89,8 @@ func ActionInstallationPlugins() cli.ActionFunc {
 
 		if network == constants.LocalDevnet {
 			if allPluginsWorkWithoutChain {
-				network = constants.Testnet
+				// Allow: chain-independent plugins (e.g. DRB) can install without a deployed chain
+        		// Keep network as LocalDevnet - no need to convert to Testnet
 			} else {
 				fmt.Println("You are in local devnet mode. Please specify the network and stack.")
 				return nil
