@@ -42,6 +42,7 @@ func ActionDeployContracts() cli.ActionFunc {
 			}
 			// STEP 1. Input the parameters
 			fmt.Println("You are about to deploy the L1 contracts.")
+
 			deployContractsConfig, err := thanos.InputDeployContracts(ctx)
 			if err != nil {
 				return err
@@ -55,6 +56,7 @@ func ActionDeployContracts() cli.ActionFunc {
 				}
 				deployContractsConfig.RegisterCandidate = registerCandidateInputs
 			}
+			deployContractsConfig.ReuseDeployment = cmd.Bool(flags.ReuseDeploymentFlag.Name)
 
 			return thanosStack.DeployContracts(ctx, deployContractsConfig)
 		default:
