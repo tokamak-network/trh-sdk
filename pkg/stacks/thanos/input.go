@@ -1653,7 +1653,7 @@ func makeBlockExplorerEnvs(dirPath string, filename string, config types.AwsData
 	}
 	lines = append(lines, "")
 
-	return os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0644)
+	return os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0600)
 }
 
 // makeDRBEnvs creates .envrc file for DRB Terraform deployment

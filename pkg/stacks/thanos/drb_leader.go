@@ -858,20 +858,8 @@ func (t *ThanosStack) deployDRBDatabaseRDS(ctx context.Context, dbConfig *types.
 
 	envrcPath := fmt.Sprintf("%s/tokamak-thanos-stack/terraform", t.deploymentPath)
 
-	// use stack id for unique rds naming
-	stackName := "drb"
-	pathParts := strings.Split(t.deploymentPath, string(filepath.Separator))
-	for i, part := range pathParts {
-		if part == "integrations" && i+1 < len(pathParts) {
-			stackId := pathParts[i+1]
-			if len(stackId) >= 8 {
-				stackName = fmt.Sprintf("drb-%s", stackId[:8])
-			} else {
-				stackName = fmt.Sprintf("drb-%s", stackId)
-			}
-			break
-		}
-	}
+	// use timestamp for unique rds naming (avoids conflicts when deploying multiple regular nodes)
+	stackName := fmt.Sprintf("drb-%d", time.Now().Unix())
 
 	err := t.makeDRBEnvs(
 		envrcPath,
