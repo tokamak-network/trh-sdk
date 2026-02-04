@@ -32,17 +32,30 @@ func ExecuteCommand(ctx context.Context, command string, args ...string) (string
 	return trimmedOutput, err
 }
 
+// ExecuteCommandInDir executes a command in a specific directory.
+// This avoids shell injection vulnerabilities by not using "bash -c" with string interpolation.
+func ExecuteCommandInDir(ctx context.Context, dir string, command string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, command, args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+
+	trimmedOutput := strings.TrimSpace(string(output))
+
+	// Handle cancellation
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
+	return trimmedOutput, err
+}
+
 func ExecuteCommandStream(ctx context.Context, l *zap.SugaredLogger, command string, args ...string) error {
-	return executeCommandStreamWithDir(ctx, l, "", command, args...)
+	return ExecuteCommandStreamInDir(ctx, l, "", command, args...)
 }
 
-// ExecuteCommandStreamWithDir runs a command with streaming output and sets the working directory.
-// Use this instead of bash -c when passing user input to avoid shell injection.
-func ExecuteCommandStreamWithDir(ctx context.Context, l *zap.SugaredLogger, dir, command string, args ...string) error {
-	return executeCommandStreamWithDir(ctx, l, dir, command, args...)
-}
-
-func executeCommandStreamWithDir(ctx context.Context, l *zap.SugaredLogger, dir, command string, args ...string) error {
+// ExecuteCommandStreamInDir executes a command in a specific directory with streaming output.
+// This avoids shell injection vulnerabilities by not using "bash -c" with string interpolation.
+func ExecuteCommandStreamInDir(ctx context.Context, l *zap.SugaredLogger, dir string, command string, args ...string) error {
 	cmd := exec.CommandContext(ctx, command, args...)
 	if dir != "" {
 		cmd.Dir = dir

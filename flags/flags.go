@@ -30,12 +30,19 @@ var (
 		Value:   false,
 		Sources: cli.EnvVars(PrefixEnvVars(envPrefix, "NO_CANDIDATE")...),
 	}
+
+	ReuseDeploymentFlag = &cli.BoolFlag{
+		Name:    "reuse-deployment",
+		Usage:   "Reuse existing deployment artifacts and skip contract deployment",
+		Value:   true,
+	}
 )
 
 var DeployContractsFlag = []cli.Flag{
 	StackFlag,
 	NetworkFlag,
 	NoCandidateFlag,
+	ReuseDeploymentFlag,
 }
 
 var (
