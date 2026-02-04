@@ -378,7 +378,7 @@ func (t *ThanosStack) deployDRBContracts(ctx context.Context, inputs *types.Depl
 	t.logger.Info("Deploying DRB contracts")
 
 	// Run forge script with direct exec (no shell) to avoid injection from user-controlled RPC URL/private key
-	err = utils.ExecuteCommandStreamWithDir(ctx, t.logger, commitReveal2Path, "forge",
+	err = utils.ExecuteCommandStreamInDir(ctx, t.logger, commitReveal2Path, "forge",
 		"script", "script/DeployCommitReveal2.s.sol:DeployCommitReveal2",
 		"--rpc-url", firstRpcUrl, "--private-key", privateKey, "--broadcast", "-vv")
 	if err != nil {
@@ -439,7 +439,7 @@ func (t *ThanosStack) deployConsumerExampleV2(ctx context.Context, inputs *types
 	commitReveal2Path := filepath.Join(t.deploymentPath, "Commit-Reveal2")
 
 	// Run forge script with direct exec (no shell) to avoid injection from user-controlled RPC URL/private key
-	err := utils.ExecuteCommandStreamWithDir(ctx, t.logger, commitReveal2Path, "forge",
+	err := utils.ExecuteCommandStreamInDir(ctx, t.logger, commitReveal2Path, "forge",
 		"script", "script/DeployConsumerExampleV2.s.sol:DeployConsumerExampleV2",
 		"--sig", "run()", "--rpc-url", firstRpcUrl, "--private-key", privateKey, "--broadcast", "-vv")
 	if err != nil {
