@@ -858,7 +858,9 @@ func (t *ThanosStack) deployDRBDatabaseRDS(ctx context.Context, dbConfig *types.
 
 	envrcPath := fmt.Sprintf("%s/tokamak-thanos-stack/terraform", t.deploymentPath)
 
-	// Create .envrc file for Terraform
+	// use timestamp for unique rds naming (avoids conflicts when deploying multiple regular nodes)
+	stackName := fmt.Sprintf("drb-%d", time.Now().Unix())
+
 	err := t.makeDRBEnvs(
 		envrcPath,
 		".envrc",
@@ -868,6 +870,7 @@ func (t *ThanosStack) deployDRBDatabaseRDS(ctx context.Context, dbConfig *types.
 			DatabaseName:     dbConfig.DatabaseName,
 			VpcId:            vpcId,
 			AwsRegion:        awsRegion,
+			StackName:        stackName,
 		},
 	)
 	if err != nil {

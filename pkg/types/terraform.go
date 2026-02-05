@@ -45,6 +45,7 @@ type AwsDatabaseEnvs struct {
 	DatabaseUserName string
 	VpcId            string
 	AwsRegion        string
+	StackName        string
 }
 
 type ThanosStackTerraformState struct {
