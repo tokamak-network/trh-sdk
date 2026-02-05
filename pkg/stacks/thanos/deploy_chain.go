@@ -272,6 +272,18 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	time.Sleep(30 * time.Second)
 
 	// Step 7. Configure EKS access
+	if _, err := utils.SetAWSConfigFile(t.deploymentPath); err != nil {
+		t.logger.Error("Error setting AWS config file", "err", err)
+		return err
+	}
+	if _, err := utils.SetAWSCredentialsFile(t.deploymentPath); err != nil {
+		t.logger.Error("Error setting AWS credentials file", "err", err)
+		return err
+	}
+	if _, err := utils.SetKubeconfigFile(t.deploymentPath); err != nil {
+		t.logger.Error("Error setting kubeconfig file", "err", err)
+		return err
+	}
 	err = utils.SwitchKubernetesContext(ctx, namespace, awsLoginInputs.Region)
 	if err != nil {
 		t.logger.Error("Error switching Kubernetes context", "err", err)

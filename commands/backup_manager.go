@@ -88,7 +88,7 @@ func ActionBackupManager() cli.ActionFunc {
 			return err
 
 		case flags.StartBackup:
-			_, err := thanosStack.BackupSnapshot(ctx)
+			_, err := thanosStack.BackupSnapshot(ctx, nil)
 			return err
 
 		case flags.ListPoints:
@@ -96,7 +96,11 @@ func ActionBackupManager() cli.ActionFunc {
 			return err
 
 		case flags.DoAttach:
-			_, err := thanosStack.BackupAttach(ctx, &flags.AttachEfs, &flags.AttachPVCs, &flags.AttachSTSs)
+			backup := true
+			reporter := func(msg string, pct float64) {
+				fmt.Printf(">> [%.1f%%] %s\n", pct, msg)
+			}
+			_, err := thanosStack.BackupAttach(ctx, &flags.AttachEfs, &flags.AttachPVCs, &flags.AttachSTSs, &backup, reporter)
 			return err
 
 		case flags.DoRestore:
@@ -123,7 +127,7 @@ func handleRestore(ctx context.Context, thanosStack *thanos.ThanosStack, flags *
 	}
 	// If ARN is provided, use direct restore mode
 	if flags.RestoreArn != "" {
-		_, err = thanosStack.BackupRestore(ctx, flags.RestoreArn, attachWorkloads)
+		_, err = thanosStack.BackupRestore(ctx, flags.RestoreArn, nil, nil, nil, nil)
 		return err
 	}
 
