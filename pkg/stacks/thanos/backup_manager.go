@@ -84,12 +84,19 @@ func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string
 		currentEfsID = "" // Not critical, continue
 	}
 
+	// Convert attach *bool to attachWorkloads bool for DirectRestore
+	attachWorkloads := false
+	if attach != nil {
+		attachWorkloads = *attach
+	}
+
 	restoreInfo, err := backup.DirectRestore(
 		ctx,
 		t.logger,
 		t.deployConfig.AWS.Region,
 		t.deployConfig.K8s.Namespace,
 		recoveryPointArn,
+		attachWorkloads,
 		func(c context.Context, arn string) (string, error) {
 			return backup.RestoreEFS(c, t.deployConfig.AWS.Region, arn, func(c2 context.Context) (string, error) {
 				acct, err := utils.DetectAWSAccountID(c2)
@@ -137,14 +144,15 @@ func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string
 }
 
 // BackupRestoreInteractive provides interactive recovery point selection and restoration
-func (t *ThanosStack) BackupRestoreInteractive(ctx context.Context) error {
+func (t *ThanosStack) BackupRestoreInteractive(ctx context.Context, attachWorkloads bool) error {
 	return backup.InteractiveRestoreWithSelection(
 		ctx,
 		t.logger,
 		t.deployConfig.AWS.Region,
 		t.deployConfig.K8s.Namespace,
-		func(c context.Context, arn string) (*types.BackupRestoreInfo, error) {
-			return t.BackupRestore(c, arn, nil, nil, nil, nil)
+		attachWorkloads,
+		func(c context.Context, arn string, attach bool) (*types.BackupRestoreInfo, error) {
+			return t.BackupRestore(c, arn, &attach, nil, nil, nil)
 		},
 	)
 }

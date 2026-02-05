@@ -10,6 +10,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/tokamak-network/trh-sdk/pkg/logging"
+	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
@@ -117,14 +118,21 @@ func ActionBackupManager() cli.ActionFunc {
 
 // handleRestore manages the restore process with interactive or direct mode
 func handleRestore(ctx context.Context, thanosStack *thanos.ThanosStack, flags *BackupManagerFlags) error {
+	// Ask user if they want to attach workloads after restore
+	fmt.Print("Would you like to attach the restored EFS to workloads after restore? (y/N): ")
+	attachWorkloads, err := scanner.ScanBool(false)
+	if err != nil {
+		fmt.Printf("Error reading attach workloads option: %s\n", err)
+		return err
+	}
 	// If ARN is provided, use direct restore mode
 	if flags.RestoreArn != "" {
-		_, err := thanosStack.BackupRestore(ctx, flags.RestoreArn, nil, nil, nil, nil)
+		_, err = thanosStack.BackupRestore(ctx, flags.RestoreArn, nil, nil, nil, nil)
 		return err
 	}
 
 	// Otherwise, use interactive mode (default)
-	return thanosStack.BackupRestoreInteractive(ctx)
+	return thanosStack.BackupRestoreInteractive(ctx, attachWorkloads)
 }
 
 // parseBackupManagerFlags extracts and parses all command line flags

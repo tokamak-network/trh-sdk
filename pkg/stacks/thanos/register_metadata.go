@@ -260,11 +260,6 @@ func (t *ThanosStack) RegisterMetadata(ctx context.Context, creds *types.GitHubC
 
 	// STEP 5. Create metadata file
 	t.logger.Info("📋 STEP 5: Creating metadata file...")
-	if t.deployConfig.L1ChainID != constants.EthereumSepoliaChainID { // Sepolia chain ID
-		t.logger.Error("Unsupported network ", "chainID ", t.deployConfig.L1ChainID)
-		return nil, fmt.Errorf("unsupported network. Currently only Sepolia (chain ID: 11155111) is supported, got chain ID: %d", t.deployConfig.L1ChainID)
-	}
-
 	if newMetadataEntry {
 		t.logger.Info("Creating new metadata file ", "file ", targetFile)
 		err = utils.ExecuteCommandStream(ctx, t.logger, "cp", sourceFile, targetFile)

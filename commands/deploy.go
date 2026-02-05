@@ -104,6 +104,23 @@ func ActionDeploy() cli.ActionFunc {
 					fmt.Println("Error collecting infrastructure deployment parameters:", err)
 					return err
 				}
+				// Backup configuration
+				if network == constants.Testnet {
+					fmt.Print("Enable automatic backup for this chain? (y/N): ")
+					enableBackup, err := scanner.ScanBool(false)
+					if err != nil {
+						fmt.Printf("Error reading backup option: %s\n", err)
+						return err
+					}
+					inputs.BackupConfig = &thanos.BackupConfig{
+						Enabled: enableBackup,
+					}
+				} else {
+					// Mainnet always has backup enabled
+					inputs.BackupConfig = &thanos.BackupConfig{
+						Enabled: true,
+					}
+				}
 			}
 
 			var creds *types.GitHubCredentials
