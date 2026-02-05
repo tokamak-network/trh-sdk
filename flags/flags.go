@@ -32,9 +32,9 @@ var (
 	}
 
 	ReuseDeploymentFlag = &cli.BoolFlag{
-		Name:    "reuse-deployment",
-		Usage:   "Reuse existing deployment artifacts and skip contract deployment",
-		Value:   true,
+		Name:  "reuse-deployment",
+		Usage: "Reuse existing deployment artifacts and skip contract deployment",
+		Value: true,
 	}
 )
 

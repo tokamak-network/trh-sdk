@@ -39,12 +39,12 @@ type TerraformEnvConfig struct {
 	TxmgrCellProofTime uint64
 }
 
-type BlockExplorerEnvs struct {
-	BlockExplorerDatabaseName     string
-	BlockExplorerDatabasePassword string
-	BlockExplorerDatabaseUserName string
-	VpcId                         string
-	AwsRegion                     string
+type AwsDatabaseEnvs struct {
+	DatabaseName     string
+	DatabasePassword string
+	DatabaseUserName string
+	VpcId            string
+	AwsRegion        string
 }
 
 type ThanosStackTerraformState struct {
