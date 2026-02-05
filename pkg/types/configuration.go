@@ -150,8 +150,15 @@ type Config struct {
 	// Metadata Registration
 	MetadataPRLink string `json:"metadata_pr_link,omitempty"`
 
+	// Backup configuration
+	BackupConfig *BackupConfiguration `json:"backup_config,omitempty"`
+
 	// Shutdown configuration state (not for storing static addresses)
 	Shutdown *ShutdownConfig `json:"shutdown,omitempty"`
+}
+
+type BackupConfiguration struct {
+	Enabled bool `json:"enabled"` // Whether automatic backup is enabled
 }
 
 type ShutdownConfig struct {
