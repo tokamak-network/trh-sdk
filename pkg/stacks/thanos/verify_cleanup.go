@@ -81,7 +81,9 @@ func (t *ThanosStack) deleteOrphanedElasticIPs(ctx context.Context, region, name
 
 	for _, eip := range eips {
 		if eip.Assoc != "" {
-			utils.DisassociateAddress(ctx, region, eip.Assoc)
+			if err := utils.DisassociateAddress(ctx, region, eip.Assoc); err != nil {
+				t.logger.Warnf("Failed to disassociate address %s: %v", eip.Assoc, err)
+			}
 			time.Sleep(2 * time.Second)
 		}
 
@@ -132,7 +134,9 @@ func (t *ThanosStack) deleteOrphanedEKS(ctx context.Context, region, namespace s
 	if err == nil {
 		for _, ng := range nodeGroups {
 			t.logger.Infof("Deleting node group: %s", ng)
-			utils.DeleteNodeGroup(ctx, region, namespace, ng)
+			if err := utils.DeleteNodeGroup(ctx, region, namespace, ng); err != nil {
+				t.logger.Warnf("Failed to delete node group %s: %v", ng, err)
+			}
 		}
 
 		if len(nodeGroups) > 0 {
@@ -178,7 +182,9 @@ func (t *ThanosStack) deleteOrphanedEFS(ctx context.Context, region, namespace s
 		mountTargets, err := utils.ListMountTargets(ctx, region, fs.ID)
 		if err == nil {
 			for _, mt := range mountTargets {
-				utils.DeleteMountTarget(ctx, region, mt)
+				if err := utils.DeleteMountTarget(ctx, region, mt); err != nil {
+					t.logger.Warnf("Failed to delete mount target %s: %v", mt, err)
+				}
 			}
 			if len(mountTargets) > 0 {
 				time.Sleep(10 * time.Second)
@@ -227,7 +233,9 @@ func (t *ThanosStack) deleteOrphanedS3(ctx context.Context, region, namespace st
 		}
 
 		t.logger.Infof("Deleting S3 bucket: %s", bucket)
-		utils.EmptyS3Bucket(ctx, bucket)
+		if err := utils.EmptyS3Bucket(ctx, bucket); err != nil {
+			t.logger.Warnf("Failed to empty S3 bucket %s: %v", bucket, err)
+		}
 
 		if err := utils.DeleteS3Bucket(ctx, bucket); err != nil {
 			t.logger.Warnf("Failed to delete S3 bucket %s: %v", bucket, err)
@@ -267,27 +275,49 @@ func (t *ThanosStack) deleteOrphanedVPC(ctx context.Context, region, namespace s
 
 func (t *ThanosStack) cleanupVPCDependencies(ctx context.Context, region, vpcID string) {
 	//internet gateways
-	igws, _ := utils.ListVPCResources(ctx, region, vpcID, "internet-gateways", "InternetGateways[].InternetGatewayId")
+	igws, err := utils.ListVPCResources(ctx, region, vpcID, "internet-gateways", "InternetGateways[].InternetGatewayId")
+	if err != nil {
+		t.logger.Warnf("Failed to list internet gateways for VPC %s: %v", vpcID, err)
+	}
 	for _, igw := range igws {
-		utils.DetachInternetGateway(ctx, region, igw, vpcID)
-		utils.DeleteInternetGateway(ctx, region, igw)
+		if err := utils.DetachInternetGateway(ctx, region, igw, vpcID); err != nil {
+			t.logger.Warnf("Failed to detach internet gateway %s: %v", igw, err)
+		}
+		if err := utils.DeleteInternetGateway(ctx, region, igw); err != nil {
+			t.logger.Warnf("Failed to delete internet gateway %s: %v", igw, err)
+		}
 	}
 
 	//subnets
-	subnets, _ := utils.ListVPCResources(ctx, region, vpcID, "subnets", "Subnets[].SubnetId")
+	subnets, err := utils.ListVPCResources(ctx, region, vpcID, "subnets", "Subnets[].SubnetId")
+	if err != nil {
+		t.logger.Warnf("Failed to list subnets for VPC %s: %v", vpcID, err)
+	}
 	for _, subnet := range subnets {
-		utils.DeleteSubnet(ctx, region, subnet)
+		if err := utils.DeleteSubnet(ctx, region, subnet); err != nil {
+			t.logger.Warnf("Failed to delete subnet %s: %v", subnet, err)
+		}
 	}
 
 	//route tables not the main one
-	routeTables, _ := utils.ListVPCResources(ctx, region, vpcID, "route-tables", "RouteTables[?Associations[0].Main!=`true`].RouteTableId")
+	routeTables, err := utils.ListVPCResources(ctx, region, vpcID, "route-tables", "RouteTables[?Associations[0].Main!=`true`].RouteTableId")
+	if err != nil {
+		t.logger.Warnf("Failed to list route tables for VPC %s: %v", vpcID, err)
+	}
 	for _, rt := range routeTables {
-		utils.DeleteRouteTable(ctx, region, rt)
+		if err := utils.DeleteRouteTable(ctx, region, rt); err != nil {
+			t.logger.Warnf("Failed to delete route table %s: %v", rt, err)
+		}
 	}
 
 	//security groups which are not default
-	securityGroups, _ := utils.ListVPCResources(ctx, region, vpcID, "security-groups", "SecurityGroups[?GroupName!='default'].GroupId")
+	securityGroups, err := utils.ListVPCResources(ctx, region, vpcID, "security-groups", "SecurityGroups[?GroupName!='default'].GroupId")
+	if err != nil {
+		t.logger.Warnf("Failed to list security groups for VPC %s: %v", vpcID, err)
+	}
 	for _, sg := range securityGroups {
-		utils.DeleteSecurityGroup(ctx, region, sg)
+		if err := utils.DeleteSecurityGroup(ctx, region, sg); err != nil {
+			t.logger.Warnf("Failed to delete security group %s: %v", sg, err)
+		}
 	}
 }
