@@ -30,6 +30,7 @@ type TerraformEnvConfig struct {
 	L1BeaconUrl         string
 	OpGethImageTag      string
 	ThanosStackImageTag string
+	ChallengePeriod     uint64
 	MaxChannelDuration  uint64
 
 	// EFS backup (op-node, op-geth) - Always enabled for production-ready backup protection

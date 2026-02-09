@@ -231,18 +231,18 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		t.deployConfig.SequencerPrivateKey = operators.SequencerPrivateKey
 		t.deployConfig.BatcherPrivateKey = operators.BatcherPrivateKey
 		t.deployConfig.ProposerPrivateKey = operators.ProposerPrivateKey
-		// if deployContractsConfig.FraudProof {
-		// 	if operators.ChallengerPrivateKey == "" {
-		// 		return fmt.Errorf("challenger operator is required for fault proof but was not found")
-		// 	}
-		// 	t.deployConfig.ChallengerPrivateKey = operators.ChallengerPrivateKey
-		// }
+		if deployContractsConfig.EnableFraudProof {
+			if operators.ChallengerPrivateKey == "" {
+				return fmt.Errorf("challenger operator is required for fault proof but was not found")
+			}
+			t.deployConfig.ChallengerPrivateKey = operators.ChallengerPrivateKey
+		}
 		t.deployConfig.DeploymentFilePath = fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", t.deploymentPath, deployContractsTemplate.L1ChainID)
 		t.deployConfig.L1RPCProvider = utils.DetectRPCKind(deployContractsConfig.L1RPCurl)
 		t.deployConfig.L1ChainID = deployContractsTemplate.L1ChainID
 		t.deployConfig.L2ChainID = l2ChainID
 		t.deployConfig.L1RPCURL = deployContractsConfig.L1RPCurl
-		t.deployConfig.EnableFraudProof = false
+		t.deployConfig.EnableFraudProof = deployContractsConfig.EnableFraudProof
 		t.deployConfig.ChainConfiguration = deployContractsConfig.ChainConfiguration
 
 		deployConfigFilePath := fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts/deploy-config.json", t.deploymentPath)
@@ -384,6 +384,12 @@ func (t *ThanosStack) deployContracts(ctx context.Context,
 	if gasPriceWei != nil && gasPriceWei.Uint64() > 0 {
 		// double gas price
 		envValues += fmt.Sprintf("export GAS_PRICE=%d\n", gasPriceWei.Uint64()*2)
+	}
+	if t.deployConfig.ChainConfiguration != nil {
+		envValues += fmt.Sprintf("export CHALLENGE_WINDOW=%ds\n", t.deployConfig.ChainConfiguration.ChallengePeriod)
+	}
+	if t.deployConfig.ChallengerPrivateKey != "" {
+		envValues += fmt.Sprintf("export CHALLENGER_PRIVATE_KEY=%s\n", t.deployConfig.ChallengerPrivateKey)
 	}
 
 	// STEP 4.1. Generate the .env file using native Go file write (avoids shell injection)

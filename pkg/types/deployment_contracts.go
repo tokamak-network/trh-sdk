@@ -36,4 +36,6 @@ type Contracts struct {
 	SystemConfig                      string `json:"SystemConfig"`
 	SystemConfigProxy                 string `json:"SystemConfigProxy"`
 	SystemOwnerSafe                   string `json:"SystemOwnerSafe"`
+	GameFactory                       string `json:"GameFactory"`
+	GameFactoryProxy                  string `json:"GameFactoryProxy"`
 }

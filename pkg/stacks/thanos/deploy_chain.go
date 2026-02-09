@@ -2,8 +2,11 @@ package thanos
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -182,6 +185,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		Azs:                 awsAccountProfile.AvailabilityZones,
 		ThanosStackImageTag: constants.DockerImageTag[t.deployConfig.Network].ThanosStackImageTag,
 		OpGethImageTag:      constants.DockerImageTag[t.deployConfig.Network].OpGethImageTag,
+		ChallengePeriod:     chainConfiguration.ChallengePeriod,
 		MaxChannelDuration:  chainConfiguration.GetMaxChannelDuration(),
 		TxmgrCellProofTime:  t.deployConfig.TxmgrCellProofTime,
 	})
@@ -263,6 +267,45 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		return fmt.Errorf("configuration file thanos-stack-values.yaml not found")
 	}
 
+	// FPS Configuration: Set challenge window for op-challenger
+	if t.deployConfig.EnableFraudProof {
+		deployJSONPath := filepath.Join(t.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "deployments", fmt.Sprintf("%d-deploy.json", t.deployConfig.L1ChainID))
+		deployData, err := os.ReadFile(deployJSONPath)
+		if err != nil {
+			t.logger.Error("failed to read deployment file", "err", err)
+			return fmt.Errorf("failed to read deployment file: %v", err)
+		}
+
+		var deployMap map[string]interface{}
+		if err := json.Unmarshal(deployData, &deployMap); err != nil {
+			t.logger.Error("failed to parse deployment file", "err", err)
+			return fmt.Errorf("failed to parse deployment file: %v", err)
+		}
+		challengePeriod := t.deployConfig.ChainConfiguration.ChallengePeriod
+		gameFactoryAddress, ok := deployMap["GameFactoryAddress"].(string)
+		if !ok {
+			t.logger.Error("failed to get the value of 'GameFactoryAddress' field in the deployment file")
+			return fmt.Errorf("failed to get the value of 'GameFactoryAddress' field in the deployment file")
+		}
+		err = utils.UpdateYAMLField(
+			fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", t.deploymentPath),
+			"opChallenger.args",
+			[]string{
+				"--game.window=" + fmt.Sprintf("%ds", challengePeriod),
+				"--l1-eth-rpc=" + t.deployConfig.L1RPCURL,
+				"--l1-beacon=" + inputs.L1BeaconURL,
+				"--game.factory.address=" + gameFactoryAddress,
+				"--datadir=/data",
+				"--rollup.rpc=" + t.deployConfig.L2RpcUrl,
+				"--l2.rpc=" + t.deployConfig.L2RpcUrl,
+			},
+		)
+		if err != nil {
+			t.logger.Error("Error updating op-challenger configuration", "err", err)
+			return err
+		}
+		t.logger.Infof("✅ Configured op-challenger with challenge window: %d seconds", challengePeriod)
+	}
 	t.deployConfig.ChainName = inputs.ChainName
 	if err := t.deployConfig.WriteToJSONFile(t.deploymentPath); err != nil {
 		return fmt.Errorf("failed to write settings file: %w", err)

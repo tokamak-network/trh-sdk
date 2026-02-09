@@ -38,6 +38,7 @@ type DeployContractsInput struct {
 	Operators          *types.Operators
 	RegisterCandidate  *RegisterCandidateInput
 	ReuseDeployment    bool
+	EnableFraudProof   bool
 }
 
 func (c *DeployContractsInput) Validate(ctx context.Context, registerCandidate bool) error {
@@ -270,12 +271,12 @@ func InputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
 	}
 
 	fraudProof := false
-	//fmt.Print("Would you like to enable the fault-proof system on your chain? [Y or N] (default: N): ")
-	//fraudProof, err = scanner.ScanBool()
-	//if err != nil {
-	//	fmt.Printf("Error while reading the fault-proof system setting: %s", err)
-	//	return nil, err
-	//}
+	fmt.Print("Would you like to enable the fault-proof system on your chain? [Y or N] (default: N): ")
+	fraudProof, err = scanner.ScanBool(false)
+	if err != nil {
+		fmt.Printf("Error while reading the fault-proof system setting: %s", err)
+		return nil, err
+	}
 
 	// Select operators Accounts
 	l1Client, err := ethclient.Dial(l1RPCUrl)
@@ -411,7 +412,8 @@ func InputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
 			ChallengePeriod:          challengePeriod,
 			OutputRootFrequency:      outputFrequency,
 		},
-		Operators: operators,
+		Operators:        operators,
+		EnableFraudProof: fraudProof,
 	}, nil
 }
 
