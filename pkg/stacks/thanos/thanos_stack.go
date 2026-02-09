@@ -43,6 +43,19 @@ func NewThanosStack(
 	var awsProfile *types.AWSProfile
 
 	if awsConfig != nil {
+		if _, err := utils.SetAWSConfigFile(deploymentPath); err != nil {
+			l.Error("Failed to set AWS config file", "err", err)
+			return nil, err
+		}
+		if _, err := utils.SetAWSCredentialsFile(deploymentPath); err != nil {
+			l.Error("Failed to set AWS credentials file", "err", err)
+			return nil, err
+		}
+		if _, err := utils.SetKubeconfigFile(deploymentPath); err != nil {
+			l.Error("Failed to set kubeconfig file", "err", err)
+			return nil, err
+		}
+
 		awsProfile, err = aws.LoginAWS(ctx, awsConfig)
 		if err != nil {
 			l.Error("Failed to login aws", "err", err)

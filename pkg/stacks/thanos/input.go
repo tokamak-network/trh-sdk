@@ -37,6 +37,7 @@ type DeployContractsInput struct {
 	ChainConfiguration *types.ChainConfiguration
 	Operators          *types.Operators
 	RegisterCandidate  *RegisterCandidateInput
+	ReuseDeployment    bool
 }
 
 func (c *DeployContractsInput) Validate(ctx context.Context, registerCandidate bool) error {
@@ -79,10 +80,15 @@ func (c *DeployContractsInput) Validate(ctx context.Context, registerCandidate b
 	return nil
 }
 
+type BackupConfig struct {
+	Enabled bool
+}
+
 type DeployInfraInput struct {
 	ChainName           string
 	L1BeaconURL         string
 	IgnoreInstallBridge bool
+	BackupConfig        *BackupConfig
 
 	// register metadata
 	GithubCredentials *types.GitHubCredentials
@@ -1448,7 +1454,7 @@ func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainI
 		GovernanceTokenOwner:                     "0x0000000000000000000000000000000000000333",
 		GovernanceTokenSymbol:                    "OP",
 		L2OutputOracleChallenger:                 "0x0000000000000000000000000000000000000001",
-		ReuseDeployment:                          true,
+		ReuseDeployment:                          deployConfigInputs.ReuseDeployment,
 	}
 
 	return defaultTemplate

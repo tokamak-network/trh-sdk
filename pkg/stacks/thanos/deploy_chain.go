@@ -272,6 +272,18 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	time.Sleep(30 * time.Second)
 
 	// Step 7. Configure EKS access
+	if _, err := utils.SetAWSConfigFile(t.deploymentPath); err != nil {
+		t.logger.Error("Error setting AWS config file", "err", err)
+		return err
+	}
+	if _, err := utils.SetAWSCredentialsFile(t.deploymentPath); err != nil {
+		t.logger.Error("Error setting AWS credentials file", "err", err)
+		return err
+	}
+	if _, err := utils.SetKubeconfigFile(t.deploymentPath); err != nil {
+		t.logger.Error("Error setting kubeconfig file", "err", err)
+		return err
+	}
 	err = utils.SwitchKubernetesContext(ctx, namespace, awsLoginInputs.Region)
 	if err != nil {
 		t.logger.Error("Error switching Kubernetes context", "err", err)
@@ -374,6 +386,18 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	t.deployConfig.L2RpcUrl = l2RPCUrl
 	t.deployConfig.L1BeaconURL = inputs.L1BeaconURL
 
+	backupEnabled := false
+	if t.network == constants.Mainnet {
+		// Mainnet always has backup enabled
+		backupEnabled = true
+	} else if inputs.BackupConfig != nil {
+		backupEnabled = inputs.BackupConfig.Enabled
+	}
+
+	t.deployConfig.BackupConfig = &types.BackupConfiguration{
+		Enabled: backupEnabled,
+	}
+
 	err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
 	if err != nil {
 		t.logger.Error("Error saving configuration file", "err", err)
@@ -381,14 +405,18 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	}
 	t.logger.Infof("Configuration saved successfully to: %s/settings.json", t.deploymentPath)
 
-	// Step 8.3. Initialize backup system (after K8s config is set)
-	fmt.Println("Initializing backup system...")
-	err = t.initializeBackupSystem(ctx, inputs.ChainName)
-	if err != nil {
-		t.logger.Warnf("Warning: Failed to initialize backup system: %v\n", err)
-		// Continue deployment even if backup initialization fails
+	// Step 8.3. Initialize backup system (conditional - only if BackupConfig.Enabled is true)
+	if backupEnabled {
+		fmt.Println("Initializing backup system...")
+		err = t.initializeBackupSystem(ctx, inputs.ChainName)
+		if err != nil {
+			t.logger.Warnf("Warning: Failed to initialize backup system: %v\n", err)
+			// Continue deployment even if backup initialization fails
+		} else {
+			t.logger.Info("✅ Backup system initialized successfully")
+		}
 	} else {
-		t.logger.Info("✅ Backup system initialized successfully")
+		t.logger.Info("⏭️ Backup system disabled, skipping initialization")
 	}
 
 	// After installing the infra successfully, we install the bridge

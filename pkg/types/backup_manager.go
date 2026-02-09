@@ -61,6 +61,9 @@ type BackupRestoreInfo struct {
 	NewEFSID         string
 	JobID            string
 	Status           string
+	SuggestedEFSID   string
+	SuggestedPVCs    string
+	SuggestedSTSs    string
 }
 
 // BackupAttachInfo represents backup attach information

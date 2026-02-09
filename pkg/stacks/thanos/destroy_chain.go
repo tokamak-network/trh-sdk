@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
+	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos/backup"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
@@ -104,10 +105,30 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 	}
 	t.logger.Info("✅ Namespace destroyed successfully!")
 
+	// Delete EFS mount targets before terraform destroy to prevent subnet deletion blocking
+	if t.deployConfig.AWS != nil {
+		if efsID, detectErr := utils.DetectEFSId(ctx, namespace); detectErr == nil && efsID != "" {
+			t.logger.Infof("Deleting EFS mount targets for %s before terraform destroy...", efsID)
+			if mtErr := backup.DeleteEFSMountTargets(ctx, t.logger, t.deployConfig.AWS.Region, efsID); mtErr != nil {
+				t.logger.Warnf("Failed to delete EFS mount targets: %v. Continuing with destroy.", mtErr)
+			} else {
+				t.logger.Info("EFS mount targets deleted, waiting for cleanup...")
+				time.Sleep(30 * time.Second)
+			}
+		}
+	}
+
 	err = t.clearTerraformState(ctx)
 	if err != nil {
 		t.logger.Error("❌ Failed to clear terraform state", "err", err)
 		return err
+	}
+
+	// runs postdestroy verification to catch any orphaned resources
+	if namespace != "" {
+		if err := t.VerifyAndCleanupResources(ctx, namespace); err != nil {
+			t.logger.Warnf("Post-destroy verification encountered issues: %v", err)
+		}
 	}
 
 	t.deployConfig.K8s = nil
@@ -118,6 +139,6 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 		// Continue even if config write fails, as resources are already destroyed
 	}
 
-	t.logger.Info("✅The chain has been destroyed successfully!")
+	t.logger.Info("The chain has been destroyed successfully!")
 	return nil
 }

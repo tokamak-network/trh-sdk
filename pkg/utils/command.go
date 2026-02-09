@@ -32,8 +32,50 @@ func ExecuteCommand(ctx context.Context, command string, args ...string) (string
 	return trimmedOutput, err
 }
 
-func ExecuteCommandStream(ctx context.Context, l *zap.SugaredLogger, command string, args ...string) error {
+// ExecuteCommandWithEnv executes a command with additional environment variables
+func ExecuteCommandWithEnv(ctx context.Context, env []string, command string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
+	cmd.Env = append(os.Environ(), env...)
+	output, err := cmd.CombinedOutput()
+
+	trimmedOutput := strings.TrimSpace(string(output))
+
+	// Handle cancellation
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
+	return trimmedOutput, err
+}
+
+// ExecuteCommandInDir executes a command in a specific directory.
+// This avoids shell injection vulnerabilities by not using "bash -c" with string interpolation.
+func ExecuteCommandInDir(ctx context.Context, dir string, command string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, command, args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+
+	trimmedOutput := strings.TrimSpace(string(output))
+
+	// Handle cancellation
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
+	return trimmedOutput, err
+}
+
+func ExecuteCommandStream(ctx context.Context, l *zap.SugaredLogger, command string, args ...string) error {
+	return ExecuteCommandStreamInDir(ctx, l, "", command, args...)
+}
+
+// ExecuteCommandStreamInDir executes a command in a specific directory with streaming output.
+// This avoids shell injection vulnerabilities by not using "bash -c" with string interpolation.
+func ExecuteCommandStreamInDir(ctx context.Context, l *zap.SugaredLogger, dir string, command string, args ...string) error {
+	cmd := exec.CommandContext(ctx, command, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
 
 	var (
 		ptmx    *os.File

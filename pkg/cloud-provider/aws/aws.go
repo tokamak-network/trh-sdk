@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -40,7 +39,15 @@ func LoginAWS(ctx context.Context, awsConfig *types.AWSConfig) (*types.AWSProfil
 		return nil, fmt.Errorf("failed to get AWS profile account")
 	}
 
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(awsConfig.Region))
+	// Use static credentials provider instead of default config
+	cfg, err := config.LoadDefaultConfig(ctx,
+		config.WithRegion(awsConfig.Region),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
+			awsConfig.AccessKey,
+			awsConfig.SecretKey,
+			"",
+		)),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS configuration: %v", err)
 	}
@@ -71,11 +78,24 @@ func loginAWS(accessKey, secretKey, region, formatFile string) (*types.AccountPr
 		formatFile = "json"
 	}
 
-	// Configure AWS CLI for other tools that may need it (terraform, kubectl, etc.)
-	configureAWS("aws", "configure", "set", "aws_access_key_id", accessKey)
-	configureAWS("aws", "configure", "set", "aws_secret_access_key", secretKey)
-	configureAWS("aws", "configure", "set", "region", region)
-	configureAWS("aws", "configure", "set", "output", formatFile)
+	// Set environment variables for the current process
+	// This affects subsequent AWS SDK calls and CLI tools (terraform, kubectl, etc.)
+	os.Setenv("AWS_ACCESS_KEY_ID", accessKey)
+	os.Setenv("AWS_SECRET_ACCESS_KEY", secretKey)
+	os.Setenv("AWS_REGION", region)
+	os.Setenv("AWS_DEFAULT_REGION", region)
+
+	// Prefer per-deployment credential/config files when provided.
+	if credPath := os.Getenv("AWS_SHARED_CREDENTIALS_FILE"); credPath != "" {
+		if err := utils.WriteAWSCredentialsFile(credPath, accessKey, secretKey); err != nil {
+			return nil, err
+		}
+		if cfgPath := os.Getenv("AWS_CONFIG_FILE"); cfgPath != "" {
+			if err := utils.WriteAWSConfigFile(cfgPath, region, formatFile); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	ctx := context.Background()
 
@@ -134,16 +154,6 @@ func loginAWS(accessKey, secretKey, region, formatFile string) (*types.AccountPr
 	}
 
 	return &profile, nil
-}
-
-func configureAWS(command ...string) {
-	cmd := exec.Command(command[0], command[1:]...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
-		fmt.Println("Error:", err)
-	}
 }
 
 func getAvailabilityZones(ctx context.Context, cfg aws.Config, region string) ([]string, error) {

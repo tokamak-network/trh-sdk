@@ -3,6 +3,7 @@ package thanos
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
+	cwTypes "github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -863,7 +865,8 @@ func (t *ThanosStack) createCloudWatchLogGroups(ctx context.Context, namespace s
 		})
 		if err != nil {
 			// If log group already exists, that's fine
-			if strings.Contains(err.Error(), "ResourceAlreadyExistsException") {
+			var alreadyExists *cwTypes.ResourceAlreadyExistsException
+			if errors.As(err, &alreadyExists) {
 				logger.Infof("Log group already exists: %s", logGroupName)
 			} else {
 				logger.Warnf("Failed to create log group %s: %v", logGroupName, err)
@@ -881,7 +884,8 @@ func (t *ThanosStack) createCloudWatchLogGroups(ctx context.Context, namespace s
 		})
 		if err != nil {
 			// If log stream already exists, that's fine
-			if strings.Contains(err.Error(), "ResourceAlreadyExistsException") {
+			var alreadyExists *cwTypes.ResourceAlreadyExistsException
+			if errors.As(err, &alreadyExists) {
 				logger.Infof("Log stream already exists: %s/%s", logGroupName, logStreamName)
 				continue
 			}
