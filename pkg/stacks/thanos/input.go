@@ -1607,42 +1607,54 @@ func updateTerraformEnvFile(dirPath string, config types.UpdateTerraformEnvConfi
 
 func makeBlockExplorerEnvs(dirPath string, filename string, config types.AwsDatabaseEnvs) error {
 	if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
-		fmt.Println("Error creating directory:", err)
 		return err
 	}
 
 	filePath := filepath.Join(dirPath, filename)
 
-	output, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		fmt.Println("Error opening environment file:", err)
-		return err
-	}
-	defer output.Close()
-
-	writer := bufio.NewWriter(output)
-
-	envVars := []string{
-		fmt.Sprintf("export TF_VAR_db_username=\"%s\"\n", config.DatabaseUserName),
-		fmt.Sprintf("export TF_VAR_db_password=\"%s\"\n", config.DatabasePassword),
-		fmt.Sprintf("export TF_VAR_db_name=\"%s\"\n", config.DatabaseName),
-		fmt.Sprintf("export TF_VAR_vpc_id=\"%s\"\n", config.VpcId),
-		fmt.Sprintf("export TF_VAR_aws_region=\"%s\"\n", config.AwsRegion),
+	dbVarPrefixes := []string{
+		"export TF_VAR_db_username=",
+		"export TF_VAR_db_password=",
+		"export TF_VAR_db_name=",
+		"export TF_VAR_vpc_id=",
+		"export TF_VAR_aws_region=",
+		"export TF_VAR_thanos_stack_name=",
 	}
 
-	for _, envVar := range envVars {
-		_, err = writer.WriteString(envVar)
-		if err != nil {
-			return err
+	// filter out existing db vars to avoid duplicates on re-run
+	var lines []string
+	if content, err := os.ReadFile(filePath); err == nil {
+		for _, line := range strings.Split(string(content), "\n") {
+			skip := false
+			for _, prefix := range dbVarPrefixes {
+				if strings.HasPrefix(line, prefix) {
+					skip = true
+					break
+				}
+			}
+			if !skip {
+				lines = append(lines, line)
+			}
 		}
 	}
 
-	if err = writer.Flush(); err != nil {
-		return err
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
 	}
 
-	fmt.Println("Environment configuration file (.envrc) has been successfully updated!")
-	return nil
+	lines = append(lines,
+		fmt.Sprintf("export TF_VAR_db_username=\"%s\"", config.DatabaseUserName),
+		fmt.Sprintf("export TF_VAR_db_password=\"%s\"", config.DatabasePassword),
+		fmt.Sprintf("export TF_VAR_db_name=\"%s\"", config.DatabaseName),
+		fmt.Sprintf("export TF_VAR_vpc_id=\"%s\"", config.VpcId),
+		fmt.Sprintf("export TF_VAR_aws_region=\"%s\"", config.AwsRegion),
+	)
+	if config.StackName != "" {
+		lines = append(lines, fmt.Sprintf("export TF_VAR_thanos_stack_name=\"%s\"", config.StackName))
+	}
+	lines = append(lines, "")
+
+	return os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0600)
 }
 
 // makeDRBEnvs creates .envrc file for DRB Terraform deployment
