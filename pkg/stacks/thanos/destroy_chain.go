@@ -124,6 +124,13 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 		return err
 	}
 
+	// runs postdestroy verification to catch any orphaned resources
+	if namespace != "" {
+		if err := t.VerifyAndCleanupResources(ctx, namespace); err != nil {
+			t.logger.Warnf("Post-destroy verification encountered issues: %v", err)
+		}
+	}
+
 	t.deployConfig.K8s = nil
 	t.deployConfig.ChainName = ""
 	err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
@@ -132,6 +139,6 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 		// Continue even if config write fails, as resources are already destroyed
 	}
 
-	t.logger.Info("✅The chain has been destroyed successfully!")
+	t.logger.Info("The chain has been destroyed successfully!")
 	return nil
 }
