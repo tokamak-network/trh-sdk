@@ -2,35 +2,21 @@ package aws
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	dynamodbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
-
-// awsEnv returns environment variables for AWS CLI commands
-// This avoids modifying ~/.aws/credentials file
-func awsEnv(accessKey, secretKey, region string) []string {
-	return append(os.Environ(),
-		"AWS_ACCESS_KEY_ID="+accessKey,
-		"AWS_SECRET_ACCESS_KEY="+secretKey,
-		"AWS_DEFAULT_REGION="+region,
-		"AWS_REGION="+region,
-	)
-}
-
-// newAWSCommand creates an exec.Command with AWS credentials set via environment variables
-func newAWSCommand(accessKey, secretKey, region string, args ...string) *exec.Cmd {
-	cmd := exec.Command("aws", args...)
-	cmd.Env = awsEnv(accessKey, secretKey, region)
-	return cmd
-}
 
 func LoginAWS(ctx context.Context, awsConfig *types.AWSConfig) (*types.AWSProfile, error) {
 	var (
@@ -93,7 +79,7 @@ func loginAWS(accessKey, secretKey, region, formatFile string) (*types.AccountPr
 	}
 
 	// Set environment variables for the current process
-	// This affects subsequent AWS SDK calls but doesn't modify ~/.aws/credentials
+	// This affects subsequent AWS SDK calls and CLI tools (terraform, kubectl, etc.)
 	os.Setenv("AWS_ACCESS_KEY_ID", accessKey)
 	os.Setenv("AWS_SECRET_ACCESS_KEY", secretKey)
 	os.Setenv("AWS_REGION", region)
@@ -111,20 +97,32 @@ func loginAWS(accessKey, secretKey, region, formatFile string) (*types.AccountPr
 		}
 	}
 
-	// Use environment variables for AWS CLI commands instead of modifying ~/.aws/credentials
-	cmd := newAWSCommand(accessKey, secretKey, region, "sts", "get-caller-identity")
-	output, err := cmd.CombinedOutput()
+	ctx := context.Background()
+
+	// Load AWS config with static credentials
+	cfg, err := config.LoadDefaultConfig(ctx,
+		config.WithRegion(region),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	// Get caller identity using STS SDK
+	stsClient := sts.NewFromConfig(cfg)
+	identity, err := stsClient.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
 	if err != nil {
 		fmt.Println("Error fetching AWS caller identity:", err)
 		return nil, err
 	}
 
-	var profile types.AccountProfile
-	if err := json.Unmarshal(output, &profile); err != nil {
-		return nil, err
+	profile := types.AccountProfile{
+		UserId:  aws.ToString(identity.UserId),
+		Account: aws.ToString(identity.Account),
+		Arn:     aws.ToString(identity.Arn),
 	}
 
-	availabilityZones, err := getAvailabilityZonesWithCreds(accessKey, secretKey, region)
+	availabilityZones, err := getAvailabilityZones(ctx, cfg, region)
 	if err != nil {
 		fmt.Println("Error fetching AWS availability zones:", err)
 		return nil, err
@@ -136,7 +134,7 @@ func loginAWS(accessKey, secretKey, region, formatFile string) (*types.AccountPr
 	// before making the thanos-stack terraform up, check the `terraform-lock` table creation first
 	// https://github.com/tokamak-network/tokamak-thanos-stack/blob/main/terraform/thanos-stack/backend.tf#L7
 	// Step 1: get the table list by the region
-	tables, err := getTablesByRegionWithCreds(accessKey, secretKey, region)
+	tables, err := getTablesByRegion(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("error getting tables: %s", err)
 	}
@@ -149,7 +147,7 @@ func loginAWS(accessKey, secretKey, region, formatFile string) (*types.AccountPr
 	}
 
 	if !existTerraformLockTable {
-		err = createDynamoDBTableWithCreds(accessKey, secretKey, region, "terraform-lock")
+		err = createDynamoDBTable(ctx, cfg, "terraform-lock")
 		if err != nil {
 			return nil, fmt.Errorf("error creating terraform-lock table: %s", err)
 		}
@@ -158,19 +156,12 @@ func loginAWS(accessKey, secretKey, region, formatFile string) (*types.AccountPr
 	return &profile, nil
 }
 
-// getAvailabilityZonesWithCreds fetches availability zones using explicit credentials
-func getAvailabilityZonesWithCreds(accessKey, secretKey, region string) ([]string, error) {
-	cmd := newAWSCommand(accessKey, secretKey, region,
-		"ec2", "describe-availability-zones", "--region", region, "--output", "json")
-	output, err := cmd.CombinedOutput()
+func getAvailabilityZones(ctx context.Context, cfg aws.Config, region string) ([]string, error) {
+	ec2Client := ec2.NewFromConfig(cfg)
+
+	result, err := ec2Client.DescribeAvailabilityZones(ctx, &ec2.DescribeAvailabilityZonesInput{})
 	if err != nil {
 		fmt.Println("Error fetching AWS availability zones:", err)
-		return nil, err
-	}
-	var awsResponse types.AWSAvailabilityZoneResponse
-	err = json.Unmarshal([]byte(output), &awsResponse)
-	if err != nil {
-		fmt.Printf("❌ Error parsing JSON: %v\n", err)
 		return nil, err
 	}
 
@@ -192,72 +183,78 @@ func getAvailabilityZonesWithCreds(accessKey, secretKey, region string) ([]strin
 
 	// Extract only available zones and filter out EKS unsupported zones
 	availabilityZones := make([]string, 0)
-	for _, zone := range awsResponse.AvailabilityZones {
-		if zone.State == "available" && !isUnsupported(zone.ZoneName) {
-			availabilityZones = append(availabilityZones, zone.ZoneName)
+	for _, zone := range result.AvailabilityZones {
+		zoneName := aws.ToString(zone.ZoneName)
+		if zone.State == ec2types.AvailabilityZoneStateAvailable && !isUnsupported(zoneName) {
+			availabilityZones = append(availabilityZones, zoneName)
 		}
 	}
 
 	return availabilityZones, nil
 }
 
-// getTablesByRegionWithCreds fetches DynamoDB tables using explicit credentials
-func getTablesByRegionWithCreds(accessKey, secretKey, region string) ([]string, error) {
-	cmd := newAWSCommand(accessKey, secretKey, region,
-		"dynamodb", "list-tables", "--region", region, "--output", "json")
-	output, err := cmd.CombinedOutput()
+func getTablesByRegion(ctx context.Context, cfg aws.Config) ([]string, error) {
+	dynamoClient := dynamodb.NewFromConfig(cfg)
+
+	result, err := dynamoClient.ListTables(ctx, &dynamodb.ListTablesInput{})
 	if err != nil {
 		fmt.Println("Error fetching the table list:", err)
 		return nil, err
 	}
-	var awsResponse types.AWSTableListResponse
-	err = json.Unmarshal(output, &awsResponse)
-	if err != nil {
-		fmt.Printf("❌ Error parsing JSON: %v\n", err)
-		return nil, err
-	}
 
-	return awsResponse.TableNames, nil
+	return result.TableNames, nil
 }
 
-// createDynamoDBTableWithCreds creates a DynamoDB table using explicit credentials
-func createDynamoDBTableWithCreds(accessKey, secretKey, region, tableName string) error {
-	cmd := newAWSCommand(accessKey, secretKey, region,
-		"dynamodb", "create-table",
-		"--table-name", tableName,
-		"--attribute-definitions", "AttributeName=LockID,AttributeType=S",
-		"--key-schema", "AttributeName=LockID,KeyType=HASH",
-		"--billing-mode", "PAY_PER_REQUEST",
-		"--region", region,
-		"--output", "json",
-	)
+func createDynamoDBTable(ctx context.Context, cfg aws.Config, tableName string) error {
+	dynamoClient := dynamodb.NewFromConfig(cfg)
 
-	output, err := cmd.CombinedOutput()
+	_, err := dynamoClient.CreateTable(ctx, &dynamodb.CreateTableInput{
+		TableName: aws.String(tableName),
+		AttributeDefinitions: []dynamodbtypes.AttributeDefinition{
+			{
+				AttributeName: aws.String("LockID"),
+				AttributeType: dynamodbtypes.ScalarAttributeTypeS,
+			},
+		},
+		KeySchema: []dynamodbtypes.KeySchemaElement{
+			{
+				AttributeName: aws.String("LockID"),
+				KeyType:       dynamodbtypes.KeyTypeHash,
+			},
+		},
+		BillingMode: dynamodbtypes.BillingModePayPerRequest,
+	})
 	if err != nil {
-		fmt.Printf("❌ Error creating table: %v\nDetails: %s\n", err, string(output))
+		fmt.Printf("❌ Error creating table: %v\n", err)
 		return err
 	}
 
-	fmt.Println("✅ Table created successfully:", string(output))
+	fmt.Println("✅ Table created successfully")
 	return nil
 }
 
-// GetAvailableRegions fetches available AWS regions using explicit credentials
-// This function uses environment variables instead of modifying ~/.aws/credentials
 func GetAvailableRegions(accessKey string, secretKey string, region string) ([]string, error) {
-	cmd := newAWSCommand(accessKey, secretKey, region,
-		"ec2", "describe-regions", "--query", "Regions[].RegionName", "--output", "json")
-	output, err := cmd.CombinedOutput()
+	ctx := context.Background()
+
+	cfg, err := config.LoadDefaultConfig(ctx,
+		config.WithRegion(region),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
+	)
 	if err != nil {
-		fmt.Println("Error fetching AWS regions:", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
-	var availableRegions []string
-	err = json.Unmarshal(output, &availableRegions)
+	ec2Client := ec2.NewFromConfig(cfg)
+	result, err := ec2Client.DescribeRegions(ctx, &ec2.DescribeRegionsInput{})
 	if err != nil {
-		fmt.Printf("❌ Error parsing JSON: %v\n", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to describe regions: %w", err)
+	}
+
+	availableRegions := make([]string, 0, len(result.Regions))
+	for _, r := range result.Regions {
+		if r.RegionName != nil {
+			availableRegions = append(availableRegions, *r.RegionName)
+		}
 	}
 
 	return availableRegions, nil
