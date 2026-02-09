@@ -10,16 +10,16 @@ import (
 
 // ShutdownState represents the state of shutdown operations
 type ShutdownState struct {
-	ChainID         uint64 `json:"chainId"`
-	L2ChainID       uint64 `json:"l2ChainId"`
-	ThanosRoot      string `json:"thanosRoot"`
-	DeploymentsPath string `json:"deploymentsPath"`
-	DataDir         string `json:"dataDir"`
-	LastGenAt       string `json:"lastGenAt,omitempty"`
-	LastDryRunAt    string `json:"lastDryRunAt,omitempty"`
-	LastSendAt      string `json:"lastSendAt,omitempty"`
+	ChainID          uint64 `json:"chainId"`
+	L2ChainID        uint64 `json:"l2ChainId"`
+	ThanosRoot       string `json:"thanosRoot"`
+	DeploymentsPath  string `json:"deploymentsPath"`
+	DataDir          string `json:"dataDir"`
+	LastGenAt        string `json:"lastGenAt,omitempty"`
+	LastDryRunAt     string `json:"lastDryRunAt,omitempty"`
+	LastSendAt       string `json:"lastSendAt,omitempty"`
 	LastSnapshotPath string `json:"lastSnapshotPath,omitempty"`
-	LastCommand     string `json:"lastCommand,omitempty"`
+	LastCommand      string `json:"lastCommand,omitempty"`
 }
 
 // GetShutdownStateFilePath returns the path to the shutdown state file

@@ -16,6 +16,16 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+// allPluginsCanWorkWithoutChain returns true if every plugin in the list can be installed without a deployed chain.
+func allPluginsCanWorkWithoutChain(plugins []string) bool {
+	for _, p := range plugins {
+		if !constants.CanPluginWorkWithoutChain(p) {
+			return false
+		}
+	}
+	return len(plugins) > 0
+}
+
 func ActionInstallationPlugins() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
 		var network, stack string
@@ -28,6 +38,21 @@ func ActionInstallationPlugins() cli.ActionFunc {
 		if err != nil {
 			return err
 		}
+
+		// Validate plugins FIRST before doing any setup
+		plugins := cmd.Args().Slice()
+		if len(plugins) == 0 {
+			fmt.Print("Please specify at least one plugin to install(e.g: bridge)")
+			return nil
+		}
+
+		// Validate all plugin names before proceeding
+		for _, pluginName := range plugins {
+			if !constants.SupportedPlugins[pluginName] {
+				return fmt.Errorf("plugin '%s' is not supported. Supported plugins: %v", pluginName, constants.SupportedPluginsList)
+			}
+		}
+
 		config, err = utils.ReadConfigFromJSONFile(deploymentPath)
 		if err != nil {
 			fmt.Println("Error reading settings.json")
@@ -38,17 +63,18 @@ func ActionInstallationPlugins() cli.ActionFunc {
 			network = constants.LocalDevnet
 			stack = constants.ThanosStack
 		} else {
-			network = config.Network
-			stack = config.Stack
-			awsConfig = config.AWS
-		}
-
-		if awsConfig == nil {
-			awsConfig, err = thanos.InputAWSLogin()
-			if err != nil {
-				fmt.Printf("Failed to login AWS: %s \n", err)
-				return err
+			// Handle empty strings - treat as if not set
+			if config.Network == "" {
+				network = constants.LocalDevnet
+			} else {
+				network = config.Network
 			}
+			if config.Stack == "" {
+				stack = constants.ThanosStack
+			} else {
+				stack = config.Stack
+			}
+			awsConfig = config.AWS
 		}
 
 		if !constants.SupportedStacks[stack] {
@@ -58,15 +84,38 @@ func ActionInstallationPlugins() cli.ActionFunc {
 			return fmt.Errorf("unsupported network: %s", network)
 		}
 
+		// Plugins that work without chain can use Testnet for logging when in LocalDevnet
+		allPluginsWorkWithoutChain := allPluginsCanWorkWithoutChain(plugins)
+
 		if network == constants.LocalDevnet {
-			fmt.Println("You are in local devnet mode. Please specify the network and stack.")
-			return nil
+			if allPluginsWorkWithoutChain {
+				// Allow: chain-independent plugins (e.g. DRB) can install without a deployed chain
+				// Keep network as LocalDevnet - no need to convert to Testnet
+			} else {
+				fmt.Println("You are in local devnet mode. Please specify the network and stack.")
+				return nil
+			}
 		}
 
-		plugins := cmd.Args().Slice()
-		if len(plugins) == 0 {
-			fmt.Print("Please specify at least one plugin to install(e.g: bridge)")
-			return nil
+		// Only prompt for AWS login if needed (after all validations)
+		// Check if awsConfig is nil OR if credentials are empty
+		// Regular-node also needs AWS for EC2 provisioning
+		if awsConfig == nil || awsConfig.AccessKey == "" || awsConfig.SecretKey == "" {
+			awsConfig, err = thanos.InputAWSLogin()
+			if err != nil {
+				fmt.Printf("Failed to login AWS: %s \n", err)
+				return err
+			}
+			// Save AWS credentials to settings.json
+			if config == nil {
+				config = &types.Config{}
+			}
+			config.AWS = awsConfig
+			if err := config.WriteToJSONFile(deploymentPath); err != nil {
+				fmt.Printf("Warning: Failed to save AWS credentials to settings.json: %s\n", err)
+			} else {
+				fmt.Println("✅ AWS credentials saved to settings.json")
+			}
 		}
 
 		// Initialize the logger
@@ -84,7 +133,10 @@ func ActionInstallationPlugins() cli.ActionFunc {
 				return err
 			}
 
-			if network == constants.LocalDevnet {
+			// Plugins that work without chain can proceed in LocalDevnet
+			allPluginsWorkWithoutChain := allPluginsCanWorkWithoutChain(plugins)
+
+			if network == constants.LocalDevnet && !allPluginsWorkWithoutChain {
 				return fmt.Errorf("network %s does not support plugin installation", constants.LocalDevnet)
 			}
 
@@ -97,14 +149,25 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							continue
 						}
 
-						if config.K8s == nil {
+						// Some plugins can work without existing chain deployment
+						if (config == nil || config.K8s == nil) && !constants.CanPluginWorkWithoutChain(pluginName) {
 							return fmt.Errorf("the chain has not been deployed yet, please deploy the chain first")
 						}
 
 						var displayNamespace string
 						if pluginName == constants.PluginMonitoring {
 							displayNamespace = constants.MonitoringNamespace
+						} else if pluginName == constants.PluginDRB {
+							drbType := strings.TrimSpace(strings.ToLower(cmd.String("type")))
+							if drbType == constants.DRBTypeRegular {
+								displayNamespace = "ec2"
+							} else {
+								displayNamespace = constants.DRBNamespace
+							}
 						} else {
+							if !constants.CanPluginWorkWithoutChain(pluginName) && (config == nil || config.K8s == nil) {
+								return fmt.Errorf("the chain has not been deployed yet, please deploy the chain first")
+							}
 							displayNamespace = config.K8s.Namespace
 						}
 
@@ -203,6 +266,35 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							}
 							return nil
 
+						case constants.PluginDRB:
+							drbType := strings.TrimSpace(strings.ToLower(cmd.String("type")))
+							if drbType == "" {
+								drbType = constants.DRBTypeLeader // default for backwards compat
+							}
+							if drbType != constants.DRBTypeLeader && drbType != constants.DRBTypeRegular {
+								return fmt.Errorf("unsupported DRB type: %s. Use --type leader or --type regular", drbType)
+							}
+							if drbType == constants.DRBTypeLeader {
+								input, err := thanosStack.GetDRBInput(ctx)
+								if err != nil {
+									return err
+								}
+								_, err = thanosStack.DeployDRB(ctx, input)
+								if err != nil {
+									return thanosStack.UninstallDRB(ctx)
+								}
+								return nil
+							}
+							// regular
+							input, err := thanosStack.GetDRBRegularNodeInput(ctx)
+							if err != nil {
+								return err
+							}
+							if err := thanosStack.InstallDRBRegularNode(ctx, input); err != nil {
+								return err
+							}
+							return nil
+
 						default:
 							return nil
 						}
@@ -221,6 +313,13 @@ func ActionInstallationPlugins() cli.ActionFunc {
 						var displayNamespace string
 						if pluginName == constants.PluginMonitoring {
 							displayNamespace = constants.MonitoringNamespace
+						} else if pluginName == constants.PluginDRB {
+							drbType := strings.TrimSpace(strings.ToLower(cmd.String("type")))
+							if drbType == constants.DRBTypeRegular {
+								displayNamespace = "ec2"
+							} else {
+								displayNamespace = constants.DRBNamespace
+							}
 						} else {
 							displayNamespace = config.K8s.Namespace
 						}
@@ -238,6 +337,18 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							return thanosStack.UninstallMonitoring(ctx)
 						case constants.PluginCrossTrade:
 							return thanosStack.UninstallCrossTrade(ctx)
+						case constants.PluginDRB:
+							drbType := strings.TrimSpace(strings.ToLower(cmd.String("type")))
+							if drbType == "" {
+								drbType = constants.DRBTypeLeader // default for backwards compat
+							}
+							if drbType != constants.DRBTypeLeader && drbType != constants.DRBTypeRegular {
+								return fmt.Errorf("unsupported DRB type: %s. Use --type leader or --type regular", drbType)
+							}
+							if drbType == constants.DRBTypeLeader {
+								return thanosStack.UninstallDRB(ctx)
+							}
+							return thanosStack.UninstallDRBRegularNode(ctx)
 						}
 					}
 				default:
