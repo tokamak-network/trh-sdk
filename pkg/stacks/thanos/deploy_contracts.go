@@ -217,14 +217,10 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		}
 
 		// STEP 2. Clone the repository
-		if !deployContractsConfig.ReuseDeployment {
-			err = t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
-			if err != nil {
-				t.logger.Error("failed to clone the repository", "err", err)
-				return err
-			}
-		} else {
-			t.logger.Info("ℹ️ ReuseDeployment: Skipping repository cloning")
+		err = t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
+		if err != nil {
+			t.logger.Error("failed to clone the repository", "err", err)
+			return err
 		}
 
 		t.deployConfig.AdminPrivateKey = operators.AdminPrivateKey
