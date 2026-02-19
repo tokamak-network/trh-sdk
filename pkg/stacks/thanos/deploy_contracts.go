@@ -250,24 +250,19 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		}
 
 		// STEP 3. Build the contracts
-		if !deployContractsConfig.ReuseDeployment {
-			t.logger.Info("Building smart contracts...")
-			scriptsDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "scripts")
-			err = utils.ExecuteCommandStreamInDir(ctx, t.logger, scriptsDir, "bash", "./start-deploy.sh", "build")
-			if err != nil {
-				if errors.Is(err, context.Canceled) {
-					t.logger.Error("Deployment canceled")
-					return err
-				}
-				t.logger.Error("❌ Build the contracts failed!")
+		t.logger.Info("Building smart contracts...")
+		scriptsDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "scripts")
+		err = utils.ExecuteCommandStreamInDir(ctx, t.logger, scriptsDir, "bash", "./start-deploy.sh", "build")
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				t.logger.Error("Deployment canceled")
 				return err
 			}
-			t.logger.Info("✅ Build the contracts completed!")
-		} else {
-			t.logger.Info("ℹ️ ReuseDeployment: Skipping contracts build")
+			t.logger.Error("❌ Build the contracts failed!")
+			return err
 		}
+		t.logger.Info("✅ Build the contracts completed!")
 
-		// STEP 4. Deploy the contracts
 		// Check admin balance and estimated deployment cost
 		balance, err := l1Client.BalanceAt(ctx, adminAccount, nil)
 		if err != nil {
@@ -306,13 +301,9 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			return err
 		}
 
-		if deployContractsConfig.ReuseDeployment {
-			t.logger.Info("ℹ️ ReuseDeployment: Proceeding with deployment using existing implementation contracts (if available)...")
-		}
-
-		// Always execute deployment step.
-		// If ReuseDeployment is true, cloning/building were skipped, so 'start-deploy.sh deploy'
-		// will use existing artifacts/broadcasts to reuse implementation contracts.
+		// STEP 4. Deploy the contracts
+		// ReuseDeployment flag is passed via deploy-config.json; start-deploy.sh reads it
+		// to decide whether to reuse existing implementation contracts.
 		err = t.deployContracts(ctx, l1Client, false)
 		if err != nil {
 			t.logger.Error("failed to deploy contracts", "err", err)
