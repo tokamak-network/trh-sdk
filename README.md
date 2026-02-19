@@ -124,6 +124,7 @@ trh-sdk deploy-contracts --network testnet --stack thanos --reuse-deployment=fal
 ```
 
 For detailed usage and verification methods, refer to the [Deploy Contracts Guide](docs/deploy-contracts-guide.md).
+If you want to replace the execution client with Ethrex for Sepolia deployment, refer to the [Sepolia Ethrex Migration Guide](docs/sepolia-ethrex-migration-guide.md).
 
 ### Deploy stack
 To deploy the testnet/mainnet network, we must deploy the L1 contracts successfully first.

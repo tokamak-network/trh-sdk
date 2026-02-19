@@ -4,6 +4,7 @@ type UpdateTerraformEnvConfig struct {
 	L1RpcUrl            string
 	L1RpcProvider       string
 	L1BeaconUrl         string
+	OpGethImageRepo     string
 	OpGethImageTag      string
 	ThanosStackImageTag string
 }
@@ -28,6 +29,7 @@ type TerraformEnvConfig struct {
 	L1RpcUrl            string
 	L1RpcProvider       string
 	L1BeaconUrl         string
+	OpGethImageRepo     string
 	OpGethImageTag      string
 	ThanosStackImageTag string
 	MaxChannelDuration  uint64

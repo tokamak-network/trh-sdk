@@ -60,6 +60,7 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, inputs *UpdateNetworkIn
 		L1RpcUrl:            t.deployConfig.L1RPCURL,
 		L1RpcProvider:       t.deployConfig.L1RPCProvider,
 		ThanosStackImageTag: constants.DockerImageTag[t.deployConfig.Network].ThanosStackImageTag,
+		OpGethImageRepo:     constants.DockerImageTag[t.deployConfig.Network].OpGethImageRepo,
 		OpGethImageTag:      constants.DockerImageTag[t.deployConfig.Network].OpGethImageTag,
 	})
 	if err != nil {
@@ -98,6 +99,28 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, inputs *UpdateNetworkIn
 		err = utils.UpdateYAMLField(thanosValuesFilePath, "op_node.env.l1_beacon", t.deployConfig.L1BeaconURL)
 		if err != nil {
 			t.logger.Error("Error updating L1_BEACON_RPC field:", "err", err)
+			return err
+		}
+
+		// Update execution client image and client_type
+		imageRepo := constants.DockerImageTag[t.deployConfig.Network].OpGethImageRepo
+		imageTag := constants.DockerImageTag[t.deployConfig.Network].OpGethImageTag
+		var opGethImage, clientType string
+		if imageRepo != "" {
+			opGethImage = fmt.Sprintf("%s:%s", imageRepo, imageTag)
+			clientType = "py-ethclient"
+		} else {
+			opGethImage = fmt.Sprintf("tokamaknetwork/thanos-op-geth:nightly-%s", imageTag)
+			clientType = "geth"
+		}
+		err = utils.UpdateYAMLField(thanosValuesFilePath, "op_geth.image", opGethImage)
+		if err != nil {
+			t.logger.Error("Error updating op_geth.image field:", "err", err)
+			return err
+		}
+		err = utils.UpdateYAMLField(thanosValuesFilePath, "op_geth.client_type", clientType)
+		if err != nil {
+			t.logger.Error("Error updating op_geth.client_type field:", "err", err)
 			return err
 		}
 	}

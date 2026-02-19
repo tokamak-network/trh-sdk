@@ -1503,6 +1503,9 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_l1_rpc_url=\"%s\"\n", config.L1RpcUrl))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_l1_rpc_provider=\"%s\"\n", config.L1RpcProvider))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_l1_beacon_url=\"%s\"\n", config.L1BeaconUrl))
+	if config.OpGethImageRepo != "" {
+		writer.WriteString(fmt.Sprintf("export TF_VAR_stack_op_geth_image_repo=\"%s\"\n", config.OpGethImageRepo))
+	}
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_op_geth_image_tag=\"%s\"\n", config.OpGethImageTag))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_thanos_stack_image_tag=\"%s\"\n", config.ThanosStackImageTag))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_max_channel_duration=\"%d\"\n", config.MaxChannelDuration))
@@ -1572,6 +1575,11 @@ func updateTerraformEnvFile(dirPath string, config types.UpdateTerraformEnvConfi
 		"TF_VAR_stack_l1_beacon_url":          config.L1BeaconUrl,
 		"TF_VAR_stack_op_geth_image_tag":      config.OpGethImageTag,
 		"TF_VAR_stack_thanos_stack_image_tag": config.ThanosStackImageTag,
+	}
+	if config.OpGethImageRepo != "" {
+		newValues["TF_VAR_stack_op_geth_image_repo"] = config.OpGethImageRepo
+	} else {
+		delete(existingContent, "TF_VAR_stack_op_geth_image_repo")
 	}
 
 	// Update or add new values

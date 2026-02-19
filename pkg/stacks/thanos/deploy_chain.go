@@ -181,6 +181,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		L1RpcProvider:       t.deployConfig.L1RPCProvider,
 		Azs:                 awsAccountProfile.AvailabilityZones,
 		ThanosStackImageTag: constants.DockerImageTag[t.deployConfig.Network].ThanosStackImageTag,
+		OpGethImageRepo:     constants.DockerImageTag[t.deployConfig.Network].OpGethImageRepo,
 		OpGethImageTag:      constants.DockerImageTag[t.deployConfig.Network].OpGethImageTag,
 		MaxChannelDuration:  chainConfiguration.GetMaxChannelDuration(),
 		TxmgrCellProofTime:  t.deployConfig.TxmgrCellProofTime,
