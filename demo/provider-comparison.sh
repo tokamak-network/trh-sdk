@@ -60,7 +60,8 @@ row() {
 # ─── SECTIONS ──────────────────────────────────────────────────────────────
 
 section_intro() {
-  clear
+  # clear은 TTY에서만 실행 (파이프/리다이렉트 환경에서 제어코드 출력 방지)
+  [[ -t 1 ]] && clear
   echo ""
   echo -e "${BOLD}${WHITE}"
   cat << 'EOF'
@@ -82,6 +83,7 @@ EOF
   echo -e "    2. 인프라 구성 비교"
   echo -e "    3. 배포 단계 흐름"
   echo -e "    4. 파괴(Destroy) 흐름"
+  echo -e "    5. 선택 가이드 (비용·복잡도 비교)"
   pause
 }
 
@@ -194,9 +196,8 @@ section_steps() {
   printf "  ${YELLOW}5.${RESET}  EKS + VPC + RDS + EFS 배포   ${ORANGE}5.${RESET}  DOKS + VPC + PostgreSQL 배포\n"
   printf "  ${DIM}    terraform apply (S3 backend)${RESET}  ${DIM}    terraform apply (Spaces backend)${RESET}\n\n"
 
-  printf "  ${DIM}    (없음)                      ${RESET}  ${ORANGE}6.${RESET}  doctl로 kubeconfig 저장\n"
-  printf "  ${YELLOW}6.${RESET}  EKS kubeconfig 설정           ${DIM}    (doctl kubernetes cluster kubeconfig save)${RESET}\n"
-  printf "  ${DIM}    (aws eks update-kubeconfig)  ${RESET}\n\n"
+  printf "  ${YELLOW}6.${RESET}  EKS kubeconfig 설정           ${ORANGE}6.${RESET}  doctl kubeconfig 저장\n"
+  printf "  ${DIM}    aws eks update-kubeconfig    ${RESET}  ${DIM}    doctl k8s cluster kubeconfig save${RESET}\n\n"
 
   printf "  ${YELLOW}7.${RESET}  K8s 클러스터 Ready 대기       ${ORANGE}7.${RESET}  K8s 클러스터 Ready 대기\n\n"
 
