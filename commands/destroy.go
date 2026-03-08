@@ -44,7 +44,8 @@ func ActionDestroyInfra() cli.ActionFunc {
 		}
 
 		// For AWS deployments, re-prompt if credentials are missing.
-		if doConfig == nil && awsConfig == nil {
+		// Skip for LocalDevnet — no cloud credentials required.
+		if network != constants.LocalDevnet && doConfig == nil && awsConfig == nil {
 			awsConfig, err = thanos.InputAWSLogin()
 			if err != nil {
 				fmt.Printf("Failed to login AWS: %s \n", err)

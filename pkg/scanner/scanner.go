@@ -13,10 +13,10 @@ import (
 // ReadPassword reads a secret string from stdin without echoing characters to the terminal.
 func ReadPassword() (string, error) {
 	raw, err := term.ReadPassword(int(os.Stdin.Fd()))
-	fmt.Println() // restore newline suppressed by ReadPassword
 	if err != nil {
 		return "", err
 	}
+	fmt.Println() // restore newline suppressed by ReadPassword
 	return strings.TrimSpace(string(raw)), nil
 }
 
