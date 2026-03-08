@@ -13,6 +13,19 @@ terraform {
       version = "~> 2.0"
     }
   }
+
+  # Backend is configured at runtime via -backend-config flags in `terraform init`.
+  # Example:
+  #   terraform init \
+  #     -backend-config="bucket=trh-terraform-state-<namespace>" \
+  #     -backend-config="endpoint=https://<region>.digitaloceanspaces.com" \
+  #     -backend-config="region=us-east-1" \
+  #     -backend-config="key=thanos-stack/terraform.tfstate" \
+  #     -backend-config="skip_credentials_validation=true" \
+  #     -backend-config="skip_metadata_api_check=true" \
+  #     -backend-config="skip_region_validation=true" \
+  #     -backend-config="force_path_style=true"
+  backend "s3" {}
 }
 
 variable "do_token" {
@@ -89,6 +102,24 @@ variable "node_count" {
   default     = 2
 }
 
+variable "k8s_version" {
+  description = "DOKS Kubernetes version slug (e.g. 1.30.x-do.0)"
+  type        = string
+  default     = "1.30.x-do.0"
+}
+
+variable "vpc_cidr" {
+  description = "VPC IP range in CIDR notation"
+  type        = string
+  default     = "10.10.0.0/16"
+}
+
+variable "db_size" {
+  description = "Managed PostgreSQL cluster size slug"
+  type        = string
+  default     = "db-s-1vcpu-1gb"
+}
+
 provider "digitalocean" {
   token = var.do_token
 }
@@ -97,14 +128,14 @@ provider "digitalocean" {
 resource "digitalocean_vpc" "thanos_vpc" {
   name     = "${var.namespace}-vpc"
   region   = var.do_region
-  ip_range = "10.10.0.0/16"
+  ip_range = var.vpc_cidr
 }
 
 # DOKS cluster
 resource "digitalocean_kubernetes_cluster" "thanos_cluster" {
   name     = var.namespace
   region   = var.do_region
-  version  = "1.30.x-do.0"
+  version  = var.k8s_version
   vpc_uuid = digitalocean_vpc.thanos_vpc.id
 
   node_pool {
@@ -123,19 +154,11 @@ resource "digitalocean_database_cluster" "blockscout_db" {
   name       = "${var.namespace}-db"
   engine     = "pg"
   version    = "15"
-  size       = "db-s-1vcpu-1gb"
+  size       = var.db_size
   region     = var.do_region
   node_count = 1
 
   private_network_uuid = digitalocean_vpc.thanos_vpc.id
-}
-
-# Persistent volume (DO Volume) for chain data
-resource "digitalocean_volume" "chain_data" {
-  region      = var.do_region
-  name        = "${var.namespace}-chain-data"
-  size        = 100
-  description = "Persistent storage for ${var.namespace} chain data"
 }
 
 # Kubernetes secrets for private keys

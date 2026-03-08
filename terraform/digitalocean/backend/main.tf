@@ -33,12 +33,6 @@ resource "digitalocean_spaces_bucket" "terraform_state" {
   name   = "trh-terraform-state-${var.namespace}"
   region = var.do_region
 
-  lifecycle_rule {
-    enabled = true
-    expiration {
-      days = 365
-    }
-  }
 }
 
 output "spaces_bucket_name" {

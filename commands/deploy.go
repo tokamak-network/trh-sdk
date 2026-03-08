@@ -97,6 +97,8 @@ func ActionDeploy() cli.ActionFunc {
 					fmt.Printf("Failed to login DigitalOcean: %s \n", err)
 					return err
 				}
+			default:
+				return fmt.Errorf("unsupported infrastructure provider %q (supported: aws, digitalocean)", infraOpt)
 			}
 
 			thanosStack, err := thanos.NewThanosStack(ctx, l, network, true, deploymentPath, awsConfig, doConfig)

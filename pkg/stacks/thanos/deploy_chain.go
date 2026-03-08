@@ -461,28 +461,27 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 
 // ----------------------------------------- Deploy to DigitalOcean ----------------------------- //
 
+const (
+	l2RPCScheme        = "http://"
+	ingressPollTimeout = 10 * time.Minute
+	ingressPollInterval = 15 * time.Second
+)
+
 func (t *ThanosStack) deployNetworkToDigitalOcean(ctx context.Context, inputs *DeployInfraInput) error {
 	shellConfigFile := utils.GetShellConfigDefault()
 
 	// STEP 1. Verify required dependencies
 	if !dependencies.CheckTerraformInstallation(ctx) {
-		t.logger.Warn("Try running `source %s` to set up your environment", shellConfigFile)
-		return nil
+		return fmt.Errorf("terraform not found: run `source %s` to set up your environment", shellConfigFile)
 	}
-
 	if !dependencies.CheckHelmInstallation(ctx) {
-		t.logger.Warn("Try running `source %s` to set up your environment", shellConfigFile)
-		return nil
+		return fmt.Errorf("helm not found: run `source %s` to set up your environment", shellConfigFile)
 	}
-
 	if !dependencies.CheckDoctlInstallation(ctx) {
-		t.logger.Warn("doctl is required for DigitalOcean deployment. Install: https://docs.digitalocean.com/reference/doctl/how-to/install/")
-		return nil
+		return fmt.Errorf("doctl not found: install from https://docs.digitalocean.com/reference/doctl/how-to/install/")
 	}
-
 	if !dependencies.CheckK8sInstallation(ctx) {
-		t.logger.Warn("Try running `source %s` to set up your environment", shellConfigFile)
-		return nil
+		return fmt.Errorf("kubectl not found: run `source %s` to set up your environment", shellConfigFile)
 	}
 
 	if inputs == nil {
@@ -505,6 +504,8 @@ func (t *ThanosStack) deployNetworkToDigitalOcean(ctx context.Context, inputs *D
 	doConfig := t.doProfile.Config
 	namespace := utils.ConvertChainNameToNamespace(inputs.ChainName)
 	terraformDir := fmt.Sprintf("%s/terraform/digitalocean", t.deploymentPath)
+	backendDir := terraformDir + "/backend"
+	thanosStackDir := terraformDir + "/thanos-stack"
 
 	// STEP 2. Save DO config
 	t.deployConfig.DigitalOcean = doConfig
@@ -515,76 +516,79 @@ func (t *ThanosStack) deployNetworkToDigitalOcean(ctx context.Context, inputs *D
 	// STEP 3. Copy chain config files
 	if err := utils.CopyFile(
 		fmt.Sprintf("%s/tokamak-thanos/build/rollup.json", t.deploymentPath),
-		fmt.Sprintf("%s/thanos-stack/config-files/rollup.json", terraformDir),
+		thanosStackDir+"/config-files/rollup.json",
 	); err != nil {
 		t.logger.Error("Error copying rollup configuration", "err", err)
 		return err
 	}
-
 	if err := utils.CopyFile(
 		fmt.Sprintf("%s/tokamak-thanos/build/genesis.json", t.deploymentPath),
-		fmt.Sprintf("%s/thanos-stack/config-files/genesis.json", terraformDir),
+		thanosStackDir+"/config-files/genesis.json",
 	); err != nil {
 		t.logger.Error("Error copying genesis configuration", "err", err)
 		return err
 	}
 
-	// STEP 4. Initialize Terraform backend (DO Spaces)
-	err := utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
-		"-c",
-		fmt.Sprintf(`cd %s/backend &&
-		export DO_TOKEN=%s &&
-		export DO_REGION=%s &&
-		export TF_VAR_namespace=%s &&
-		terraform init &&
-		terraform plan &&
-		terraform apply -auto-approve`,
-			terraformDir, doConfig.Token, doConfig.Region, namespace),
-	}...)
-	if err != nil {
-		t.logger.Error("Error initializing Terraform backend (DO Spaces)", "err", err)
-		return err
+	// STEP 4. Initialize Terraform backend (DO Spaces).
+	// Sensitive values are passed via environment variables, never embedded in command arguments.
+	backendEnv := []string{
+		"SPACES_ACCESS_TOKEN=" + doConfig.Token,
+		"TF_VAR_do_token=" + doConfig.Token,
+		"TF_VAR_do_region=" + doConfig.Region,
+		"TF_VAR_namespace=" + namespace,
+	}
+	for _, args := range [][]string{
+		{"init"},
+		{"plan"},
+		{"apply", "-auto-approve"},
+	} {
+		if err := utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, backendDir, backendEnv, "terraform", args...); err != nil {
+			t.logger.Error("Error initializing Terraform backend (DO Spaces)", "err", err)
+			return err
+		}
 	}
 
-	// STEP 5. Deploy DOKS + VPC + Managed DB + Volumes
+	// STEP 5. Deploy DOKS + VPC + Managed DB
 	t.logger.Info("Deploying Thanos stack infrastructure on DigitalOcean...")
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
-		"-c",
-		fmt.Sprintf(`cd %s/thanos-stack &&
-		export DO_TOKEN=%s &&
-		export DO_REGION=%s &&
-		export TF_VAR_namespace=%s &&
-		export TF_VAR_sequencer_key=%s &&
-		export TF_VAR_batcher_key=%s &&
-		export TF_VAR_proposer_key=%s &&
-		export TF_VAR_challenger_key=%s &&
-		export TF_VAR_l1_rpc_url=%s &&
-		export TF_VAR_l1_beacon_url=%s &&
-		export TF_VAR_thanos_stack_image_tag=%s &&
-		export TF_VAR_op_geth_image_tag=%s &&
-		terraform init &&
-		terraform plan &&
-		terraform apply -auto-approve`,
-			terraformDir,
-			doConfig.Token, doConfig.Region, namespace,
-			t.deployConfig.SequencerPrivateKey,
-			t.deployConfig.BatcherPrivateKey,
-			t.deployConfig.ProposerPrivateKey,
-			t.deployConfig.ChallengerPrivateKey,
-			t.deployConfig.L1RPCURL,
-			inputs.L1BeaconURL,
-			constants.DockerImageTag[t.deployConfig.Network].ThanosStackImageTag,
-			constants.DockerImageTag[t.deployConfig.Network].OpGethImageTag,
-		),
-	}...)
-	if err != nil {
-		t.logger.Error("Error deploying Thanos stack infrastructure on DigitalOcean", "err", err)
-		return err
+	imgTags := constants.DockerImageTag[t.deployConfig.Network]
+	infraEnv := []string{
+		"TF_VAR_do_token=" + doConfig.Token,
+		"TF_VAR_do_region=" + doConfig.Region,
+		"TF_VAR_namespace=" + namespace,
+		"TF_VAR_sequencer_key=" + t.deployConfig.SequencerPrivateKey,
+		"TF_VAR_batcher_key=" + t.deployConfig.BatcherPrivateKey,
+		"TF_VAR_proposer_key=" + t.deployConfig.ProposerPrivateKey,
+		"TF_VAR_challenger_key=" + t.deployConfig.ChallengerPrivateKey,
+		"TF_VAR_l1_rpc_url=" + t.deployConfig.L1RPCURL,
+		"TF_VAR_l1_beacon_url=" + inputs.L1BeaconURL,
+		"TF_VAR_thanos_stack_image_tag=" + imgTags.ThanosStackImageTag,
+		"TF_VAR_op_geth_image_tag=" + imgTags.OpGethImageTag,
+	}
+	stateBucket := fmt.Sprintf("trh-terraform-state-%s", namespace)
+	stateEndpoint := fmt.Sprintf("https://%s.digitaloceanspaces.com", doConfig.Region)
+	for _, args := range [][]string{
+		{"init",
+			"-backend-config=bucket=" + stateBucket,
+			"-backend-config=endpoint=" + stateEndpoint,
+			"-backend-config=region=us-east-1",
+			"-backend-config=key=thanos-stack/terraform.tfstate",
+			"-backend-config=skip_credentials_validation=true",
+			"-backend-config=skip_metadata_api_check=true",
+			"-backend-config=skip_region_validation=true",
+			"-backend-config=force_path_style=true",
+		},
+		{"plan"},
+		{"apply", "-auto-approve"},
+	} {
+		if err := utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, thanosStackDir, infraEnv, "terraform", args...); err != nil {
+			t.logger.Error("Error deploying Thanos stack infrastructure on DigitalOcean", "err", err)
+			return err
+		}
 	}
 
 	// STEP 6. Configure DOKS kubeconfig
 	t.logger.Info("Configuring DOKS kubeconfig...")
-	if err := digitalocean.SaveKubeconfig(doConfig.Token, namespace); err != nil {
+	if err := digitalocean.SaveKubeconfig(ctx, doConfig.Token, namespace); err != nil {
 		t.logger.Error("Error saving DOKS kubeconfig", "err", err)
 		return err
 	}
@@ -600,8 +604,8 @@ func (t *ThanosStack) deployNetworkToDigitalOcean(ctx context.Context, inputs *D
 
 	// STEP 8. Install Helm charts
 	helmReleaseName := fmt.Sprintf("%s-%d", namespace, time.Now().Unix())
-	chartFile := fmt.Sprintf("%s/thanos-stack/charts/thanos-stack", terraformDir)
-	valueFile := fmt.Sprintf("%s/thanos-stack/thanos-stack-values.yaml", terraformDir)
+	chartFile := thanosStackDir + "/charts/thanos-stack"
+	valueFile := thanosStackDir + "/thanos-stack-values.yaml"
 
 	if err := utils.UpdateYAMLField(valueFile, "enable_vpc", true); err != nil {
 		t.logger.Error("Error updating enable_vpc configuration", "err", err)
@@ -626,22 +630,30 @@ func (t *ThanosStack) deployNetworkToDigitalOcean(ctx context.Context, inputs *D
 		t.logger.Error("Error installing Helm charts", "err", err)
 		return err
 	}
-
 	t.logger.Info("✅ Helm charts installed successfully")
 
-	// STEP 9. Get L2 RPC endpoint
+	// STEP 9. Poll for L2 RPC endpoint with timeout.
 	var l2RPCUrl string
+	ingressCtx, ingressCancel := context.WithTimeout(ctx, ingressPollTimeout)
+	defer ingressCancel()
 	for {
-		k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, helmReleaseName)
+		k8sIngresses, err := utils.GetAddressByIngress(ingressCtx, namespace, helmReleaseName)
 		if err != nil {
+			if ingressCtx.Err() != nil {
+				return fmt.Errorf("timed out waiting for L2 RPC ingress after %v", ingressPollTimeout)
+			}
 			t.logger.Error("Error retrieving ingress addresses", "err", err)
 			return err
 		}
 		if len(k8sIngresses) > 0 {
-			l2RPCUrl = "http://" + k8sIngresses[0]
+			l2RPCUrl = l2RPCScheme + k8sIngresses[0]
 			break
 		}
-		time.Sleep(15 * time.Second)
+		select {
+		case <-ingressCtx.Done():
+			return fmt.Errorf("timed out waiting for L2 RPC ingress after %v", ingressPollTimeout)
+		case <-time.After(ingressPollInterval):
+		}
 	}
 
 	t.logger.Info("✅ Network deployment completed successfully!")
@@ -662,6 +674,7 @@ func (t *ThanosStack) deployNetworkToDigitalOcean(ctx context.Context, inputs *D
 	if !inputs.IgnoreInstallBridge {
 		if _, err := t.InstallBridge(ctx); err != nil {
 			t.logger.Error("Error installing bridge", "err", err)
+			return fmt.Errorf("bridge installation failed: %w", err)
 		}
 	}
 

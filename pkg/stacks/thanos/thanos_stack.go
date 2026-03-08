@@ -77,7 +77,7 @@ func NewThanosStack(
 	var doProfile *types.DigitalOceanProfile
 
 	if doConfig != nil {
-		if err := digitalocean.ValidateToken(doConfig.Token); err != nil {
+		if err := digitalocean.ValidateToken(ctx, doConfig.Token); err != nil {
 			l.Error("Failed to validate DigitalOcean token", "err", err)
 			return nil, err
 		}

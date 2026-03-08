@@ -1085,6 +1085,7 @@ func InputAWSLogin() (*types.AWSConfig, error) {
 }
 
 func InputDigitalOceanLogin() (*types.DigitalOceanConfig, error) {
+	ctx := context.Background()
 	var (
 		token  string
 		region string
@@ -1103,31 +1104,33 @@ func InputDigitalOceanLogin() (*types.DigitalOceanConfig, error) {
 			continue
 		}
 		fmt.Println("Verifying DigitalOcean token...")
-		if err := digitalocean.ValidateToken(token); err != nil {
+		if err := digitalocean.ValidateToken(ctx, token); err != nil {
 			fmt.Printf("Error: %s. Please try again.\n", err)
 			continue
 		}
 		break
 	}
 
+	// Fetch region list once and reuse for all validation attempts.
+	fmt.Println("Fetching available regions...")
+	regions, err := digitalocean.GetAvailableRegions(ctx, token)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch DigitalOcean regions: %w", err)
+	}
+
+	const defaultRegion = "nyc3"
 	for {
-		fmt.Print("Please enter your DigitalOcean region (default: nyc3): ")
+		fmt.Printf("Please enter your DigitalOcean region (default: %s): ", defaultRegion)
 		region, err = scanner.ScanString()
 		if err != nil {
 			fmt.Println("Error while reading DigitalOcean region")
 			return nil, err
 		}
 		if region == "" {
-			region = "nyc3"
+			region = defaultRegion
 		}
-		fmt.Println("Verifying region availability...")
-		valid, err := digitalocean.IsValidRegion(token, region)
-		if err != nil {
-			fmt.Printf("Error checking region: %s. Please try again.\n", err)
-			continue
-		}
-		if !valid {
-			fmt.Println("Error: The DigitalOcean region is not available. Please try again.")
+		if !digitalocean.IsValidRegion(regions, region) {
+			fmt.Printf("Error: region %q is not available. Please try again.\n", region)
 			continue
 		}
 		break

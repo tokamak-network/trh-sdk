@@ -183,18 +183,14 @@ func (t *ThanosStack) destroyInfraOnDigitalOcean(ctx context.Context) error {
 	}
 	t.logger.Info("✅ Namespace destroyed successfully!")
 
-	// Terraform destroy
-	terraformDir := fmt.Sprintf("%s/terraform/digitalocean", t.deploymentPath)
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
-		"-c",
-		fmt.Sprintf(`cd %s/thanos-stack &&
-		export DO_TOKEN=%s &&
-		export DO_REGION=%s &&
-		export TF_VAR_namespace=%s &&
-		terraform destroy -auto-approve`,
-			terraformDir, doConfig.Token, doConfig.Region, namespace),
-	}...)
-	if err != nil {
+	// Terraform destroy — env vars are passed directly to the process, not embedded in shell args.
+	thanosStackDir := fmt.Sprintf("%s/terraform/digitalocean/thanos-stack", t.deploymentPath)
+	destroyEnv := []string{
+		"TF_VAR_do_token=" + doConfig.Token,
+		"TF_VAR_do_region=" + doConfig.Region,
+		"TF_VAR_namespace=" + namespace,
+	}
+	if err := utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, thanosStackDir, destroyEnv, "terraform", "destroy", "-auto-approve"); err != nil {
 		t.logger.Error("Error destroying DigitalOcean infrastructure", "err", err)
 		return err
 	}
