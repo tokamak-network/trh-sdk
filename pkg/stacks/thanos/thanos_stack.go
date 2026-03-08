@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
+	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/digitalocean"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 
@@ -15,6 +16,7 @@ type ThanosStack struct {
 	deployConfig      *types.Config
 	usePromptInput    bool
 	awsProfile        *types.AWSProfile
+	doProfile         *types.DigitalOceanProfile
 	logger            *zap.SugaredLogger
 	deploymentPath    string
 	registerCandidate bool
@@ -27,6 +29,7 @@ func NewThanosStack(
 	usePromptInput bool,
 	deploymentPath string,
 	awsConfig *types.AWSConfig,
+	doConfig *types.DigitalOceanConfig,
 ) (*ThanosStack, error) {
 	l.Infof("Deployment Path: %s", deploymentPath)
 	l.Infof("Network: %s", network)
@@ -39,7 +42,6 @@ func NewThanosStack(
 	}
 
 	// Login AWS
-
 	var awsProfile *types.AWSProfile
 
 	if awsConfig != nil {
@@ -71,10 +73,24 @@ func NewThanosStack(
 		}
 	}
 
+	// Login DigitalOcean
+	var doProfile *types.DigitalOceanProfile
+
+	if doConfig != nil {
+		if err := digitalocean.ValidateToken(doConfig.Token); err != nil {
+			l.Error("Failed to validate DigitalOcean token", "err", err)
+			return nil, err
+		}
+		doProfile = &types.DigitalOceanProfile{
+			Config: doConfig,
+		}
+	}
+
 	return &ThanosStack{
 		network:        network,
 		usePromptInput: usePromptInput,
 		awsProfile:     awsProfile,
+		doProfile:      doProfile,
 		logger:         l,
 		deploymentPath: deploymentPath,
 		deployConfig:   config,

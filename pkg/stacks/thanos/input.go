@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
+	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/digitalocean"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 
@@ -1080,6 +1081,61 @@ func InputAWSLogin() (*types.AWSConfig, error) {
 		Region:        awsRegion,
 		AccessKey:     awsAccessKeyID,
 		DefaultFormat: "json",
+	}, nil
+}
+
+func InputDigitalOceanLogin() (*types.DigitalOceanConfig, error) {
+	var (
+		token  string
+		region string
+		err    error
+	)
+
+	for {
+		fmt.Print("Please enter your DigitalOcean API token: ")
+		token, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error while reading DigitalOcean token")
+			return nil, err
+		}
+		if token == "" {
+			fmt.Println("Error: DigitalOcean token cannot be empty")
+			continue
+		}
+		fmt.Println("Verifying DigitalOcean token...")
+		if err := digitalocean.ValidateToken(token); err != nil {
+			fmt.Printf("Error: %s. Please try again.\n", err)
+			continue
+		}
+		break
+	}
+
+	for {
+		fmt.Print("Please enter your DigitalOcean region (default: nyc3): ")
+		region, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error while reading DigitalOcean region")
+			return nil, err
+		}
+		if region == "" {
+			region = "nyc3"
+		}
+		fmt.Println("Verifying region availability...")
+		valid, err := digitalocean.IsValidRegion(token, region)
+		if err != nil {
+			fmt.Printf("Error checking region: %s. Please try again.\n", err)
+			continue
+		}
+		if !valid {
+			fmt.Println("Error: The DigitalOcean region is not available. Please try again.")
+			continue
+		}
+		break
+	}
+
+	return &types.DigitalOceanConfig{
+		Token:  token,
+		Region: region,
 	}, nil
 }
 

@@ -97,6 +97,16 @@ func CheckAwsCLIInstallation(ctx context.Context) bool {
 	return true
 }
 
+func CheckDoctlInstallation(ctx context.Context) bool {
+	_, err := utils.ExecuteCommand(ctx, "doctl", "version")
+	if err != nil {
+		fmt.Printf("❌ doctl is not installed or not found in PATH, err: %v\n", err)
+		return false
+	}
+	fmt.Println("✅ doctl is installed")
+	return true
+}
+
 func CheckDirenvInstallation(ctx context.Context) bool {
 	_, err := utils.ExecuteCommand(ctx, "direnv", "--version")
 	if err != nil {

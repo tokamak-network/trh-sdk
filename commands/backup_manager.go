@@ -76,7 +76,7 @@ func ActionBackupManager() cli.ActionFunc {
 		}
 
 		// Create ThanosStack instance
-		thanosStack, err := thanos.NewThanosStack(ctx, l, network, false, deploymentPath, config.AWS)
+		thanosStack, err := thanos.NewThanosStack(ctx, l, network, false, deploymentPath, config.AWS, nil)
 		if err != nil {
 			return fmt.Errorf("failed to create ThanosStack instance: %w", err)
 		}

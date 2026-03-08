@@ -27,6 +27,7 @@ func ActionDeploy() cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
 		var network, stack string
 		var awsConfig *types.AWSConfig
+		var doConfig *types.DigitalOceanConfig
 
 		var config *types.Config
 		now := time.Now().Unix()
@@ -71,7 +72,7 @@ func ActionDeploy() cli.ActionFunc {
 			if network == constants.LocalDevnet {
 				infraOpt = "localhost"
 			} else {
-				fmt.Print("Please select your infrastructure provider [AWS] (default: AWS): ")
+				fmt.Print("Please select your infrastructure provider [AWS/digitalocean] (default: AWS): ")
 				input, err := scanner.ScanString()
 				if err != nil {
 					fmt.Printf("Error reading infrastructure selection: %s", err)
@@ -83,15 +84,22 @@ func ActionDeploy() cli.ActionFunc {
 				}
 			}
 
-			if infraOpt == constants.AWS {
+			switch infraOpt {
+			case constants.AWS:
 				awsConfig, err = thanos.InputAWSLogin()
 				if err != nil {
 					fmt.Printf("Failed to login AWS: %s \n", err)
 					return err
 				}
+			case constants.DigitalOcean:
+				doConfig, err = thanos.InputDigitalOceanLogin()
+				if err != nil {
+					fmt.Printf("Failed to login DigitalOcean: %s \n", err)
+					return err
+				}
 			}
 
-			thanosStack, err := thanos.NewThanosStack(ctx, l, network, true, deploymentPath, awsConfig)
+			thanosStack, err := thanos.NewThanosStack(ctx, l, network, true, deploymentPath, awsConfig, doConfig)
 			if err != nil {
 				fmt.Println("Failed to initialize thanos stack", "err", err)
 				return err
