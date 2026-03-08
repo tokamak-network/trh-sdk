@@ -1,9 +1,11 @@
 package constants
 
 const (
-	AWS = "aws"
+	AWS          = "aws"
+	DigitalOcean = "digitalocean"
 )
 
 var SupportedInfra = map[string]bool{
-	"aws": true,
+	"aws":          true,
+	"digitalocean": true,
 }

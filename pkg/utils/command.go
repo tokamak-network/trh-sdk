@@ -76,7 +76,23 @@ func ExecuteCommandStreamInDir(ctx context.Context, l *zap.SugaredLogger, dir st
 	if dir != "" {
 		cmd.Dir = dir
 	}
+	return runStreamingCmd(ctx, l, cmd)
+}
 
+// ExecuteCommandStreamWithEnvInDir executes a command in a specific directory with the given
+// additional environment variables and streaming output. env entries should be "KEY=VALUE".
+// Sensitive values (tokens, private keys) must be passed via env — never via command arguments.
+func ExecuteCommandStreamWithEnvInDir(ctx context.Context, l *zap.SugaredLogger, dir string, env []string, command string, args ...string) error {
+	cmd := exec.CommandContext(ctx, command, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	cmd.Env = append(os.Environ(), env...)
+	return runStreamingCmd(ctx, l, cmd)
+}
+
+// runStreamingCmd runs a pre-configured exec.Cmd with PTY/pipe streaming.
+func runStreamingCmd(ctx context.Context, l *zap.SugaredLogger, cmd *exec.Cmd) error {
 	var (
 		ptmx    *os.File
 		err     error

@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
+	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/digitalocean"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 
@@ -1080,6 +1081,106 @@ func InputAWSLogin() (*types.AWSConfig, error) {
 		Region:        awsRegion,
 		AccessKey:     awsAccessKeyID,
 		DefaultFormat: "json",
+	}, nil
+}
+
+func InputDigitalOceanLogin(ctx context.Context) (*types.DigitalOceanConfig, error) {
+	var (
+		token  string
+		region string
+		err    error
+	)
+
+	for {
+		fmt.Print("Please enter your DigitalOcean API token: ")
+		token, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error while reading DigitalOcean token")
+			return nil, err
+		}
+		if token == "" {
+			fmt.Println("Error: DigitalOcean token cannot be empty")
+			continue
+		}
+		fmt.Println("Verifying DigitalOcean token...")
+		if err := digitalocean.ValidateToken(ctx, token); err != nil {
+			fmt.Printf("Error: %s. Please try again.\n", err)
+			continue
+		}
+		break
+	}
+
+	// Fetch region list once and reuse for all validation attempts.
+	fmt.Println("Fetching available regions...")
+	regions, err := digitalocean.GetRegions(ctx, token)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch DigitalOcean regions: %w", err)
+	}
+
+	const defaultRegion = "nyc3"
+	for {
+		fmt.Printf("Please enter your DigitalOcean region (default: %s): ", defaultRegion)
+		region, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error while reading DigitalOcean region")
+			return nil, err
+		}
+		if region == "" {
+			region = defaultRegion
+		}
+		if !digitalocean.IsValidRegion(regions, region) {
+			fmt.Printf("Error: region %q is not available. Please try again.\n", region)
+			continue
+		}
+		break
+	}
+
+	// Spaces HMAC credentials are separate from the API token.
+	// Create them at: https://cloud.digitalocean.com/account/api/spaces
+	const doSpacesConsoleURL = "https://cloud.digitalocean.com/account/api/spaces"
+	fmt.Println("")
+	fmt.Println("DigitalOcean Spaces credentials are required for Terraform state storage.")
+	fmt.Println("Create them at: " + doSpacesConsoleURL)
+
+	var spacesAccessKey, spacesSecretKey string
+	for {
+		fmt.Print("Please enter your Spaces Access Key: ")
+		spacesAccessKey, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error while reading Spaces Access Key")
+			return nil, err
+		}
+		if spacesAccessKey == "" {
+			fmt.Println("Error: Spaces Access Key cannot be empty")
+			continue
+		}
+		// DO Spaces access keys are 20 alphanumeric characters.
+		if len(spacesAccessKey) < 16 || len(spacesAccessKey) > 32 {
+			fmt.Println("Error: Spaces Access Key format appears invalid (expected ~20 alphanumeric characters)")
+			continue
+		}
+		break
+	}
+
+	for {
+		fmt.Print("Please enter your Spaces Secret Key: ")
+		spacesSecretKey, err = scanner.ReadPassword()
+		if err != nil {
+			fmt.Println("Error while reading Spaces Secret Key")
+			return nil, err
+		}
+		if spacesSecretKey == "" {
+			fmt.Println("Error: Spaces Secret Key cannot be empty")
+			continue
+		}
+		break
+	}
+
+	return &types.DigitalOceanConfig{
+		Token:           token,
+		Region:          region,
+		SpacesAccessKey: spacesAccessKey,
+		SpacesSecretKey: spacesSecretKey,
 	}, nil
 }
 

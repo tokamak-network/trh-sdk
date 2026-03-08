@@ -35,7 +35,7 @@ func ActionRegisterMetadata() cli.ActionFunc {
 				return fmt.Errorf("failed to initialize logger: %w", err)
 			}
 
-			thanosStack, err := thanos.NewThanosStack(ctx, l, config.Network, true, deploymentPath, config.AWS)
+			thanosStack, err := thanos.NewThanosStack(ctx, l, config.Network, true, deploymentPath, config.AWS, nil)
 			if err != nil {
 				return fmt.Errorf("failed to create thanos stack: %v", err)
 			}

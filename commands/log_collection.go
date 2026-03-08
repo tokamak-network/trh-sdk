@@ -72,7 +72,7 @@ func ActionLogCollection() cli.ActionFunc {
 		}
 
 		// Initialize ThanosStack
-		thanosStack, err := thanos.NewThanosStack(ctx, logger, config.Network, true, deploymentPath, config.AWS)
+		thanosStack, err := thanos.NewThanosStack(ctx, logger, config.Network, true, deploymentPath, config.AWS, nil)
 		if err != nil {
 			logger.Errorw("Failed to initialize ThanosStack", "err", err)
 			return fmt.Errorf("failed to initialize ThanosStack: %w", err)
