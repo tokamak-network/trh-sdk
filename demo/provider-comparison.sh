@@ -316,27 +316,22 @@ case "$SECTION" in
 esac
 
 case "$SECTION" in
-  credentials)
-    section_credentials
-    ;;
-  infra)
-    section_infra
-    ;;
-  steps)
-    section_steps
-    ;;
-  destroy)
-    section_destroy
-    ;;
-  summary)
-    section_summary
-    ;;
-  all|*)
+  credentials)  section_credentials ;;
+  infra)        section_infra ;;
+  steps)        section_steps ;;
+  destroy)      section_destroy ;;
+  summary)      section_summary ;;
+  all)
     section_intro
     section_credentials
     section_infra
     section_steps
     section_destroy
     section_summary
+    ;;
+  *)
+    echo "오류: 알 수 없는 섹션 '${SECTION}'" >&2
+    echo "사용 가능: credentials | infra | steps | destroy | summary | all" >&2
+    exit 1
     ;;
 esac
