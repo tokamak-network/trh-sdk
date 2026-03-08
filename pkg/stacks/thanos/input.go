@@ -1113,7 +1113,7 @@ func InputDigitalOceanLogin() (*types.DigitalOceanConfig, error) {
 
 	// Fetch region list once and reuse for all validation attempts.
 	fmt.Println("Fetching available regions...")
-	regions, err := digitalocean.GetAvailableRegions(ctx, token)
+	regions, err := digitalocean.GetRegions(ctx, token)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch DigitalOcean regions: %w", err)
 	}
@@ -1136,9 +1136,46 @@ func InputDigitalOceanLogin() (*types.DigitalOceanConfig, error) {
 		break
 	}
 
+	// Spaces access keys are separate from the API token.
+	// Create them at: https://cloud.digitalocean.com/account/api/spaces
+	fmt.Println("")
+	fmt.Println("DigitalOcean Spaces credentials are required for Terraform state storage.")
+	fmt.Println("Create them at: https://cloud.digitalocean.com/account/api/spaces")
+
+	var spacesAccessKey, spacesSecretKey string
+	for {
+		fmt.Print("Please enter your Spaces Access Key: ")
+		spacesAccessKey, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error while reading Spaces Access Key")
+			return nil, err
+		}
+		if spacesAccessKey == "" {
+			fmt.Println("Error: Spaces Access Key cannot be empty")
+			continue
+		}
+		break
+	}
+
+	for {
+		fmt.Print("Please enter your Spaces Secret Key: ")
+		spacesSecretKey, err = scanner.ScanString()
+		if err != nil {
+			fmt.Println("Error while reading Spaces Secret Key")
+			return nil, err
+		}
+		if spacesSecretKey == "" {
+			fmt.Println("Error: Spaces Secret Key cannot be empty")
+			continue
+		}
+		break
+	}
+
 	return &types.DigitalOceanConfig{
-		Token:  token,
-		Region: region,
+		Token:           token,
+		Region:          region,
+		SpacesAccessKey: spacesAccessKey,
+		SpacesSecretKey: spacesSecretKey,
 	}, nil
 }
 

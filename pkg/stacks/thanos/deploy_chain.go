@@ -529,29 +529,31 @@ func (t *ThanosStack) deployNetworkToDigitalOcean(ctx context.Context, inputs *D
 		return err
 	}
 
-	// STEP 4. Initialize Terraform backend (DO Spaces).
-	// Sensitive values are passed via environment variables, never embedded in command arguments.
+	// STEP 4. Create Terraform state bucket (DO Spaces).
+	// The backend module has local state; it only needs the DO API token.
 	backendEnv := []string{
-		"SPACES_ACCESS_TOKEN=" + doConfig.Token,
 		"TF_VAR_do_token=" + doConfig.Token,
 		"TF_VAR_do_region=" + doConfig.Region,
 		"TF_VAR_namespace=" + namespace,
 	}
-	for _, args := range [][]string{
-		{"init"},
-		{"plan"},
-		{"apply", "-auto-approve"},
-	} {
-		if err := utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, backendDir, backendEnv, "terraform", args...); err != nil {
-			t.logger.Error("Error initializing Terraform backend (DO Spaces)", "err", err)
-			return err
-		}
+	if err := utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, backendDir, backendEnv, "terraform", "init"); err != nil {
+		return fmt.Errorf("terraform init failed for state backend: %w", err)
+	}
+	if err := utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, backendDir, backendEnv, "terraform", "apply", "-auto-approve"); err != nil {
+		return fmt.Errorf("terraform apply failed for state backend: %w", err)
 	}
 
 	// STEP 5. Deploy DOKS + VPC + Managed DB
+	// AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY are DO Spaces HMAC credentials (not the API token).
+	// They authenticate the Terraform S3 backend against DO Spaces object storage.
 	t.logger.Info("Deploying Thanos stack infrastructure on DigitalOcean...")
 	imgTags := constants.DockerImageTag[t.deployConfig.Network]
+	stateBucket := fmt.Sprintf("trh-terraform-state-%s", namespace)
+	// DO Spaces is S3-compatible; "us-east-1" is a required placeholder ignored by DO.
+	stateEndpoint := fmt.Sprintf("https://%s.digitaloceanspaces.com", doConfig.Region)
 	infraEnv := []string{
+		"AWS_ACCESS_KEY_ID=" + doConfig.SpacesAccessKey,
+		"AWS_SECRET_ACCESS_KEY=" + doConfig.SpacesSecretKey,
 		"TF_VAR_do_token=" + doConfig.Token,
 		"TF_VAR_do_region=" + doConfig.Region,
 		"TF_VAR_namespace=" + namespace,
@@ -564,26 +566,21 @@ func (t *ThanosStack) deployNetworkToDigitalOcean(ctx context.Context, inputs *D
 		"TF_VAR_thanos_stack_image_tag=" + imgTags.ThanosStackImageTag,
 		"TF_VAR_op_geth_image_tag=" + imgTags.OpGethImageTag,
 	}
-	stateBucket := fmt.Sprintf("trh-terraform-state-%s", namespace)
-	stateEndpoint := fmt.Sprintf("https://%s.digitaloceanspaces.com", doConfig.Region)
-	for _, args := range [][]string{
-		{"init",
-			"-backend-config=bucket=" + stateBucket,
-			"-backend-config=endpoint=" + stateEndpoint,
-			"-backend-config=region=us-east-1",
-			"-backend-config=key=thanos-stack/terraform.tfstate",
-			"-backend-config=skip_credentials_validation=true",
-			"-backend-config=skip_metadata_api_check=true",
-			"-backend-config=skip_region_validation=true",
-			"-backend-config=force_path_style=true",
-		},
-		{"plan"},
-		{"apply", "-auto-approve"},
-	} {
-		if err := utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, thanosStackDir, infraEnv, "terraform", args...); err != nil {
-			t.logger.Error("Error deploying Thanos stack infrastructure on DigitalOcean", "err", err)
-			return err
-		}
+	if err := utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, thanosStackDir, infraEnv, "terraform",
+		"init",
+		"-backend-config=bucket="+stateBucket,
+		"-backend-config=endpoint="+stateEndpoint,
+		"-backend-config=region=us-east-1",
+		"-backend-config=key=thanos-stack/terraform.tfstate",
+		"-backend-config=skip_credentials_validation=true",
+		"-backend-config=skip_metadata_api_check=true",
+		"-backend-config=skip_region_validation=true",
+		"-backend-config=force_path_style=true",
+	); err != nil {
+		return fmt.Errorf("terraform init failed for thanos-stack: %w", err)
+	}
+	if err := utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, thanosStackDir, infraEnv, "terraform", "apply", "-auto-approve"); err != nil {
+		return fmt.Errorf("terraform apply failed for thanos-stack: %w", err)
 	}
 
 	// STEP 6. Configure DOKS kubeconfig

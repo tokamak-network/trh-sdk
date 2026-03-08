@@ -25,8 +25,9 @@ func ValidateToken(ctx context.Context, token string) error {
 	return nil
 }
 
-// GetAvailableRegions returns a list of available DigitalOcean region slugs.
-func GetAvailableRegions(ctx context.Context, token string) ([]Region, error) {
+// GetRegions returns all DigitalOcean regions. Callers should check Region.Available
+// before using a region. Use IsValidRegion for availability validation.
+func GetRegions(ctx context.Context, token string) ([]Region, error) {
 	cmd := exec.CommandContext(ctx, "doctl", "compute", "region", "list", "--output", "json", "--access-token", token)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

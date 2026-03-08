@@ -184,8 +184,11 @@ func (t *ThanosStack) destroyInfraOnDigitalOcean(ctx context.Context) error {
 	t.logger.Info("✅ Namespace destroyed successfully!")
 
 	// Terraform destroy — env vars are passed directly to the process, not embedded in shell args.
+	// AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY authenticate the S3 backend to read state from DO Spaces.
 	thanosStackDir := fmt.Sprintf("%s/terraform/digitalocean/thanos-stack", t.deploymentPath)
 	destroyEnv := []string{
+		"AWS_ACCESS_KEY_ID=" + doConfig.SpacesAccessKey,
+		"AWS_SECRET_ACCESS_KEY=" + doConfig.SpacesSecretKey,
 		"TF_VAR_do_token=" + doConfig.Token,
 		"TF_VAR_do_region=" + doConfig.Region,
 		"TF_VAR_namespace=" + namespace,

@@ -14,17 +14,7 @@ terraform {
     }
   }
 
-  # Backend is configured at runtime via -backend-config flags in `terraform init`.
-  # Example:
-  #   terraform init \
-  #     -backend-config="bucket=trh-terraform-state-<namespace>" \
-  #     -backend-config="endpoint=https://<region>.digitaloceanspaces.com" \
-  #     -backend-config="region=us-east-1" \
-  #     -backend-config="key=thanos-stack/terraform.tfstate" \
-  #     -backend-config="skip_credentials_validation=true" \
-  #     -backend-config="skip_metadata_api_check=true" \
-  #     -backend-config="skip_region_validation=true" \
-  #     -backend-config="force_path_style=true"
+  # Backend flags are injected at runtime by deploy_chain.go STEP 5 (AWS_ACCESS_KEY_ID = DO Spaces key).
   backend "s3" {}
 }
 
