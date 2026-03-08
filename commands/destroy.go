@@ -8,6 +8,7 @@ import (
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/logging"
+	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -19,8 +20,8 @@ func ActionDestroyInfra() cli.ActionFunc {
 		var network, stack string
 
 		var config *types.Config
-
 		var awsConfig *types.AWSConfig
+		var doConfig *types.DigitalOceanConfig
 
 		deploymentPath, err := os.Getwd()
 		if err != nil {
@@ -39,14 +40,26 @@ func ActionDestroyInfra() cli.ActionFunc {
 			network = config.Network
 			stack = config.Stack
 			awsConfig = config.AWS
+			doConfig = config.DigitalOcean
 		}
 
-		if awsConfig == nil {
+		// For AWS deployments, re-prompt if credentials are missing.
+		if doConfig == nil && awsConfig == nil {
 			awsConfig, err = thanos.InputAWSLogin()
 			if err != nil {
 				fmt.Printf("Failed to login AWS: %s \n", err)
 				return err
 			}
+		}
+
+		// SpacesSecretKey is never written to disk (json:"-"); re-prompt at destroy time.
+		if doConfig != nil && doConfig.SpacesSecretKey == "" {
+			fmt.Print("Please enter your Spaces Secret Key: ")
+			secret, readErr := scanner.ReadPassword()
+			if readErr != nil {
+				return fmt.Errorf("failed to read Spaces Secret Key: %w", readErr)
+			}
+			doConfig.SpacesSecretKey = secret
 		}
 
 		// Initialize the logger
@@ -58,7 +71,7 @@ func ActionDestroyInfra() cli.ActionFunc {
 
 		switch stack {
 		case constants.ThanosStack:
-			thanosStack, err := thanos.NewThanosStack(ctx, l, network, true, deploymentPath, awsConfig, nil)
+			thanosStack, err := thanos.NewThanosStack(ctx, l, network, true, deploymentPath, awsConfig, doConfig)
 			if err != nil {
 				fmt.Println("Failed to initialize thanos stack", "err", err)
 				return err

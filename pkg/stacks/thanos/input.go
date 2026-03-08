@@ -1084,8 +1084,7 @@ func InputAWSLogin() (*types.AWSConfig, error) {
 	}, nil
 }
 
-func InputDigitalOceanLogin() (*types.DigitalOceanConfig, error) {
-	ctx := context.Background()
+func InputDigitalOceanLogin(ctx context.Context) (*types.DigitalOceanConfig, error) {
 	var (
 		token  string
 		region string
@@ -1136,11 +1135,12 @@ func InputDigitalOceanLogin() (*types.DigitalOceanConfig, error) {
 		break
 	}
 
-	// Spaces access keys are separate from the API token.
+	// Spaces HMAC credentials are separate from the API token.
 	// Create them at: https://cloud.digitalocean.com/account/api/spaces
+	const doSpacesConsoleURL = "https://cloud.digitalocean.com/account/api/spaces"
 	fmt.Println("")
 	fmt.Println("DigitalOcean Spaces credentials are required for Terraform state storage.")
-	fmt.Println("Create them at: https://cloud.digitalocean.com/account/api/spaces")
+	fmt.Println("Create them at: " + doSpacesConsoleURL)
 
 	var spacesAccessKey, spacesSecretKey string
 	for {
@@ -1154,12 +1154,17 @@ func InputDigitalOceanLogin() (*types.DigitalOceanConfig, error) {
 			fmt.Println("Error: Spaces Access Key cannot be empty")
 			continue
 		}
+		// DO Spaces access keys are 20 alphanumeric characters.
+		if len(spacesAccessKey) < 16 || len(spacesAccessKey) > 32 {
+			fmt.Println("Error: Spaces Access Key format appears invalid (expected ~20 alphanumeric characters)")
+			continue
+		}
 		break
 	}
 
 	for {
 		fmt.Print("Please enter your Spaces Secret Key: ")
-		spacesSecretKey, err = scanner.ScanString()
+		spacesSecretKey, err = scanner.ReadPassword()
 		if err != nil {
 			fmt.Println("Error while reading Spaces Secret Key")
 			return nil, err

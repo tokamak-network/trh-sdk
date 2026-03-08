@@ -92,7 +92,7 @@ func ActionDeploy() cli.ActionFunc {
 					return err
 				}
 			case constants.DigitalOcean:
-				doConfig, err = thanos.InputDigitalOceanLogin()
+				doConfig, err = thanos.InputDigitalOceanLogin(ctx)
 				if err != nil {
 					fmt.Printf("Failed to login DigitalOcean: %s \n", err)
 					return err

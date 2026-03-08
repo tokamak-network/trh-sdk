@@ -14,7 +14,10 @@ terraform {
     }
   }
 
-  # Backend flags are injected at runtime by deploy_chain.go STEP 5 (AWS_ACCESS_KEY_ID = DO Spaces key).
+  # Backend is configured at runtime by deploy_chain.go STEP 5 via -backend-config flags.
+  # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY = DO Spaces HMAC credentials (not the API token).
+  # region=us-east-1 is a required placeholder; DO Spaces ignores it.
+  # force_path_style=true and skip_* flags are required for S3-compatible DO Spaces.
   backend "s3" {}
 }
 
