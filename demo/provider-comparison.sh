@@ -11,15 +11,19 @@
 
 set -euo pipefail
 
-# ─── 색상 ──────────────────────────────────────────────────────────────────
-BOLD="\033[1m"
-RESET="\033[0m"
-CYAN="\033[36m"
-YELLOW="\033[33m"
-GREEN="\033[32m"
-ORANGE="\033[38;5;214m"
-DIM="\033[2m"
-WHITE="\033[97m"
+# ─── 색상 (NO_COLOR 또는 비-TTY stdout 환경에서 자동 비활성화) ─────────────
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  BOLD="\033[1m"
+  RESET="\033[0m"
+  CYAN="\033[36m"
+  YELLOW="\033[33m"
+  GREEN="\033[32m"
+  ORANGE="\033[38;5;214m"
+  DIM="\033[2m"
+  WHITE="\033[97m"
+else
+  BOLD="" RESET="" CYAN="" YELLOW="" GREEN="" ORANGE="" DIM="" WHITE=""
+fi
 
 # ─── 레이아웃 상수 ─────────────────────────────────────────────────────────
 DIVIDER="$(printf '%.0s─' {1..76})"
@@ -27,6 +31,8 @@ HALF="$(printf '%.0s─' {1..36})"
 
 # ─── 헬퍼 ──────────────────────────────────────────────────────────────────
 pause() {
+  # non-interactive 환경(CI, 파이프)에서는 입력 대기 없이 통과한다.
+  if [[ ! -t 0 ]]; then return; fi
   echo ""
   read -rp "$(echo -e "${DIM}  [ Enter 키를 눌러 계속 ]${RESET}")" _
   echo ""
@@ -45,17 +51,10 @@ side_by_side_header() {
 }
 
 row() {
-  # row "label" "aws value" "do value"
+  # row <aws_label> <aws_value> <do_label> <do_value>
+  local aws_label="$1" aws_value="$2" do_label="$3" do_value="$4"
   printf "  ${DIM}%-16s${RESET} ${YELLOW}%-19s${RESET}  ${DIM}%-16s${RESET} ${ORANGE}%-19s${RESET}\n" \
-    "$1:" "$2" "$3:" "$4"
-}
-
-step_row() {
-  # step_row "step label" "aws step detail" "do step detail"
-  local label="$1" aws="$2" dooc="$3"
-  printf "  ${BOLD}%-20s${RESET}\n" "$label"
-  printf "    ${YELLOW}AWS${RESET}: %-28s  ${ORANGE}DO${RESET}: %s\n" "$aws" "$dooc"
-  echo ""
+    "${aws_label}:" "${aws_value}" "${do_label}:" "${do_value}"
 }
 
 # ─── SECTIONS ──────────────────────────────────────────────────────────────
