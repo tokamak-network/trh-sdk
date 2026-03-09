@@ -1779,24 +1779,28 @@ func (t *ThanosStack) getGrafanaURL(ctx context.Context, config *types.Monitorin
 func (t *ThanosStack) checkCloudWatchLogGroupsStatus(ctx context.Context, namespace string) error {
 	logger := t.getLogger()
 
-	// Check CloudWatch Log Groups status silently
 	components := CoreComponents
 
 	for _, component := range components {
 		logGroupName := fmt.Sprintf("/aws/eks/%s/%s", namespace, component)
 
-		checkCmd := []string{
-			"logs", "describe-log-groups",
-			"--log-group-name-prefix", logGroupName,
-			"--region", t.deployConfig.AWS.Region,
-			"--query", "logGroups[?logGroupName==`" + logGroupName + "`]",
-			"--output", "text",
-		}
-
-		_, err := utils.ExecuteCommand(ctx, "aws", checkCmd...)
-		if err != nil {
-			// Lower log noise in periodic checks; keep as debug unless troubleshooting
-			logger.Infow("CloudWatch log group check failed", "logGroup", logGroupName, "err", err)
+		if t.awsRunner != nil {
+			_, err := t.awsRunner.LogsDescribeLogGroups(ctx, t.deployConfig.AWS.Region, logGroupName)
+			if err != nil {
+				logger.Infow("CloudWatch log group check failed", "logGroup", logGroupName, "err", err)
+			}
+		} else {
+			checkCmd := []string{
+				"logs", "describe-log-groups",
+				"--log-group-name-prefix", logGroupName,
+				"--region", t.deployConfig.AWS.Region,
+				"--query", "logGroups[?logGroupName==`" + logGroupName + "`]",
+				"--output", "text",
+			}
+			_, err := utils.ExecuteCommand(ctx, "aws", checkCmd...)
+			if err != nil {
+				logger.Infow("CloudWatch log group check failed", "logGroup", logGroupName, "err", err)
+			}
 		}
 	}
 
@@ -1812,14 +1816,18 @@ func (t *ThanosStack) updateRetentionPolicy(ctx context.Context, namespace strin
 	for _, component := range components {
 		logGroupName := fmt.Sprintf("/aws/eks/%s/%s", namespace, component)
 
-		// Update retention policy
-		cmd := exec.CommandContext(ctx, "aws", "logs", "put-retention-policy",
-			"--log-group-name", logGroupName,
-			"--retention-in-days", strconv.Itoa(retention),
-			"--region", t.deployConfig.AWS.Region)
-
-		if _, err := cmd.CombinedOutput(); err != nil {
-			logger.Warnw("Failed to update retention policy", "logGroup", logGroupName, "error", err)
+		if t.awsRunner != nil {
+			if err := t.awsRunner.LogsPutRetentionPolicy(ctx, t.deployConfig.AWS.Region, logGroupName, retention); err != nil {
+				logger.Warnw("Failed to update retention policy", "logGroup", logGroupName, "error", err)
+			}
+		} else {
+			cmd := exec.CommandContext(ctx, "aws", "logs", "put-retention-policy",
+				"--log-group-name", logGroupName,
+				"--retention-in-days", strconv.Itoa(retention),
+				"--region", t.deployConfig.AWS.Region)
+			if _, err := cmd.CombinedOutput(); err != nil {
+				logger.Warnw("Failed to update retention policy", "logGroup", logGroupName, "error", err)
+			}
 		}
 	}
 
@@ -1871,14 +1879,20 @@ func (t *ThanosStack) verifyRetentionPolicy(ctx context.Context, namespace strin
 	for _, component := range components {
 		logGroupName := fmt.Sprintf("/aws/eks/%s/%s", namespace, component)
 
-		cmd := exec.CommandContext(ctx, "aws", "logs", "describe-log-groups",
-			"--log-group-name-prefix", logGroupName,
-			"--region", t.deployConfig.AWS.Region,
-			"--query", "logGroups[0].retentionInDays",
-			"--output", "text")
-
-		if _, err := cmd.CombinedOutput(); err != nil {
-			logger.Errorw("Verification failed", "component", component)
+		if t.awsRunner != nil {
+			_, err := t.awsRunner.LogsDescribeLogGroups(ctx, t.deployConfig.AWS.Region, logGroupName)
+			if err != nil {
+				logger.Errorw("Verification failed", "component", component)
+			}
+		} else {
+			cmd := exec.CommandContext(ctx, "aws", "logs", "describe-log-groups",
+				"--log-group-name-prefix", logGroupName,
+				"--region", t.deployConfig.AWS.Region,
+				"--query", "logGroups[0].retentionInDays",
+				"--output", "text")
+			if _, err := cmd.CombinedOutput(); err != nil {
+				logger.Errorw("Verification failed", "component", component)
+			}
 		}
 	}
 

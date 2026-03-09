@@ -452,8 +452,8 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 // ----------------------------------------- Deploy to DigitalOcean ----------------------------- //
 
 const (
-	l2RPCScheme        = "http://"
-	ingressPollTimeout = 10 * time.Minute
+	l2RPCScheme         = "http://"
+	ingressPollTimeout  = 10 * time.Minute
 	ingressPollInterval = 15 * time.Second
 )
 
@@ -526,10 +526,10 @@ func (t *ThanosStack) deployNetworkToDigitalOcean(ctx context.Context, inputs *D
 		"TF_VAR_do_region=" + doConfig.Region,
 		"TF_VAR_namespace=" + namespace,
 	}
-	if err := utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, backendDir, backendEnv, "terraform", "init"); err != nil {
+	if err := t.tfInit(ctx, backendDir, backendEnv, nil); err != nil {
 		return fmt.Errorf("terraform init failed for state backend: %w", err)
 	}
-	if err := utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, backendDir, backendEnv, "terraform", "apply", "-auto-approve"); err != nil {
+	if err := t.tfApply(ctx, backendDir, backendEnv); err != nil {
 		return fmt.Errorf("terraform apply failed for state backend: %w", err)
 	}
 
@@ -556,20 +556,20 @@ func (t *ThanosStack) deployNetworkToDigitalOcean(ctx context.Context, inputs *D
 		"TF_VAR_thanos_stack_image_tag=" + imgTags.ThanosStackImageTag,
 		"TF_VAR_op_geth_image_tag=" + imgTags.OpGethImageTag,
 	}
-	if err := utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, thanosStackDir, infraEnv, "terraform",
-		"init",
-		"-backend-config=bucket="+stateBucket,
-		"-backend-config=endpoint="+stateEndpoint,
-		"-backend-config=region=us-east-1",
-		"-backend-config=key=thanos-stack/terraform.tfstate",
-		"-backend-config=skip_credentials_validation=true",
-		"-backend-config=skip_metadata_api_check=true",
-		"-backend-config=skip_region_validation=true",
-		"-backend-config=force_path_style=true",
-	); err != nil {
+	backendConfigs := []string{
+		"bucket=" + stateBucket,
+		"endpoint=" + stateEndpoint,
+		"region=us-east-1",
+		"key=thanos-stack/terraform.tfstate",
+		"skip_credentials_validation=true",
+		"skip_metadata_api_check=true",
+		"skip_region_validation=true",
+		"force_path_style=true",
+	}
+	if err := t.tfInit(ctx, thanosStackDir, infraEnv, backendConfigs); err != nil {
 		return fmt.Errorf("terraform init failed for thanos-stack: %w", err)
 	}
-	if err := utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, thanosStackDir, infraEnv, "terraform", "apply", "-auto-approve"); err != nil {
+	if err := t.tfApply(ctx, thanosStackDir, infraEnv); err != nil {
 		return fmt.Errorf("terraform apply failed for thanos-stack: %w", err)
 	}
 

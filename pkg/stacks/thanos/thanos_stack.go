@@ -25,6 +25,8 @@ type ThanosStack struct {
 	registerCandidate bool
 	helmRunner        runner.HelmRunner // optional; when nil, falls back to shellout
 	k8sRunner         runner.K8sRunner  // optional; when nil, falls back to shellout
+	tfRunner          runner.TFRunner   // optional; when nil, falls back to shellout
+	awsRunner         runner.AWSRunner  // optional; when nil, falls back to shellout
 }
 
 // SetHelmRunner injects a HelmRunner for native Helm operations.
@@ -37,6 +39,44 @@ func (t *ThanosStack) SetHelmRunner(hr runner.HelmRunner) {
 // When set, kubectl calls use the runner instead of shelling out to kubectl.
 func (t *ThanosStack) SetK8sRunner(kr runner.K8sRunner) {
 	t.k8sRunner = kr
+}
+
+// SetTFRunner injects a TFRunner for native Terraform operations.
+func (t *ThanosStack) SetTFRunner(tr runner.TFRunner) {
+	t.tfRunner = tr
+}
+
+// SetAWSRunner injects an AWSRunner for native AWS operations.
+func (t *ThanosStack) SetAWSRunner(ar runner.AWSRunner) {
+	t.awsRunner = ar
+}
+
+// tfInit runs terraform init in workDir. Uses TFRunner when available.
+func (t *ThanosStack) tfInit(ctx context.Context, workDir string, env []string, backendConfigs []string) error {
+	if t.tfRunner != nil {
+		return t.tfRunner.Init(ctx, workDir, env, backendConfigs)
+	}
+	args := []string{"init"}
+	for _, bc := range backendConfigs {
+		args = append(args, "-backend-config="+bc)
+	}
+	return utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, workDir, env, "terraform", args...)
+}
+
+// tfApply runs terraform apply -auto-approve in workDir. Uses TFRunner when available.
+func (t *ThanosStack) tfApply(ctx context.Context, workDir string, env []string) error {
+	if t.tfRunner != nil {
+		return t.tfRunner.Apply(ctx, workDir, env)
+	}
+	return utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, workDir, env, "terraform", "apply", "-auto-approve")
+}
+
+// tfDestroy runs terraform destroy -auto-approve in workDir. Uses TFRunner when available.
+func (t *ThanosStack) tfDestroy(ctx context.Context, workDir string, env []string) error {
+	if t.tfRunner != nil {
+		return t.tfRunner.Destroy(ctx, workDir, env)
+	}
+	return utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, workDir, env, "terraform", "destroy", "-auto-approve")
 }
 
 // helmList returns all release names in a namespace. Uses HelmRunner when available.

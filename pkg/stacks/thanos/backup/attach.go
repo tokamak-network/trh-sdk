@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/tokamak-network/trh-sdk/pkg/runner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
@@ -34,8 +35,12 @@ func ShowAttachUsage(l *zap.SugaredLogger) {
 
 // ValidateAttachPrerequisites checks required CLIs and cluster access.
 // These checks are tool-availability probes with no K8sRunner equivalent.
-func ValidateAttachPrerequisites(ctx context.Context) error {
-	if _, err := utils.ExecuteCommand(ctx, "aws", "--version"); err != nil {
+func ValidateAttachPrerequisites(ctx context.Context, ar runner.AWSRunner) error {
+	if ar != nil {
+		if err := ar.CheckVersion(ctx); err != nil {
+			return fmt.Errorf("AWS CLI is not installed or not accessible: %w", err)
+		}
+	} else if _, err := utils.ExecuteCommand(ctx, "aws", "--version"); err != nil {
 		return fmt.Errorf("AWS CLI is not installed or not accessible: %w", err)
 	}
 	if _, err := utils.ExecuteCommand(ctx, "kubectl", "version", "--client"); err != nil {
@@ -172,6 +177,7 @@ func GatherBackupAttachInfo(
 // ExecuteBackupAttach performs attach flow using injected helpers
 func ExecuteBackupAttach(
 	ctx context.Context,
+	ar runner.AWSRunner,
 	l *zap.SugaredLogger,
 	attachInfo *types.BackupAttachInfo,
 	validatePrereq func(context.Context) error,
@@ -224,7 +230,7 @@ func ExecuteBackupAttach(
 
 	progressReporter("Creating recovery point...", 90.0)
 	l.Info("Creating recovery point for attached EFS...")
-	snapshotInfo, err := SnapshotExecute(ctx, l, attachInfo.Region, attachInfo.Namespace, nil)
+	snapshotInfo, err := SnapshotExecute(ctx, ar, l, attachInfo.Region, attachInfo.Namespace, nil)
 	if err != nil {
 		l.Warnf("Failed to create recovery point: %v", err)
 		// Don't fail the whole operation if snapshot fails
@@ -242,11 +248,43 @@ func ExecuteBackupAttach(
 // (duplicate removed)
 
 // ReplicateEFSMountTargets replicates mount targets from source to destination EFS
-func ReplicateEFSMountTargets(ctx context.Context, l *zap.SugaredLogger, region, srcFs, dstFs string) error {
+func ReplicateEFSMountTargets(ctx context.Context, ar runner.AWSRunner, l *zap.SugaredLogger, region, srcFs, dstFs string) error {
 	if strings.TrimSpace(srcFs) == "" || strings.TrimSpace(dstFs) == "" || srcFs == dstFs {
 		return nil
 	}
 
+	if ar != nil {
+		mts, err := ar.EFSDescribeMountTargets(ctx, region, srcFs)
+		if err != nil {
+			return fmt.Errorf("failed to describe source mount targets: %w", err)
+		}
+		if len(mts) == 0 {
+			l.Info("No mount targets found on source EFS; skipping replication")
+			return nil
+		}
+		for _, mt := range mts {
+			if strings.TrimSpace(mt.SubnetID) == "" || strings.TrimSpace(mt.MountTargetID) == "" {
+				continue
+			}
+			sgs, err := ar.EFSDescribeMountTargetSecurityGroups(ctx, region, mt.MountTargetID)
+			if err != nil {
+				l.Warnf("Failed to get SGs for %s: %v", mt.MountTargetID, err)
+				continue
+			}
+			if len(sgs) == 0 {
+				l.Warnf("No SGs for %s; skipping subnet %s", mt.MountTargetID, mt.SubnetID)
+				continue
+			}
+			if err := ar.EFSCreateMountTarget(ctx, region, dstFs, mt.SubnetID, sgs); err != nil {
+				l.Infof("Note: create-mount-target may have failed/exists for subnet %s: %v", mt.SubnetID, err)
+			} else {
+				l.Infof("Created mount target on subnet %s (AZ %s) for %s", mt.SubnetID, mt.AvailabilityZoneName, dstFs)
+			}
+		}
+		return nil
+	}
+
+	// Fallback: shellout
 	mtJSON, err := utils.ExecuteCommand(ctx, "aws", "efs", "describe-mount-targets", "--region", region, "--file-system-id", srcFs, "--output", "json")
 	if err != nil {
 		return fmt.Errorf("failed to describe source mount targets: %w", err)
@@ -292,53 +330,99 @@ func ReplicateEFSMountTargets(ctx context.Context, l *zap.SugaredLogger, region,
 }
 
 // ValidateEFSMountTargets validates destination EFS mount targets and SGs
-func ValidateEFSMountTargets(ctx context.Context, l *zap.SugaredLogger, region, fsId string) error {
+func ValidateEFSMountTargets(ctx context.Context, ar runner.AWSRunner, l *zap.SugaredLogger, region, fsId string) error {
 	if strings.TrimSpace(fsId) == "" {
 		return fmt.Errorf("empty file system id")
 	}
-	mtJSON, err := utils.ExecuteCommand(ctx, "aws", "efs", "describe-mount-targets", "--region", region, "--file-system-id", fsId, "--output", "json")
-	if err != nil {
-		return fmt.Errorf("failed to describe mount targets for %s: %w", fsId, err)
+
+	type mtEntry struct {
+		MountTargetId string
+		SubnetId      string
 	}
-	type mtItem struct {
-		MountTargetId string `json:"MountTargetId"`
-		SubnetId      string `json:"SubnetId"`
+
+	var mountTargets []mtEntry
+	if ar != nil {
+		mts, err := ar.EFSDescribeMountTargets(ctx, region, fsId)
+		if err != nil {
+			return fmt.Errorf("failed to describe mount targets for %s: %w", fsId, err)
+		}
+		for _, mt := range mts {
+			mountTargets = append(mountTargets, mtEntry{MountTargetId: mt.MountTargetID, SubnetId: mt.SubnetID})
+		}
+	} else {
+		mtJSON, err := utils.ExecuteCommand(ctx, "aws", "efs", "describe-mount-targets", "--region", region, "--file-system-id", fsId, "--output", "json")
+		if err != nil {
+			return fmt.Errorf("failed to describe mount targets for %s: %w", fsId, err)
+		}
+		type mtItem struct {
+			MountTargetId string `json:"MountTargetId"`
+			SubnetId      string `json:"SubnetId"`
+		}
+		var mtResp struct {
+			MountTargets []mtItem `json:"MountTargets"`
+		}
+		if err := json.Unmarshal([]byte(mtJSON), &mtResp); err != nil {
+			return fmt.Errorf("failed to parse mount targets for %s: %w", fsId, err)
+		}
+		for _, mt := range mtResp.MountTargets {
+			mountTargets = append(mountTargets, mtEntry{MountTargetId: mt.MountTargetId, SubnetId: mt.SubnetId})
+		}
 	}
-	var mtResp struct {
-		MountTargets []mtItem `json:"MountTargets"`
-	}
-	if err := json.Unmarshal([]byte(mtJSON), &mtResp); err != nil {
-		return fmt.Errorf("failed to parse mount targets for %s: %w", fsId, err)
-	}
-	if len(mtResp.MountTargets) == 0 {
+
+	if len(mountTargets) == 0 {
 		return fmt.Errorf("no mount targets found on EFS %s", fsId)
 	}
+
 	criticalIssues := []string{}
-	for _, mt := range mtResp.MountTargets {
+	for _, mt := range mountTargets {
 		subnetId := strings.TrimSpace(mt.SubnetId)
 		if subnetId == "" || strings.TrimSpace(mt.MountTargetId) == "" {
 			criticalIssues = append(criticalIssues, fmt.Sprintf("invalid mount target entry (id=%s subnet=%s)", mt.MountTargetId, mt.SubnetId))
 			continue
 		}
-		state, sErr := utils.ExecuteCommand(ctx, "aws", "ec2", "describe-subnets", "--region", region, "--subnet-ids", subnetId, "--query", "Subnets[0].State", "--output", "text")
-		if sErr != nil {
-			l.Infof("⚠️  Failed to check subnet state for %s: %v", subnetId, sErr)
-		} else if strings.TrimSpace(state) != "available" {
-			criticalIssues = append(criticalIssues, fmt.Sprintf("subnet %s state is %s (expected available)", subnetId, strings.TrimSpace(state)))
+
+		if ar != nil {
+			state, sErr := ar.EC2DescribeSubnetState(ctx, region, subnetId)
+			if sErr != nil {
+				l.Infof("⚠️  Failed to check subnet state for %s: %v", subnetId, sErr)
+			} else if state != "available" {
+				criticalIssues = append(criticalIssues, fmt.Sprintf("subnet %s state is %s (expected available)", subnetId, state))
+			} else {
+				l.Infof("✅ Subnet %s is available", subnetId)
+			}
+
+			sgs, gErr := ar.EFSDescribeMountTargetSecurityGroups(ctx, region, mt.MountTargetId)
+			if gErr != nil {
+				criticalIssues = append(criticalIssues, fmt.Sprintf("failed to get security groups for mount target %s: %v", mt.MountTargetId, gErr))
+				continue
+			}
+			if len(sgs) == 0 {
+				criticalIssues = append(criticalIssues, fmt.Sprintf("no security groups associated with mount target %s", mt.MountTargetId))
+				continue
+			}
+			l.Infof("Mount target %s has SGs: %s", mt.MountTargetId, strings.Join(sgs, " "))
 		} else {
-			l.Infof("✅ Subnet %s is available", subnetId)
+			state, sErr := utils.ExecuteCommand(ctx, "aws", "ec2", "describe-subnets", "--region", region, "--subnet-ids", subnetId, "--query", "Subnets[0].State", "--output", "text")
+			if sErr != nil {
+				l.Infof("⚠️  Failed to check subnet state for %s: %v", subnetId, sErr)
+			} else if strings.TrimSpace(state) != "available" {
+				criticalIssues = append(criticalIssues, fmt.Sprintf("subnet %s state is %s (expected available)", subnetId, strings.TrimSpace(state)))
+			} else {
+				l.Infof("✅ Subnet %s is available", subnetId)
+			}
+
+			sgText, gErr := utils.ExecuteCommand(ctx, "aws", "efs", "describe-mount-target-security-groups", "--region", region, "--mount-target-id", mt.MountTargetId, "--query", "SecurityGroups", "--output", "text")
+			if gErr != nil {
+				criticalIssues = append(criticalIssues, fmt.Sprintf("failed to get security groups for mount target %s: %v", mt.MountTargetId, gErr))
+				continue
+			}
+			sgText = strings.TrimSpace(sgText)
+			if sgText == "" {
+				criticalIssues = append(criticalIssues, fmt.Sprintf("no security groups associated with mount target %s", mt.MountTargetId))
+				continue
+			}
+			l.Infof("Mount target %s has SGs: %s", mt.MountTargetId, sgText)
 		}
-		sgText, gErr := utils.ExecuteCommand(ctx, "aws", "efs", "describe-mount-target-security-groups", "--region", region, "--mount-target-id", mt.MountTargetId, "--query", "SecurityGroups", "--output", "text")
-		if gErr != nil {
-			criticalIssues = append(criticalIssues, fmt.Sprintf("failed to get security groups for mount target %s: %v", mt.MountTargetId, gErr))
-			continue
-		}
-		sgText = strings.TrimSpace(sgText)
-		if sgText == "" {
-			criticalIssues = append(criticalIssues, fmt.Sprintf("no security groups associated with mount target %s", mt.MountTargetId))
-			continue
-		}
-		l.Infof("Mount target %s has SGs: %s", mt.MountTargetId, sgText)
 	}
 	if len(criticalIssues) > 0 {
 		return fmt.Errorf("EFS %s mount target validation issues: %s", fsId, strings.Join(criticalIssues, "; "))
@@ -624,18 +708,20 @@ spec:
 // ExecuteEFSOperationsFull contains the full attach EFS operation flow
 func ExecuteEFSOperationsFull(
 	ctx context.Context,
+	ar runner.AWSRunner,
 	l *zap.SugaredLogger,
 	attachInfo *types.BackupAttachInfo,
 	verify func(context.Context, string) error,
 	backupPvPvcFlag *bool,
 	progressReporter func(string, float64),
 ) error {
-	return getDefaultClient().executeEFSOperationsFull(ctx, l, attachInfo, verify, backupPvPvcFlag, progressReporter)
+	return getDefaultClient().executeEFSOperationsFull(ctx, ar, l, attachInfo, verify, backupPvPvcFlag, progressReporter)
 }
 
 // executeEFSOperationsFull is the BackupClient method implementation.
 func (b *BackupClient) executeEFSOperationsFull(
 	ctx context.Context,
+	ar runner.AWSRunner,
 	l *zap.SugaredLogger,
 	attachInfo *types.BackupAttachInfo,
 	verify func(context.Context, string) error,
@@ -653,7 +739,7 @@ func (b *BackupClient) executeEFSOperationsFull(
 		// continue to next steps
 	} else {
 		progressReporter("Replicating mount targets...", 20.0)
-		if err := ReplicateEFSMountTargets(ctx, l, attachInfo.Region, strings.TrimSpace(srcEfs), attachInfo.EFSID); err != nil {
+		if err := ReplicateEFSMountTargets(ctx, ar, l, attachInfo.Region, strings.TrimSpace(srcEfs), attachInfo.EFSID); err != nil {
 			l.Warnf("Failed to replicate EFS mount targets from %s to %s: %v", srcEfs, attachInfo.EFSID, err)
 			// continue even if replication fails
 		} else {
@@ -662,7 +748,7 @@ func (b *BackupClient) executeEFSOperationsFull(
 	}
 
 	progressReporter("Validating mount targets...", 25.0)
-	if vErr := ValidateEFSMountTargets(ctx, l, attachInfo.Region, attachInfo.EFSID); vErr != nil {
+	if vErr := ValidateEFSMountTargets(ctx, ar, l, attachInfo.Region, attachInfo.EFSID); vErr != nil {
 		l.Warnf("Mount target validation for %s reported issues: %v", attachInfo.EFSID, vErr)
 		// continue? usually yes, let kubelet handle attach errors
 	} else {

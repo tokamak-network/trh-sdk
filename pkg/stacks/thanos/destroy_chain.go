@@ -111,7 +111,7 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 	if t.deployConfig.AWS != nil {
 		if efsID, detectErr := utils.DetectEFSId(ctx, namespace); detectErr == nil && efsID != "" {
 			t.logger.Infof("Deleting EFS mount targets for %s before terraform destroy...", efsID)
-			if mtErr := backup.DeleteEFSMountTargets(ctx, t.logger, t.deployConfig.AWS.Region, efsID); mtErr != nil {
+			if mtErr := backup.DeleteEFSMountTargets(ctx, t.awsRunner, t.logger, t.deployConfig.AWS.Region, efsID); mtErr != nil {
 				t.logger.Warnf("Failed to delete EFS mount targets: %v. Continuing with destroy.", mtErr)
 			} else {
 				t.logger.Info("EFS mount targets deleted, waiting for cleanup...")
@@ -192,7 +192,7 @@ func (t *ThanosStack) destroyInfraOnDigitalOcean(ctx context.Context) error {
 		"TF_VAR_do_region=" + doConfig.Region,
 		"TF_VAR_namespace=" + namespace,
 	}
-	if err := utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, thanosStackDir, destroyEnv, "terraform", "destroy", "-auto-approve"); err != nil {
+	if err := t.tfDestroy(ctx, thanosStackDir, destroyEnv); err != nil {
 		t.logger.Error("Error destroying DigitalOcean infrastructure", "err", err)
 		return err
 	}
