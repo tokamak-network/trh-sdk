@@ -39,6 +39,7 @@ func (t *ThanosStack) InstallUptimeService(ctx context.Context, config *types.Up
 		existingReleases, err := utils.FilterHelmReleases(ctx, config.Namespace, "uptime-service")
 		if err != nil || len(existingReleases) == 0 {
 			t.logger.Warn("Could not find existing Helm release, trying to get service URL with label selector")
+			return "", fmt.Errorf("no existing uptime-service helm release found in namespace %s", config.Namespace)
 		}
 		// Use the first existing release name
 		existingReleaseName := existingReleases[0]
@@ -331,7 +332,7 @@ func (t *ThanosStack) deployUptimeServiceInfrastructure(ctx context.Context, con
 	if err := utils.ApplyPVCManifest(ctx, t.deploymentPath, "uptime-service", uptimePVC, "UptimeService"); err != nil {
 		return fmt.Errorf("failed to create uptime-service PVC: %w", err)
 	}
-	fmt.Println("✅ Created uptime-service PV and PVC")
+	t.logger.Info("✅ Created uptime-service PV and PVC")
 
 	return nil
 }

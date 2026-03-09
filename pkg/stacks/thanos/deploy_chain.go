@@ -366,6 +366,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	err = utils.UpdateYAMLField(valueFile, "enable_deployment", true)
 	if err != nil {
 		t.logger.Error("Error updating `enable_deployment` configuration", "err", err)
+		return err
 	}
 
 	err = utils.InstallHelmRelease(ctx, helmReleaseName, chartFile, valueFile, namespace)
@@ -421,7 +422,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 
 	// Step 8.3. Initialize backup system (conditional - only if BackupConfig.Enabled is true)
 	if backupEnabled {
-		fmt.Println("Initializing backup system...")
+		t.logger.Info("Initializing backup system...")
 		err = t.initializeBackupSystem(ctx, inputs.ChainName)
 		if err != nil {
 			t.logger.Warnf("Warning: Failed to initialize backup system: %v\n", err)
