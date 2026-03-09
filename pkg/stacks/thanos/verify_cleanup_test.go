@@ -48,7 +48,12 @@ func TestDeleteOrphanedLoadBalancers_ELBErrorDoesNotSkipALB(t *testing.T) {
 // TestDeleteOrphanedLoadBalancers_BothEmpty returns zero counts when nothing is found.
 func TestDeleteOrphanedLoadBalancers_BothEmpty(t *testing.T) {
 	m := &mock.AWSRunner{}
-	// nil hooks → zero values (empty slice, nil error)
+	m.OnELBDescribeLoadBalancers = func(_ context.Context, _, _ string) ([]string, error) {
+		return nil, nil
+	}
+	m.OnELBv2DescribeLoadBalancers = func(_ context.Context, _, _ string) ([]string, error) {
+		return nil, nil
+	}
 	s := &ThanosStack{awsRunner: m, logger: noopLogger()}
 	cleaned, failed := s.deleteOrphanedLoadBalancers(context.Background(), "us-east-1", "test-ns", 0, 0)
 	if cleaned != 0 || failed != 0 {
@@ -81,10 +86,10 @@ func TestDeleteOrphanedEKS_NodeGroupDeletionFailureCounted(t *testing.T) {
 	cancel()
 	cleaned, failed := s.deleteOrphanedEKS(ctx, "us-east-1", "test-ns", 0, 0)
 
-	if failed == 0 {
-		t.Fatal("expected failed>0 when node group deletion fails")
+	if failed != 1 {
+		t.Fatalf("expected failed=1 (node group), got %d", failed)
 	}
-	// Cluster deletion still succeeded.
+	// Cluster deletion still succeeded despite node group failure.
 	if cleaned != 1 {
 		t.Fatalf("expected cleaned=1 (cluster), got %d", cleaned)
 	}
@@ -165,8 +170,8 @@ func TestWaitForNodeGroupsDeletion_ExitsWhenContextCancelled(t *testing.T) {
 	s := &ThanosStack{awsRunner: m, logger: noopLogger()}
 	s.waitForNodeGroupsDeletion(ctx, "us-east-1", "test-cluster")
 
-	// With a pre-cancelled context the ticker select should fire ctx.Done()
-	// on the first iteration without calling ListNodeGroups at all.
+	// The check-first pattern calls ListNodeGroups once before the ticker select.
+	// Then ctx.Done() fires immediately, exiting without further polls.
 	if callCount > 1 {
 		t.Fatalf("expected at most 1 ListNodeGroups call, got %d", callCount)
 	}

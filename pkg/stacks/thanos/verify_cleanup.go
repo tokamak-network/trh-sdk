@@ -117,7 +117,11 @@ func (t *ThanosStack) deleteOrphanedElasticIPs(ctx context.Context, region, name
 
 func (t *ThanosStack) deleteOrphanedNATGateways(ctx context.Context, region, namespace string, cleaned, failed int) (int, int) {
 	ids, err := utils.ListNATGateways(ctx, t.awsRunner, region, namespace)
-	if err != nil || len(ids) == 0 {
+	if err != nil {
+		t.logger.Warnf("Failed to list NAT Gateways: %v", err)
+		return cleaned, failed
+	}
+	if len(ids) == 0 {
 		return cleaned, failed
 	}
 
@@ -206,7 +210,7 @@ func (t *ThanosStack) deleteOrphanedEFS(ctx context.Context, region, namespace s
 	}
 
 	for _, fs := range filesystems {
-		if !strings.HasPrefix(fs.Name, namespace) {
+		if !strings.HasPrefix(fs.Name, namespace+"-") && fs.Name != namespace {
 			continue
 		}
 
@@ -225,6 +229,8 @@ func (t *ThanosStack) deleteOrphanedEFS(ctx context.Context, region, namespace s
 				case <-time.After(mountTargetDeletionGrace):
 				}
 			}
+		} else {
+			t.logger.Warnf("Failed to list mount targets for EFS %s: %v", fs.ID, err)
 		}
 
 		t.logger.Infof("Deleting EFS: %s (%s)", fs.Name, fs.ID)
@@ -264,7 +270,7 @@ func (t *ThanosStack) deleteOrphanedS3(ctx context.Context, region, namespace st
 	}
 
 	for _, bucket := range buckets {
-		if !strings.HasPrefix(bucket, namespace) {
+		if !strings.HasPrefix(bucket, namespace+"-") && bucket != namespace {
 			continue
 		}
 

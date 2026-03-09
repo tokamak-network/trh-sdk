@@ -55,7 +55,7 @@ func (t *ThanosStack) BackupList(ctx context.Context, limit string) (*types.Back
 
 	rps, err := backup.ListRecoveryPoints(ctx, t.awsRunner, region, arn, strings.TrimSpace(limit))
 	if err != nil {
-		t.logger.Infof("   ❌ Error retrieving recovery points: %v", err)
+		t.logger.Warnf("Failed to retrieve recovery points: %v", err)
 		return nil, err
 	}
 	backup.DisplayRecoveryPoints(t.logger, rps)
