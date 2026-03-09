@@ -174,24 +174,10 @@ func (t *ThanosStack) InstallUptimeService(ctx context.Context, config *types.Up
 		return "", fmt.Errorf("failed to update volume.size: %w", err)
 	}
 
-	args := []string{
-		"install",
-		helmReleaseName,
-		fmt.Sprintf("%s/tokamak-thanos-stack/charts/uptime-service", t.deploymentPath),
-		"--values", valuesFilePath,
-		"--namespace", config.Namespace,
-		"--create-namespace",
-	}
-
 	//Installing helm chart for uptime-service
-	output, err := utils.ExecuteCommand(ctx, "helm", args...)
-
-	if err != nil {
-		t.logger.Error(
-			"❌ Error installing uptime service",
-			"err", err,
-			"helm_output", output,
-		)
+	uptimeChart := fmt.Sprintf("%s/tokamak-thanos-stack/charts/uptime-service", t.deploymentPath)
+	if err := t.helmUpgradeInstallWithFiles(ctx, helmReleaseName, uptimeChart, config.Namespace, []string{valuesFilePath}, "--create-namespace"); err != nil {
+		t.logger.Error("❌ Error installing uptime service", "err", err)
 		return "", err
 	}
 	t.logger.Info("✅ Install uptime service successfully")
@@ -256,7 +242,7 @@ func (t *ThanosStack) UninstallUptimeService(ctx context.Context) error {
 	}
 
 	// Uninstall Helm releases
-	releases, err := utils.FilterHelmReleases(ctx, uptimeNamespace, "uptime-service")
+	releases, err := t.helmFilterReleases(ctx, uptimeNamespace, "uptime-service")
 	if err != nil {
 		t.logger.Error("Error to filter helm releases", "err", err)
 		return err
@@ -264,13 +250,7 @@ func (t *ThanosStack) UninstallUptimeService(ctx context.Context) error {
 
 	for _, release := range releases {
 		t.logger.Infow("Uninstalling Helm release", "release", release, "namespace", uptimeNamespace)
-		_, err = utils.ExecuteCommand(ctx, "helm", []string{
-			"uninstall",
-			release,
-			"--namespace",
-			uptimeNamespace,
-		}...)
-		if err != nil {
+		if err = t.helmUninstall(ctx, release, uptimeNamespace); err != nil {
 			t.logger.Error("❌ Error uninstalling uptime-service helm chart", "err", err)
 			return err
 		}

@@ -326,28 +326,17 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 
 	// ---------------------------------------- Deploy chain --------------------------//
 	// Step 8. Add Helm repository
-	helmAddOuput, err := utils.ExecuteCommand(ctx, "helm", []string{
-		"repo",
-		"add",
-		"thanos-stack",
-		"https://tokamak-network.github.io/tokamak-thanos-stack",
-	}...)
-	if err != nil {
-		t.logger.Error("Error adding Helm repository", "err", err, "details", helmAddOuput)
+	if err := t.helmRepoAdd(ctx, "thanos-stack", "https://tokamak-network.github.io/tokamak-thanos-stack"); err != nil {
+		t.logger.Error("Error adding Helm repository", "err", err)
 		return err
 	}
 
 	// Step 8.1 Search available Helm charts
-	helmSearchOutput, err := utils.ExecuteCommand(ctx, "helm", []string{
-		"search",
-		"repo",
-		"thanos-stack",
-	}...)
-	if err != nil {
-		t.logger.Error("Error searching Helm charts", "err", err, "details", helmSearchOutput)
+	if _, err := t.helmSearch(ctx, "thanos-stack"); err != nil {
+		t.logger.Error("Error searching Helm charts", "err", err)
 		return err
 	}
-	t.logger.Info("Helm repository added successfully: \n", helmSearchOutput)
+	t.logger.Info("Helm repository added successfully")
 
 	// Step 8.2. Install Helm charts
 	helmReleaseName := fmt.Sprintf("%s-%d", namespace, time.Now().Unix())

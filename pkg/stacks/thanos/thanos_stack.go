@@ -89,6 +89,23 @@ func (t *ThanosStack) helmUpgradeInstallWithFiles(ctx context.Context, release, 
 	return err
 }
 
+// helmRepoAdd adds a Helm repository. Uses HelmRunner when available.
+func (t *ThanosStack) helmRepoAdd(ctx context.Context, name, url string) error {
+	if t.helmRunner != nil {
+		return t.helmRunner.RepoAdd(ctx, name, url)
+	}
+	_, err := utils.ExecuteCommand(ctx, "helm", "repo", "add", name, url)
+	return err
+}
+
+// helmSearch searches a Helm repository. Uses HelmRunner when available.
+func (t *ThanosStack) helmSearch(ctx context.Context, keyword string) (string, error) {
+	if t.helmRunner != nil {
+		return t.helmRunner.Search(ctx, keyword)
+	}
+	return utils.ExecuteCommand(ctx, "helm", "search", "repo", keyword)
+}
+
 // helmFilterReleases lists releases and filters by name substring. Uses HelmRunner when available.
 func (t *ThanosStack) helmFilterReleases(ctx context.Context, namespace, releaseName string) ([]string, error) {
 	releases, err := t.helmList(ctx, namespace)
