@@ -311,7 +311,7 @@ func (t *ThanosStack) UninstallBlockExplorer(ctx context.Context) error {
 	// 1. Uninstall helm charts
 	releases, err := t.helmFilterReleases(ctx, namespace, "block-explorer")
 	if err != nil {
-		t.logger.Error("Error to filter helm releases", "err", err)
+		t.logger.Error("Error filtering helm releases", "err", err)
 		return err
 	}
 
