@@ -5,7 +5,6 @@
 package runner
 
 import (
-	"context"
 	"os"
 )
 
@@ -55,9 +54,3 @@ type ShellOutRunner struct{}
 
 func (r *ShellOutRunner) K8s() K8sRunner { return &ShellOutK8sRunner{} }
 
-// WithContext is a helper that carries a context alongside a ToolRunner for
-// callers that need to pass both through function boundaries.
-type WithContext struct {
-	Ctx    context.Context
-	Runner ToolRunner
-}

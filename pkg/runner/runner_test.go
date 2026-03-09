@@ -130,3 +130,37 @@ func TestMockK8sRunner_NamespaceExists_False(t *testing.T) {
 		t.Fatal("expected exists=false")
 	}
 }
+
+// TestShellOutK8sRunner_Logs_AlwaysErrors verifies that the legacy Logs
+// implementation always returns an error without leaking infrastructure details.
+func TestShellOutK8sRunner_Logs_AlwaysErrors(t *testing.T) {
+	r, err := runner.New(runner.RunnerConfig{UseNative: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	ctx := context.Background()
+
+	rc, err := r.K8s().Logs(ctx, "my-pod", "my-ns", "", false)
+	if err == nil {
+		_ = rc.Close()
+		t.Fatal("expected error from legacy Logs, got nil")
+	}
+	// Error must not contain pod name or namespace (no infrastructure leak).
+	msg := err.Error()
+	if containsAny(msg, "my-pod", "my-ns") {
+		t.Fatalf("error message leaks infrastructure details: %q", msg)
+	}
+}
+
+func containsAny(s string, subs ...string) bool {
+	for _, sub := range subs {
+		if len(sub) > 0 && len(s) >= len(sub) {
+			for i := 0; i <= len(s)-len(sub); i++ {
+				if s[i:i+len(sub)] == sub {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -25,17 +26,25 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+const gvrCacheTTL = 60 * time.Second
+
+// gvrEntry is a single cached discovery result.
+type gvrEntry struct {
+	gvr        schema.GroupVersionResource
+	namespaced bool
+	cachedAt   time.Time
+}
+
 // NativeK8sRunner implements K8sRunner using k8s.io/client-go.
 // No kubectl binary is required.
 type NativeK8sRunner struct {
-	client  kubernetes.Interface
-	dynamic dynamic.Interface
-	rest    *rest.Config
+	client   kubernetes.Interface
+	dynamic  dynamic.Interface
+	gvrCache sync.Map // map[string]*gvrEntry, keyed by "gvk:<G>/<V>/<K>" or "res:<name>"
 }
 
 // newNativeK8sRunner creates a NativeK8sRunner from the given kubeconfig path.
-// If kubeconfigPath is empty, the runner uses in-cluster config or the default
-// ~/.kube/config file, whichever is available.
+// If kubeconfigPath is empty the runner uses in-cluster config or ~/.kube/config.
 func newNativeK8sRunner(kubeconfigPath string) (*NativeK8sRunner, error) {
 	cfg, err := loadKubeConfig(kubeconfigPath)
 	if err != nil {
@@ -52,11 +61,11 @@ func newNativeK8sRunner(kubeconfigPath string) (*NativeK8sRunner, error) {
 		return nil, fmt.Errorf("native k8s runner: build dynamic client: %w", err)
 	}
 
-	return &NativeK8sRunner{client: client, dynamic: dynClient, rest: cfg}, nil
+	return &NativeK8sRunner{client: client, dynamic: dynClient}, nil
 }
 
 // loadKubeConfig returns a *rest.Config from the given path, in-cluster env,
-// or the user's default kubeconfig.
+// or the user's default kubeconfig (~/.kube/config).
 func loadKubeConfig(path string) (*rest.Config, error) {
 	if path != "" {
 		return clientcmd.BuildConfigFromFlags("", path)
@@ -73,8 +82,8 @@ func loadKubeConfig(path string) (*rest.Config, error) {
 	return clientcmd.BuildConfigFromFlags("", filepath.Join(home, ".kube", "config"))
 }
 
-// Apply decodes a YAML/JSON manifest and applies it to the cluster via
-// server-side apply. Mixed-document YAML (---) is supported.
+// Apply decodes a YAML/JSON manifest and applies it via server-side apply.
+// Multi-document YAML (---) is supported.
 func (r *NativeK8sRunner) Apply(ctx context.Context, manifest []byte) error {
 	decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
 	docs := splitYAMLDocuments(manifest)
@@ -89,7 +98,12 @@ func (r *NativeK8sRunner) Apply(ctx context.Context, manifest []byte) error {
 			return fmt.Errorf("native apply: decode manifest: %w", err)
 		}
 
-		gvr, namespaced, err := r.resolveGVR(ctx, gvk)
+		// Validate identity before calling the API.
+		if obj.GetName() == "" && obj.GetGenerateName() == "" {
+			return fmt.Errorf("native apply: %s/%s manifest is missing metadata.name and metadata.generateName", gvk.Group, gvk.Kind)
+		}
+
+		entry, err := r.resolveGVR(ctx, gvk)
 		if err != nil {
 			return fmt.Errorf("native apply: resolve GVR for %s: %w", gvk.Kind, err)
 		}
@@ -100,14 +114,14 @@ func (r *NativeK8sRunner) Apply(ctx context.Context, manifest []byte) error {
 		}
 
 		var dynRes dynamic.ResourceInterface
-		if namespaced {
+		if entry.namespaced {
 			ns := obj.GetNamespace()
 			if ns == "" {
 				ns = "default"
 			}
-			dynRes = r.dynamic.Resource(gvr).Namespace(ns)
+			dynRes = r.dynamic.Resource(entry.gvr).Namespace(ns)
 		} else {
-			dynRes = r.dynamic.Resource(gvr)
+			dynRes = r.dynamic.Resource(entry.gvr)
 		}
 
 		_, err = dynRes.Patch(ctx, obj.GetName(), types.ApplyPatchType, data, metav1.PatchOptions{
@@ -122,16 +136,16 @@ func (r *NativeK8sRunner) Apply(ctx context.Context, manifest []byte) error {
 
 // Delete removes the named resource from the cluster.
 func (r *NativeK8sRunner) Delete(ctx context.Context, resource, name, namespace string, ignoreNotFound bool) error {
-	gvr, err := r.resolveGVRByResource(ctx, resource, namespace)
+	entry, err := r.resolveGVRByResource(ctx, resource)
 	if err != nil {
 		return fmt.Errorf("native delete: resolve resource %s: %w", resource, err)
 	}
 
 	var dynRes dynamic.ResourceInterface
 	if namespace != "" {
-		dynRes = r.dynamic.Resource(gvr).Namespace(namespace)
+		dynRes = r.dynamic.Resource(entry.gvr).Namespace(namespace)
 	} else {
-		dynRes = r.dynamic.Resource(gvr)
+		dynRes = r.dynamic.Resource(entry.gvr)
 	}
 
 	err = dynRes.Delete(ctx, name, metav1.DeleteOptions{})
@@ -146,16 +160,16 @@ func (r *NativeK8sRunner) Delete(ctx context.Context, resource, name, namespace 
 
 // Get fetches a resource and returns it as JSON bytes.
 func (r *NativeK8sRunner) Get(ctx context.Context, resource, name, namespace string) ([]byte, error) {
-	gvr, err := r.resolveGVRByResource(ctx, resource, namespace)
+	entry, err := r.resolveGVRByResource(ctx, resource)
 	if err != nil {
 		return nil, fmt.Errorf("native get: resolve resource %s: %w", resource, err)
 	}
 
 	var obj *unstructured.Unstructured
 	if namespace != "" {
-		obj, err = r.dynamic.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+		obj, err = r.dynamic.Resource(entry.gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 	} else {
-		obj, err = r.dynamic.Resource(gvr).Get(ctx, name, metav1.GetOptions{})
+		obj, err = r.dynamic.Resource(entry.gvr).Get(ctx, name, metav1.GetOptions{})
 	}
 	if err != nil {
 		return nil, fmt.Errorf("native get %s/%s: %w", resource, name, err)
@@ -170,7 +184,7 @@ func (r *NativeK8sRunner) Get(ctx context.Context, resource, name, namespace str
 
 // List returns a JSON list of resources filtered by an optional label selector.
 func (r *NativeK8sRunner) List(ctx context.Context, resource, namespace, labelSelector string) ([]byte, error) {
-	gvr, err := r.resolveGVRByResource(ctx, resource, namespace)
+	entry, err := r.resolveGVRByResource(ctx, resource)
 	if err != nil {
 		return nil, fmt.Errorf("native list: resolve resource %s: %w", resource, err)
 	}
@@ -182,9 +196,9 @@ func (r *NativeK8sRunner) List(ctx context.Context, resource, namespace, labelSe
 
 	var list *unstructured.UnstructuredList
 	if namespace != "" {
-		list, err = r.dynamic.Resource(gvr).Namespace(namespace).List(ctx, listOpts)
+		list, err = r.dynamic.Resource(entry.gvr).Namespace(namespace).List(ctx, listOpts)
 	} else {
-		list, err = r.dynamic.Resource(gvr).List(ctx, listOpts)
+		list, err = r.dynamic.Resource(entry.gvr).List(ctx, listOpts)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("native list %s: %w", resource, err)
@@ -198,17 +212,22 @@ func (r *NativeK8sRunner) List(ctx context.Context, resource, namespace, labelSe
 }
 
 // Patch applies a JSON merge-patch to an existing resource.
+// Returns an error immediately if patch is not valid JSON.
 func (r *NativeK8sRunner) Patch(ctx context.Context, resource, name, namespace string, patch []byte) error {
-	gvr, err := r.resolveGVRByResource(ctx, resource, namespace)
+	if !json.Valid(patch) {
+		return fmt.Errorf("native patch: invalid JSON payload for %s/%s", resource, name)
+	}
+
+	entry, err := r.resolveGVRByResource(ctx, resource)
 	if err != nil {
 		return fmt.Errorf("native patch: resolve resource %s: %w", resource, err)
 	}
 
 	var dynRes dynamic.ResourceInterface
 	if namespace != "" {
-		dynRes = r.dynamic.Resource(gvr).Namespace(namespace)
+		dynRes = r.dynamic.Resource(entry.gvr).Namespace(namespace)
 	} else {
-		dynRes = r.dynamic.Resource(gvr)
+		dynRes = r.dynamic.Resource(entry.gvr)
 	}
 
 	_, err = dynRes.Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
@@ -223,29 +242,31 @@ func (r *NativeK8sRunner) Wait(ctx context.Context, resource, name, namespace, c
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	gvr, err := r.resolveGVRByResource(ctx, resource, namespace)
+	entry, err := r.resolveGVRByResource(ctx, resource)
 	if err != nil {
 		return fmt.Errorf("native wait: resolve resource %s: %w", resource, err)
 	}
 
 	return wait.PollUntilContextTimeout(waitCtx, 2*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
+		// Use a closure-local error variable to avoid mutating the outer err.
 		var obj *unstructured.Unstructured
+		var pollErr error
 		if namespace != "" {
-			obj, err = r.dynamic.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+			obj, pollErr = r.dynamic.Resource(entry.gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 		} else {
-			obj, err = r.dynamic.Resource(gvr).Get(ctx, name, metav1.GetOptions{})
+			obj, pollErr = r.dynamic.Resource(entry.gvr).Get(ctx, name, metav1.GetOptions{})
 		}
-		if err != nil {
-			if k8serrors.IsNotFound(err) {
+		if pollErr != nil {
+			if k8serrors.IsNotFound(pollErr) {
 				return false, nil // resource not yet created
 			}
-			return false, err
+			return false, pollErr
 		}
 		return checkCondition(obj, condition), nil
 	})
 }
 
-// EnsureNamespace creates the namespace if it does not exist.
+// EnsureNamespace creates the namespace if it does not already exist.
 func (r *NativeK8sRunner) EnsureNamespace(ctx context.Context, namespace string) error {
 	exists, err := r.NamespaceExists(ctx, namespace)
 	if err != nil {
@@ -290,17 +311,26 @@ func (r *NativeK8sRunner) Logs(ctx context.Context, pod, namespace, container st
 	return stream, nil
 }
 
-// ─── helpers ────────────────────────────────────────────────────────────────
+// ─── discovery helpers ───────────────────────────────────────────────────────
 
-// resolveGVR uses server-side discovery to map a GVK to a GroupVersionResource.
-func (r *NativeK8sRunner) resolveGVR(ctx context.Context, gvk *schema.GroupVersionKind) (schema.GroupVersionResource, bool, error) {
-	lists, err := r.client.Discovery().ServerPreferredResources()
-	if err != nil {
-		return schema.GroupVersionResource{}, false, err
+// resolveGVR maps a GVK to a GroupVersionResource via server-side discovery.
+// Results are cached for gvrCacheTTL to avoid redundant API round-trips.
+func (r *NativeK8sRunner) resolveGVR(ctx context.Context, gvk *schema.GroupVersionKind) (*gvrEntry, error) {
+	key := fmt.Sprintf("gvk:%s/%s/%s", gvk.Group, gvk.Version, gvk.Kind)
+	if cached := r.loadCachedGVR(key); cached != nil {
+		return cached, nil
 	}
+
+	lists, err := r.client.Discovery().ServerPreferredResources()
+	// ServerPreferredResources returns partial results even when some groups fail.
+	// Only hard-fail when no lists were returned at all.
+	if lists == nil {
+		return nil, fmt.Errorf("discovery failed: %w", err)
+	}
+
 	for _, list := range lists {
-		gv, err := schema.ParseGroupVersion(list.GroupVersion)
-		if err != nil {
+		gv, parseErr := schema.ParseGroupVersion(list.GroupVersion)
+		if parseErr != nil {
 			continue
 		}
 		if gv.Group != gvk.Group || gv.Version != gvk.Version {
@@ -308,74 +338,106 @@ func (r *NativeK8sRunner) resolveGVR(ctx context.Context, gvk *schema.GroupVersi
 		}
 		for _, res := range list.APIResources {
 			if res.Kind == gvk.Kind {
-				return schema.GroupVersionResource{
-					Group:    gv.Group,
-					Version:  gv.Version,
-					Resource: res.Name,
-				}, res.Namespaced, nil
+				entry := &gvrEntry{
+					gvr: schema.GroupVersionResource{
+						Group: gv.Group, Version: gv.Version, Resource: res.Name,
+					},
+					namespaced: res.Namespaced,
+					cachedAt:   time.Now(),
+				}
+				r.gvrCache.Store(key, entry)
+				return entry, nil
 			}
 		}
 	}
-	return schema.GroupVersionResource{}, false, fmt.Errorf("resource not found for GVK %s", gvk)
+	return nil, fmt.Errorf("resource not found for GVK %s", gvk)
 }
 
-// resolveGVRByResource maps a short resource name (e.g. "pods", "pvc", "namespace")
-// to a GroupVersionResource using server discovery.
-func (r *NativeK8sRunner) resolveGVRByResource(ctx context.Context, resource, namespace string) (schema.GroupVersionResource, error) {
-	lists, err := r.client.Discovery().ServerPreferredResources()
-	if err != nil {
-		return schema.GroupVersionResource{}, err
-	}
-	// Normalise: "namespace" → "namespaces", "pvc" → "persistentvolumeclaims", etc.
+// resolveGVRByResource maps a short resource name (e.g. "pods", "pvc") to a
+// GroupVersionResource via server-side discovery. Results are cached for gvrCacheTTL.
+func (r *NativeK8sRunner) resolveGVRByResource(ctx context.Context, resource string) (*gvrEntry, error) {
 	target := normaliseResourceName(resource)
+	key := "res:" + target
+	if cached := r.loadCachedGVR(key); cached != nil {
+		return cached, nil
+	}
+
+	lists, err := r.client.Discovery().ServerPreferredResources()
+	if lists == nil {
+		return nil, fmt.Errorf("discovery failed: %w", err)
+	}
+
 	for _, list := range lists {
-		gv, err := schema.ParseGroupVersion(list.GroupVersion)
-		if err != nil {
+		gv, parseErr := schema.ParseGroupVersion(list.GroupVersion)
+		if parseErr != nil {
 			continue
 		}
 		for _, res := range list.APIResources {
-			matchesShortName := false
-			for _, sn := range res.ShortNames {
-				if strings.EqualFold(sn, target) {
-					matchesShortName = true
-					break
+			if strings.EqualFold(res.Name, target) || matchesShortName(res.ShortNames, target) {
+				entry := &gvrEntry{
+					gvr: schema.GroupVersionResource{
+						Group: gv.Group, Version: gv.Version, Resource: res.Name,
+					},
+					namespaced: res.Namespaced,
+					cachedAt:   time.Now(),
 				}
-			}
-			if strings.EqualFold(res.Name, target) || matchesShortName {
-				return schema.GroupVersionResource{
-					Group:    gv.Group,
-					Version:  gv.Version,
-					Resource: res.Name,
-				}, nil
+				r.gvrCache.Store(key, entry)
+				return entry, nil
 			}
 		}
 	}
-	return schema.GroupVersionResource{}, fmt.Errorf("unknown resource: %s", resource)
+	return nil, fmt.Errorf("unknown resource: %s", resource)
 }
+
+// loadCachedGVR returns a valid (non-expired) cached entry or nil.
+func (r *NativeK8sRunner) loadCachedGVR(key string) *gvrEntry {
+	v, ok := r.gvrCache.Load(key)
+	if !ok {
+		return nil
+	}
+	entry, ok := v.(*gvrEntry)
+	if !ok || time.Since(entry.cachedAt) > gvrCacheTTL {
+		r.gvrCache.Delete(key)
+		return nil
+	}
+	return entry
+}
+
+// matchesShortName reports whether target equals any entry in shortNames (case-insensitive).
+func matchesShortName(shortNames []string, target string) bool {
+	for _, sn := range shortNames {
+		if strings.EqualFold(sn, target) {
+			return true
+		}
+	}
+	return false
+}
+
+// ─── pure helpers (no IO) ────────────────────────────────────────────────────
 
 // normaliseResourceName maps common short forms to their canonical plural names.
 func normaliseResourceName(r string) string {
 	aliases := map[string]string{
-		"namespace":              "namespaces",
-		"pod":                    "pods",
-		"svc":                    "services",
-		"service":                "services",
-		"ingress":                "ingresses",
-		"pvc":                    "persistentvolumeclaims",
-		"persistentvolumeclaim":  "persistentvolumeclaims",
-		"pv":                     "persistentvolumes",
-		"persistentvolume":       "persistentvolumes",
-		"deployment":             "deployments",
-		"configmap":              "configmaps",
-		"clusterrolebinding":     "clusterrolebindings",
-		"clusterrole":            "clusterroles",
-		"serviceaccount":         "serviceaccounts",
-		"secret":                 "secrets",
-		"storageclass":           "storageclasses",
-		"statefulset":            "statefulsets",
-		"daemonset":              "daemonsets",
-		"job":                    "jobs",
-		"cronjob":                "cronjobs",
+		"namespace":             "namespaces",
+		"pod":                   "pods",
+		"svc":                   "services",
+		"service":               "services",
+		"ingress":               "ingresses",
+		"pvc":                   "persistentvolumeclaims",
+		"persistentvolumeclaim": "persistentvolumeclaims",
+		"pv":                    "persistentvolumes",
+		"persistentvolume":      "persistentvolumes",
+		"deployment":            "deployments",
+		"configmap":             "configmaps",
+		"clusterrolebinding":    "clusterrolebindings",
+		"clusterrole":           "clusterroles",
+		"serviceaccount":        "serviceaccounts",
+		"secret":                "secrets",
+		"storageclass":          "storageclasses",
+		"statefulset":           "statefulsets",
+		"daemonset":             "daemonsets",
+		"job":                   "jobs",
+		"cronjob":               "cronjobs",
 	}
 	if canonical, ok := aliases[strings.ToLower(r)]; ok {
 		return canonical
@@ -405,6 +467,7 @@ func checkCondition(obj *unstructured.Unstructured, condition string) bool {
 }
 
 // splitYAMLDocuments splits a multi-document YAML byte slice on "---" separators.
+// Empty documents are omitted from the result.
 func splitYAMLDocuments(data []byte) [][]byte {
 	sep := []byte("\n---")
 	parts := bytes.Split(data, sep)
@@ -420,4 +483,3 @@ func splitYAMLDocuments(data []byte) [][]byte {
 	}
 	return result
 }
-
