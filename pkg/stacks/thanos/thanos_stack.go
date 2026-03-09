@@ -3,7 +3,10 @@ package thanos
 import (
 	"context"
 	"fmt"
+	"io"
+	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/digitalocean"
@@ -49,6 +52,25 @@ func (t *ThanosStack) SetTFRunner(tr runner.TFRunner) {
 // SetAWSRunner injects an AWSRunner for native AWS operations.
 func (t *ThanosStack) SetAWSRunner(ar runner.AWSRunner) {
 	t.awsRunner = ar
+}
+
+// PodLogs reads logs from the named pod. Uses K8sRunner when available.
+// container may be empty to select the pod's first container.
+// since limits the log window; zero means all available logs (native runner always fetches all).
+func (t *ThanosStack) PodLogs(ctx context.Context, pod, namespace, container string, since time.Duration) ([]byte, error) {
+	if t.k8sRunner != nil {
+		rc, err := t.k8sRunner.Logs(ctx, pod, namespace, container, false)
+		if err != nil {
+			return nil, fmt.Errorf("pod logs %s/%s: %w", namespace, pod, err)
+		}
+		defer rc.Close() //nolint:errcheck
+		return io.ReadAll(rc)
+	}
+	args := []string{"logs", pod, "-n", namespace}
+	if since > 0 {
+		args = append(args, "--since", since.String())
+	}
+	return exec.CommandContext(ctx, "kubectl", args...).CombinedOutput()
 }
 
 // tfInit runs terraform init in workDir. Uses TFRunner when available.
