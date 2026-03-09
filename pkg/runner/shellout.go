@@ -13,6 +13,12 @@ import (
 // ShellOutK8sRunner implements K8sRunner by shelling out to the kubectl binary.
 // It preserves the exact existing behaviour and serves as a fallback when
 // NativeK8sRunner is not available or when --legacy mode is requested.
+//
+// SECURITY NOTE: resource, name, namespace, condition, and patch parameters are
+// passed as discrete arguments to utils.ExecuteCommand, which uses os/exec.Command
+// directly (not via a shell). Shell metacharacters in these values therefore have
+// no effect. Callers must still validate inputs for semantic correctness before
+// passing them here.
 type ShellOutK8sRunner struct{}
 
 func (r *ShellOutK8sRunner) Apply(ctx context.Context, manifest []byte) error {

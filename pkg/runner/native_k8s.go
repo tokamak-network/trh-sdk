@@ -84,7 +84,11 @@ func loadKubeConfig(path string) (*rest.Config, error) {
 }
 
 // Apply decodes a YAML/JSON manifest and applies it via server-side apply.
-// Multi-document YAML (---) is supported.
+// Multi-document YAML (---) is supported. Comment-only and empty documents are skipped.
+//
+// Namespace defaulting: for namespaced resources that do not specify metadata.namespace,
+// Apply defaults to "namespace: default". Cluster-scoped resources (ClusterRole, PV, etc.)
+// are applied without a namespace regardless.
 func (r *NativeK8sRunner) Apply(ctx context.Context, manifest []byte) error {
 	decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
 	docs := splitYAMLDocuments(manifest)
@@ -424,7 +428,11 @@ func (r *NativeK8sRunner) loadCachedGVR(key string) *gvrEntry {
 		return nil
 	}
 	entry, ok := v.(*gvrEntry)
-	if !ok || time.Since(entry.cachedAt) > gvrCacheTTL {
+	if !ok {
+		return nil
+	}
+	// Check TTL after successful type assertion so we never use a nil entry.
+	if time.Since(entry.cachedAt) > gvrCacheTTL {
 		r.gvrCache.Delete(key)
 		return nil
 	}

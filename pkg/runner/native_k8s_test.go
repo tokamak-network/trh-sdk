@@ -265,6 +265,32 @@ func TestSplitYAMLDocuments_LeadingSeparator(t *testing.T) {
 	}
 }
 
+func TestSplitYAMLDocuments_ConsecutiveSeparators(t *testing.T) {
+	// Consecutive --- separators (empty documents between them) should be skipped.
+	input := []byte("---\n---\napiVersion: v1\nkind: Pod\nmetadata:\n  name: foo")
+	docs := splitYAMLDocuments(input)
+	if len(docs) != 1 {
+		t.Fatalf("expected 1 doc (empty docs skipped), got %d", len(docs))
+	}
+}
+
+func TestSplitYAMLDocuments_CommentOnly(t *testing.T) {
+	// A document containing only a comment should be skipped.
+	input := []byte("# just a comment\n---\napiVersion: v1\nkind: Pod\nmetadata:\n  name: foo")
+	docs := splitYAMLDocuments(input)
+	// The first segment is "# just a comment", Apply() skips it; splitter may include it.
+	// Verify at least the real doc is present.
+	hasReal := false
+	for _, d := range docs {
+		if len(d) > 0 && d[0] != '#' {
+			hasReal = true
+		}
+	}
+	if !hasReal {
+		t.Fatal("expected at least one non-comment document")
+	}
+}
+
 func TestCheckCondition_True(t *testing.T) {
 	obj := &unstructured.Unstructured{
 		Object: map[string]interface{}{
