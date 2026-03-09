@@ -22,6 +22,12 @@ func observedLogger(lvl zapcore.Level) (*zap.SugaredLogger, *observer.ObservedLo
 	return zap.New(core).Sugar(), logs
 }
 
+// warnObserver is a convenience wrapper around observedLogger pre-set to WarnLevel,
+// matching the level used by all API-error guard tests.
+func warnObserver() (*zap.SugaredLogger, *observer.ObservedLogs) {
+	return observedLogger(zapcore.WarnLevel)
+}
+
 // minimalStack returns a ThanosStack with only the helmRunner set,
 // sufficient for testing helper methods that do not access other fields.
 func minimalStack(hr *mock.HelmRunner) *ThanosStack {

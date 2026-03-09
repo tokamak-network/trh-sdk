@@ -9,7 +9,6 @@ import (
 
 	"github.com/tokamak-network/trh-sdk/pkg/runner"
 	"github.com/tokamak-network/trh-sdk/pkg/runner/mock"
-	"go.uber.org/zap/zapcore"
 )
 
 // ─── deleteOrphanedLoadBalancers ───────────────────────────────────────────
@@ -115,7 +114,7 @@ func TestDeleteOrphanedEKS_ClusterExistsAPIError(t *testing.T) {
 	m.OnEKSClusterExists = func(_ context.Context, _, _ string) (bool, error) {
 		return false, errors.New("iam: access denied")
 	}
-	logger, logs := observedLogger(zapcore.WarnLevel)
+	logger, logs := warnObserver()
 	s := &ThanosStack{awsRunner: m, logger: logger}
 	cleaned, failed := s.deleteOrphanedEKS(context.Background(), "us-east-1", "test-ns", 3, 1)
 	if cleaned != 3 || failed != 1 {
@@ -124,8 +123,15 @@ func TestDeleteOrphanedEKS_ClusterExistsAPIError(t *testing.T) {
 	if logs.Len() == 0 {
 		t.Fatal("expected a Warn log for EKSClusterExists API error, got none")
 	}
-	if got := logs.All()[0].Message; !strings.Contains(got, "EKS cluster existence") {
-		t.Fatalf("expected log to mention 'EKS cluster existence', got %q", got)
+	found := false
+	for _, entry := range logs.All() {
+		if strings.Contains(entry.Message, "EKS cluster existence") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected a Warn log mentioning 'EKS cluster existence', got: %v", logs.All())
 	}
 }
 
@@ -137,7 +143,7 @@ func TestDeleteOrphanedRDS_InstanceExistsAPIError(t *testing.T) {
 	m.OnRDSInstanceExists = func(_ context.Context, _, _ string) (bool, error) {
 		return false, errors.New("throttling: rate exceeded")
 	}
-	logger, logs := observedLogger(zapcore.WarnLevel)
+	logger, logs := warnObserver()
 	s := &ThanosStack{awsRunner: m, logger: logger}
 	cleaned, failed := s.deleteOrphanedRDS(context.Background(), "us-east-1", "test-ns", 2, 0)
 	if cleaned != 2 || failed != 0 {
@@ -146,8 +152,15 @@ func TestDeleteOrphanedRDS_InstanceExistsAPIError(t *testing.T) {
 	if logs.Len() == 0 {
 		t.Fatal("expected a Warn log for RDSInstanceExists API error, got none")
 	}
-	if got := logs.All()[0].Message; !strings.Contains(got, "RDS instance existence") {
-		t.Fatalf("expected log to mention 'RDS instance existence', got %q", got)
+	found := false
+	for _, entry := range logs.All() {
+		if strings.Contains(entry.Message, "RDS instance existence") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected a Warn log mentioning 'RDS instance existence', got: %v", logs.All())
 	}
 }
 
@@ -158,7 +171,7 @@ func TestDeleteOrphanedVPC_DescribeAPIError(t *testing.T) {
 	m.OnEC2DescribeVPCs = func(_ context.Context, _, _ string) ([]string, error) {
 		return nil, errors.New("ec2: request limit exceeded")
 	}
-	logger, logs := observedLogger(zapcore.WarnLevel)
+	logger, logs := warnObserver()
 	s := &ThanosStack{awsRunner: m, logger: logger}
 	cleaned, failed := s.deleteOrphanedVPC(context.Background(), "us-east-1", "test-ns", 4, 0)
 	if cleaned != 4 || failed != 0 {
@@ -167,8 +180,15 @@ func TestDeleteOrphanedVPC_DescribeAPIError(t *testing.T) {
 	if logs.Len() == 0 {
 		t.Fatal("expected a Warn log for EC2DescribeVPCs API error, got none")
 	}
-	if got := logs.All()[0].Message; !strings.Contains(got, "list VPCs") {
-		t.Fatalf("expected log to mention 'list VPCs', got %q", got)
+	found := false
+	for _, entry := range logs.All() {
+		if strings.Contains(entry.Message, "list VPCs") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected a Warn log mentioning 'list VPCs', got: %v", logs.All())
 	}
 }
 

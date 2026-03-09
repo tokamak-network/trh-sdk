@@ -68,7 +68,9 @@ func newNativeTFRunner(ctx context.Context) (*NativeTFRunner, error) {
 		},
 	})
 	if err != nil {
-		_ = i.Remove(context.Background())
+		if rErr := i.Remove(context.Background()); rErr != nil {
+			fmt.Fprintf(os.Stderr, "native tf: cleanup failed after install error: %v\n", rErr)
+		}
 		return nil, fmt.Errorf("native tf: locate/install terraform %s: %w", terraformVersion, err)
 	}
 	return &NativeTFRunner{execPath: execPath, stdout: os.Stdout}, nil
@@ -85,10 +87,12 @@ func findPinnedTerraformInPath(ctx context.Context, pinnedVersion *version.Versi
 	}
 
 	v, vErr := tfCheckVersion(ctx, path)
-	if vErr != nil || !v.Equal(pinnedVersion) {
+	if vErr != nil || v == nil || !v.Equal(pinnedVersion) {
 		var reason string
 		if vErr != nil {
 			reason = vErr.Error()
+		} else if v == nil {
+			reason = "version check returned nil"
 		} else {
 			reason = fmt.Sprintf("version %s != pinned %s", v, pinnedVersion)
 		}
