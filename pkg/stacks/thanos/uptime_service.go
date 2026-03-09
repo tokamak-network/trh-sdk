@@ -227,7 +227,7 @@ func (t *ThanosStack) UninstallUptimeService(ctx context.Context) error {
 	}
 
 	uptimeNamespace := constants.UptimeServiceNamespace
-	fmt.Printf("namespace while uninstalling : %s ", uptimeNamespace)
+	t.logger.Infow("uninstalling uptime-service", "namespace", uptimeNamespace)
 
 	// Check if namespace exists first
 	exists, err := utils.CheckNamespaceExists(ctx, uptimeNamespace)

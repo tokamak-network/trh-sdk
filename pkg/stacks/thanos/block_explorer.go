@@ -89,7 +89,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		return "", err
 	}
 
-	chainReleaseName, err := utils.FilterHelmReleases(ctx, namespace, namespace)
+	chainReleaseName, err := t.helmFilterReleases(ctx, namespace, namespace)
 	if err != nil {
 		t.logger.Error("Error filtering helm releases", "err", err)
 		return "", err

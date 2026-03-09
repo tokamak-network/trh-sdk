@@ -331,7 +331,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		return err
 	}
 
-	// Step 8.1 Search available Helm charts
+	// Step 8.1 Search available Helm charts — validates the repository is reachable; result is informational.
 	if _, err := t.helmSearch(ctx, "thanos-stack"); err != nil {
 		t.logger.Error("Error searching Helm charts", "err", err)
 		return err
