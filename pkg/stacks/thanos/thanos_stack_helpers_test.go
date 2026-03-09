@@ -3,6 +3,7 @@ package thanos
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/tokamak-network/trh-sdk/pkg/runner/mock"
@@ -26,6 +27,18 @@ func observedLogger(lvl zapcore.Level) (*zap.SugaredLogger, *observer.ObservedLo
 // matching the level used by all API-error guard tests.
 func warnObserver() (*zap.SugaredLogger, *observer.ObservedLogs) {
 	return observedLogger(zapcore.WarnLevel)
+}
+
+// assertWarnLogContains fails the test if no captured log entry contains substr.
+// Use with warnObserver() to verify that a specific Warn message was emitted.
+func assertWarnLogContains(t *testing.T, logs *observer.ObservedLogs, substr string) {
+	t.Helper()
+	for _, e := range logs.All() {
+		if strings.Contains(e.Message, substr) {
+			return
+		}
+	}
+	t.Fatalf("expected a Warn log containing %q, got: %v", substr, logs.All())
 }
 
 // minimalStack returns a ThanosStack with only the helmRunner set,

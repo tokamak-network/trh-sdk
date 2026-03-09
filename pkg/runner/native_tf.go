@@ -104,18 +104,27 @@ func findPinnedTerraformInPath(ctx context.Context, pinnedVersion *version.Versi
 
 func (r *NativeTFRunner) SetStdout(w io.Writer) { r.stdout = w }
 
-func (r *NativeTFRunner) Init(ctx context.Context, workDir string, env []string, backendConfigs []string) error {
+// newConfiguredTF creates a tfexec.Terraform instance with env and stdout
+// configured. Shared by Init, Apply, and Destroy to avoid repetition.
+func (r *NativeTFRunner) newConfiguredTF(op, workDir string, env []string) (*tfexec.Terraform, error) {
 	tf, err := tfexec.NewTerraform(workDir, r.execPath)
 	if err != nil {
-		return fmt.Errorf("native tf init: new terraform: %w", err)
+		return nil, fmt.Errorf("native tf %s: new terraform: %w", op, err)
 	}
 	if err := tf.SetEnv(envSliceToMap(env)); err != nil {
-		return fmt.Errorf("native tf init: set env: %w", err)
+		return nil, fmt.Errorf("native tf %s: set env: %w", op, err)
 	}
 	if r.stdout != nil {
 		tf.SetStdout(r.stdout)
 	}
+	return tf, nil
+}
 
+func (r *NativeTFRunner) Init(ctx context.Context, workDir string, env []string, backendConfigs []string) error {
+	tf, err := r.newConfiguredTF("init", workDir, env)
+	if err != nil {
+		return err
+	}
 	var opts []tfexec.InitOption
 	for _, bc := range backendConfigs {
 		opts = append(opts, tfexec.BackendConfig(bc))
@@ -127,15 +136,9 @@ func (r *NativeTFRunner) Init(ctx context.Context, workDir string, env []string,
 }
 
 func (r *NativeTFRunner) Apply(ctx context.Context, workDir string, env []string) error {
-	tf, err := tfexec.NewTerraform(workDir, r.execPath)
+	tf, err := r.newConfiguredTF("apply", workDir, env)
 	if err != nil {
-		return fmt.Errorf("native tf apply: new terraform: %w", err)
-	}
-	if err := tf.SetEnv(envSliceToMap(env)); err != nil {
-		return fmt.Errorf("native tf apply: set env: %w", err)
-	}
-	if r.stdout != nil {
-		tf.SetStdout(r.stdout)
+		return err
 	}
 	if err := tf.Apply(ctx); err != nil {
 		return fmt.Errorf("native tf apply %s: %w", workDir, err)
@@ -144,15 +147,9 @@ func (r *NativeTFRunner) Apply(ctx context.Context, workDir string, env []string
 }
 
 func (r *NativeTFRunner) Destroy(ctx context.Context, workDir string, env []string) error {
-	tf, err := tfexec.NewTerraform(workDir, r.execPath)
+	tf, err := r.newConfiguredTF("destroy", workDir, env)
 	if err != nil {
-		return fmt.Errorf("native tf destroy: new terraform: %w", err)
-	}
-	if err := tf.SetEnv(envSliceToMap(env)); err != nil {
-		return fmt.Errorf("native tf destroy: set env: %w", err)
-	}
-	if r.stdout != nil {
-		tf.SetStdout(r.stdout)
+		return err
 	}
 	if err := tf.Destroy(ctx); err != nil {
 		return fmt.Errorf("native tf destroy %s: %w", workDir, err)

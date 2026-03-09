@@ -80,21 +80,27 @@ func mustParseVersion(t *testing.T, v string) *version.Version {
 	return parsed
 }
 
-// captureStderr redirects os.Stderr to a buffer for the duration of fn,
+// captureStderr redirects the GLOBAL os.Stderr to a buffer for the duration of fn,
 // returning whatever was written to stderr.
-func captureStderr(fn func()) string {
+// NOT safe for parallel tests — os.Stderr is a process-wide variable.
+// Uses a named return + defer to guarantee restoration even if fn calls t.Fatal
+// (which triggers runtime.Goexit and skips non-deferred statements).
+func captureStderr(fn func()) (out string) {
 	r, w, err := os.Pipe()
 	if err != nil {
 		panic("captureStderr: os.Pipe: " + err.Error())
 	}
 	old := os.Stderr
 	os.Stderr = w
+	defer func() {
+		w.Close()
+		os.Stderr = old
+		var buf bytes.Buffer
+		io.Copy(&buf, r) //nolint:errcheck // pipe read never fails after write end closed
+		out = buf.String()
+	}()
 	fn()
-	w.Close()
-	os.Stderr = old
-	var buf bytes.Buffer
-	io.Copy(&buf, r) //nolint:errcheck // pipe read never fails after write end closed
-	return buf.String()
+	return
 }
 
 func TestFindPinnedTerraformInPath_NotFound(t *testing.T) {
@@ -160,6 +166,36 @@ func TestFindPinnedTerraformInPath_VersionMismatch(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "PATH terraform skipped") {
 		t.Fatalf("expected stderr diagnostic, got: %q", stderr)
+	}
+}
+
+// TestFindPinnedTerraformInPath_NilVersionNoError verifies that when
+// tfCheckVersion returns (nil, nil) — no error but nil version — the nil guard
+// fires and returns "" with the appropriate stderr diagnostic.
+func TestFindPinnedTerraformInPath_NilVersionNoError(t *testing.T) {
+	origLook := execLookPath
+	origCheck := tfCheckVersion
+	t.Cleanup(func() {
+		execLookPath = origLook
+		tfCheckVersion = origCheck
+	})
+
+	execLookPath = func(string) (string, error) { return "/usr/local/bin/terraform", nil }
+	tfCheckVersion = func(_ context.Context, _ string) (*version.Version, error) {
+		return nil, nil // nil version, no error — exercises the v == nil guard
+	}
+
+	pinnedVersion := mustParseVersion(t, terraformVersion)
+	var got string
+	stderr := captureStderr(func() {
+		got = findPinnedTerraformInPath(context.Background(), pinnedVersion)
+	})
+
+	if got != "" {
+		t.Fatalf("expected empty path for nil version, got %q", got)
+	}
+	if !strings.Contains(stderr, "version check returned nil") {
+		t.Fatalf("expected 'version check returned nil' in stderr, got: %q", stderr)
 	}
 }
 

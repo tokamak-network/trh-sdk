@@ -3,7 +3,6 @@ package thanos
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -120,19 +119,7 @@ func TestDeleteOrphanedEKS_ClusterExistsAPIError(t *testing.T) {
 	if cleaned != 3 || failed != 1 {
 		t.Fatalf("expected 3/1 unchanged on API error, got %d/%d", cleaned, failed)
 	}
-	if logs.Len() == 0 {
-		t.Fatal("expected a Warn log for EKSClusterExists API error, got none")
-	}
-	found := false
-	for _, entry := range logs.All() {
-		if strings.Contains(entry.Message, "EKS cluster existence") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected a Warn log mentioning 'EKS cluster existence', got: %v", logs.All())
-	}
+	assertWarnLogContains(t, logs, "EKS cluster existence")
 }
 
 // TestDeleteOrphanedRDS_InstanceExistsAPIError verifies that an API error from
@@ -149,19 +136,7 @@ func TestDeleteOrphanedRDS_InstanceExistsAPIError(t *testing.T) {
 	if cleaned != 2 || failed != 0 {
 		t.Fatalf("expected 2/0 unchanged on API error, got %d/%d", cleaned, failed)
 	}
-	if logs.Len() == 0 {
-		t.Fatal("expected a Warn log for RDSInstanceExists API error, got none")
-	}
-	found := false
-	for _, entry := range logs.All() {
-		if strings.Contains(entry.Message, "RDS instance existence") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected a Warn log mentioning 'RDS instance existence', got: %v", logs.All())
-	}
+	assertWarnLogContains(t, logs, "RDS instance existence")
 }
 
 // TestDeleteOrphanedVPC_DescribeAPIError verifies that an EC2DescribeVPCs API error
@@ -177,19 +152,7 @@ func TestDeleteOrphanedVPC_DescribeAPIError(t *testing.T) {
 	if cleaned != 4 || failed != 0 {
 		t.Fatalf("expected 4/0 unchanged on API error, got %d/%d", cleaned, failed)
 	}
-	if logs.Len() == 0 {
-		t.Fatal("expected a Warn log for EC2DescribeVPCs API error, got none")
-	}
-	found := false
-	for _, entry := range logs.All() {
-		if strings.Contains(entry.Message, "list VPCs") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected a Warn log mentioning 'list VPCs', got: %v", logs.All())
-	}
+	assertWarnLogContains(t, logs, "list VPCs")
 }
 
 // ─── deleteOrphanedElasticIPs ──────────────────────────────────────────────
