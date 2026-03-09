@@ -349,10 +349,16 @@ func (r *NativeK8sRunner) Logs(ctx context.Context, pod, namespace, container st
 
 // ─── discovery helpers ───────────────────────────────────────────────────────
 
-// runDiscovery calls ServerPreferredResources once and returns the result.
-// ServerPreferredResources may return partial results alongside a non-nil error
-// (e.g. when some API groups are unavailable). We treat partial results as
-// usable and only hard-fail when the returned list is nil.
+// runDiscovery calls ServerPreferredResources and returns the result.
+//
+// ServerPreferredResources may return (partialLists, nonNilError) when some
+// API groups are unreachable. Those partial results are still usable — we
+// only hard-fail when the returned list is nil (total failure). Callers that
+// receive a nil error from this function can therefore rely on a non-nil list,
+// but should not assume every API group was reachable.
+//
+// Note: this always returns a nil error when lists is non-nil. The "if err != nil"
+// guards in callers are defensive against the total-failure path only.
 func (r *NativeK8sRunner) runDiscovery() ([]*metav1.APIResourceList, error) {
 	lists, err := r.client.Discovery().ServerPreferredResources()
 	if lists == nil {
@@ -469,35 +475,35 @@ func matchesShortName(shortNames []string, target string) bool {
 // plural API resource names. Initialised once at package level to avoid
 // allocating a new map on every normaliseResourceName call.
 var resourceAliases = map[string]string{
-	"namespace":             "namespaces",
-	"pod":                   "pods",
-	"svc":                   "services",
-	"service":               "services",
-	"ingress":               "ingresses",
-	"pvc":                   "persistentvolumeclaims",
-	"persistentvolumeclaim": "persistentvolumeclaims",
-	"pv":                    "persistentvolumes",
-	"persistentvolume":      "persistentvolumes",
-	"deployment":            "deployments",
-	"configmap":             "configmaps",
-	"clusterrolebinding":    "clusterrolebindings",
-	"clusterrole":           "clusterroles",
-	"serviceaccount":        "serviceaccounts",
-	"secret":                "secrets",
-	"storageclass":          "storageclasses",
-	"statefulset":           "statefulsets",
-	"daemonset":             "daemonsets",
-	"job":                   "jobs",
-	"cronjob":               "cronjobs",
-	"endpoint":              "endpoints",
-	"rolebinding":           "rolebindings",
-	"role":                  "roles",
-	"networkpolicy":         "networkpolicies",
-	"crd":                   "customresourcedefinitions",
+	"clusterrole":              "clusterroles",
+	"clusterrolebinding":       "clusterrolebindings",
+	"configmap":                "configmaps",
+	"crd":                      "customresourcedefinitions",
+	"cronjob":                  "cronjobs",
 	"customresourcedefinition": "customresourcedefinitions",
-	"replicaset":            "replicasets",
-	"horizontalpodautoscaler": "horizontalpodautoscalers",
-	"hpa":                   "horizontalpodautoscalers",
+	"daemonset":                "daemonsets",
+	"deployment":               "deployments",
+	"endpoint":                 "endpoints",
+	"horizontalpodautoscaler":  "horizontalpodautoscalers",
+	"hpa":                      "horizontalpodautoscalers",
+	"ingress":                  "ingresses",
+	"job":                      "jobs",
+	"namespace":                "namespaces",
+	"networkpolicy":            "networkpolicies",
+	"persistentvolume":         "persistentvolumes",
+	"persistentvolumeclaim":    "persistentvolumeclaims",
+	"pod":                      "pods",
+	"pv":                       "persistentvolumes",
+	"pvc":                      "persistentvolumeclaims",
+	"replicaset":               "replicasets",
+	"role":                     "roles",
+	"rolebinding":              "rolebindings",
+	"secret":                   "secrets",
+	"service":                  "services",
+	"serviceaccount":           "serviceaccounts",
+	"statefulset":              "statefulsets",
+	"storageclass":             "storageclasses",
+	"svc":                      "services",
 }
 
 // normaliseResourceName maps common short forms to their canonical plural names.
@@ -552,8 +558,9 @@ func checkCondition(obj *unstructured.Unstructured, condition string) bool {
 // It correctly handles documents that start with "---", skips empty documents,
 // and normalises Windows-style CRLF line endings before splitting.
 func splitYAMLDocuments(data []byte) [][]byte {
-	// Normalise CRLF → LF so Windows-authored manifests are handled correctly.
+	// Normalise line endings: CRLF (Windows) and standalone CR (old Mac) → LF.
 	data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+	data = bytes.ReplaceAll(data, []byte("\r"), []byte("\n"))
 
 	// Normalise: if the document starts with "---", drop that prefix so the
 	// subsequent split on "\n---" handles it uniformly.

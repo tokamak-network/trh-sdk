@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -9,7 +10,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	k8sdiscovery "k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes"
 	fakek8s "k8s.io/client-go/kubernetes/fake"
 )
 
@@ -165,6 +168,61 @@ func TestNativeK8sRunner_Logs_CancelledContext(t *testing.T) {
 	}
 }
 
+// ─── runDiscovery error path ──────────────────────────────────────────────────
+
+// nilDiscoveryClientset is a kubernetes.Interface stub whose Discovery()
+// returns nil lists — used to exercise runDiscovery()'s total-failure path.
+type nilDiscoveryClientset struct {
+	kubernetes.Interface
+}
+
+func (c *nilDiscoveryClientset) Discovery() k8sdiscovery.DiscoveryInterface {
+	return &nilDiscovery{}
+}
+
+type nilDiscovery struct {
+	k8sdiscovery.DiscoveryInterface
+}
+
+func (d *nilDiscovery) ServerPreferredResources() ([]*metav1.APIResourceList, error) {
+	return nil, errors.New("server unreachable")
+}
+
+func TestNativeK8sRunner_runDiscovery_TotalFailure(t *testing.T) {
+	r := &NativeK8sRunner{
+		client: &nilDiscoveryClientset{Interface: fakek8s.NewSimpleClientset()},
+	}
+	_, err := r.runDiscovery()
+	if err == nil {
+		t.Fatal("expected error when ServerPreferredResources returns nil lists")
+	}
+}
+
+// ─── isKubectlAlreadyExistsErr ───────────────────────────────────────────────
+
+func TestIsKubectlAlreadyExistsErr_AlreadyExists(t *testing.T) {
+	// Standard kubectl AlreadyExists output.
+	err := errors.New(`Error from server (AlreadyExists): namespaces "my-ns" already exists`)
+	if !isKubectlAlreadyExistsErr(err) {
+		t.Fatal("expected AlreadyExists to be detected")
+	}
+}
+
+func TestIsKubectlAlreadyExistsErr_AlreadyExistsParens(t *testing.T) {
+	// Match on the parenthesised reason code alone.
+	err := errors.New(`Error from server (AlreadyExists): something`)
+	if !isKubectlAlreadyExistsErr(err) {
+		t.Fatal("expected (AlreadyExists) to be detected")
+	}
+}
+
+func TestIsKubectlAlreadyExistsErr_OtherError(t *testing.T) {
+	err := errors.New("Error from server (Forbidden): namespaces is forbidden")
+	if isKubectlAlreadyExistsErr(err) {
+		t.Fatal("expected non-AlreadyExists error to not match")
+	}
+}
+
 func TestNativeK8sRunner_Patch_NamespaceMutation(t *testing.T) {
 	r := newTestRunner()
 	patch := []byte(`{"metadata":{"namespace":"kube-system"}}`)
@@ -290,6 +348,29 @@ func TestSplitYAMLDocuments_CRLF(t *testing.T) {
 	docs := splitYAMLDocuments(input)
 	if len(docs) != 2 {
 		t.Fatalf("expected 2 docs with CRLF line endings, got %d", len(docs))
+	}
+	// Verify CR bytes were fully stripped — not just counted.
+	for i, doc := range docs {
+		if bytes.Contains(doc, []byte("\r")) {
+			t.Errorf("doc[%d] still contains CR after normalisation: %q", i, doc)
+		}
+	}
+	if !bytes.Contains(docs[0], []byte("apiVersion: v1")) {
+		t.Errorf("doc[0] content unexpected: %q", docs[0])
+	}
+}
+
+func TestSplitYAMLDocuments_StandaloneCR(t *testing.T) {
+	// Old Mac-style standalone CR line endings must also be normalised.
+	input := []byte("apiVersion: v1\rkind: Pod\r---\rapiVersion: v1\rkind: Service")
+	docs := splitYAMLDocuments(input)
+	if len(docs) != 2 {
+		t.Fatalf("expected 2 docs with standalone CR line endings, got %d", len(docs))
+	}
+	for i, doc := range docs {
+		if bytes.Contains(doc, []byte("\r")) {
+			t.Errorf("doc[%d] still contains CR after normalisation: %q", i, doc)
+		}
 	}
 }
 

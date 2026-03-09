@@ -133,13 +133,21 @@ func (r *ShellOutK8sRunner) EnsureNamespace(ctx context.Context, namespace strin
 	// This avoids the TOCTOU race inherent in a check-then-create pattern.
 	_, err := utils.ExecuteCommand(ctx, "kubectl", "create", "namespace", namespace)
 	if err != nil {
-		// kubectl reports "AlreadyExists" when the namespace was concurrently created.
-		if strings.Contains(err.Error(), "AlreadyExists") || strings.Contains(err.Error(), "already exists") {
+		if isKubectlAlreadyExistsErr(err) {
 			return nil
 		}
 		return fmt.Errorf("shellout create namespace %s: %w", namespace, err)
 	}
 	return nil
+}
+
+// isKubectlAlreadyExistsErr reports whether err came from kubectl reporting that
+// a resource already exists. kubectl always uses English error messages regardless
+// of locale, so string matching is reliable here.
+// Example kubectl output: "Error from server (AlreadyExists): namespaces "foo" already exists"
+func isKubectlAlreadyExistsErr(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "AlreadyExists") || strings.Contains(msg, "already exists")
 }
 
 func (r *ShellOutK8sRunner) NamespaceExists(ctx context.Context, namespace string) (bool, error) {

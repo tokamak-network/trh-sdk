@@ -153,6 +153,64 @@ func TestShellOutK8sRunner_Logs_AlwaysErrors(t *testing.T) {
 	}
 }
 
+// ─── ShellOutK8sRunner input-validation tests ─────────────────────────────────
+
+func TestShellOutK8sRunner_Delete_EmptyResource(t *testing.T) {
+	r, _ := runner.New(runner.RunnerConfig{UseNative: false})
+	err := r.K8s().Delete(context.Background(), "", "my-obj", "default", false)
+	if err == nil {
+		t.Fatal("expected error for empty resource")
+	}
+}
+
+func TestShellOutK8sRunner_Delete_EmptyName(t *testing.T) {
+	r, _ := runner.New(runner.RunnerConfig{UseNative: false})
+	err := r.K8s().Delete(context.Background(), "pods", "", "default", false)
+	if err == nil {
+		t.Fatal("expected error for empty name")
+	}
+}
+
+func TestShellOutK8sRunner_Get_EmptyResource(t *testing.T) {
+	r, _ := runner.New(runner.RunnerConfig{UseNative: false})
+	_, err := r.K8s().Get(context.Background(), "", "my-obj", "default")
+	if err == nil {
+		t.Fatal("expected error for empty resource")
+	}
+}
+
+func TestShellOutK8sRunner_Get_EmptyName(t *testing.T) {
+	r, _ := runner.New(runner.RunnerConfig{UseNative: false})
+	_, err := r.K8s().Get(context.Background(), "pods", "", "default")
+	if err == nil {
+		t.Fatal("expected error for empty name")
+	}
+}
+
+func TestShellOutK8sRunner_List_EmptyResource(t *testing.T) {
+	r, _ := runner.New(runner.RunnerConfig{UseNative: false})
+	_, err := r.K8s().List(context.Background(), "", "default", "")
+	if err == nil {
+		t.Fatal("expected error for empty resource")
+	}
+}
+
+func TestShellOutK8sRunner_Patch_EmptyResource(t *testing.T) {
+	r, _ := runner.New(runner.RunnerConfig{UseNative: false})
+	err := r.K8s().Patch(context.Background(), "", "my-obj", "default", []byte(`{}`))
+	if err == nil {
+		t.Fatal("expected error for empty resource")
+	}
+}
+
+func TestShellOutK8sRunner_Patch_EmptyName(t *testing.T) {
+	r, _ := runner.New(runner.RunnerConfig{UseNative: false})
+	err := r.K8s().Patch(context.Background(), "pods", "", "default", []byte(`{}`))
+	if err == nil {
+		t.Fatal("expected error for empty name")
+	}
+}
+
 func containsAny(s string, subs ...string) bool {
 	for _, sub := range subs {
 		if len(sub) > 0 && len(s) >= len(sub) {
