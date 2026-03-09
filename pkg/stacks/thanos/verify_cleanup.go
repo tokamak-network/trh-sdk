@@ -9,15 +9,25 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
-// VerifyAndCleanupResources  will scans for orphaned aws resources after destroy and removes them
-//Resources are identified by namespace tag , name pattern following terraform conventions.
+// Timing constants for AWS resource deletion propagation delays.
+const (
+	eipDisassociationGrace   = 2 * time.Second
+	natGwDeletionPropagation = 30 * time.Second
+	mountTargetDeletionGrace = 10 * time.Second
+	vpcDependencyGrace       = 5 * time.Second
+	nodeGroupPollInterval    = 30 * time.Second
+	nodeGroupPollMaxAttempts = 20 // ~10-minute timeout
+)
+
+// VerifyAndCleanupResources scans for orphaned AWS resources after destroy and removes them.
+// Resources are identified by namespace tag or name pattern following Terraform conventions.
 func (t *ThanosStack) VerifyAndCleanupResources(ctx context.Context, namespace string) error {
 	region := t.awsProfile.AwsConfig.Region
 	t.logger.Infof("Verifying resource cleanup for namespace: %s in region: %s", namespace, region)
 
 	var cleaned, failed int
 
-	// Delete in dependency order (reverse of creation)
+	// Delete in dependency order (reverse of creation).
 	cleaned, failed = t.deleteOrphanedLoadBalancers(ctx, region, namespace, cleaned, failed)
 	cleaned, failed = t.deleteOrphanedElasticIPs(ctx, region, namespace, cleaned, failed)
 	cleaned, failed = t.deleteOrphanedNATGateways(ctx, region, namespace, cleaned, failed)
@@ -40,29 +50,31 @@ func (t *ThanosStack) VerifyAndCleanupResources(ctx context.Context, namespace s
 }
 
 func (t *ThanosStack) deleteOrphanedLoadBalancers(ctx context.Context, region, namespace string, cleaned, failed int) (int, int) {
-	// Classic ELB
-	names, err := utils.ListClassicLoadBalancers(ctx, region, namespace)
-	if err != nil {
-		return cleaned, failed
-	}
-	for _, name := range names {
-		t.logger.Infof("Deleting ELB: %s", name)
-		if err := utils.DeleteClassicLoadBalancer(ctx, region, name); err != nil {
-			t.logger.Warnf("Failed to delete ELB %s: %v", name, err)
-			failed++
-		} else {
-			cleaned++
+	// Classic ELB — independent of ALB/NLB; a listing error here does not skip other categories.
+	names, err := utils.ListClassicLoadBalancers(ctx, t.awsRunner, region, namespace)
+	if err == nil {
+		for _, name := range names {
+			t.logger.Infof("Deleting ELB: %s", name)
+			if err := utils.DeleteClassicLoadBalancer(ctx, t.awsRunner, region, name); err != nil {
+				t.logger.Warnf("Failed to delete ELB %s: %v", name, err)
+				failed++
+			} else {
+				cleaned++
+			}
 		}
+	} else {
+		t.logger.Warnf("Failed to list Classic ELBs: %v", err)
 	}
 
 	// ALB / NLB
-	arns, err := utils.ListALBLoadBalancers(ctx, region, namespace)
+	arns, err := utils.ListALBLoadBalancers(ctx, t.awsRunner, region, namespace)
 	if err != nil {
+		t.logger.Warnf("Failed to list ALB/NLBs: %v", err)
 		return cleaned, failed
 	}
 	for _, arn := range arns {
 		t.logger.Infof("Deleting ALB/NLB: %s", arn)
-		if err := utils.DeleteALBLoadBalancer(ctx, region, arn); err != nil {
+		if err := utils.DeleteALBLoadBalancer(ctx, t.awsRunner, region, arn); err != nil {
 			t.logger.Warnf("Failed to delete ALB/NLB: %v", err)
 			failed++
 		} else {
@@ -74,21 +86,25 @@ func (t *ThanosStack) deleteOrphanedLoadBalancers(ctx context.Context, region, n
 }
 
 func (t *ThanosStack) deleteOrphanedElasticIPs(ctx context.Context, region, namespace string, cleaned, failed int) (int, int) {
-	eips, err := utils.ListElasticIPs(ctx, region, namespace)
+	eips, err := utils.ListElasticIPs(ctx, t.awsRunner, region, namespace)
 	if err != nil {
 		return cleaned, failed
 	}
 
 	for _, eip := range eips {
 		if eip.Assoc != "" {
-			if err := utils.DisassociateAddress(ctx, region, eip.Assoc); err != nil {
+			if err := utils.DisassociateAddress(ctx, t.awsRunner, region, eip.Assoc); err != nil {
 				t.logger.Warnf("Failed to disassociate address %s: %v", eip.Assoc, err)
 			}
-			time.Sleep(2 * time.Second)
+			select {
+			case <-ctx.Done():
+				return cleaned, failed
+			case <-time.After(eipDisassociationGrace):
+			}
 		}
 
 		t.logger.Infof("Releasing Elastic IP: %s", eip.ID)
-		if err := utils.ReleaseAddress(ctx, region, eip.ID); err != nil {
+		if err := utils.ReleaseAddress(ctx, t.awsRunner, region, eip.ID); err != nil {
 			t.logger.Warnf("Failed to release Elastic IP %s: %v", eip.ID, err)
 			failed++
 		} else {
@@ -100,14 +116,14 @@ func (t *ThanosStack) deleteOrphanedElasticIPs(ctx context.Context, region, name
 }
 
 func (t *ThanosStack) deleteOrphanedNATGateways(ctx context.Context, region, namespace string, cleaned, failed int) (int, int) {
-	ids, err := utils.ListNATGateways(ctx, region, namespace)
+	ids, err := utils.ListNATGateways(ctx, t.awsRunner, region, namespace)
 	if err != nil || len(ids) == 0 {
 		return cleaned, failed
 	}
 
 	for _, id := range ids {
 		t.logger.Infof("Deleting NAT Gateway: %s", id)
-		if err := utils.DeleteNATGateway(ctx, region, id); err != nil {
+		if err := utils.DeleteNATGateway(ctx, t.awsRunner, region, id); err != nil {
 			t.logger.Warnf("Failed to delete NAT Gateway %s: %v", id, err)
 			failed++
 		} else {
@@ -115,27 +131,30 @@ func (t *ThanosStack) deleteOrphanedNATGateways(ctx context.Context, region, nam
 		}
 	}
 
-	if len(ids) > 0 {
-		t.logger.Info("Waiting for NAT Gateway deletion...")
-		time.Sleep(30 * time.Second)
+	t.logger.Info("Waiting for NAT Gateway deletion...")
+	select {
+	case <-ctx.Done():
+		return cleaned, failed
+	case <-time.After(natGwDeletionPropagation):
 	}
 
 	return cleaned, failed
 }
 
 func (t *ThanosStack) deleteOrphanedEKS(ctx context.Context, region, namespace string, cleaned, failed int) (int, int) {
-	// this will check if cluster exists
-	if !utils.EKSClusterExists(ctx, region, namespace) {
+	// EKS cluster name matches namespace by TRH convention.
+	if !utils.EKSClusterExists(ctx, t.awsRunner, region, namespace) {
 		return cleaned, failed
 	}
 
-	// Deletes node groups first
-	nodeGroups, err := utils.ListNodeGroups(ctx, region, namespace)
+	// Delete node groups first.
+	nodeGroups, err := utils.ListNodeGroups(ctx, t.awsRunner, region, namespace)
 	if err == nil {
 		for _, ng := range nodeGroups {
 			t.logger.Infof("Deleting node group: %s", ng)
-			if err := utils.DeleteNodeGroup(ctx, region, namespace, ng); err != nil {
+			if err := utils.DeleteNodeGroup(ctx, t.awsRunner, region, namespace, ng); err != nil {
 				t.logger.Warnf("Failed to delete node group %s: %v", ng, err)
+				failed++
 			}
 		}
 
@@ -145,7 +164,7 @@ func (t *ThanosStack) deleteOrphanedEKS(ctx context.Context, region, namespace s
 	}
 
 	t.logger.Infof("Deleting EKS cluster: %s", namespace)
-	if err := utils.DeleteEKSCluster(ctx, region, namespace); err != nil {
+	if err := utils.DeleteEKSCluster(ctx, t.awsRunner, region, namespace); err != nil {
 		t.logger.Warnf("Failed to delete EKS cluster: %v", err)
 		failed++
 	} else {
@@ -157,18 +176,31 @@ func (t *ThanosStack) deleteOrphanedEKS(ctx context.Context, region, namespace s
 
 func (t *ThanosStack) waitForNodeGroupsDeletion(ctx context.Context, region, cluster string) {
 	t.logger.Info("Waiting for node groups deletion...")
-	for i := 0; i < 20; i++ { // 10 minute timeout
-		time.Sleep(30 * time.Second)
+	ticker := time.NewTicker(nodeGroupPollInterval)
+	defer ticker.Stop()
 
-		ngs, err := utils.ListNodeGroups(ctx, region, cluster)
-		if err != nil || len(ngs) == 0 {
+	for i := 0; i < nodeGroupPollMaxAttempts; i++ {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		ngs, err := utils.ListNodeGroups(ctx, t.awsRunner, region, cluster)
+		if err != nil {
+			// Transient error — keep polling rather than treating as done.
+			t.logger.Warnf("Failed to list node groups (attempt %d/%d): %v", i+1, nodeGroupPollMaxAttempts, err)
+			continue
+		}
+		if len(ngs) == 0 {
 			return
 		}
 	}
+	t.logger.Warnf("Node groups may not have fully deleted after %d attempts", nodeGroupPollMaxAttempts)
 }
 
 func (t *ThanosStack) deleteOrphanedEFS(ctx context.Context, region, namespace string, cleaned, failed int) (int, int) {
-	filesystems, err := utils.ListEFSFileSystems(ctx, region)
+	filesystems, err := utils.ListEFSFileSystems(ctx, t.awsRunner, region)
 	if err != nil {
 		return cleaned, failed
 	}
@@ -178,21 +210,25 @@ func (t *ThanosStack) deleteOrphanedEFS(ctx context.Context, region, namespace s
 			continue
 		}
 
-		// Delete mount targets first
-		mountTargets, err := utils.ListMountTargets(ctx, region, fs.ID)
+		// Delete mount targets first.
+		mountTargets, err := utils.ListMountTargets(ctx, t.awsRunner, region, fs.ID)
 		if err == nil {
 			for _, mt := range mountTargets {
-				if err := utils.DeleteMountTarget(ctx, region, mt); err != nil {
+				if err := utils.DeleteMountTarget(ctx, t.awsRunner, region, mt); err != nil {
 					t.logger.Warnf("Failed to delete mount target %s: %v", mt, err)
 				}
 			}
 			if len(mountTargets) > 0 {
-				time.Sleep(10 * time.Second)
+				select {
+				case <-ctx.Done():
+					return cleaned, failed
+				case <-time.After(mountTargetDeletionGrace):
+				}
 			}
 		}
 
 		t.logger.Infof("Deleting EFS: %s (%s)", fs.Name, fs.ID)
-		if err := utils.DeleteEFSFileSystem(ctx, region, fs.ID); err != nil {
+		if err := utils.DeleteEFSFileSystem(ctx, t.awsRunner, region, fs.ID); err != nil {
 			t.logger.Warnf("Failed to delete EFS %s: %v", fs.ID, err)
 			failed++
 		} else {
@@ -206,12 +242,12 @@ func (t *ThanosStack) deleteOrphanedEFS(ctx context.Context, region, namespace s
 func (t *ThanosStack) deleteOrphanedRDS(ctx context.Context, region, namespace string, cleaned, failed int) (int, int) {
 	identifier := fmt.Sprintf("%s-rds", namespace)
 
-	if !utils.RDSInstanceExists(ctx, region, identifier) {
+	if !utils.RDSInstanceExists(ctx, t.awsRunner, region, identifier) {
 		return cleaned, failed
 	}
 
 	t.logger.Infof("Deleting RDS: %s", identifier)
-	if err := utils.DeleteRDSInstance(ctx, region, identifier); err != nil {
+	if err := utils.DeleteRDSInstance(ctx, t.awsRunner, region, identifier); err != nil {
 		t.logger.Warnf("Failed to delete RDS %s: %v", identifier, err)
 		failed++
 	} else {
@@ -222,7 +258,7 @@ func (t *ThanosStack) deleteOrphanedRDS(ctx context.Context, region, namespace s
 }
 
 func (t *ThanosStack) deleteOrphanedS3(ctx context.Context, region, namespace string, cleaned, failed int) (int, int) {
-	buckets, err := utils.ListS3Buckets(ctx)
+	buckets, err := utils.ListS3Buckets(ctx, t.awsRunner)
 	if err != nil {
 		return cleaned, failed
 	}
@@ -233,11 +269,11 @@ func (t *ThanosStack) deleteOrphanedS3(ctx context.Context, region, namespace st
 		}
 
 		t.logger.Infof("Deleting S3 bucket: %s", bucket)
-		if err := utils.EmptyS3Bucket(ctx, bucket); err != nil {
+		if err := utils.EmptyS3Bucket(ctx, t.awsRunner, bucket); err != nil {
 			t.logger.Warnf("Failed to empty S3 bucket %s: %v", bucket, err)
 		}
 
-		if err := utils.DeleteS3Bucket(ctx, bucket); err != nil {
+		if err := utils.DeleteS3Bucket(ctx, t.awsRunner, bucket); err != nil {
 			t.logger.Warnf("Failed to delete S3 bucket %s: %v", bucket, err)
 			failed++
 		} else {
@@ -249,7 +285,7 @@ func (t *ThanosStack) deleteOrphanedS3(ctx context.Context, region, namespace st
 }
 
 func (t *ThanosStack) deleteOrphanedVPC(ctx context.Context, region, namespace string, cleaned, failed int) (int, int) {
-	vpcIDs, err := utils.ListVPCs(ctx, region, namespace)
+	vpcIDs, err := utils.ListVPCs(ctx, t.awsRunner, region, namespace)
 	if err != nil || len(vpcIDs) == 0 {
 		return cleaned, failed
 	}
@@ -257,12 +293,16 @@ func (t *ThanosStack) deleteOrphanedVPC(ctx context.Context, region, namespace s
 	for _, vpcID := range vpcIDs {
 		t.logger.Infof("Cleaning up VPC: %s", vpcID)
 
-		// Delete dependencies in order
+		// Delete dependencies in order.
 		t.cleanupVPCDependencies(ctx, region, vpcID)
 
-		time.Sleep(5 * time.Second)
+		select {
+		case <-ctx.Done():
+			return cleaned, failed
+		case <-time.After(vpcDependencyGrace):
+		}
 
-		if err := utils.DeleteVPC(ctx, region, vpcID); err != nil {
+		if err := utils.DeleteVPC(ctx, t.awsRunner, region, vpcID); err != nil {
 			t.logger.Warnf("Failed to delete VPC %s: %v", vpcID, err)
 			failed++
 		} else {
@@ -274,49 +314,49 @@ func (t *ThanosStack) deleteOrphanedVPC(ctx context.Context, region, namespace s
 }
 
 func (t *ThanosStack) cleanupVPCDependencies(ctx context.Context, region, vpcID string) {
-	//internet gateways
-	igws, err := utils.ListVPCResources(ctx, region, vpcID, "internet-gateways", "InternetGateways[].InternetGatewayId")
+	// internet gateways
+	igws, err := utils.ListVPCResources(ctx, t.awsRunner, region, vpcID, "internet-gateways")
 	if err != nil {
 		t.logger.Warnf("Failed to list internet gateways for VPC %s: %v", vpcID, err)
 	}
 	for _, igw := range igws {
-		if err := utils.DetachInternetGateway(ctx, region, igw, vpcID); err != nil {
+		if err := utils.DetachInternetGateway(ctx, t.awsRunner, region, igw, vpcID); err != nil {
 			t.logger.Warnf("Failed to detach internet gateway %s: %v", igw, err)
 		}
-		if err := utils.DeleteInternetGateway(ctx, region, igw); err != nil {
+		if err := utils.DeleteInternetGateway(ctx, t.awsRunner, region, igw); err != nil {
 			t.logger.Warnf("Failed to delete internet gateway %s: %v", igw, err)
 		}
 	}
 
-	//subnets
-	subnets, err := utils.ListVPCResources(ctx, region, vpcID, "subnets", "Subnets[].SubnetId")
+	// subnets
+	subnets, err := utils.ListVPCResources(ctx, t.awsRunner, region, vpcID, "subnets")
 	if err != nil {
 		t.logger.Warnf("Failed to list subnets for VPC %s: %v", vpcID, err)
 	}
 	for _, subnet := range subnets {
-		if err := utils.DeleteSubnet(ctx, region, subnet); err != nil {
+		if err := utils.DeleteSubnet(ctx, t.awsRunner, region, subnet); err != nil {
 			t.logger.Warnf("Failed to delete subnet %s: %v", subnet, err)
 		}
 	}
 
-	//route tables not the main one
-	routeTables, err := utils.ListVPCResources(ctx, region, vpcID, "route-tables", "RouteTables[?Associations[0].Main!=`true`].RouteTableId")
+	// route tables (not the main one)
+	routeTables, err := utils.ListVPCResources(ctx, t.awsRunner, region, vpcID, "route-tables")
 	if err != nil {
 		t.logger.Warnf("Failed to list route tables for VPC %s: %v", vpcID, err)
 	}
 	for _, rt := range routeTables {
-		if err := utils.DeleteRouteTable(ctx, region, rt); err != nil {
+		if err := utils.DeleteRouteTable(ctx, t.awsRunner, region, rt); err != nil {
 			t.logger.Warnf("Failed to delete route table %s: %v", rt, err)
 		}
 	}
 
-	//security groups which are not default
-	securityGroups, err := utils.ListVPCResources(ctx, region, vpcID, "security-groups", "SecurityGroups[?GroupName!='default'].GroupId")
+	// security groups (not the default one)
+	securityGroups, err := utils.ListVPCResources(ctx, t.awsRunner, region, vpcID, "security-groups")
 	if err != nil {
 		t.logger.Warnf("Failed to list security groups for VPC %s: %v", vpcID, err)
 	}
 	for _, sg := range securityGroups {
-		if err := utils.DeleteSecurityGroup(ctx, region, sg); err != nil {
+		if err := utils.DeleteSecurityGroup(ctx, t.awsRunner, region, sg); err != nil {
 			t.logger.Warnf("Failed to delete security group %s: %v", sg, err)
 		}
 	}
