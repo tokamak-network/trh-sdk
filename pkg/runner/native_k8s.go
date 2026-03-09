@@ -136,6 +136,12 @@ func (r *NativeK8sRunner) Apply(ctx context.Context, manifest []byte) error {
 
 // Delete removes the named resource from the cluster.
 func (r *NativeK8sRunner) Delete(ctx context.Context, resource, name, namespace string, ignoreNotFound bool) error {
+	if resource == "" {
+		return fmt.Errorf("native delete: resource name cannot be empty")
+	}
+	if name == "" {
+		return fmt.Errorf("native delete: object name cannot be empty")
+	}
 	entry, err := r.resolveGVRByResource(ctx, resource)
 	if err != nil {
 		return fmt.Errorf("native delete: resolve resource %s: %w", resource, err)
@@ -160,6 +166,12 @@ func (r *NativeK8sRunner) Delete(ctx context.Context, resource, name, namespace 
 
 // Get fetches a resource and returns it as JSON bytes.
 func (r *NativeK8sRunner) Get(ctx context.Context, resource, name, namespace string) ([]byte, error) {
+	if resource == "" {
+		return nil, fmt.Errorf("native get: resource name cannot be empty")
+	}
+	if name == "" {
+		return nil, fmt.Errorf("native get: object name cannot be empty")
+	}
 	entry, err := r.resolveGVRByResource(ctx, resource)
 	if err != nil {
 		return nil, fmt.Errorf("native get: resolve resource %s: %w", resource, err)
@@ -184,6 +196,9 @@ func (r *NativeK8sRunner) Get(ctx context.Context, resource, name, namespace str
 
 // List returns a JSON list of resources filtered by an optional label selector.
 func (r *NativeK8sRunner) List(ctx context.Context, resource, namespace, labelSelector string) ([]byte, error) {
+	if resource == "" {
+		return nil, fmt.Errorf("native list: resource name cannot be empty")
+	}
 	entry, err := r.resolveGVRByResource(ctx, resource)
 	if err != nil {
 		return nil, fmt.Errorf("native list: resolve resource %s: %w", resource, err)
@@ -214,6 +229,12 @@ func (r *NativeK8sRunner) List(ctx context.Context, resource, namespace, labelSe
 // Patch applies a JSON merge-patch to an existing resource.
 // Returns an error immediately if patch is not valid JSON.
 func (r *NativeK8sRunner) Patch(ctx context.Context, resource, name, namespace string, patch []byte) error {
+	if resource == "" {
+		return fmt.Errorf("native patch: resource name cannot be empty")
+	}
+	if name == "" {
+		return fmt.Errorf("native patch: object name cannot be empty")
+	}
 	if !json.Valid(patch) {
 		return fmt.Errorf("native patch: invalid JSON payload for %s/%s", resource, name)
 	}
@@ -239,15 +260,13 @@ func (r *NativeK8sRunner) Patch(ctx context.Context, resource, name, namespace s
 
 // Wait polls until the named resource satisfies condition or the context is cancelled.
 func (r *NativeK8sRunner) Wait(ctx context.Context, resource, name, namespace, condition string, timeout time.Duration) error {
-	waitCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
 	entry, err := r.resolveGVRByResource(ctx, resource)
 	if err != nil {
 		return fmt.Errorf("native wait: resolve resource %s: %w", resource, err)
 	}
 
-	return wait.PollUntilContextTimeout(waitCtx, 2*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
+	// PollUntilContextTimeout enforces the timeout internally; no child context needed.
+	return wait.PollUntilContextTimeout(ctx, 2*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		// Use a closure-local error variable to avoid mutating the outer err.
 		var obj *unstructured.Unstructured
 		var pollErr error
@@ -267,18 +286,12 @@ func (r *NativeK8sRunner) Wait(ctx context.Context, resource, name, namespace, c
 }
 
 // EnsureNamespace creates the namespace if it does not already exist.
+// It uses an optimistic create-then-check pattern to avoid TOCTOU races.
 func (r *NativeK8sRunner) EnsureNamespace(ctx context.Context, namespace string) error {
-	exists, err := r.NamespaceExists(ctx, namespace)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return nil
-	}
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{Name: namespace},
 	}
-	_, err = r.client.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+	_, err := r.client.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
 	if err != nil && !k8serrors.IsAlreadyExists(err) {
 		return fmt.Errorf("native create namespace %s: %w", namespace, err)
 	}
@@ -299,6 +312,9 @@ func (r *NativeK8sRunner) NamespaceExists(ctx context.Context, namespace string)
 
 // Logs opens a streaming log connection to the named pod.
 func (r *NativeK8sRunner) Logs(ctx context.Context, pod, namespace, container string, follow bool) (io.ReadCloser, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("native logs: context already done: %w", err)
+	}
 	opts := &corev1.PodLogOptions{
 		Container: container,
 		Follow:    follow,
@@ -459,7 +475,8 @@ func checkCondition(obj *unstructured.Unstructured, condition string) bool {
 		}
 		t, _ := cMap["type"].(string)
 		s, _ := cMap["status"].(string)
-		if strings.ToLower(t) == target && strings.EqualFold(s, "True") {
+		// Kubernetes condition status values are exactly "True", "False", or "Unknown".
+		if strings.ToLower(t) == target && s == "True" {
 			return true
 		}
 	}
@@ -467,18 +484,22 @@ func checkCondition(obj *unstructured.Unstructured, condition string) bool {
 }
 
 // splitYAMLDocuments splits a multi-document YAML byte slice on "---" separators.
-// Empty documents are omitted from the result.
+// It correctly handles documents that start with "---" and skips empty documents.
 func splitYAMLDocuments(data []byte) [][]byte {
-	sep := []byte("\n---")
-	parts := bytes.Split(data, sep)
-	if len(parts) == 1 {
-		return parts
+	// Normalise: if the document starts with "---", drop that prefix so the
+	// subsequent split on "\n---" handles it uniformly.
+	trimmed := bytes.TrimSpace(data)
+	if bytes.HasPrefix(trimmed, []byte("---")) {
+		trimmed = trimmed[3:]
 	}
+
+	parts := bytes.Split(trimmed, []byte("\n---"))
 	result := make([][]byte, 0, len(parts))
 	for _, p := range parts {
-		trimmed := bytes.TrimPrefix(p, []byte("---"))
-		if len(bytes.TrimSpace(trimmed)) > 0 {
-			result = append(result, trimmed)
+		// Strip any leading "---" left after the split (edge case: "\n---\n---")
+		p = bytes.TrimPrefix(bytes.TrimSpace(p), []byte("---"))
+		if len(bytes.TrimSpace(p)) > 0 {
+			result = append(result, p)
 		}
 	}
 	return result

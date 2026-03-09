@@ -53,13 +53,10 @@ func TestNativeK8sRunner_EnsureNamespace_Creates(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify the namespace was created.
-	exists, err := r.NamespaceExists(ctx, "new-ns")
+	// Verify the namespace was created via the typed client.
+	_, err := r.client.CoreV1().Namespaces().Get(ctx, "new-ns", metav1.GetOptions{})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !exists {
-		t.Fatal("expected namespace to exist after EnsureNamespace")
+		t.Fatalf("expected namespace to exist after EnsureNamespace: %v", err)
 	}
 }
 
@@ -71,6 +68,83 @@ func TestNativeK8sRunner_EnsureNamespace_Idempotent(t *testing.T) {
 	// Should not return an error when the namespace already exists.
 	if err := r.EnsureNamespace(ctx, "existing-ns"); err != nil {
 		t.Fatalf("unexpected error on existing namespace: %v", err)
+	}
+}
+
+// ─── input validation tests ──────────────────────────────────────────────────
+
+func TestNativeK8sRunner_Delete_EmptyResource(t *testing.T) {
+	r := newTestRunner()
+	err := r.Delete(context.Background(), "", "my-obj", "default", false)
+	if err == nil {
+		t.Fatal("expected error for empty resource")
+	}
+}
+
+func TestNativeK8sRunner_Delete_EmptyName(t *testing.T) {
+	r := newTestRunner()
+	err := r.Delete(context.Background(), "pods", "", "default", false)
+	if err == nil {
+		t.Fatal("expected error for empty name")
+	}
+}
+
+func TestNativeK8sRunner_Get_EmptyResource(t *testing.T) {
+	r := newTestRunner()
+	_, err := r.Get(context.Background(), "", "my-obj", "default")
+	if err == nil {
+		t.Fatal("expected error for empty resource")
+	}
+}
+
+func TestNativeK8sRunner_Get_EmptyName(t *testing.T) {
+	r := newTestRunner()
+	_, err := r.Get(context.Background(), "pods", "", "default")
+	if err == nil {
+		t.Fatal("expected error for empty name")
+	}
+}
+
+func TestNativeK8sRunner_List_EmptyResource(t *testing.T) {
+	r := newTestRunner()
+	_, err := r.List(context.Background(), "", "default", "")
+	if err == nil {
+		t.Fatal("expected error for empty resource")
+	}
+}
+
+func TestNativeK8sRunner_Patch_EmptyResource(t *testing.T) {
+	r := newTestRunner()
+	err := r.Patch(context.Background(), "", "my-obj", "default", []byte(`{}`))
+	if err == nil {
+		t.Fatal("expected error for empty resource")
+	}
+}
+
+func TestNativeK8sRunner_Patch_EmptyName(t *testing.T) {
+	r := newTestRunner()
+	err := r.Patch(context.Background(), "pods", "", "default", []byte(`{}`))
+	if err == nil {
+		t.Fatal("expected error for empty name")
+	}
+}
+
+func TestNativeK8sRunner_Patch_InvalidJSON(t *testing.T) {
+	r := newTestRunner()
+	err := r.Patch(context.Background(), "pods", "my-pod", "default", []byte(`not-json`))
+	if err == nil {
+		t.Fatal("expected error for invalid JSON patch")
+	}
+}
+
+func TestNativeK8sRunner_Logs_CancelledContext(t *testing.T) {
+	r := newTestRunner()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before call
+
+	_, err := r.Logs(ctx, "my-pod", "default", "", false)
+	if err == nil {
+		t.Fatal("expected error for cancelled context")
 	}
 }
 
@@ -122,6 +196,15 @@ func TestSplitYAMLDocuments_SkipsEmpty(t *testing.T) {
 	docs := splitYAMLDocuments(input)
 	if len(docs) != 2 {
 		t.Fatalf("expected 2 docs (empty skipped), got %d", len(docs))
+	}
+}
+
+func TestSplitYAMLDocuments_LeadingSeparator(t *testing.T) {
+	// Documents that begin with "---" should be parsed correctly.
+	input := []byte("---\napiVersion: v1\nkind: Pod\n---\napiVersion: v1\nkind: Service")
+	docs := splitYAMLDocuments(input)
+	if len(docs) != 2 {
+		t.Fatalf("expected 2 docs with leading ---, got %d", len(docs))
 	}
 }
 
