@@ -51,7 +51,7 @@ func newNativeRunner(cfg RunnerConfig) (*NativeRunner, error) {
 	if err != nil {
 		return nil, err
 	}
-	tf, err := newNativeTFRunner()
+	tf, err := newNativeTFRunner(context.Background())
 	if err != nil {
 		return nil, err
 	}

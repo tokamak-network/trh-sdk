@@ -86,6 +86,7 @@ func (t *ThanosStack) deleteOrphanedLoadBalancers(ctx context.Context, region, n
 func (t *ThanosStack) deleteOrphanedElasticIPs(ctx context.Context, region, namespace string, cleaned, failed int) (int, int) {
 	eips, err := t.awsRunner.EC2DescribeAddresses(ctx, region, namespace)
 	if err != nil {
+		t.logger.Warnf("Failed to list Elastic IPs: %v", err)
 		return cleaned, failed
 	}
 
@@ -152,7 +153,9 @@ func (t *ThanosStack) deleteOrphanedEKS(ctx context.Context, region, namespace s
 
 	// Delete node groups first.
 	nodeGroups, err := t.awsRunner.EKSListNodegroups(ctx, region, namespace)
-	if err == nil {
+	if err != nil {
+		t.logger.Warnf("Failed to list node groups for cluster %s: %v", namespace, err)
+	} else {
 		for _, ng := range nodeGroups {
 			t.logger.Infof("Deleting node group: %s", ng)
 			if err := t.awsRunner.EKSDeleteNodegroup(ctx, region, namespace, ng); err != nil {
@@ -205,6 +208,7 @@ func (t *ThanosStack) waitForNodeGroupsDeletion(ctx context.Context, region, clu
 func (t *ThanosStack) deleteOrphanedEFS(ctx context.Context, region, namespace string, cleaned, failed int) (int, int) {
 	filesystems, err := t.awsRunner.EFSDescribeFileSystems(ctx, region, "")
 	if err != nil {
+		t.logger.Warnf("Failed to list EFS filesystems: %v", err)
 		return cleaned, failed
 	}
 
@@ -263,9 +267,10 @@ func (t *ThanosStack) deleteOrphanedRDS(ctx context.Context, region, namespace s
 	return cleaned, failed
 }
 
-func (t *ThanosStack) deleteOrphanedS3(ctx context.Context, region, namespace string, cleaned, failed int) (int, int) {
+func (t *ThanosStack) deleteOrphanedS3(ctx context.Context, _ string, namespace string, cleaned, failed int) (int, int) {
 	buckets, err := t.awsRunner.S3ListBuckets(ctx)
 	if err != nil {
+		t.logger.Warnf("Failed to list S3 buckets: %v", err)
 		return cleaned, failed
 	}
 

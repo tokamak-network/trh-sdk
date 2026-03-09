@@ -108,6 +108,34 @@ func TestDeleteOrphanedEKS_ClusterNotFound(t *testing.T) {
 	}
 }
 
+// TestDeleteOrphanedEKS_ClusterExistsAPIError verifies that an API error from
+// EKSClusterExists returns unchanged counts without panicking.
+func TestDeleteOrphanedEKS_ClusterExistsAPIError(t *testing.T) {
+	m := &mock.AWSRunner{}
+	m.OnEKSClusterExists = func(_ context.Context, _, _ string) (bool, error) {
+		return false, errors.New("iam: access denied")
+	}
+	s := &ThanosStack{awsRunner: m, logger: noopLogger()}
+	cleaned, failed := s.deleteOrphanedEKS(context.Background(), "us-east-1", "test-ns", 3, 1)
+	if cleaned != 3 || failed != 1 {
+		t.Fatalf("expected 3/1 unchanged on API error, got %d/%d", cleaned, failed)
+	}
+}
+
+// TestDeleteOrphanedRDS_InstanceExistsAPIError verifies that an API error from
+// RDSInstanceExists returns unchanged counts without panicking.
+func TestDeleteOrphanedRDS_InstanceExistsAPIError(t *testing.T) {
+	m := &mock.AWSRunner{}
+	m.OnRDSInstanceExists = func(_ context.Context, _, _ string) (bool, error) {
+		return false, errors.New("throttling: rate exceeded")
+	}
+	s := &ThanosStack{awsRunner: m, logger: noopLogger()}
+	cleaned, failed := s.deleteOrphanedRDS(context.Background(), "us-east-1", "test-ns", 2, 0)
+	if cleaned != 2 || failed != 0 {
+		t.Fatalf("expected 2/0 unchanged on API error, got %d/%d", cleaned, failed)
+	}
+}
+
 // ─── deleteOrphanedElasticIPs ──────────────────────────────────────────────
 
 // TestDeleteOrphanedElasticIPs_ContextCancelledBeforeRelease verifies that

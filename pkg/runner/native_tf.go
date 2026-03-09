@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	version "github.com/hashicorp/go-version"
 	install "github.com/hashicorp/hc-install"
 	"github.com/hashicorp/hc-install/product"
 	"github.com/hashicorp/hc-install/releases"
@@ -23,23 +24,28 @@ type NativeTFRunner struct {
 	stdout   io.Writer
 }
 
+// terraformVersion is the exact Terraform binary version pinned for reproducibility.
+const terraformVersion = "1.9.8"
+
 // newNativeTFRunner creates a NativeTFRunner by locating or installing terraform.
 // hc-install v0.9+ moved the Installer type to the root package (install alias).
-func newNativeTFRunner() (*NativeTFRunner, error) {
+// ctx is forwarded to hc-install so callers can cancel long downloads.
+func newNativeTFRunner(ctx context.Context) (*NativeTFRunner, error) {
 	// Try to find terraform in PATH first.
 	if path, err := exec.LookPath("terraform"); err == nil {
 		return &NativeTFRunner{execPath: path, stdout: os.Stdout}, nil
 	}
-	// Fall back to hc-install to download terraform.
+	// Fall back to hc-install to download the pinned terraform version.
 	i := install.NewInstaller()
-	execPath, err := i.Ensure(context.Background(), []src.Source{
-		&releases.LatestVersion{
+	execPath, err := i.Ensure(ctx, []src.Source{
+		&releases.ExactVersion{
 			Product:    product.Terraform,
+			Version:    version.Must(version.NewVersion(terraformVersion)),
 			InstallDir: os.TempDir(),
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("native tf: locate/install terraform: %w", err)
+		return nil, fmt.Errorf("native tf: locate/install terraform %s: %w", terraformVersion, err)
 	}
 	return &NativeTFRunner{execPath: execPath, stdout: os.Stdout}, nil
 }
