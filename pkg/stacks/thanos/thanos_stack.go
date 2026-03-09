@@ -74,7 +74,7 @@ func (t *ThanosStack) PodLogs(ctx context.Context, pod, namespace, container str
 	if since > 0 {
 		args = append(args, "--since", since.String())
 	}
-	raw, err := exec.CommandContext(ctx, "kubectl", args...).Output()
+	raw, err := exec.CommandContext(ctx, "kubectl", args...).CombinedOutput()
 	if int64(len(raw)) > maxLogBytes {
 		raw = raw[:maxLogBytes]
 	}
