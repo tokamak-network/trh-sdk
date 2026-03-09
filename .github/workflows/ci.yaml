@@ -50,3 +50,25 @@ jobs:
           go-version: "1.24.11"
       - name: Run test
         run: go test -race -v ./...
+
+  build:
+    name: Build binary
+    runs-on: [ubuntu-24.04]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Install Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.24.11"
+      - name: Build (stripped)
+        # -s: omit symbol table, -w: omit DWARF debug info → keeps binary ≤ 100 MB
+        run: go build -ldflags="-s -w" -o trh-sdk .
+      - name: Check binary size (≤ 100 MB)
+        run: |
+          SIZE=$(du -m trh-sdk | cut -f1)
+          echo "Binary size: ${SIZE} MB"
+          if [ "$SIZE" -gt 100 ]; then
+            echo "ERROR: binary exceeds 100 MB limit (got ${SIZE} MB)"
+            exit 1
+          fi
