@@ -180,20 +180,20 @@ func (t *ThanosStack) waitForNodeGroupsDeletion(ctx context.Context, region, clu
 	defer ticker.Stop()
 
 	for i := 0; i < nodeGroupPollMaxAttempts; i++ {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-
+		// Check first, then wait — avoids an unnecessary 30-second delay on
+		// the first iteration when node groups may already be gone.
 		ngs, err := utils.ListNodeGroups(ctx, t.awsRunner, region, cluster)
 		if err != nil {
 			// Transient error — keep polling rather than treating as done.
 			t.logger.Warnf("Failed to list node groups (attempt %d/%d): %v", i+1, nodeGroupPollMaxAttempts, err)
-			continue
-		}
-		if len(ngs) == 0 {
+		} else if len(ngs) == 0 {
 			return
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
 		}
 	}
 	t.logger.Warnf("Node groups may not have fully deleted after %d attempts", nodeGroupPollMaxAttempts)

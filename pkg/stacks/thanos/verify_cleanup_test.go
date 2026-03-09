@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/runner"
 	"github.com/tokamak-network/trh-sdk/pkg/runner/mock"
@@ -171,30 +172,28 @@ func TestWaitForNodeGroupsDeletion_ExitsWhenContextCancelled(t *testing.T) {
 	}
 }
 
-// TestWaitForNodeGroupsDeletion_ExitsWhenEmpty verifies the loop exits when
-// the node group list becomes empty.
+// TestWaitForNodeGroupsDeletion_ExitsWhenEmpty verifies the loop exits
+// immediately when the node group list is already empty on first check.
+// The check-first pattern means no ticker wait is needed.
 func TestWaitForNodeGroupsDeletion_ExitsWhenEmpty(t *testing.T) {
 	m := &mock.AWSRunner{}
 	m.OnEKSListNodegroups = func(_ context.Context, _, _ string) ([]string, error) {
 		return nil, nil // empty — deletion complete
 	}
 
-	// Use a very short ticker by temporarily overriding the constant is not
-	// possible in Go without refactoring; instead rely on context timeout to
-	// bound the test duration. The test itself should be instant because the
-	// waitForNodeGroupsDeletion ticker fires, then sees empty list and returns.
-	// We just verify the function returns (test timeout catches hangs).
 	s := &ThanosStack{awsRunner: m, logger: noopLogger()}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
+	// With the check-first pattern, empty list returns before the first ticker
+	// tick — no 30-second wait occurs, so this test completes well within 1s.
 	done := make(chan struct{})
 	go func() {
-		s.waitForNodeGroupsDeletion(ctx, "us-east-1", "test-cluster")
+		s.waitForNodeGroupsDeletion(context.Background(), "us-east-1", "test-cluster")
 		close(done)
 	}()
 
-	// Cancel context after brief wait to avoid a 30-second block in CI.
-	cancel()
-	<-done
+	select {
+	case <-done:
+		// passed — returned before ticker fired
+	case <-time.After(5 * time.Second):
+		t.Fatal("waitForNodeGroupsDeletion did not return promptly with empty node list")
+	}
 }
