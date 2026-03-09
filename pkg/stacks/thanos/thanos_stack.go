@@ -24,12 +24,19 @@ type ThanosStack struct {
 	deploymentPath    string
 	registerCandidate bool
 	helmRunner        runner.HelmRunner // optional; when nil, falls back to shellout
+	k8sRunner         runner.K8sRunner  // optional; when nil, falls back to shellout
 }
 
 // SetHelmRunner injects a HelmRunner for native Helm operations.
 // When set, Helm calls use the runner instead of shelling out to the helm binary.
 func (t *ThanosStack) SetHelmRunner(hr runner.HelmRunner) {
 	t.helmRunner = hr
+}
+
+// SetK8sRunner injects a K8sRunner for native Kubernetes operations.
+// When set, kubectl calls use the runner instead of shelling out to kubectl.
+func (t *ThanosStack) SetK8sRunner(kr runner.K8sRunner) {
+	t.k8sRunner = kr
 }
 
 // helmList returns all release names in a namespace. Uses HelmRunner when available.

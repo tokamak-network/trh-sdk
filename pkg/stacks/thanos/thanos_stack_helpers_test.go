@@ -14,6 +14,11 @@ func minimalStack(hr *mock.HelmRunner) *ThanosStack {
 	return &ThanosStack{helmRunner: hr}
 }
 
+// minimalK8sStack returns a ThanosStack with only the k8sRunner set.
+func minimalK8sStack(kr *mock.K8sRunner) *ThanosStack {
+	return &ThanosStack{k8sRunner: kr}
+}
+
 // ─── valueFiles guard tests ────────────────────────────────────────────────
 
 func TestHelmInstallWithFiles_EmptyValueFiles(t *testing.T) {
@@ -103,5 +108,145 @@ func TestHelmSearch_RunnerError(t *testing.T) {
 	_, err := s.helmSearch(context.Background(), "thanos-stack")
 	if err == nil {
 		t.Fatal("expected error from runner, got nil")
+	}
+}
+
+// ─── k8sPVCPhase ───────────────────────────────────────────────────────────
+
+func TestK8sPVCPhase_Bound(t *testing.T) {
+	m := &mock.K8sRunner{}
+	m.OnGet = func(_ context.Context, resource, name, namespace string) ([]byte, error) {
+		if resource != "pvc" || name != "my-pvc" || namespace != "ns" {
+			return nil, errors.New("unexpected args")
+		}
+		return []byte(`{"status":{"phase":"Bound"}}`), nil
+	}
+	s := minimalK8sStack(m)
+	phase, err := s.k8sPVCPhase(context.Background(), "my-pvc", "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if phase != "Bound" {
+		t.Fatalf("expected Bound, got %q", phase)
+	}
+	if m.CallCount("Get") != 1 {
+		t.Fatalf("expected 1 Get call, got %d", m.CallCount("Get"))
+	}
+}
+
+func TestK8sPVCPhase_NotFound(t *testing.T) {
+	m := &mock.K8sRunner{}
+	m.OnGet = func(_ context.Context, _, _, _ string) ([]byte, error) {
+		return nil, errors.New("not found")
+	}
+	s := minimalK8sStack(m)
+	phase, err := s.k8sPVCPhase(context.Background(), "missing", "ns")
+	if err != nil {
+		t.Fatalf("expected nil error for not-found, got %v", err)
+	}
+	if phase != "" {
+		t.Fatalf("expected empty phase for not-found, got %q", phase)
+	}
+}
+
+// ─── k8sPVCNames ───────────────────────────────────────────────────────────
+
+func TestK8sPVCNames_ReturnsList(t *testing.T) {
+	m := &mock.K8sRunner{}
+	m.OnList = func(_ context.Context, resource, namespace, _ string) ([]byte, error) {
+		if resource != "pvc" || namespace != "ns" {
+			return nil, errors.New("unexpected args")
+		}
+		return []byte(`{"items":[{"metadata":{"name":"pvc-a"}},{"metadata":{"name":"pvc-b"}}]}`), nil
+	}
+	s := minimalK8sStack(m)
+	names, err := s.k8sPVCNames(context.Background(), "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(names) != 2 || names[0] != "pvc-a" || names[1] != "pvc-b" {
+		t.Fatalf("unexpected names: %v", names)
+	}
+}
+
+// ─── k8sPodPVCClaims ───────────────────────────────────────────────────────
+
+func TestK8sPodPVCClaims_ExtractsClaims(t *testing.T) {
+	m := &mock.K8sRunner{}
+	m.OnList = func(_ context.Context, resource, _, _ string) ([]byte, error) {
+		if resource != "pods" {
+			return nil, errors.New("unexpected resource: " + resource)
+		}
+		return []byte(`{"items":[{"spec":{"volumes":[{"persistentVolumeClaim":{"claimName":"pvc-x"}},{"name":"emptydir"}]}}]}`), nil
+	}
+	s := minimalK8sStack(m)
+	claims, err := s.k8sPodPVCClaims(context.Background(), "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(claims) != 1 || claims[0] != "pvc-x" {
+		t.Fatalf("unexpected claims: %v", claims)
+	}
+}
+
+// ─── k8sPVList ─────────────────────────────────────────────────────────────
+
+func TestK8sPVList_ReturnsEntries(t *testing.T) {
+	m := &mock.K8sRunner{}
+	m.OnList = func(_ context.Context, resource, namespace, _ string) ([]byte, error) {
+		if resource != "pv" || namespace != "" {
+			return nil, errors.New("unexpected args")
+		}
+		return []byte(`{"items":[{"metadata":{"name":"pv-1"},"status":{"phase":"Released"}},{"metadata":{"name":"pv-2"},"status":{"phase":"Bound"}}]}`), nil
+	}
+	s := minimalK8sStack(m)
+	entries, err := s.k8sPVList(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	if entries[0].Name != "pv-1" || entries[0].Phase != "Released" {
+		t.Fatalf("unexpected entry[0]: %+v", entries[0])
+	}
+}
+
+// ─── k8sDeletePVC ──────────────────────────────────────────────────────────
+
+func TestK8sDeletePVC_UsesRunner(t *testing.T) {
+	m := &mock.K8sRunner{}
+	m.OnDelete = func(_ context.Context, resource, name, namespace string, ignoreNotFound bool) error {
+		if resource != "pvc" || name != "pvc-a" || namespace != "ns" || !ignoreNotFound {
+			return errors.New("unexpected args")
+		}
+		return nil
+	}
+	s := minimalK8sStack(m)
+	if err := s.k8sDeletePVC(context.Background(), "pvc-a", "ns"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.CallCount("Delete") != 1 {
+		t.Fatalf("expected 1 Delete call, got %d", m.CallCount("Delete"))
+	}
+}
+
+// ─── k8sPatchPV ────────────────────────────────────────────────────────────
+
+func TestK8sPatchPV_UsesRunnerWithEmptyNamespace(t *testing.T) {
+	m := &mock.K8sRunner{}
+	m.OnPatch = func(_ context.Context, resource, name, namespace string, patch []byte) error {
+		if resource != "pv" || name != "pv-1" || namespace != "" {
+			return errors.New("unexpected args")
+		}
+		return nil
+	}
+	s := minimalK8sStack(m)
+	patch := []byte(`{"spec":{"claimRef":null}}`)
+	if err := s.k8sPatchPV(context.Background(), "pv-1", patch); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.CallCount("Patch") != 1 {
+		t.Fatalf("expected 1 Patch call, got %d", m.CallCount("Patch"))
 	}
 }
