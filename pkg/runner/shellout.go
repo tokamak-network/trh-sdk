@@ -133,5 +133,6 @@ func (r *ShellOutK8sRunner) NamespaceExists(ctx context.Context, namespace strin
 func (r *ShellOutK8sRunner) Logs(ctx context.Context, pod, namespace, container string, follow bool) (io.ReadCloser, error) {
 	// Streaming logs via subprocess is complex; return an error for now.
 	// Full streaming will be implemented in NativeK8sRunner.
-	return nil, fmt.Errorf("shellout logs: streaming is not supported in legacy mode; switch to native mode or run kubectl logs directly")
+	return nil, fmt.Errorf("shellout logs: streaming is not supported in legacy mode (TRHS_LEGACY=1 or UseNative=false); " +
+		"switch to native mode (RunnerConfig{UseNative: true}) or run 'kubectl logs' directly")
 }

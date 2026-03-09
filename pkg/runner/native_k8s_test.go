@@ -275,19 +275,19 @@ func TestSplitYAMLDocuments_ConsecutiveSeparators(t *testing.T) {
 }
 
 func TestSplitYAMLDocuments_CommentOnly(t *testing.T) {
-	// A document containing only a comment should be skipped.
-	input := []byte("# just a comment\n---\napiVersion: v1\nkind: Pod\nmetadata:\n  name: foo")
-	docs := splitYAMLDocuments(input)
-	// The first segment is "# just a comment", Apply() skips it; splitter may include it.
-	// Verify at least the real doc is present.
-	hasReal := false
-	for _, d := range docs {
-		if len(d) > 0 && d[0] != '#' {
-			hasReal = true
-		}
+	// A document containing only a comment should be detected by isEmptyOrCommentOnlyYAML.
+	commentOnly := []byte("# just a comment\n# another comment")
+	if !isEmptyOrCommentOnlyYAML(commentOnly) {
+		t.Fatal("expected comment-only document to be detected")
 	}
-	if !hasReal {
-		t.Fatal("expected at least one non-comment document")
+	// Empty document is also considered "empty or comment-only".
+	if !isEmptyOrCommentOnlyYAML([]byte("   \n   ")) {
+		t.Fatal("expected whitespace-only document to be detected")
+	}
+	// A document with a comment followed by real YAML must NOT be treated as comment-only.
+	mixed := []byte("# comment\napiVersion: v1")
+	if isEmptyOrCommentOnlyYAML(mixed) {
+		t.Fatal("expected mixed comment+YAML document to NOT be treated as comment-only")
 	}
 }
 

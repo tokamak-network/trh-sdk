@@ -94,9 +94,7 @@ func (r *NativeK8sRunner) Apply(ctx context.Context, manifest []byte) error {
 	docs := splitYAMLDocuments(manifest)
 
 	for _, doc := range docs {
-		trimmedDoc := bytes.TrimSpace(doc)
-		if len(trimmedDoc) == 0 || trimmedDoc[0] == '#' {
-			// Skip empty docs and comment-only docs.
+		if isEmptyOrCommentOnlyYAML(doc) {
 			continue
 		}
 		obj := &unstructured.Unstructured{}
@@ -490,7 +488,23 @@ func normaliseResourceName(r string) string {
 	return r
 }
 
+// isEmptyOrCommentOnlyYAML returns true when all non-empty lines in a YAML
+// document start with '#'. This is used to skip preamble or separator-only docs.
+func isEmptyOrCommentOnlyYAML(doc []byte) bool {
+	for _, line := range bytes.Split(doc, []byte("\n")) {
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) > 0 && trimmed[0] != '#' {
+			return false // found a real YAML line
+		}
+	}
+	return true
+}
+
 // checkCondition inspects an unstructured object's .status.conditions array.
+//
+// Type matching is case-insensitive (parity with kubectl wait behaviour — kubectl
+// accepts "available" and "Available" interchangeably). Status matching is case-
+// sensitive: the Kubernetes API guarantees exactly "True", "False", or "Unknown".
 func checkCondition(obj *unstructured.Unstructured, condition string) bool {
 	conditions, found, err := unstructured.NestedSlice(obj.Object, "status", "conditions")
 	if err != nil || !found {
@@ -502,9 +516,11 @@ func checkCondition(obj *unstructured.Unstructured, condition string) bool {
 		if !ok {
 			continue
 		}
-		t, _ := cMap["type"].(string)
-		s, _ := cMap["status"].(string)
-		// Kubernetes condition status values are exactly "True", "False", or "Unknown".
+		t, okT := cMap["type"].(string)
+		s, okS := cMap["status"].(string)
+		if !okT || !okS {
+			continue
+		}
 		if strings.ToLower(t) == target && s == "True" {
 			return true
 		}
