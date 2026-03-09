@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/hashicorp/hc-install/installer"
+	install "github.com/hashicorp/hc-install"
 	"github.com/hashicorp/hc-install/product"
 	"github.com/hashicorp/hc-install/releases"
 	"github.com/hashicorp/hc-install/src"
@@ -24,15 +24,14 @@ type NativeTFRunner struct {
 }
 
 // newNativeTFRunner creates a NativeTFRunner by locating or installing terraform.
-// NOTE: github.com/hashicorp/terraform-exec and github.com/hashicorp/hc-install
-// must be added to go.mod before this compiles (not yet present).
+// hc-install v0.9+ moved the Installer type to the root package (install alias).
 func newNativeTFRunner() (*NativeTFRunner, error) {
 	// Try to find terraform in PATH first.
 	if path, err := exec.LookPath("terraform"); err == nil {
 		return &NativeTFRunner{execPath: path, stdout: os.Stdout}, nil
 	}
 	// Fall back to hc-install to download terraform.
-	i := installer.NewInstaller()
+	i := install.NewInstaller()
 	execPath, err := i.Ensure(context.Background(), []src.Source{
 		&releases.LatestVersion{
 			Product:    product.Terraform,

@@ -8,6 +8,7 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 )
 
+
 // ─── BackupAttach — immutability ──────────────────────────────────────────
 
 // TestBackupAttach_ReturnsNewStructWithStatusAttached verifies the copy-on-write
@@ -74,7 +75,7 @@ func TestCleanupUnusedBackupResources_NilAWSConfigReturnsError(t *testing.T) {
 	s := &ThanosStack{
 		awsRunner:    &mock.AWSRunner{},
 		logger:       noopLogger(),
-		deployConfig: &types.DeployConfig{}, // AWS is nil
+		deployConfig: &types.Config{}, // AWS is nil
 	}
 	if err := s.CleanupUnusedBackupResources(context.Background()); err == nil {
 		t.Fatal("expected error when AWS config is nil")
