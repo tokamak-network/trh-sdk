@@ -38,9 +38,10 @@ type gvrEntry struct {
 // NativeK8sRunner implements K8sRunner using k8s.io/client-go.
 // No kubectl binary is required.
 type NativeK8sRunner struct {
-	client   kubernetes.Interface
-	dynamic  dynamic.Interface
-	gvrCache sync.Map // map[string]*gvrEntry, keyed by "gvk:<G>/<V>/<K>" or "res:<name>"
+	client       kubernetes.Interface
+	dynamic      dynamic.Interface
+	gvrCache     sync.Map // map[string]*gvrEntry, keyed by "gvk:<G>/<V>/<K>" or "res:<name>"
+	fieldManager string   // server-side apply field manager name
 }
 
 // newNativeK8sRunner creates a NativeK8sRunner from the given kubeconfig path.
@@ -61,7 +62,7 @@ func newNativeK8sRunner(kubeconfigPath string) (*NativeK8sRunner, error) {
 		return nil, fmt.Errorf("native k8s runner: build dynamic client: %w", err)
 	}
 
-	return &NativeK8sRunner{client: client, dynamic: dynClient}, nil
+	return &NativeK8sRunner{client: client, dynamic: dynClient, fieldManager: "trh-sdk"}, nil
 }
 
 // loadKubeConfig returns a *rest.Config from the given path, in-cluster env,
@@ -89,7 +90,9 @@ func (r *NativeK8sRunner) Apply(ctx context.Context, manifest []byte) error {
 	docs := splitYAMLDocuments(manifest)
 
 	for _, doc := range docs {
-		if len(bytes.TrimSpace(doc)) == 0 {
+		trimmedDoc := bytes.TrimSpace(doc)
+		if len(trimmedDoc) == 0 || trimmedDoc[0] == '#' {
+			// Skip empty docs and comment-only docs.
 			continue
 		}
 		obj := &unstructured.Unstructured{}
@@ -125,7 +128,7 @@ func (r *NativeK8sRunner) Apply(ctx context.Context, manifest []byte) error {
 		}
 
 		_, err = dynRes.Patch(ctx, obj.GetName(), types.ApplyPatchType, data, metav1.PatchOptions{
-			FieldManager: "trh-sdk",
+			FieldManager: r.fieldManager,
 		})
 		if err != nil {
 			return fmt.Errorf("native apply: server-side apply %s/%s: %w", gvk.Kind, obj.GetName(), err)
@@ -239,6 +242,16 @@ func (r *NativeK8sRunner) Patch(ctx context.Context, resource, name, namespace s
 		return fmt.Errorf("native patch: invalid JSON payload for %s/%s", resource, name)
 	}
 
+	// Reject patches that attempt to relocate a resource to a different namespace.
+	var patchMap map[string]interface{}
+	if err := json.Unmarshal(patch, &patchMap); err == nil {
+		if meta, ok := patchMap["metadata"].(map[string]interface{}); ok {
+			if _, hasNS := meta["namespace"]; hasNS {
+				return fmt.Errorf("native patch: cannot modify metadata.namespace via Patch; use Delete + Apply instead")
+			}
+		}
+	}
+
 	entry, err := r.resolveGVRByResource(ctx, resource)
 	if err != nil {
 		return fmt.Errorf("native patch: resolve resource %s: %w", resource, err)
@@ -267,21 +280,20 @@ func (r *NativeK8sRunner) Wait(ctx context.Context, resource, name, namespace, c
 
 	// PollUntilContextTimeout enforces the timeout internally; no child context needed.
 	return wait.PollUntilContextTimeout(ctx, 2*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
-		// Use a closure-local error variable to avoid mutating the outer err.
-		var obj *unstructured.Unstructured
-		var pollErr error
+		var currentObj *unstructured.Unstructured
+		var getErr error
 		if namespace != "" {
-			obj, pollErr = r.dynamic.Resource(entry.gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+			currentObj, getErr = r.dynamic.Resource(entry.gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 		} else {
-			obj, pollErr = r.dynamic.Resource(entry.gvr).Get(ctx, name, metav1.GetOptions{})
+			currentObj, getErr = r.dynamic.Resource(entry.gvr).Get(ctx, name, metav1.GetOptions{})
 		}
-		if pollErr != nil {
-			if k8serrors.IsNotFound(pollErr) {
-				return false, nil // resource not yet created
+		if getErr != nil {
+			if k8serrors.IsNotFound(getErr) {
+				return false, nil // resource not yet created; keep polling
 			}
-			return false, pollErr
+			return false, getErr
 		}
-		return checkCondition(obj, condition), nil
+		return checkCondition(currentObj, condition), nil
 	})
 }
 
@@ -452,8 +464,17 @@ func normaliseResourceName(r string) string {
 		"storageclass":          "storageclasses",
 		"statefulset":           "statefulsets",
 		"daemonset":             "daemonsets",
-		"job":                   "jobs",
-		"cronjob":               "cronjobs",
+		"job":                     "jobs",
+		"cronjob":                  "cronjobs",
+		"endpoint":                 "endpoints",
+		"rolebinding":              "rolebindings",
+		"role":                     "roles",
+		"networkpolicy":            "networkpolicies",
+		"crd":                      "customresourcedefinitions",
+		"customresourcedefinition": "customresourcedefinitions",
+		"replicaset":               "replicasets",
+		"horizontalpodautoscaler":  "horizontalpodautoscalers",
+		"hpa":                      "horizontalpodautoscalers",
 	}
 	if canonical, ok := aliases[strings.ToLower(r)]; ok {
 		return canonical

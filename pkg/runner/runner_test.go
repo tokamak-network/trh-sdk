@@ -49,7 +49,8 @@ func TestMockK8sRunner_EnsureNamespace(t *testing.T) {
 	if count := m.CallCount("EnsureNamespace"); count != 1 {
 		t.Fatalf("expected 1 call, got %d", count)
 	}
-	if got := m.Calls[0].Args[0]; got != "test-ns" {
+	calls := m.GetCalls()
+	if got := calls[0].Args[0]; got != "test-ns" {
 		t.Fatalf("expected namespace=test-ns, got %v", got)
 	}
 }

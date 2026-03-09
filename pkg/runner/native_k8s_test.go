@@ -2,22 +2,26 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic/fake"
 	fakek8s "k8s.io/client-go/kubernetes/fake"
-	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // ─── fake-client tests ───────────────────────────────────────────────────────
 
 func newTestRunner(objs ...runtime.Object) *NativeK8sRunner {
 	client := fakek8s.NewSimpleClientset(objs...)
-	dynClient := fake.NewSimpleDynamicClient(runtime.NewScheme())
-	return &NativeK8sRunner{client: client, dynamic: dynClient}
+	// Register corev1 types so the fake dynamic client can find them.
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	dynClient := fake.NewSimpleDynamicClient(scheme, objs...)
+	return &NativeK8sRunner{client: client, dynamic: dynClient, fieldManager: "trh-sdk"}
 }
 
 func TestNativeK8sRunner_NamespaceExists_True(t *testing.T) {
@@ -145,6 +149,59 @@ func TestNativeK8sRunner_Logs_CancelledContext(t *testing.T) {
 	_, err := r.Logs(ctx, "my-pod", "default", "", false)
 	if err == nil {
 		t.Fatal("expected error for cancelled context")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got: %v", err)
+	}
+}
+
+func TestNativeK8sRunner_Patch_NamespaceMutation(t *testing.T) {
+	r := newTestRunner()
+	patch := []byte(`{"metadata":{"namespace":"kube-system"}}`)
+	err := r.Patch(context.Background(), "pods", "my-pod", "default", patch)
+	if err == nil {
+		t.Fatal("expected error when patch attempts to change namespace")
+	}
+}
+
+// ─── pure-function: normaliseResourceName extras ─────────────────────────────
+
+func TestNormaliseResourceName_NewAliases(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"endpoint", "endpoints"},
+		{"rolebinding", "rolebindings"},
+		{"networkpolicy", "networkpolicies"},
+		{"crd", "customresourcedefinitions"},
+		{"hpa", "horizontalpodautoscalers"},
+		{"role", "roles"},
+	}
+	for _, tc := range cases {
+		got := normaliseResourceName(tc.input)
+		if got != tc.want {
+			t.Errorf("normaliseResourceName(%q) = %q; want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestCheckCondition_ExactStatusMatch(t *testing.T) {
+	// "true" (lowercase) must NOT match — Kubernetes spec requires exactly "True".
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"status": map[string]interface{}{
+				"conditions": []interface{}{
+					map[string]interface{}{
+						"type":   "Available",
+						"status": "true", // lowercase — invalid K8s value
+					},
+				},
+			},
+		},
+	}
+	if checkCondition(obj, "Available") {
+		t.Fatal("expected no match for status='true' (lowercase); only 'True' is valid")
 	}
 }
 

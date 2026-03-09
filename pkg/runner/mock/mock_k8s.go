@@ -61,6 +61,15 @@ func (m *K8sRunner) CallCount(method string) int {
 	return count
 }
 
+// GetCalls returns a snapshot of all recorded calls, safe for concurrent reads.
+func (m *K8sRunner) GetCalls() []Call {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	snapshot := make([]Call, len(m.Calls))
+	copy(snapshot, m.Calls)
+	return snapshot
+}
+
 func (m *K8sRunner) Apply(ctx context.Context, manifest []byte) error {
 	m.record("Apply", manifest)
 	if m.OnApply != nil {
@@ -90,7 +99,8 @@ func (m *K8sRunner) List(ctx context.Context, resource, namespace, labelSelector
 	if m.OnList != nil {
 		return m.OnList(ctx, resource, namespace, labelSelector)
 	}
-	return []byte(`{"apiVersion":"v1","kind":"List","items":[]}`), nil
+	// Default fixture mirrors the UnstructuredList structure returned by NativeK8sRunner.
+	return []byte(`{"apiVersion":"v1","kind":"List","metadata":{"resourceVersion":"0"},"items":[]}`), nil
 }
 
 func (m *K8sRunner) Patch(ctx context.Context, resource, name, namespace string, patch []byte) error {
