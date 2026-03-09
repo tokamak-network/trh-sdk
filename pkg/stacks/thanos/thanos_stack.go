@@ -204,6 +204,7 @@ func NewThanosStack(
 
 	// Login AWS
 	var awsProfile *types.AWSProfile
+	var kubeconfigPath string
 
 	if awsConfig != nil {
 		if _, err := utils.SetAWSConfigFile(deploymentPath); err != nil {
@@ -214,7 +215,8 @@ func NewThanosStack(
 			l.Error("Failed to set AWS credentials file", "err", err)
 			return nil, err
 		}
-		if _, err := utils.SetKubeconfigFile(deploymentPath); err != nil {
+		kubeconfigPath, err = utils.SetKubeconfigFile(deploymentPath)
+		if err != nil {
 			l.Error("Failed to set kubeconfig file", "err", err)
 			return nil, err
 		}
@@ -247,7 +249,7 @@ func NewThanosStack(
 		}
 	}
 
-	return &ThanosStack{
+	stack := &ThanosStack{
 		network:        network,
 		usePromptInput: usePromptInput,
 		awsProfile:     awsProfile,
@@ -255,5 +257,19 @@ func NewThanosStack(
 		logger:         l,
 		deploymentPath: deploymentPath,
 		deployConfig:   config,
-	}, nil
+	}
+
+	// Wire native runners. On failure, fall back to nil runners which causes each
+	// helper method (tfInit, helmUpgradeInstallWithFiles, etc.) to shell out.
+	tr, runnerErr := runner.New(runner.RunnerConfig{UseNative: true, KubeconfigPath: kubeconfigPath})
+	if runnerErr != nil {
+		l.Warnf("Native runner init failed, falling back to shell-out: %v", runnerErr)
+	} else {
+		stack.helmRunner = tr.Helm()
+		stack.k8sRunner = tr.K8s()
+		stack.tfRunner = tr.TF()
+		stack.awsRunner = tr.AWS()
+	}
+
+	return stack, nil
 }
