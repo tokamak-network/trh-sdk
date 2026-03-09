@@ -147,7 +147,11 @@ func (t *ThanosStack) deleteOrphanedNATGateways(ctx context.Context, region, nam
 func (t *ThanosStack) deleteOrphanedEKS(ctx context.Context, region, namespace string, cleaned, failed int) (int, int) {
 	// EKS cluster name matches namespace by TRH convention.
 	exists, err := t.awsRunner.EKSClusterExists(ctx, region, namespace)
-	if err != nil || !exists {
+	if err != nil {
+		t.logger.Warnf("Failed to check EKS cluster existence %s: %v", namespace, err)
+		return cleaned, failed
+	}
+	if !exists {
 		return cleaned, failed
 	}
 
@@ -252,7 +256,11 @@ func (t *ThanosStack) deleteOrphanedRDS(ctx context.Context, region, namespace s
 	identifier := fmt.Sprintf("%s-rds", namespace)
 
 	exists, err := t.awsRunner.RDSInstanceExists(ctx, region, identifier)
-	if err != nil || !exists {
+	if err != nil {
+		t.logger.Warnf("Failed to check RDS instance existence %s: %v", identifier, err)
+		return cleaned, failed
+	}
+	if !exists {
 		return cleaned, failed
 	}
 
@@ -267,6 +275,7 @@ func (t *ThanosStack) deleteOrphanedRDS(ctx context.Context, region, namespace s
 	return cleaned, failed
 }
 
+// deleteOrphanedS3 ignores the region parameter because S3 uses a global API endpoint.
 func (t *ThanosStack) deleteOrphanedS3(ctx context.Context, _ string, namespace string, cleaned, failed int) (int, int) {
 	buckets, err := t.awsRunner.S3ListBuckets(ctx)
 	if err != nil {
@@ -297,7 +306,11 @@ func (t *ThanosStack) deleteOrphanedS3(ctx context.Context, _ string, namespace 
 
 func (t *ThanosStack) deleteOrphanedVPC(ctx context.Context, region, namespace string, cleaned, failed int) (int, int) {
 	vpcIDs, err := t.awsRunner.EC2DescribeVPCs(ctx, region, namespace)
-	if err != nil || len(vpcIDs) == 0 {
+	if err != nil {
+		t.logger.Warnf("Failed to list VPCs: %v", err)
+		return cleaned, failed
+	}
+	if len(vpcIDs) == 0 {
 		return cleaned, failed
 	}
 

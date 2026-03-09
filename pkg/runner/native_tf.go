@@ -24,23 +24,36 @@ type NativeTFRunner struct {
 	stdout   io.Writer
 }
 
-// terraformVersion is the exact Terraform binary version pinned for reproducibility.
+// terraformVersion pins the exact Terraform binary for reproducible deploys.
+// Verified against TRH integration tests as of 2026-03. Bump requires re-testing.
 const terraformVersion = "1.9.8"
 
 // newNativeTFRunner creates a NativeTFRunner by locating or installing terraform.
 // hc-install v0.9+ moved the Installer type to the root package (install alias).
 // ctx is forwarded to hc-install so callers can cancel long downloads.
 func newNativeTFRunner(ctx context.Context) (*NativeTFRunner, error) {
-	// Try to find terraform in PATH first.
-	if path, err := exec.LookPath("terraform"); err == nil {
-		return &NativeTFRunner{execPath: path, stdout: os.Stdout}, nil
+	pinnedVersion, err := version.NewVersion(terraformVersion)
+	if err != nil {
+		return nil, fmt.Errorf("native tf: invalid terraform version %q: %w", terraformVersion, err)
 	}
+
+	// Try to find a matching terraform version in PATH first.
+	if path, err := exec.LookPath("terraform"); err == nil {
+		tf, err := tfexec.NewTerraform(".", path)
+		if err == nil {
+			if v, _, err := tf.Version(ctx, false); err == nil && v.Equal(pinnedVersion) {
+				return &NativeTFRunner{execPath: path, stdout: os.Stdout}, nil
+			}
+		}
+	}
+
 	// Fall back to hc-install to download the pinned terraform version.
 	i := install.NewInstaller()
+	defer func() { _ = i.Remove(context.Background()) }()
 	execPath, err := i.Ensure(ctx, []src.Source{
 		&releases.ExactVersion{
 			Product:    product.Terraform,
-			Version:    version.Must(version.NewVersion(terraformVersion)),
+			Version:    pinnedVersion,
 			InstallDir: os.TempDir(),
 		},
 	})

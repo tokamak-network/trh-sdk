@@ -9,9 +9,18 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/runner"
 	"github.com/tokamak-network/trh-sdk/pkg/runner/mock"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func noopLogger() *zap.SugaredLogger { return zap.NewNop().Sugar() }
+
+// observedLogger returns a SugaredLogger whose output is captured in the returned
+// *observer.ObservedLogs, allowing tests to assert on log calls.
+func observedLogger(lvl zapcore.Level) (*zap.SugaredLogger, *observer.ObservedLogs) {
+	core, logs := observer.New(lvl)
+	return zap.New(core).Sugar(), logs
+}
 
 // ─── deleteOrphanedLoadBalancers ───────────────────────────────────────────
 
@@ -109,30 +118,56 @@ func TestDeleteOrphanedEKS_ClusterNotFound(t *testing.T) {
 }
 
 // TestDeleteOrphanedEKS_ClusterExistsAPIError verifies that an API error from
-// EKSClusterExists returns unchanged counts without panicking.
+// EKSClusterExists returns unchanged counts and emits a Warn log.
 func TestDeleteOrphanedEKS_ClusterExistsAPIError(t *testing.T) {
 	m := &mock.AWSRunner{}
 	m.OnEKSClusterExists = func(_ context.Context, _, _ string) (bool, error) {
 		return false, errors.New("iam: access denied")
 	}
-	s := &ThanosStack{awsRunner: m, logger: noopLogger()}
+	logger, logs := observedLogger(zapcore.WarnLevel)
+	s := &ThanosStack{awsRunner: m, logger: logger}
 	cleaned, failed := s.deleteOrphanedEKS(context.Background(), "us-east-1", "test-ns", 3, 1)
 	if cleaned != 3 || failed != 1 {
 		t.Fatalf("expected 3/1 unchanged on API error, got %d/%d", cleaned, failed)
 	}
+	if logs.Len() == 0 {
+		t.Fatal("expected a Warn log for EKSClusterExists API error, got none")
+	}
 }
 
 // TestDeleteOrphanedRDS_InstanceExistsAPIError verifies that an API error from
-// RDSInstanceExists returns unchanged counts without panicking.
+// RDSInstanceExists returns unchanged counts and emits a Warn log.
 func TestDeleteOrphanedRDS_InstanceExistsAPIError(t *testing.T) {
 	m := &mock.AWSRunner{}
 	m.OnRDSInstanceExists = func(_ context.Context, _, _ string) (bool, error) {
 		return false, errors.New("throttling: rate exceeded")
 	}
-	s := &ThanosStack{awsRunner: m, logger: noopLogger()}
+	logger, logs := observedLogger(zapcore.WarnLevel)
+	s := &ThanosStack{awsRunner: m, logger: logger}
 	cleaned, failed := s.deleteOrphanedRDS(context.Background(), "us-east-1", "test-ns", 2, 0)
 	if cleaned != 2 || failed != 0 {
 		t.Fatalf("expected 2/0 unchanged on API error, got %d/%d", cleaned, failed)
+	}
+	if logs.Len() == 0 {
+		t.Fatal("expected a Warn log for RDSInstanceExists API error, got none")
+	}
+}
+
+// TestDeleteOrphanedVPC_DescribeAPIError verifies that an EC2DescribeVPCs API error
+// returns unchanged counts and emits a Warn log.
+func TestDeleteOrphanedVPC_DescribeAPIError(t *testing.T) {
+	m := &mock.AWSRunner{}
+	m.OnEC2DescribeVPCs = func(_ context.Context, _, _ string) ([]string, error) {
+		return nil, errors.New("ec2: request limit exceeded")
+	}
+	logger, logs := observedLogger(zapcore.WarnLevel)
+	s := &ThanosStack{awsRunner: m, logger: logger}
+	cleaned, failed := s.deleteOrphanedVPC(context.Background(), "us-east-1", "test-ns", 4, 0)
+	if cleaned != 4 || failed != 0 {
+		t.Fatalf("expected 4/0 unchanged on API error, got %d/%d", cleaned, failed)
+	}
+	if logs.Len() == 0 {
+		t.Fatal("expected a Warn log for EC2DescribeVPCs API error, got none")
 	}
 }
 
