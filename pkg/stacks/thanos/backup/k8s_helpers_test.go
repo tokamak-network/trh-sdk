@@ -327,6 +327,68 @@ func TestK8sDeletePV_UsesRunner(t *testing.T) {
 	if err := c.k8sDeletePV(context.Background(), "pv-abc"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if m.CallCount("Delete") != 1 {
+		t.Fatalf("expected 1 Delete call, got %d", m.CallCount("Delete"))
+	}
+}
+
+// ─── k8sApplyManifest ────────────────────────────────────────────────────────
+
+func TestK8sApplyManifest_UsesRunner(t *testing.T) {
+	manifest := []byte("apiVersion: v1\nkind: ConfigMap")
+	m := &mock.K8sRunner{}
+	m.OnApply = func(_ context.Context, b []byte) error {
+		if string(b) != string(manifest) {
+			return errors.New("unexpected manifest")
+		}
+		return nil
+	}
+	c := NewBackupClient(m)
+	if err := c.k8sApplyManifest(context.Background(), manifest); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.CallCount("Apply") != 1 {
+		t.Fatalf("expected 1 Apply call, got %d", m.CallCount("Apply"))
+	}
+}
+
+func TestK8sApplyManifest_RunnerError(t *testing.T) {
+	m := &mock.K8sRunner{}
+	m.OnApply = func(_ context.Context, _ []byte) error {
+		return errors.New("apply failed")
+	}
+	c := NewBackupClient(m)
+	if err := c.k8sApplyManifest(context.Background(), []byte("data")); err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+// ─── k8sGetPVCVolumeName error path ──────────────────────────────────────────
+
+func TestK8sGetPVCVolumeName_RunnerError(t *testing.T) {
+	m := &mock.K8sRunner{}
+	m.OnGet = func(_ context.Context, _, _, _ string) ([]byte, error) {
+		return nil, errors.New("api error")
+	}
+	c := NewBackupClient(m)
+	_, err := c.k8sGetPVCVolumeName(context.Background(), "my-pvc", "ns")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+// ─── k8sGetPodPhase error path ────────────────────────────────────────────────
+
+func TestK8sGetPodPhase_RunnerError(t *testing.T) {
+	m := &mock.K8sRunner{}
+	m.OnGet = func(_ context.Context, _, _, _ string) ([]byte, error) {
+		return nil, errors.New("api error")
+	}
+	c := NewBackupClient(m)
+	_, err := c.k8sGetPodPhase(context.Background(), "pod-a", "ns")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
 }
 
 // ─── SetDefaultK8sRunner ────────────────────────────────────────────────────

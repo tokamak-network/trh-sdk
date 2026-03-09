@@ -265,7 +265,7 @@ func (b *BackupClient) k8sGetPVCPhase(ctx context.Context, name, namespace strin
 	}
 	out, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", name, "-o", "jsonpath={.status.phase}")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("k8sGetPVCPhase: %w", err)
 	}
 	return strings.TrimSpace(out), nil
 }
@@ -289,7 +289,7 @@ func (b *BackupClient) k8sGetPodPhase(ctx context.Context, name, namespace strin
 	}
 	out, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pod", name, "-o", "jsonpath={.status.phase}")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("k8sGetPodPhase: %w", err)
 	}
 	return strings.TrimSpace(out), nil
 }
@@ -310,7 +310,7 @@ func (b *BackupClient) k8sGetPodLogs(ctx context.Context, name, namespace string
 	}
 	out, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "logs", name)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("k8sGetPodLogs: %w", err)
 	}
 	return out, nil
 }
