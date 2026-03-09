@@ -105,20 +105,25 @@ func (b *BackupClient) k8sListPVCNames(ctx context.Context, namespace string) ([
 }
 
 // k8sGetPVCExists returns true if the named PVC exists in the namespace.
+// Returns (false, nil) only when the API confirms the PVC does not exist.
+// Any other error (network failure, auth, etc.) is propagated to the caller.
 func (b *BackupClient) k8sGetPVCExists(ctx context.Context, name, namespace string) (bool, error) {
 	if b.k8sRunner != nil {
 		_, err := b.k8sRunner.Get(ctx, "pvc", name, namespace)
 		if err != nil {
-			// treat not-found as false
-			return false, nil
+			if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "NotFound") {
+				return false, nil
+			}
+			return false, fmt.Errorf("k8sGetPVCExists: %w", err)
 		}
 		return true, nil
 	}
-	_, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", name)
+	// --ignore-not-found=true: exits 0 with empty output when not found, exits 0 with output when found.
+	out, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", name, "--ignore-not-found=true")
 	if err != nil {
-		return false, nil
+		return false, fmt.Errorf("k8sGetPVCExists: %w", err)
 	}
-	return true, nil
+	return strings.TrimSpace(out) != "", nil
 }
 
 // k8sGetPVCVolumeName returns the spec.volumeName of the named PVC.
@@ -180,13 +185,38 @@ func (b *BackupClient) k8sListPodsUsingPVC(ctx context.Context, claimName, names
 		}
 		return names, nil
 	}
-	out, err := utils.ExecuteCommand(ctx, "sh", "-c",
-		fmt.Sprintf("kubectl -n %s get pods -o json | jq -r '.items[] | select(.spec.volumes[]?.persistentVolumeClaim.claimName == \"%s\") | .metadata.name'",
-			namespace, claimName))
+	out, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pods", "-o", "json")
 	if err != nil || strings.TrimSpace(out) == "" {
 		return nil, nil
 	}
-	return strings.Fields(strings.TrimSpace(out)), nil
+	// Parse JSON inline — avoids shell injection via namespace/claimName interpolation.
+	var podList struct {
+		Items []struct {
+			Metadata struct {
+				Name string `json:"name"`
+			} `json:"metadata"`
+			Spec struct {
+				Volumes []struct {
+					PVC *struct {
+						ClaimName string `json:"claimName"`
+					} `json:"persistentVolumeClaim"`
+				} `json:"volumes"`
+			} `json:"spec"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(out), &podList); err != nil {
+		return nil, fmt.Errorf("k8sListPodsUsingPVC: failed to parse pod list: %w", err)
+	}
+	var names []string
+	for _, pod := range podList.Items {
+		for _, vol := range pod.Spec.Volumes {
+			if vol.PVC != nil && vol.PVC.ClaimName == claimName {
+				names = append(names, pod.Metadata.Name)
+				break
+			}
+		}
+	}
+	return names, nil
 }
 
 // k8sDeletePVCNoWait deletes the named PVC without waiting, ignoring not-found errors.
