@@ -5,6 +5,7 @@
 package runner
 
 import (
+	"context"
 	"os"
 )
 
@@ -14,6 +15,8 @@ type ToolRunner interface {
 	K8s() K8sRunner
 	Helm() HelmRunner
 	DO() DORunner
+	AWS() AWSRunner
+	TF() TFRunner
 }
 
 // RunnerConfig controls which implementation is selected.
@@ -44,7 +47,15 @@ func newNativeRunner(cfg RunnerConfig) (*NativeRunner, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &NativeRunner{k8s: k8s, helm: helm, do: &NativeDORunner{}}, nil
+	awsR, err := newNativeAWSRunner(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	tf, err := newNativeTFRunner()
+	if err != nil {
+		return nil, err
+	}
+	return &NativeRunner{k8s: k8s, helm: helm, do: &NativeDORunner{}, aws: awsR, tf: tf}, nil
 }
 
 // NativeRunner is the ToolRunner implementation that calls Go libraries directly.
@@ -52,11 +63,15 @@ type NativeRunner struct {
 	k8s  K8sRunner
 	helm HelmRunner
 	do   DORunner
+	aws  AWSRunner
+	tf   TFRunner
 }
 
 func (r *NativeRunner) K8s() K8sRunner   { return r.k8s }
 func (r *NativeRunner) Helm() HelmRunner { return r.helm }
 func (r *NativeRunner) DO() DORunner     { return r.do }
+func (r *NativeRunner) AWS() AWSRunner   { return r.aws }
+func (r *NativeRunner) TF() TFRunner     { return r.tf }
 
 // ShellOutRunner is the legacy ToolRunner that delegates to external binaries
 // via ExecuteCommand. It is always available as a fallback.
@@ -65,4 +80,6 @@ type ShellOutRunner struct{}
 func (r *ShellOutRunner) K8s() K8sRunner   { return &ShellOutK8sRunner{} }
 func (r *ShellOutRunner) Helm() HelmRunner { return &ShellOutHelmRunner{} }
 func (r *ShellOutRunner) DO() DORunner     { return &ShellOutDORunner{} }
+func (r *ShellOutRunner) AWS() AWSRunner   { return &ShellOutAWSRunner{} }
+func (r *ShellOutRunner) TF() TFRunner     { return &ShellOutTFRunner{} }
 
