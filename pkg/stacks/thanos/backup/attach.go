@@ -32,7 +32,8 @@ func ShowAttachUsage(l *zap.SugaredLogger) {
 	l.Info("  --sts op-geth,op-node     Comma-separated StatefulSet names to restart")
 }
 
-// ValidateAttachPrerequisites checks required CLIs and cluster access
+// ValidateAttachPrerequisites checks required CLIs and cluster access.
+// These checks are tool-availability probes with no K8sRunner equivalent.
 func ValidateAttachPrerequisites(ctx context.Context) error {
 	if _, err := utils.ExecuteCommand(ctx, "aws", "--version"); err != nil {
 		return fmt.Errorf("AWS CLI is not installed or not accessible: %w", err)
@@ -54,8 +55,14 @@ func VerifyEFSData(ctx context.Context, namespace string, verify func(context.Co
 	return verify(ctx, namespace)
 }
 
-// RestartStatefulSets restarts comma-separated StatefulSets and waits for rollout
+// RestartStatefulSets restarts comma-separated StatefulSets and waits for rollout.
+// rollout restart/status have no K8sRunner equivalent and always shell out to kubectl.
 func RestartStatefulSets(ctx context.Context, l *zap.SugaredLogger, namespace, stsCSV string) error {
+	return (&BackupClient{}).restartStatefulSets(ctx, l, namespace, stsCSV)
+}
+
+// restartStatefulSets is the BackupClient method implementation.
+func (b *BackupClient) restartStatefulSets(ctx context.Context, l *zap.SugaredLogger, namespace, stsCSV string) error {
 	list := strings.Split(strings.TrimSpace(stsCSV), ",")
 	for _, raw := range list {
 		name := strings.TrimSpace(raw)
@@ -64,7 +71,7 @@ func RestartStatefulSets(ctx context.Context, l *zap.SugaredLogger, namespace, s
 		}
 
 		// Find actual StatefulSet name by pattern matching
-		actualName, err := findStatefulSetByName(ctx, namespace, name)
+		actualName, err := b.findStatefulSetByName(ctx, namespace, name)
 		if err != nil {
 			return fmt.Errorf("failed to find StatefulSet matching %s: %w", name, err)
 		}
@@ -72,6 +79,7 @@ func RestartStatefulSets(ctx context.Context, l *zap.SugaredLogger, namespace, s
 		// Log StatefulSet restart initiation
 		l.Infof("🔄 Restarting StatefulSet %s (actual: %s)...", name, actualName)
 
+		// rollout restart has no K8sRunner equivalent — always shellout
 		if _, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "rollout", "restart", "statefulset/"+actualName); err != nil {
 			return fmt.Errorf("failed to restart StatefulSet %s (actual: %s): %w", name, actualName, err)
 		}
@@ -79,6 +87,7 @@ func RestartStatefulSets(ctx context.Context, l *zap.SugaredLogger, namespace, s
 		// Log rollout status monitoring
 		l.Infof("⏳ Waiting for StatefulSet %s rollout to complete (timeout: 10 minutes)...", actualName)
 
+		// rollout status has no K8sRunner equivalent — always shellout
 		if _, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "rollout", "status", "statefulset/"+actualName, "--timeout=600s"); err != nil {
 			return fmt.Errorf("rollout status failed for %s (actual: %s): %w", name, actualName, err)
 		}
@@ -91,29 +100,20 @@ func RestartStatefulSets(ctx context.Context, l *zap.SugaredLogger, namespace, s
 
 // findStatefulSetByName finds the actual StatefulSet name by pattern matching
 func findStatefulSetByName(ctx context.Context, namespace, pattern string) (string, error) {
-	// Get all StatefulSets in the namespace using a simpler approach
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "statefulsets", "-o", "name")
+	return (&BackupClient{}).findStatefulSetByName(ctx, namespace, pattern)
+}
+
+// findStatefulSetByName finds the actual StatefulSet name by pattern matching.
+func (b *BackupClient) findStatefulSetByName(ctx context.Context, namespace, pattern string) (string, error) {
+	names, err := b.k8sListStatefulSetNames(ctx, namespace)
 	if err != nil {
-		return "", fmt.Errorf("failed to list StatefulSets: %w", err)
+		return "", err
 	}
-
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		// Remove "statefulset.apps/" prefix
-		stsName := strings.TrimPrefix(line, "statefulset.apps/")
-
-		// Check if the StatefulSet name contains the pattern
-		// e.g., pattern "op-geth" should match "theo09112-iskw4-1757567097-thanos-stack-op-geth"
+	for _, stsName := range names {
 		if strings.Contains(stsName, pattern) {
 			return stsName, nil
 		}
 	}
-
 	return "", fmt.Errorf("no StatefulSet found matching pattern: %s", pattern)
 }
 
@@ -202,7 +202,7 @@ func ExecuteBackupAttach(
 		if err := verify(ctx, attachInfo.Namespace); err != nil {
 			l.Warnf("Current EFS data verification failed: %v", err)
 		}
-		_, _ = utils.ExecuteCommand(ctx, "kubectl", "-n", attachInfo.Namespace, "delete", "pod", "verify-efs", "--ignore-not-found=true")
+		_ = (&BackupClient{}).k8sDeletePod(ctx, "verify-efs", attachInfo.Namespace)
 	}
 
 	// Handle StatefulSet restarts
@@ -440,16 +440,20 @@ func backupPvPvcWithDir(ctx context.Context, l *zap.SugaredLogger, namespace str
 
 // UpdatePVVolumeHandles recreates PV/PVCs pointing to the new EFS ID
 func UpdatePVVolumeHandles(ctx context.Context, l *zap.SugaredLogger, namespace, newEfs string, pvcs *string) error {
+	return (&BackupClient{}).updatePVVolumeHandles(ctx, l, namespace, newEfs, pvcs)
+}
+
+// updatePVVolumeHandles is the BackupClient method implementation.
+func (b *BackupClient) updatePVVolumeHandles(ctx context.Context, l *zap.SugaredLogger, namespace, newEfs string, pvcs *string) error {
 	l.Infof("Updating PV volume handles to EFS: %s", newEfs)
 	var targetPVCs []string
 
 	// Handle specific PVCs if provided
 	if pvcs != nil && strings.TrimSpace(*pvcs) != "" {
-		allPVCsOut, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", "-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")
+		allPVCs, err := b.k8sListPVCNames(ctx, namespace)
 		if err != nil {
 			return fmt.Errorf("failed to list PVCs for matching: %w", err)
 		}
-		allPVCs := strings.Fields(allPVCsOut)
 		for _, input := range strings.Split(strings.TrimSpace(*pvcs), ",") {
 			alias := strings.TrimSpace(input)
 			if alias == "" {
@@ -474,7 +478,8 @@ func UpdatePVVolumeHandles(ctx context.Context, l *zap.SugaredLogger, namespace,
 				l.Warnf("PVC alias '%s' did not match any PVC in namespace %s", alias, namespace)
 				continue
 			}
-			if _, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", resolvedPVC); err != nil {
+			exists, err := b.k8sGetPVCExists(ctx, resolvedPVC, namespace)
+			if err != nil || !exists {
 				l.Warnf("PVC %s not found after resolution, skipping", resolvedPVC)
 				continue
 			}
@@ -483,11 +488,11 @@ func UpdatePVVolumeHandles(ctx context.Context, l *zap.SugaredLogger, namespace,
 		}
 	} else {
 		// Auto-detect op-geth and op-node PVCs
-		pvcsList, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", "-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")
+		allPVCs, err := b.k8sListPVCNames(ctx, namespace)
 		if err != nil {
 			return fmt.Errorf("failed to list PVCs: %w", err)
 		}
-		for _, pvc := range strings.Fields(pvcsList) {
+		for _, pvc := range allPVCs {
 			if strings.Contains(pvc, "op-geth") || strings.Contains(pvc, "op-node") {
 				targetPVCs = append(targetPVCs, pvc)
 				l.Infof("Found PVC: %s", pvc)
@@ -505,22 +510,21 @@ func UpdatePVVolumeHandles(ctx context.Context, l *zap.SugaredLogger, namespace,
 		if pvcName == "" {
 			continue
 		}
-		pvName, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", pvcName, "-o", "jsonpath={.spec.volumeName}")
+		pvName, err := b.k8sGetPVCVolumeName(ctx, pvcName, namespace)
 		if err != nil {
 			l.Errorf("Failed to get PV name for PVC %s: %v", pvcName, err)
 			continue
 		}
-		pvName = strings.TrimSpace(pvName)
 		if pvName == "" {
 			l.Warnf("PVC %s has no volumeName, skipping", pvcName)
 			continue
 		}
 		l.Infof("Processing PVC: %s (PV: %s)", pvcName, pvName)
-		// Find pods using the PVC with a more reliable method using jq
-		podsUsingPVC, err := utils.ExecuteCommand(ctx, "sh", "-c", fmt.Sprintf("kubectl -n %s get pods -o json | jq -r '.items[] | select(.spec.volumes[]?.persistentVolumeClaim.claimName == \"%s\") | .metadata.name'", namespace, pvcName))
-		var pods []string
-		if err == nil && strings.TrimSpace(podsUsingPVC) != "" {
-			pods = strings.Fields(strings.TrimSpace(podsUsingPVC))
+
+		// Find pods using the PVC
+		pods, err := b.k8sListPodsUsingPVC(ctx, pvcName, namespace)
+		if err != nil {
+			l.Warnf("Failed to list pods using PVC %s: %v", pvcName, err)
 		}
 		if len(pods) > 0 {
 			l.Infof("Found %d pods using PVC %s: %v", len(pods), pvcName, pods)
@@ -528,37 +532,31 @@ func UpdatePVVolumeHandles(ctx context.Context, l *zap.SugaredLogger, namespace,
 			// Delete pods that use the PVC (StatefulSet will recreate them later)
 			for _, podName := range pods {
 				l.Infof("Deleting pod %s that uses PVC %s...", podName, pvcName)
-				deleteCmd := []string{"kubectl", "-n", namespace, "delete", "pod", podName, "--ignore-not-found=true"}
-				output, err := utils.ExecuteCommand(ctx, deleteCmd[0], deleteCmd[1:]...)
-				if err != nil {
-					l.Warnf("⚠️  Pod deletion command failed: %v, Output: %s", err, output)
+				if err := b.k8sDeletePod(ctx, podName, namespace); err != nil {
+					l.Warnf("⚠️  Pod deletion failed: %v", err)
 				} else {
-					l.Infof("✅ Pod deletion command succeeded. Output: %s", output)
+					l.Infof("✅ Pod %s deleted", podName)
 				}
 			}
-
 		}
+
 		// Delete PVC
 		l.Infof("Deleting PVC %s...", pvcName)
-		// Non-blocking delete with wait=false and ignore-not-found
-		pvcDeleteCmd := []string{"kubectl", "-n", namespace, "delete", "pvc", pvcName, "--wait=false", "--ignore-not-found=true"}
-		output, err := utils.ExecuteCommand(ctx, pvcDeleteCmd[0], pvcDeleteCmd[1:]...)
-		if err != nil {
-			l.Warnf("⚠️  PVC deletion command failed: %v, Output: %s", err, output)
+		if err := b.k8sDeletePVCNoWait(ctx, pvcName, namespace); err != nil {
+			l.Warnf("⚠️  PVC deletion failed: %v", err)
 		} else {
-			l.Infof("✅ PVC deletion command succeeded. Output: %s", output)
+			l.Infof("✅ PVC deletion command succeeded.")
 		}
 
 		l.Infof("✅ PVC deletion command completed. Proceeding with PV deletion and recreation.")
 		l.Infof("Deleting old PV %s...", pvName)
-		pvDeleteCmd := []string{"kubectl", "delete", "pv", pvName, "--ignore-not-found=true"}
-		pvOutput, pvErr := utils.ExecuteCommand(ctx, pvDeleteCmd[0], pvDeleteCmd[1:]...)
-		if pvErr != nil {
-			l.Warnf("Failed to delete PV %s: %v, Output: %s", pvName, pvErr, pvOutput)
+		if err := b.k8sDeletePV(ctx, pvName); err != nil {
+			l.Warnf("Failed to delete PV %s: %v", pvName, err)
 		} else {
-			l.Infof("✅ PV deletion command succeeded. Output: %s", pvOutput)
+			l.Infof("✅ PV deletion command succeeded.")
 		}
 		time.Sleep(2 * time.Second)
+
 		newPVYaml := fmt.Sprintf(`apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -576,16 +574,12 @@ spec:
   csi:
     driver: efs.csi.aws.com
     volumeHandle: %s`, pvName, pvName, newEfs)
-		tempPVFile := fmt.Sprintf("/tmp/new-pv-%s.yaml", pvName)
-		if err := os.WriteFile(tempPVFile, []byte(newPVYaml), 0644); err != nil {
-			l.Errorf("Failed to create temporary PV YAML file: %v", err)
-			continue
-		}
-		defer os.Remove(tempPVFile)
-		if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempPVFile); err != nil {
+
+		if err := b.k8sApplyManifest(ctx, []byte(newPVYaml)); err != nil {
 			l.Errorf("Failed to create new PV %s: %v", pvName, err)
 			continue
 		}
+
 		newPVCYaml := fmt.Sprintf(`apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -603,20 +597,16 @@ spec:
       app: %s
   volumeMode: Filesystem
   volumeName: %s`, pvcName, namespace, pvName, pvName)
-		tempPVCFile := fmt.Sprintf("/tmp/new-pvc-%s.yaml", pvcName)
-		if err := os.WriteFile(tempPVCFile, []byte(newPVCYaml), 0644); err != nil {
-			l.Errorf("Failed to create temporary PVC YAML file: %v", err)
-			continue
-		}
-		defer os.Remove(tempPVCFile)
-		if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempPVCFile); err != nil {
+
+		if err := b.k8sApplyManifest(ctx, []byte(newPVCYaml)); err != nil {
 			l.Errorf("Failed to create new PVC %s: %v", pvcName, err)
 			continue
 		}
+
 		l.Infof("Waiting for PVC %s to be bound...", pvcName)
 		for i := 0; i < 30; i++ {
-			status, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", pvcName, "-o", "jsonpath={.status.phase}")
-			if err == nil && strings.TrimSpace(status) == "Bound" {
+			phase, err := b.k8sGetPVCPhase(ctx, pvcName, namespace)
+			if err == nil && phase == "Bound" {
 				break
 			}
 			time.Sleep(1 * time.Second)
@@ -633,6 +623,18 @@ spec:
 
 // ExecuteEFSOperationsFull contains the full attach EFS operation flow
 func ExecuteEFSOperationsFull(
+	ctx context.Context,
+	l *zap.SugaredLogger,
+	attachInfo *types.BackupAttachInfo,
+	verify func(context.Context, string) error,
+	backupPvPvcFlag *bool,
+	progressReporter func(string, float64),
+) error {
+	return (&BackupClient{}).executeEFSOperationsFull(ctx, l, attachInfo, verify, backupPvPvcFlag, progressReporter)
+}
+
+// executeEFSOperationsFull is the BackupClient method implementation.
+func (b *BackupClient) executeEFSOperationsFull(
 	ctx context.Context,
 	l *zap.SugaredLogger,
 	attachInfo *types.BackupAttachInfo,
@@ -673,7 +675,7 @@ func ExecuteEFSOperationsFull(
 		if err := verify(ctx, attachInfo.Namespace); err != nil {
 			l.Warnf("EFS data verification failed: %v", err)
 		}
-		_, _ = utils.ExecuteCommand(ctx, "kubectl", "-n", attachInfo.Namespace, "delete", "pod", "verify-efs", "--ignore-not-found=true")
+		_ = b.k8sDeletePod(ctx, "verify-efs", attachInfo.Namespace)
 	}
 
 	// Backup PV/PVC definitions before destructive changes
@@ -698,7 +700,7 @@ func ExecuteEFSOperationsFull(
 
 	progressReporter("Updating PV/PVC volume handles...", 60.0)
 	pvcList := strings.Join(attachInfo.PVCs, ",")
-	if err := UpdatePVVolumeHandles(ctx, l, attachInfo.Namespace, attachInfo.EFSID, &pvcList); err != nil {
+	if err := b.updatePVVolumeHandles(ctx, l, attachInfo.Namespace, attachInfo.EFSID, &pvcList); err != nil {
 		return fmt.Errorf("failed to update PV volume handles: %w", err)
 	}
 
@@ -707,22 +709,27 @@ func ExecuteEFSOperationsFull(
 
 // VerifyEFSDataImpl verifies EFS data integrity by creating a verification pod
 func VerifyEFSDataImpl(ctx context.Context, l *zap.SugaredLogger, namespace string) error {
+	return (&BackupClient{}).verifyEFSDataImpl(ctx, l, namespace)
+}
+
+// verifyEFSDataImpl is the BackupClient method implementation.
+func (b *BackupClient) verifyEFSDataImpl(ctx context.Context, l *zap.SugaredLogger, namespace string) error {
 	l.Info("Checking EFS data...")
 
 	// Clean up any existing verify pod
-	_, _ = utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "delete", "pod", "verify-efs", "--ignore-not-found=true")
+	_ = b.k8sDeletePod(ctx, "verify-efs", namespace)
 
 	// Wait for cleanup
 	time.Sleep(2 * time.Second)
 
 	// Find the correct PVC name for op-geth
-	pvcsList, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pvc", "-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")
+	pvcsList, err := b.k8sListPVCNames(ctx, namespace)
 	if err != nil {
 		return fmt.Errorf("failed to list PVCs: %w", err)
 	}
 
 	var opGethPVC string
-	for _, pvc := range strings.Fields(pvcsList) {
+	for _, pvc := range pvcsList {
 		if strings.Contains(pvc, "op-geth") {
 			opGethPVC = pvc
 			break
@@ -750,9 +757,9 @@ spec:
     - |
       # Check EFS accessibility
       ls -la /db > /dev/null || { echo "ERROR: EFS not accessible"; exit 1; }
-      
+
       echo "🔍 Op-Geth Data Analysis"
-      
+
       # Find the actual operational chaindata path (subPath-based)
       OPERATIONAL_CHAINDATA=""
       for subpath_dir in /db/*-op-geth; do
@@ -761,12 +768,12 @@ spec:
           break
         fi
       done
-      
+
       # Fallback to direct chaindata if no subPath found
       if [ -z "$OPERATIONAL_CHAINDATA" ] && [ -d "/db/chaindata" ]; then
         OPERATIONAL_CHAINDATA="/db/chaindata"
       fi
-      
+
       if [ -n "$OPERATIONAL_CHAINDATA" ]; then
         echo "   ✅ Operational chaindata: $OPERATIONAL_CHAINDATA"
         chaindata_size=$(du -sh "$OPERATIONAL_CHAINDATA" 2>/dev/null | awk '{print $1}' || echo 'N/A')
@@ -776,15 +783,15 @@ spec:
       else
         echo "   ❌ No operational chaindata found"
       fi
-      
+
       echo "🔍 Chaindata Integrity Check:"
-      
+
       if [ -n "$PRIMARY_CHAINDATA" ] && [ -d "$PRIMARY_CHAINDATA" ]; then
         file_count=$(find "$PRIMARY_CHAINDATA" -type f 2>/dev/null | wc -l || echo "0")
-        
+
         if [ "$file_count" -gt 0 ]; then
           echo "✅ Contains $file_count files"
-          
+
           # Check critical LevelDB files
           if [ -f "$PRIMARY_CHAINDATA/CURRENT" ]; then
             echo "✅ CURRENT file exists"
@@ -792,14 +799,14 @@ spec:
             echo "❌ CURRENT file missing - database corrupted"
             exit 1
           fi
-          
+
           if ls "$PRIMARY_CHAINDATA"/MANIFEST-* >/dev/null 2>&1; then
             echo "✅ MANIFEST file exists"
           else
             echo "❌ MANIFEST file missing - database corrupted"
             exit 1
           fi
-          
+
           # Check for LOG files (indicates recent activity)
           log_files=$(find "$PRIMARY_CHAINDATA" -name "*.log" -type f 2>/dev/null | wc -l || echo "0")
           if [ "$log_files" -gt 0 ]; then
@@ -807,7 +814,7 @@ spec:
           else
             echo "⚠️  No LOG files found"
           fi
-          
+
           # Check for SST files (actual data)
           sst_files=$(find "$PRIMARY_CHAINDATA" -name "*.sst" -o -name "*.ldb" -type f 2>/dev/null | wc -l || echo "0")
           if [ "$sst_files" -gt 0 ]; then
@@ -816,14 +823,14 @@ spec:
             echo "❌ No data files found - empty database"
             exit 1
           fi
-          
+
           # Check for LOCK file (should not exist if geth is not running)
           if [ -f "$PRIMARY_CHAINDATA/LOCK" ]; then
             echo "⚠️  LOCK file exists - database may be in use"
           else
             echo "✅ No LOCK file - database available"
           fi
-          
+
         else
           echo "❌ Chaindata directory is empty"
           exit 1
@@ -842,56 +849,43 @@ spec:
       claimName: %s
   restartPolicy: Never`, namespace, opGethPVC)
 
-	// Create pod using kubectl apply
-	tempFile := fmt.Sprintf("/tmp/verify-efs-%s.yaml", namespace)
-	if err := os.WriteFile(tempFile, []byte(podYaml), 0644); err != nil {
-		return fmt.Errorf("failed to create temporary YAML file: %w", err)
-	}
-	defer os.Remove(tempFile)
-
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile); err != nil {
+	if err := b.k8sApplyManifest(ctx, []byte(podYaml)); err != nil {
 		return fmt.Errorf("failed to create verify pod: %w", err)
 	}
 
 	// Wait for pod to complete
 	l.Info("Waiting for verification pod to complete...")
 	for i := 0; i < 90; i++ { // Increased timeout to 3 minutes for geth operations
-		status, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pod", "verify-efs", "-o", "jsonpath={.status.phase}")
+		phase, err := b.k8sGetPodPhase(ctx, "verify-efs", namespace)
 		if err != nil {
 			l.Infof("Pod status check failed: %v", err)
 			time.Sleep(2 * time.Second)
 			continue
 		}
 
-		status = strings.TrimSpace(status)
-		if status == "Succeeded" {
+		switch phase {
+		case "Succeeded":
 			l.Info("✅ EFS data verification completed successfully")
-
-			// Get and display pod logs with metadata information
-			logs, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "logs", "verify-efs")
+			logs, err := b.k8sGetPodLogs(ctx, "verify-efs", namespace)
 			if err != nil {
 				l.Infof("Warning: Could not retrieve verification logs: %v", err)
 			} else {
 				l.Info(logs)
 			}
 			return nil
-		}
-		if status == "Failed" {
-			// Get pod logs for analysis
-			logs, _ := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "logs", "verify-efs")
+		case "Failed":
+			logs, _ := b.k8sGetPodLogs(ctx, "verify-efs", namespace)
 			l.Infof("❌ Pod failed. Logs:\n%s", logs)
 			return fmt.Errorf("verification pod failed")
-		}
-		if status == "Pending" {
+		case "Pending":
 			l.Infof("Pod is pending... (attempt %d/90)", i+1)
-		}
-		if status == "Running" {
+		case "Running":
 			l.Infof("Pod is running... (attempt %d/90)", i+1)
 		}
 		time.Sleep(2 * time.Second)
 	}
 
 	// Clean up the pod
-	utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "delete", "pod", "verify-efs", "--ignore-not-found=true")
+	_ = b.k8sDeletePod(ctx, "verify-efs", namespace)
 	return fmt.Errorf("verification pod timed out after 3 minutes")
 }

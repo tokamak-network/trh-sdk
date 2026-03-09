@@ -329,15 +329,13 @@ func (t *ThanosStack) cleanupSidecarDeployments(ctx context.Context, namespace s
 
 	// Clean up deployments
 	for _, deployment := range sidecarDeployments {
-		_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "deployment", deployment, "-n", namespace, "--ignore-not-found=true")
-		if err != nil {
+		if err := t.k8sDeleteResource(ctx, "deployment", deployment, namespace); err != nil {
 			logger.Warnw("Failed to delete Sidecar deployment", "deployment", deployment, "err", err)
 		}
 	}
 
 	// Delete ConfigMap (if exists)
-	_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "configmap", "thanos-logs-sidecar-config", "-n", namespace, "--ignore-not-found=true")
-	if err != nil {
+	if err := t.k8sDeleteResource(ctx, "configmap", "thanos-logs-sidecar-config", namespace); err != nil {
 		logger.Warnw("Failed to delete logs sidecar ConfigMap", "err", err)
 	}
 
@@ -350,13 +348,11 @@ func (t *ThanosStack) cleanupRBACResources(ctx context.Context) error {
 	logger := t.getLogger()
 
 	// Delete RBAC resources silently
-	_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "clusterrolebinding", "thanos-logs-sidecar-binding", "--ignore-not-found=true")
-	if err != nil {
+	if err := t.k8sDeleteResource(ctx, "clusterrolebinding", "thanos-logs-sidecar-binding", ""); err != nil {
 		logger.Warnw("Failed to delete ClusterRoleBinding", "err", err)
 	}
 
-	_, err = utils.ExecuteCommand(ctx, "kubectl", "delete", "clusterrole", "thanos-logs-sidecar-role", "--ignore-not-found=true")
-	if err != nil {
+	if err := t.k8sDeleteResource(ctx, "clusterrole", "thanos-logs-sidecar-role", ""); err != nil {
 		logger.Warnw("Failed to delete ClusterRole", "err", err)
 	}
 
@@ -369,8 +365,7 @@ func (t *ThanosStack) cleanupRBACResources(ctx context.Context) error {
 		logger.Errorw("K8s namespace is not set in deploy config")
 		return nil
 	}
-	_, err = utils.ExecuteCommand(ctx, "kubectl", "delete", "serviceaccount", "thanos-logs-sidecar", "-n", ns, "--ignore-not-found=true")
-	if err != nil {
+	if err := t.k8sDeleteResource(ctx, "serviceaccount", "thanos-logs-sidecar", ns); err != nil {
 		logger.Warnw("Failed to delete ServiceAccount", "namespace", ns, "err", err)
 	}
 
@@ -387,8 +382,7 @@ func (t *ThanosStack) tryToDeleteMonitoringNamespace(ctx context.Context, namesp
 	}
 
 	// First attempt normal deletion
-	_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "namespace", namespace, "--ignore-not-found=true")
-	if err != nil {
+	if err := t.k8sDeleteResource(ctx, "namespace", namespace, ""); err != nil {
 		logger.Warnw("Initial namespace deletion failed", "err", err)
 	}
 
@@ -396,8 +390,8 @@ func (t *ThanosStack) tryToDeleteMonitoringNamespace(ctx context.Context, namesp
 	time.Sleep(10 * time.Second)
 
 	// Check if namespace still exists
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "namespace", namespace, "-o", "json")
-	if err != nil {
+	rawNS, err := t.k8sGetNamespaceJSON(ctx, namespace)
+	if err != nil || rawNS == nil {
 		// Namespace doesn't exist, deletion successful
 		logger.Infow("Monitoring namespace deleted successfully", "namespace", namespace)
 		return nil
@@ -416,7 +410,7 @@ func (t *ThanosStack) tryToDeleteMonitoringNamespace(ctx context.Context, namesp
 		} `json:"status"`
 	}
 
-	if err := json.Unmarshal([]byte(output), &namespaceStatus); err != nil {
+	if err := json.Unmarshal(rawNS, &namespaceStatus); err != nil {
 		logger.Errorw("Error unmarshalling monitoring namespace status", "err", err)
 		return err
 	}
@@ -449,9 +443,8 @@ func (t *ThanosStack) tryToDeleteMonitoringNamespace(ctx context.Context, namesp
 		// Close file before kubectl command
 		tmpFile.Close()
 
-		// Apply the changes to force finalize
-		_, err = utils.ExecuteCommand(ctx, "kubectl", "replace", "--raw", fmt.Sprintf("/api/v1/namespaces/%s/finalize", namespace), "-f", "/tmp/monitoring-namespace.json")
-		if err != nil {
+		// Apply the changes to force finalize (raw API call; no K8sRunner equivalent)
+		if err := t.k8sReplaceNamespaceFinalize(ctx, namespace, "/tmp/monitoring-namespace.json"); err != nil {
 			logger.Errorw("Error applying changes to monitoring namespace", "err", err)
 			return err
 		}
@@ -501,34 +494,27 @@ func (t *ThanosStack) createMonitoringInfo(ctx context.Context, config *types.Mo
 func (t *ThanosStack) checkALBIngressStatus(ctx context.Context, config *types.MonitoringConfig) string {
 	// Wait for ALB Ingress to be ready (max 5 minutes)
 	maxAttempts := 60 // 60 attempts * 5 seconds = 5 minutes
+	ingressName := fmt.Sprintf("%s-grafana", config.HelmReleaseName)
 	for i := 0; i < maxAttempts; i++ {
 		// Check if ALB Ingress exists and has an address
-		output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "ingress", "-n", config.Namespace,
-			fmt.Sprintf("%s-grafana", config.HelmReleaseName), "-o", "jsonpath={.status.loadBalancer.ingress[0].hostname}", "--ignore-not-found=true")
-
-		if err == nil && strings.TrimSpace(output) != "" {
-			albHostname := strings.TrimSpace(output)
-			if strings.HasPrefix(albHostname, "internal-") || strings.HasPrefix(albHostname, "dualstack.") {
-				return fmt.Sprintf("http://%s", albHostname)
+		hostname, err := t.k8sGetIngressHostname(ctx, ingressName, config.Namespace)
+		if err == nil && hostname != "" {
+			if strings.HasPrefix(hostname, "internal-") || strings.HasPrefix(hostname, "dualstack.") {
+				return fmt.Sprintf("http://%s", hostname)
 			}
 		}
 
 		// Check if ALB Ingress is still being created
-		output, err = utils.ExecuteCommand(ctx, "kubectl", "get", "ingress", "-n", config.Namespace,
-			fmt.Sprintf("%s-grafana", config.HelmReleaseName), "-o", "jsonpath={.status.loadBalancer.ingress}", "--ignore-not-found=true")
-
-		if err != nil || strings.TrimSpace(output) == "" {
+		hasLB, err := t.k8sIngressHasLoadBalancer(ctx, ingressName, config.Namespace)
+		if err != nil || !hasLB {
 			time.Sleep(5 * time.Second)
 			continue
 		}
 
 		// Try to get the hostname again
-		output, err = utils.ExecuteCommand(ctx, "kubectl", "get", "ingress", "-n", config.Namespace,
-			fmt.Sprintf("%s-grafana", config.HelmReleaseName), "-o", "jsonpath={.status.loadBalancer.ingress[0].hostname}")
-
-		if err == nil && strings.TrimSpace(output) != "" {
-			albHostname := strings.TrimSpace(output)
-			return fmt.Sprintf("http://%s", albHostname)
+		hostname, err = t.k8sGetIngressHostname(ctx, ingressName, config.Namespace)
+		if err == nil && hostname != "" {
+			return fmt.Sprintf("http://%s", hostname)
 		}
 
 		time.Sleep(5 * time.Second)
@@ -907,7 +893,7 @@ func (t *ThanosStack) getCloudWatchLogsClient(ctx context.Context, region string
 
 // applyManifest applies a Kubernetes manifest
 func (t *ThanosStack) applyManifest(ctx context.Context, manifest string) error {
-	return t.applyManifestWithTempFile(ctx, manifest, "k8s-manifest-*.yaml")
+	return t.k8sApplyManifest(ctx, manifest)
 }
 
 // applyManifestWithTempFile applies a Kubernetes manifest using a temporary file
@@ -1034,19 +1020,13 @@ func (t *ThanosStack) generateAlertTemplates(grafanaURL string) map[string]strin
 
 // getServiceNames returns a map of component names to their Kubernetes service names
 func (t *ThanosStack) getServiceNames(ctx context.Context, namespace string) (map[string]string, error) {
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "services", "-n", namespace, "-o", "custom-columns=NAME:.metadata.name", "--no-headers")
+	names, err := t.k8sListServiceNames(ctx, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get services in namespace %s: %w", namespace, err)
 	}
 
 	serviceNames := make(map[string]string)
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-		serviceName := strings.TrimSpace(line)
+	for _, serviceName := range names {
 		if strings.Contains(serviceName, "op-node") {
 			serviceNames["op-node"] = serviceName
 		} else if strings.Contains(serviceName, "op-batcher") {
@@ -1064,26 +1044,21 @@ func (t *ThanosStack) getServiceNames(ctx context.Context, namespace string) (ma
 // getEFSFileSystemId extracts EFS filesystem ID from existing PV
 func (t *ThanosStack) getEFSFileSystemId(ctx context.Context, chainName string) (string, error) {
 	// First try to get EFS filesystem ID from existing op-geth PV using a more reliable method
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pv", "-o", "custom-columns=NAME:.metadata.name,VOLUMEHANDLE:.spec.csi.volumeHandle", "--no-headers")
+	pvs, err := t.k8sListPVVolumeHandles(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to get PVs: %w", err)
 	}
 
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	for _, line := range lines {
-		if strings.Contains(line, chainName) && strings.Contains(line, "thanos-stack-op-geth") {
-			fields := strings.Fields(line)
-			if len(fields) >= 2 {
-				volumeHandle := fields[1]
-				if strings.HasPrefix(volumeHandle, "fs-") {
-					return volumeHandle, nil
-				}
+	for _, pv := range pvs {
+		if strings.Contains(pv.Name, chainName) && strings.Contains(pv.Name, "thanos-stack-op-geth") {
+			if strings.HasPrefix(pv.VolumeHandle, "fs-") {
+				return pv.VolumeHandle, nil
 			}
 		}
 	}
 
 	// Fallback: try to get from AWS EFS directly
-	output, err = utils.ExecuteCommand(ctx, "aws", "efs", "describe-file-systems", "--query", "FileSystems[0].FileSystemId", "--output", "text", "--region", t.deployConfig.AWS.Region)
+	output, err := utils.ExecuteCommand(ctx, "aws", "efs", "describe-file-systems", "--query", "FileSystems[0].FileSystemId", "--output", "text", "--region", t.deployConfig.AWS.Region)
 	if err != nil {
 		return "", fmt.Errorf("failed to get EFS filesystem ID from AWS: %w", err)
 	}
@@ -1098,7 +1073,7 @@ func (t *ThanosStack) getEFSFileSystemId(ctx context.Context, chainName string) 
 
 // deployMonitoringInfrastructure creates PVs for Static Provisioning
 func (t *ThanosStack) deployMonitoringInfrastructure(ctx context.Context, config *types.MonitoringConfig) error {
-	if err := t.ensureNamespaceExists(ctx, config.Namespace); err != nil {
+	if err := t.k8sEnsureNamespace(ctx, config.Namespace); err != nil {
 		return fmt.Errorf("failed to ensure namespace exists: %w", err)
 	}
 
@@ -1147,20 +1122,15 @@ func (t *ThanosStack) cleanupExistingMonitoringStorage(ctx context.Context, conf
 
 	// Get all PVCs once to reduce API calls
 	logger.Info("Fetching all PVCs in namespace")
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", "-n", config.Namespace, "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
+	allPVCNames, err := t.k8sPVCNames(ctx, config.Namespace)
 	if err != nil {
 		return fmt.Errorf("failed to get existing PVCs: %w", err)
 	}
 
-	lines := strings.Split(strings.TrimSpace(output), "\n")
 	var grafanaPVCs, otherPVCs []string
 
 	// Separate Grafana PVCs from others
-	for _, line := range lines {
-		pvcName := strings.TrimSpace(line)
-		if pvcName == "" {
-			continue
-		}
+	for _, pvcName := range allPVCNames {
 		if strings.Contains(pvcName, "grafana") {
 			grafanaPVCs = append(grafanaPVCs, pvcName)
 		} else {
@@ -1172,8 +1142,7 @@ func (t *ThanosStack) cleanupExistingMonitoringStorage(ctx context.Context, conf
 	logger.Info("Cleaning up Grafana PVCs before PV cleanup")
 	for _, pvcName := range grafanaPVCs {
 		logger.Infow("Deleting Grafana PVC to unbind PV", "pvcName", pvcName)
-		_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "pvc", pvcName, "-n", config.Namespace, "--ignore-not-found=true")
-		if err != nil {
+		if err := t.k8sDeletePVC(ctx, pvcName, config.Namespace); err != nil {
 			logger.Warnw("Failed to delete Grafana PVC", "pvcName", pvcName, "error", err)
 		}
 	}
@@ -1185,56 +1154,53 @@ func (t *ThanosStack) cleanupExistingMonitoringStorage(ctx context.Context, conf
 	deletedPVCs := 0
 	for _, pvcName := range otherPVCs {
 		// Check if PVC is bound to a pod
-		boundOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", pvcName, "-n", config.Namespace, "-o", "jsonpath={.status.phase}")
-		if err == nil && strings.TrimSpace(boundOutput) == "Bound" {
+		phase, err := t.k8sPVCPhase(ctx, pvcName, config.Namespace)
+		if err == nil && phase == "Bound" {
 			// Check if any pod is using this PVC
-			podOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pods", "-n", config.Namespace, "-o", "jsonpath={.items[*].spec.volumes[*].persistentVolumeClaim.claimName}")
-			if err == nil && strings.Contains(podOutput, pvcName) {
-				continue
+			claims, err := t.k8sPodPVCClaims(ctx, config.Namespace)
+			if err == nil {
+				inUse := false
+				for _, c := range claims {
+					if c == pvcName {
+						inUse = true
+						break
+					}
+				}
+				if inUse {
+					continue
+				}
 			}
 		}
 
 		// Delete PVC
-		_, err = utils.ExecuteCommand(ctx, "kubectl", "delete", "pvc", pvcName, "-n", config.Namespace, "--ignore-not-found=true")
-		if err == nil {
+		if err := t.k8sDeletePVC(ctx, pvcName, config.Namespace); err == nil {
 			deletedPVCs++
 		}
 	}
 
 	// Get existing monitoring PVs
-	output, err = utils.ExecuteCommand(ctx, "kubectl", "get", "pv", "--no-headers", "-o", "custom-columns=NAME:.metadata.name,STATUS:.status.phase")
+	pvEntries, err := t.k8sPVList(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get existing PVs: %w", err)
 	}
 
-	lines = strings.Split(strings.TrimSpace(output), "\n")
 	deletedPVs := 0
 
-	for _, line := range lines {
-		parts := strings.Fields(line)
-		if len(parts) < 2 {
-			continue
-		}
-
-		pvName := parts[0]
-		status := parts[1]
-
+	for _, pv := range pvEntries {
 		// Handle Grafana PVs: Delete completely to prevent password mismatch on reinstall
-		if strings.Contains(pvName, "thanos-stack-grafana") {
+		if strings.Contains(pv.Name, "thanos-stack-grafana") {
 			// Delete Grafana PV regardless of status (PVC already deleted above)
-			logger.Infow("Deleting Grafana PV to ensure clean reinstall", "pvName", pvName, "status", status)
-			_, err = utils.ExecuteCommand(ctx, "kubectl", "delete", "pv", pvName, "--ignore-not-found=true")
-			if err == nil {
+			logger.Infow("Deleting Grafana PV to ensure clean reinstall", "pvName", pv.Name, "status", pv.Phase)
+			if err := t.k8sDeletePV(ctx, pv.Name); err == nil {
 				deletedPVs++
-				logger.Infow("Successfully deleted Grafana PV", "pvName", pvName)
+				logger.Infow("Successfully deleted Grafana PV", "pvName", pv.Name)
 			} else {
-				logger.Warnw("Failed to delete Grafana PV", "pvName", pvName, "error", err)
+				logger.Warnw("Failed to delete Grafana PV", "pvName", pv.Name, "error", err)
 			}
-		} else if strings.Contains(pvName, "thanos-stack-prometheus") {
+		} else if strings.Contains(pv.Name, "thanos-stack-prometheus") {
 			// Handle Prometheus PVs: Patch to allow reuse (preserve monitoring history)
-			if status == "Released" {
-				_, err = utils.ExecuteCommand(ctx, "kubectl", "patch", "pv", pvName, "-p", `{"spec":{"claimRef":null}}`, "--type=merge")
-				if err == nil {
+			if pv.Phase == "Released" {
+				if err := t.k8sPatchPV(ctx, pv.Name, []byte(`{"spec":{"claimRef":null}}`)); err == nil {
 					deletedPVs++
 				}
 			}
@@ -1267,16 +1233,14 @@ func (t *ThanosStack) deleteGrafanaDatabase(ctx context.Context) error {
 	logger := t.getLogger()
 
 	// Find running Grafana pod
-	podOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pod", "-n", constants.MonitoringNamespace, "-l", "app.kubernetes.io/name=grafana", "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
-	if err != nil || strings.TrimSpace(podOutput) == "" {
+	podName, err := t.k8sGetPodNameByLabel(ctx, constants.MonitoringNamespace, "app.kubernetes.io/name=grafana")
+	if err != nil || podName == "" {
 		logger.Info("No running Grafana pod found, skipping database cleanup")
 		return nil
 	}
-
-	podName := strings.TrimSpace(strings.Split(podOutput, "\n")[0])
 	logger.Infow("Found running Grafana pod, deleting DB files", "podName", podName)
 
-	// Delete DB files directly from running Grafana pod (without shell, just rm command)
+	// Delete DB files directly from running Grafana pod (kubectl exec; no K8sRunner equivalent)
 	_, err = utils.ExecuteCommand(ctx, "kubectl", "exec", "-n", constants.MonitoringNamespace, podName, "-c", "grafana", "--", "rm", "-f", "/var/lib/grafana/grafana.db", "/var/lib/grafana/grafana.db-shm", "/var/lib/grafana/grafana.db-wal")
 	if err != nil {
 		return fmt.Errorf("failed to delete DB files from pod %s: %w", podName, err)
@@ -1292,16 +1256,14 @@ func (t *ThanosStack) cleanupOldGrafanaDatabase(ctx context.Context) error {
 	logger := t.getLogger()
 
 	// Check if there's an existing Grafana pod from a previous installation
-	podOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pod", "-n", constants.MonitoringNamespace, "-l", "app.kubernetes.io/name=grafana", "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
-	if err != nil || strings.TrimSpace(podOutput) == "" {
+	podName, err := t.k8sGetPodNameByLabel(ctx, constants.MonitoringNamespace, "app.kubernetes.io/name=grafana")
+	if err != nil || podName == "" {
 		logger.Info("No existing Grafana pod found, skipping database cleanup")
 		return nil
 	}
-
-	podName := strings.TrimSpace(strings.Split(podOutput, "\n")[0])
 	logger.Infow("Found existing Grafana pod from previous installation", "podName", podName)
 
-	// Delete old database files from the existing pod
+	// Delete old database files from the existing pod (kubectl exec; no K8sRunner equivalent)
 	logger.Info("Deleting old Grafana database files...")
 	_, err = utils.ExecuteCommand(ctx, "kubectl", "exec", "-n", constants.MonitoringNamespace, podName, "-c", "grafana", "--", "rm", "-f", "/var/lib/grafana/grafana.db", "/var/lib/grafana/grafana.db-shm", "/var/lib/grafana/grafana.db-wal")
 	if err != nil {
@@ -1316,18 +1278,7 @@ func (t *ThanosStack) cleanupOldGrafanaDatabase(ctx context.Context) error {
 
 // ensureNamespaceExists checks if namespace exists and creates it if needed
 func (t *ThanosStack) ensureNamespaceExists(ctx context.Context, namespace string) error {
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "namespace", namespace, "--ignore-not-found=true")
-	if err != nil {
-		return fmt.Errorf("failed to check namespace existence: %w", err)
-	}
-
-	if strings.TrimSpace(output) == "" {
-		if _, err := utils.ExecuteCommand(ctx, "kubectl", "create", "namespace", namespace); err != nil {
-			return fmt.Errorf("failed to create namespace: %w", err)
-		}
-	}
-
-	return nil
+	return t.k8sEnsureNamespace(ctx, namespace)
 }
 
 // generateStaticPVManifest generates PV manifest with fixed naming (no timestamp)
@@ -1357,19 +1308,11 @@ spec:
 `, pvName, pvName, size, volumeHandle)
 }
 
-// applyPVManifest applies PV manifest using kubectl
-func (t *ThanosStack) applyPVManifest(ctx context.Context, component string, manifest string) error {
-	tempFile := filepath.Join(t.deploymentPath, fmt.Sprintf("monitoring-%s-pv.yaml", component))
-	if err := os.WriteFile(tempFile, []byte(manifest), 0644); err != nil {
-		return fmt.Errorf("failed to write PV manifest: %w", err)
-	}
-	defer os.Remove(tempFile)
-
-	_, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile)
-	if err != nil {
+// applyPVManifest applies PV manifest
+func (t *ThanosStack) applyPVManifest(ctx context.Context, _ string, manifest string) error {
+	if err := t.k8sApplyManifest(ctx, manifest); err != nil {
 		return fmt.Errorf("failed to apply PV manifest: %w", err)
 	}
-
 	return nil
 }
 
@@ -1398,40 +1341,24 @@ spec:
 `, pvcName, config.Namespace, size, pvName, pvName)
 }
 
-// applyPVCManifest applies PVC manifest using kubectl
-func (t *ThanosStack) applyPVCManifest(ctx context.Context, component string, manifest string) error {
-	tempFile := filepath.Join(t.deploymentPath, fmt.Sprintf("monitoring-%s-pvc.yaml", component))
-	if err := os.WriteFile(tempFile, []byte(manifest), 0644); err != nil {
-		return fmt.Errorf("failed to write PVC manifest: %w", err)
-	}
-	defer os.Remove(tempFile)
-
-	_, err := utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile)
-	if err != nil {
+// applyPVCManifest applies PVC manifest
+func (t *ThanosStack) applyPVCManifest(ctx context.Context, _ string, manifest string) error {
+	if err := t.k8sApplyManifest(ctx, manifest); err != nil {
 		return fmt.Errorf("failed to apply PVC manifest: %w", err)
 	}
-
 	return nil
 }
 
 // cleanupExistingDashboardConfigMaps removes existing dashboard ConfigMaps
 func (t *ThanosStack) cleanupExistingDashboardConfigMaps(ctx context.Context, config *types.MonitoringConfig) error {
 	// List and delete existing dashboard ConfigMaps
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "configmap", "-n", config.Namespace, "-l", "grafana_dashboard=1", "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
+	names, err := t.k8sListConfigMapNamesByLabel(ctx, config.Namespace, "grafana_dashboard=1")
 	if err != nil {
-		// If no ConfigMaps exist, that's fine
 		return nil
 	}
 
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	for _, line := range lines {
-		configMapName := strings.TrimSpace(line)
-		if configMapName == "" {
-			continue
-		}
-
-		_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "configmap", configMapName, "-n", config.Namespace, "--ignore-not-found=true")
-		if err != nil {
+	for _, configMapName := range names {
+		if err := t.k8sDeleteResource(ctx, "configmap", configMapName, config.Namespace); err != nil {
 			return fmt.Errorf("failed to delete configmap: %w", err)
 		}
 	}
@@ -1476,16 +1403,9 @@ data:
   %s: |
     %s`, configMapName, config.Namespace, file.Name(), indentedContent)
 
-		tempFile := filepath.Join(os.TempDir(), fmt.Sprintf("dashboard-%s.yaml", configMapName))
-		if err := os.WriteFile(tempFile, []byte(configMapYAML), 0644); err != nil {
+		if err := t.k8sApplyManifest(ctx, configMapYAML); err != nil {
 			continue
 		}
-
-		_, err = utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile)
-		if err != nil {
-			continue
-		}
-		os.Remove(tempFile)
 	}
 	return nil
 }
@@ -1609,22 +1529,9 @@ func (t *ThanosStack) generateAlertManagerSecretConfig(config *types.MonitoringC
 
 // applySecretManifest applies a Kubernetes Secret manifest
 func (t *ThanosStack) applySecretManifest(ctx context.Context, manifest string) error {
-	tempFile, err := os.CreateTemp("", "alertmanager-secret-*.yaml")
-	if err != nil {
-		return fmt.Errorf("failed to create temporary file: %w", err)
-	}
-	defer os.Remove(tempFile.Name())
-
-	if _, err := tempFile.WriteString(manifest); err != nil {
-		return fmt.Errorf("failed to write manifest to file: %w", err)
-	}
-	tempFile.Close()
-
-	_, err = utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile.Name())
-	if err != nil {
+	if err := t.k8sApplyManifest(ctx, manifest); err != nil {
 		return fmt.Errorf("failed to apply secret manifest: %w", err)
 	}
-
 	return nil
 }
 
@@ -1643,17 +1550,10 @@ func (t *ThanosStack) createPrometheusRule(ctx context.Context, config *types.Mo
 func (t *ThanosStack) cleanupExistingPrometheusRules(ctx context.Context, config *types.MonitoringConfig) error {
 	logger := t.getLogger()
 	// Get all PrometheusRules in the monitoring namespace
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", config.Namespace, "-o", "jsonpath={.items[*].metadata.name}")
-	if err != nil {
-		// If no PrometheusRules exist, that's fine
+	ruleNames, err := t.k8sListResourceNames(ctx, "prometheusrule", config.Namespace)
+	if err != nil || len(ruleNames) == 0 {
 		return nil
 	}
-
-	if strings.TrimSpace(output) == "" {
-		return nil
-	}
-
-	ruleNames := strings.Split(strings.TrimSpace(output), " ")
 
 	for _, ruleName := range ruleNames {
 		if ruleName == "" {
@@ -1665,10 +1565,8 @@ func (t *ThanosStack) cleanupExistingPrometheusRules(ctx context.Context, config
 			continue
 		}
 
-		_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "prometheusrule", ruleName, "-n", config.Namespace)
-		if err != nil {
+		if err := t.k8sDeleteResource(ctx, "prometheusrule", ruleName, config.Namespace); err != nil {
 			// Continue with other rules even if one fails
-			// Log the error but don't fail the entire operation
 			logger.Warnw("Failed to delete PrometheusRule", "rule", ruleName, "err", err)
 		}
 	}
@@ -1857,24 +1755,11 @@ spec:
 	return manifest
 }
 
-// applyPrometheusRuleManifest applies the PrometheusRule manifest using kubectl
+// applyPrometheusRuleManifest applies the PrometheusRule manifest
 func (t *ThanosStack) applyPrometheusRuleManifest(ctx context.Context, manifest string) error {
-	tempFile, err := os.CreateTemp("", "prometheus-rule-*.yaml")
-	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
-	}
-	defer os.Remove(tempFile.Name())
-
-	if _, err := tempFile.WriteString(manifest); err != nil {
-		return fmt.Errorf("failed to write manifest to temp file: %w", err)
-	}
-	tempFile.Close()
-
-	_, err = utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tempFile.Name())
-	if err != nil {
+	if err := t.k8sApplyManifest(ctx, manifest); err != nil {
 		return fmt.Errorf("failed to apply PrometheusRule manifest: %w", err)
 	}
-
 	return nil
 }
 
@@ -1882,12 +1767,12 @@ func (t *ThanosStack) applyPrometheusRuleManifest(ctx context.Context, manifest 
 func (t *ThanosStack) getGrafanaURL(ctx context.Context, config *types.MonitoringConfig) string {
 	// Try to get the ALB Ingress hostname using the actual Helm release name
 	ingressName := fmt.Sprintf("%s-grafana", config.HelmReleaseName)
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "ingress", "-n", config.Namespace, "-o", "jsonpath={.items[?(@.metadata.name==\""+ingressName+"\")].status.loadBalancer.ingress[0].hostname}")
-	if err != nil || output == "" {
+	hostname, err := t.k8sGetIngressHostname(ctx, ingressName, config.Namespace)
+	if err != nil || hostname == "" {
 		// Fallback to using ExternalURL template variable for dynamic resolution
 		return "{{ .ExternalURL }}/d/thanos-stack-app-v9/thanos-stack-application-monitoring-dashboard?orgId=1&refresh=30s"
 	}
-	return "http://" + output + "/d/thanos-stack-app-v9/thanos-stack-application-monitoring-dashboard?orgId=1&refresh=30s"
+	return "http://" + hostname + "/d/thanos-stack-app-v9/thanos-stack-application-monitoring-dashboard?orgId=1&refresh=30s"
 }
 
 // checkCloudWatchLogGroupsStatus checks the status of CloudWatch Log Groups
@@ -2004,14 +1889,13 @@ func (t *ThanosStack) verifyRetentionPolicy(ctx context.Context, namespace strin
 func (t *ThanosStack) verifyCollectionInterval(ctx context.Context, namespace string) error {
 	logger := t.getLogger()
 	// Fetch sidecar pod via label selector
-	pods, err := utils.GetPodNamesByLabel(ctx, namespace, "app=thanos-logs-sidecar")
-	if err != nil || len(pods) == 0 {
+	podName, err := t.k8sGetPodNameByLabel(ctx, namespace, "app=thanos-logs-sidecar")
+	if err != nil || podName == "" {
 		return fmt.Errorf("unified sidecar pod not found")
 	}
-	podName := pods[0]
 
 	// Get pod spec as JSON and extract container command/args
-	out, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pod", podName, "-n", namespace, "-o", "json")
+	raw, err := t.k8sGetPodJSON(ctx, podName, namespace)
 	if err != nil {
 		return fmt.Errorf("failed to get sidecar pod spec: %w", err)
 	}
@@ -2026,7 +1910,7 @@ func (t *ThanosStack) verifyCollectionInterval(ctx context.Context, namespace st
 			Containers []containerSpec `json:"containers"`
 		} `json:"spec"`
 	}
-	if err := json.Unmarshal([]byte(out), &podJSON); err != nil {
+	if err := json.Unmarshal(raw, &podJSON); err != nil {
 		return fmt.Errorf("failed to parse pod json: %w", err)
 	}
 
