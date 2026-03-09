@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -131,13 +132,19 @@ func (r *ShellOutHelmRunner) Search(ctx context.Context, keyword string) (string
 }
 
 // flattenValues converts a map of Helm values into --set key=value arguments.
+// Keys are sorted to produce a deterministic argument order.
 func flattenValues(vals map[string]interface{}) []string {
 	if len(vals) == 0 {
 		return nil
 	}
-	var args []string
-	for k, v := range vals {
-		args = append(args, "--set", fmt.Sprintf("%s=%v", k, v))
+	keys := make([]string, 0, len(vals))
+	for k := range vals {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	args := make([]string, 0, len(keys)*2)
+	for _, k := range keys {
+		args = append(args, "--set", fmt.Sprintf("%s=%v", k, vals[k]))
 	}
 	return args
 }

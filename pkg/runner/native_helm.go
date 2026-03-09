@@ -6,7 +6,9 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart"
@@ -22,6 +24,7 @@ import (
 // No helm binary is required.
 type NativeHelmRunner struct {
 	settings *cli.EnvSettings
+	repoMu   sync.Mutex // guards concurrent RepoAdd calls (TOCTOU prevention)
 }
 
 // newNativeHelmRunner creates a NativeHelmRunner backed by the Helm SDK.
@@ -161,7 +164,15 @@ func (r *NativeHelmRunner) Uninstall(ctx context.Context, release, namespace str
 	}
 }
 
+// listResult carries the output of a helm list operation.
+type listResult struct {
+	names []string
+	err   error
+}
+
 // List returns the names of all releases in a namespace.
+// The Helm SDK's List.Run does not accept a context, so we wrap it in a goroutine
+// and honour ctx cancellation while the SDK call runs independently.
 func (r *NativeHelmRunner) List(ctx context.Context, namespace string) ([]string, error) {
 	cfg, err := r.actionConfig(namespace)
 	if err != nil {
@@ -171,24 +182,40 @@ func (r *NativeHelmRunner) List(ctx context.Context, namespace string) ([]string
 	client := action.NewList(cfg)
 	client.SetStateMask()
 
-	releases, err := client.Run()
-	if err != nil {
-		return nil, fmt.Errorf("helm list namespace %s: %w", namespace, err)
-	}
+	resCh := make(chan listResult, 1)
+	go func() {
+		releases, runErr := client.Run()
+		if runErr != nil {
+			resCh <- listResult{err: fmt.Errorf("helm list namespace %s: %w", namespace, runErr)}
+			return
+		}
+		names := make([]string, 0, len(releases))
+		for _, rel := range releases {
+			names = append(names, rel.Name)
+		}
+		resCh <- listResult{names: names}
+	}()
 
-	names := make([]string, 0, len(releases))
-	for _, rel := range releases {
-		names = append(names, rel.Name)
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("helm list %s: %w", namespace, ctx.Err())
+	case res := <-resCh:
+		return res.names, res.err
 	}
-	return names, nil
 }
 
 // RepoAdd adds a Helm chart repository.
 func (r *NativeHelmRunner) RepoAdd(ctx context.Context, name, url string) error {
+	r.repoMu.Lock()
+	defer r.repoMu.Unlock()
+
 	repoFile := r.settings.RepositoryConfig
 
 	repoFileObj, err := repo.LoadFile(repoFile)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("helm repo add %s: load repo file: %w", name, err)
+		}
 		repoFileObj = repo.NewFile()
 	}
 
@@ -208,7 +235,7 @@ func (r *NativeHelmRunner) RepoAdd(ctx context.Context, name, url string) error 
 
 	repoFileObj.Update(entry)
 
-	if err := repoFileObj.WriteFile(repoFile, 0644); err != nil {
+	if err := repoFileObj.WriteFile(repoFile, 0600); err != nil {
 		return fmt.Errorf("helm repo add %s: write repo file: %w", name, err)
 	}
 
@@ -241,6 +268,7 @@ func (r *NativeHelmRunner) RepoUpdate(ctx context.Context) error {
 }
 
 // DependencyUpdate updates chart dependencies for the chart at chartPath.
+// Note: the Helm SDK's downloader.Manager.Update does not accept a context; ctx is not forwarded.
 func (r *NativeHelmRunner) DependencyUpdate(ctx context.Context, chartPath string) error {
 	absPath, err := filepath.Abs(chartPath)
 	if err != nil {
@@ -262,6 +290,7 @@ func (r *NativeHelmRunner) DependencyUpdate(ctx context.Context, chartPath strin
 }
 
 // Status returns the status string for a release.
+// Note: the Helm SDK's Status.Run does not accept a context; ctx is not forwarded.
 func (r *NativeHelmRunner) Status(ctx context.Context, release, namespace string) (string, error) {
 	cfg, err := r.actionConfig(namespace)
 	if err != nil {
@@ -278,6 +307,7 @@ func (r *NativeHelmRunner) Status(ctx context.Context, release, namespace string
 }
 
 // Search searches configured repositories for charts matching the keyword.
+// Note: ctx is accepted for interface compatibility but is not used in this implementation.
 func (r *NativeHelmRunner) Search(ctx context.Context, keyword string) (string, error) {
 	repoFile := r.settings.RepositoryConfig
 	repoFileObj, err := repo.LoadFile(repoFile)

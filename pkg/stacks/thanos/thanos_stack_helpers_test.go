@@ -21,6 +21,59 @@ func minimalK8sStack(kr *mock.K8sRunner) *ThanosStack {
 
 // ─── valueFiles guard tests ────────────────────────────────────────────────
 
+// TestHelmUpgradeInstallWithFiles_ExtraArgsRejectedByRunner verifies that
+// passing extraArgs while helmRunner is set returns an error (args would be silently dropped).
+func TestHelmUpgradeInstallWithFiles_ExtraArgsRejectedByRunner(t *testing.T) {
+	m := &mock.HelmRunner{}
+	s := minimalStack(m)
+	err := s.helmUpgradeInstallWithFiles(context.Background(), "rel", "chart", "ns",
+		[]string{"values.yaml"}, "--atomic", "--timeout=5m")
+	if err == nil {
+		t.Fatal("expected error when extraArgs passed with helmRunner, got nil")
+	}
+	if m.CallCount("UpgradeWithFiles") != 0 {
+		t.Fatal("expected UpgradeWithFiles not to be called when extraArgs are rejected")
+	}
+}
+
+// TestHelmUpgradeInstallWithFiles_NoExtraArgsUsesRunner verifies the happy path.
+func TestHelmUpgradeInstallWithFiles_NoExtraArgsUsesRunner(t *testing.T) {
+	m := &mock.HelmRunner{}
+	s := minimalStack(m)
+	err := s.helmUpgradeInstallWithFiles(context.Background(), "rel", "chart", "ns",
+		[]string{"values.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.CallCount("UpgradeWithFiles") != 1 {
+		t.Fatalf("expected 1 UpgradeWithFiles call, got %d", m.CallCount("UpgradeWithFiles"))
+	}
+}
+
+// TestHelmInstallWithFiles_CallsUpgradeWithFilesOnRunner verifies that
+// helmInstallWithFiles delegates to UpgradeWithFiles when helmRunner is set.
+func TestHelmInstallWithFiles_CallsUpgradeWithFilesOnRunner(t *testing.T) {
+	m := &mock.HelmRunner{}
+	var gotRelease, gotChart, gotNamespace string
+	var gotFiles []string
+	m.OnUpgradeWithFiles = func(_ context.Context, release, chart, namespace string, files []string) error {
+		gotRelease, gotChart, gotNamespace, gotFiles = release, chart, namespace, files
+		return nil
+	}
+	s := minimalStack(m)
+	err := s.helmInstallWithFiles(context.Background(), "my-rel", "my-chart", "my-ns",
+		[]string{"v.yaml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotRelease != "my-rel" || gotChart != "my-chart" || gotNamespace != "my-ns" {
+		t.Fatalf("unexpected args: release=%q chart=%q ns=%q", gotRelease, gotChart, gotNamespace)
+	}
+	if len(gotFiles) != 1 || gotFiles[0] != "v.yaml" {
+		t.Fatalf("unexpected files: %v", gotFiles)
+	}
+}
+
 func TestHelmInstallWithFiles_EmptyValueFiles(t *testing.T) {
 	s := minimalStack(&mock.HelmRunner{})
 	err := s.helmInstallWithFiles(context.Background(), "rel", "chart", "ns", nil)

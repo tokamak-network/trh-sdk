@@ -96,8 +96,12 @@ func (r *NativeDORunner) GetKubeconfig(ctx context.Context, clusterName, token s
 	}
 
 	// Load existing kubeconfig or start with an empty one.
+	// Only ignore the error when the file does not yet exist.
 	existing, err := clientcmd.LoadFromFile(kubeconfigPath)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("do get kubeconfig: load existing kubeconfig: %w", err)
+		}
 		existing = clientcmdapi.NewConfig()
 	}
 

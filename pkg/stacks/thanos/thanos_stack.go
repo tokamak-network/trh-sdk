@@ -94,12 +94,15 @@ func (t *ThanosStack) helmDependencyUpdate(ctx context.Context, chartPath string
 }
 
 // helmUpgradeInstallWithFiles performs helm upgrade --install using values files and extra args.
-// Uses HelmRunner when available; extra args are only used in shellout mode.
+// When HelmRunner is set, extraArgs are not supported and must be empty.
 func (t *ThanosStack) helmUpgradeInstallWithFiles(ctx context.Context, release, chart, namespace string, valueFiles []string, extraArgs ...string) error {
 	if len(valueFiles) == 0 {
 		return fmt.Errorf("helmUpgradeInstallWithFiles: valueFiles cannot be empty")
 	}
 	if t.helmRunner != nil {
+		if len(extraArgs) > 0 {
+			return fmt.Errorf("helmUpgradeInstallWithFiles: extraArgs %v not supported with helmRunner; remove extra args or use shellout mode", extraArgs)
+		}
 		return t.helmRunner.UpgradeWithFiles(ctx, release, chart, namespace, valueFiles)
 	}
 	args := []string{"upgrade", "--install", release, chart, "--values", valueFiles[0], "--namespace", namespace}
