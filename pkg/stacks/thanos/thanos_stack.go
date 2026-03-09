@@ -74,7 +74,11 @@ func (t *ThanosStack) PodLogs(ctx context.Context, pod, namespace, container str
 	if since > 0 {
 		args = append(args, "--since", since.String())
 	}
-	return exec.CommandContext(ctx, "kubectl", args...).CombinedOutput()
+	raw, err := exec.CommandContext(ctx, "kubectl", args...).Output()
+	if int64(len(raw)) > maxLogBytes {
+		raw = raw[:maxLogBytes]
+	}
+	return raw, err
 }
 
 // tfInit runs terraform init in workDir. Uses TFRunner when available.

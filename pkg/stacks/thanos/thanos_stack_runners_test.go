@@ -59,12 +59,17 @@ func TestPodLogs_FallsBackWhenSinceIsNonZero(t *testing.T) {
 }
 
 // TestPodLogs_FallsBackWhenRunnerIsNil verifies the shell-out path is taken
-// when k8sRunner is nil. kubectl is not present in test env; we just assert
-// K8sRunner is not invoked (no panic, no nil-deref).
+// when k8sRunner is nil. kubectl is absent in the test environment so the
+// call returns an error; we assert: no panic, no nil-deref, and the error is
+// non-nil (proving exec was attempted, not the runner).
 func TestPodLogs_FallsBackWhenRunnerIsNil(t *testing.T) {
 	s := &ThanosStack{k8sRunner: nil, logger: noopLogger()}
-	// No panic — shell-out path returns error (kubectl absent), which is expected.
-	_, _ = s.PodLogs(context.Background(), "pod", "ns", "", 0)
+	_, err := s.PodLogs(context.Background(), "pod", "ns", "", 0)
+	// kubectl is absent → shell-out must fail. A nil error here would mean
+	// the native runner path was taken (impossible since k8sRunner == nil).
+	if err == nil {
+		t.Fatal("expected an error from kubectl shell-out when runner is nil, got nil")
+	}
 }
 
 // TestPodLogs_LimitReader verifies that PodLogs caps memory usage:
@@ -129,37 +134,21 @@ func TestInjectRunners_EitherInjectsOrWarns(t *testing.T) {
 	}
 }
 
-// TestInjectRunners_FallbackOnLegacyEnv verifies that TRHS_LEGACY=1 causes
-// injectRunners to inject ShellOutRunner variants (non-nil) without error.
-func TestInjectRunners_FallbackOnLegacyEnv(t *testing.T) {
+// TestInjectRunners_ShellOutAlwaysSucceeds verifies that TRHS_LEGACY=1 causes
+// injectRunners to inject ShellOutRunner variants (non-nil) unconditionally,
+// regardless of whether native runner initialisation would succeed or fail.
+func TestInjectRunners_ShellOutAlwaysSucceeds(t *testing.T) {
 	t.Setenv("TRHS_LEGACY", "1")
 
 	stack := &ThanosStack{logger: noopLogger()}
 	injectRunners(stack, noopLogger(), "")
 
-	// ShellOutRunner is returned; all four fields must still be non-nil.
+	// ShellOutRunner always succeeds — all four fields must be non-nil.
 	if stack.helmRunner == nil || stack.k8sRunner == nil ||
 		stack.tfRunner == nil || stack.awsRunner == nil {
-		t.Error("expected all runner fields non-nil even with TRHS_LEGACY=1")
-	}
-}
-
-// TestInjectRunners_WarnOnNativeFailure verifies that when native runner.New
-// fails the runner fields remain nil and a Warn log is emitted.
-// TRHS_LEGACY=1 forces ShellOutRunner which always succeeds, so we test the
-// failure path by having injectRunners called in an env where native init fails
-// and asserting on the observed behaviour (same invariant as EitherInjectsOrWarns).
-func TestInjectRunners_WarnOnNativeFailure(t *testing.T) {
-	// ShellOutRunner always succeeds — use it to verify the non-failure path too.
-	t.Setenv("TRHS_LEGACY", "1")
-
-	logger, _ := warnObserver()
-	stack := &ThanosStack{logger: logger}
-	injectRunners(stack, logger, "")
-
-	// With TRHS_LEGACY=1 ShellOutRunner is returned — no warning, all non-nil.
-	if stack.helmRunner == nil || stack.k8sRunner == nil ||
-		stack.tfRunner == nil || stack.awsRunner == nil {
-		t.Fatal("expected all runner fields set when TRHS_LEGACY=1")
+		t.Errorf("expected all runner fields non-nil with TRHS_LEGACY=1: "+
+			"helm=%v k8s=%v tf=%v aws=%v",
+			stack.helmRunner != nil, stack.k8sRunner != nil,
+			stack.tfRunner != nil, stack.awsRunner != nil)
 	}
 }
