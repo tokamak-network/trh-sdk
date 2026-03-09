@@ -1,4 +1,4 @@
-package digitalocean
+package runner
 
 import (
 	"context"
@@ -12,11 +12,9 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
-type Region struct {
-	Slug      string `json:"slug"`
-	Name      string `json:"Name"`
-	Available bool   `json:"available"`
-}
+// NativeDORunner implements DORunner using github.com/digitalocean/godo.
+// No doctl binary is required.
+type NativeDORunner struct{}
 
 // tokenSource implements oauth2.TokenSource for a static DO API token.
 type tokenSource struct{ token string }
@@ -31,44 +29,39 @@ func newGodoClient(token string) *godo.Client {
 	return godo.NewClient(oauthClient)
 }
 
-// ValidateToken checks if the given DigitalOcean API token is valid.
-func ValidateToken(ctx context.Context, token string) error {
+// ValidateToken checks if the provided DO token is valid by calling the Account API.
+func (r *NativeDORunner) ValidateToken(ctx context.Context, token string) error {
 	client := newGodoClient(token)
 	_, _, err := client.Account.Get(ctx)
 	if err != nil {
-		return fmt.Errorf("invalid DigitalOcean token: %w", err)
+		return fmt.Errorf("do validate token: %w", err)
 	}
 	return nil
 }
 
-// GetRegions returns all DigitalOcean regions. Callers should check Region.Available
-// before using a region. Use IsValidRegion for availability validation.
-func GetRegions(ctx context.Context, token string) ([]Region, error) {
+// ListRegions returns slugs for all available DO regions.
+func (r *NativeDORunner) ListRegions(ctx context.Context, token string) ([]string, error) {
 	client := newGodoClient(token)
 
-	var allRegions []Region
+	var allRegions []string
 	opt := &godo.ListOptions{PerPage: 200}
 
 	for {
 		regions, resp, err := client.Regions.List(ctx, opt)
 		if err != nil {
-			return nil, fmt.Errorf("failed to list DigitalOcean regions: %w", err)
+			return nil, fmt.Errorf("do list regions: %w", err)
 		}
-		for _, r := range regions {
-			features := make([]string, len(r.Features))
-			copy(features, r.Features)
-			allRegions = append(allRegions, Region{
-				Slug:      r.Slug,
-				Name:      r.Name,
-				Available: r.Available,
-			})
+		for _, region := range regions {
+			if region.Available {
+				allRegions = append(allRegions, region.Slug)
+			}
 		}
 		if resp.Links == nil || resp.Links.IsLastPage() {
 			break
 		}
 		page, err := resp.Links.CurrentPage()
 		if err != nil {
-			return nil, fmt.Errorf("failed to list DigitalOcean regions: parse pagination: %w", err)
+			return nil, fmt.Errorf("do list regions: parse pagination: %w", err)
 		}
 		opt.Page = page + 1
 	}
@@ -76,39 +69,30 @@ func GetRegions(ctx context.Context, token string) ([]Region, error) {
 	return allRegions, nil
 }
 
-// IsValidRegion checks whether the given region slug is available.
-// Pass a pre-fetched region list to avoid redundant API calls.
-func IsValidRegion(regions []Region, region string) bool {
-	for _, r := range regions {
-		if r.Slug == region && r.Available {
-			return true
-		}
-	}
-	return false
-}
-
-// SaveKubeconfig saves the kubeconfig for a DOKS cluster.
-func SaveKubeconfig(ctx context.Context, token, clusterName string) error {
+// GetKubeconfig fetches and saves the kubeconfig for a DOKS cluster.
+// It finds the cluster by name, downloads the kubeconfig, and merges it
+// into the default kubeconfig path (~/.kube/config).
+func (r *NativeDORunner) GetKubeconfig(ctx context.Context, clusterName, token string) error {
 	client := newGodoClient(token)
 
 	clusterID, err := resolveClusterID(ctx, client, clusterName)
 	if err != nil {
-		return fmt.Errorf("failed to save kubeconfig for cluster %s: %w", clusterName, err)
+		return err
 	}
 
 	kubeConfig, _, err := client.Kubernetes.GetKubeConfig(ctx, clusterID)
 	if err != nil {
-		return fmt.Errorf("failed to save kubeconfig for cluster %s: %w", clusterName, err)
+		return fmt.Errorf("do get kubeconfig: %w", err)
 	}
 
 	config, err := clientcmd.Load(kubeConfig.KubeconfigYAML)
 	if err != nil {
-		return fmt.Errorf("failed to save kubeconfig for cluster %s: parse: %w", clusterName, err)
+		return fmt.Errorf("do get kubeconfig: parse kubeconfig: %w", err)
 	}
 
 	kubeconfigPath, err := defaultKubeconfigPath()
 	if err != nil {
-		return fmt.Errorf("failed to save kubeconfig for cluster %s: %w", clusterName, err)
+		return err
 	}
 
 	// Load existing kubeconfig or start with an empty one.
@@ -132,12 +116,17 @@ func SaveKubeconfig(ctx context.Context, token, clusterName string) error {
 	}
 
 	if err := os.MkdirAll(filepath.Dir(kubeconfigPath), 0700); err != nil {
-		return fmt.Errorf("failed to save kubeconfig for cluster %s: create dir: %w", clusterName, err)
+		return fmt.Errorf("do get kubeconfig: create kube dir: %w", err)
 	}
 
 	if err := clientcmd.WriteToFile(*existing, kubeconfigPath); err != nil {
-		return fmt.Errorf("failed to save kubeconfig for cluster %s: write: %w", clusterName, err)
+		return fmt.Errorf("do get kubeconfig: write kubeconfig: %w", err)
 	}
+	return nil
+}
+
+// CheckVersion is a no-op for NativeDORunner since no external binary is needed.
+func (r *NativeDORunner) CheckVersion(ctx context.Context) error {
 	return nil
 }
 
@@ -148,7 +137,7 @@ func resolveClusterID(ctx context.Context, client *godo.Client, name string) (st
 	for {
 		clusters, resp, err := client.Kubernetes.List(ctx, opt)
 		if err != nil {
-			return "", fmt.Errorf("resolve cluster: %w", err)
+			return "", fmt.Errorf("do resolve cluster: %w", err)
 		}
 		for _, c := range clusters {
 			if c.Name == name {
@@ -160,18 +149,18 @@ func resolveClusterID(ctx context.Context, client *godo.Client, name string) (st
 		}
 		page, err := resp.Links.CurrentPage()
 		if err != nil {
-			return "", fmt.Errorf("resolve cluster: parse pagination: %w", err)
+			return "", fmt.Errorf("do resolve cluster: parse pagination: %w", err)
 		}
 		opt.Page = page + 1
 	}
-	return "", fmt.Errorf("cluster %q not found", name)
+	return "", fmt.Errorf("do resolve cluster: cluster %q not found", name)
 }
 
 // defaultKubeconfigPath returns the standard kubeconfig file path.
 func defaultKubeconfigPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("determine home dir: %w", err)
+		return "", fmt.Errorf("do get kubeconfig: determine home dir: %w", err)
 	}
 	return filepath.Join(home, ".kube", "config"), nil
 }

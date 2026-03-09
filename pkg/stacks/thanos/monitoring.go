@@ -82,27 +82,15 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *types.Monit
 
 	// Update chart dependencies
 	logger.Info("Updating Helm chart dependencies")
-	out, err := utils.ExecuteCommand(ctx, "helm", "dependency", "update", config.ChartsPath)
-	if err != nil {
-		logger.Errorw("Failed to update chart dependencies", "err", err, "output", out)
+	if err := t.helmDependencyUpdate(ctx, config.ChartsPath); err != nil {
+		logger.Errorw("Failed to update chart dependencies", "err", err)
 	}
 
 	// Install monitoring plugin
 	logger.Infow("Installing monitoring plugin via Helm", "release", config.HelmReleaseName)
-	installCmd := []string{
-		"upgrade", "--install",
-		config.HelmReleaseName,
-		config.ChartsPath,
-		"--values", config.ValuesFilePath,
-		"--namespace", config.Namespace,
-		"--create-namespace",
-		"--timeout", "15m",
-		"--wait",
-		"--wait-for-jobs",
-	}
-	out, err = utils.ExecuteCommand(ctx, "helm", installCmd...)
-	if err != nil {
-		logger.Errorw("Failed to install monitoring plugin", "err", err, "output", out)
+	if err := t.helmUpgradeInstallWithFiles(ctx, config.HelmReleaseName, config.ChartsPath, config.Namespace,
+		[]string{config.ValuesFilePath}, "--create-namespace", "--timeout", "15m", "--wait", "--wait-for-jobs"); err != nil {
+		logger.Errorw("Failed to install monitoring plugin", "err", err)
 	}
 
 	// Clean up existing resources before creating new ones
@@ -302,7 +290,7 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 		// Don't fail the uninstall if cleanup fails
 	}
 
-	releases, err := utils.FilterHelmReleases(ctx, monitoringNamespace, constants.MonitoringNamespace)
+	releases, err := t.helmFilterReleases(ctx, monitoringNamespace, constants.MonitoringNamespace)
 	if err != nil {
 		logger.Errorw("Failed to filter Helm releases", "err", err)
 		return err
@@ -310,9 +298,7 @@ func (t *ThanosStack) UninstallMonitoring(ctx context.Context) error {
 
 	for _, release := range releases {
 		logger.Infow("Uninstalling Helm release", "release", release, "namespace", monitoringNamespace)
-		out, err := utils.ExecuteCommand(ctx, "helm", "uninstall", release, "--namespace", monitoringNamespace)
-		logger.Infow("Helm uninstall output", "output", out, "release", release, "namespace", monitoringNamespace)
-		if err != nil {
+		if err := t.helmUninstall(ctx, release, monitoringNamespace); err != nil {
 			logger.Errorw("Failed to uninstall Helm release", "err", err, "release", release, "namespace", monitoringNamespace)
 			return err
 		}

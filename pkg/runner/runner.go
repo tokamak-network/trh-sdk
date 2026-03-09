@@ -12,6 +12,8 @@ import (
 // Use RunnerFactory to obtain an implementation.
 type ToolRunner interface {
 	K8s() K8sRunner
+	Helm() HelmRunner
+	DO() DORunner
 }
 
 // RunnerConfig controls which implementation is selected.
@@ -38,19 +40,29 @@ func newNativeRunner(cfg RunnerConfig) (*NativeRunner, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &NativeRunner{k8s: k8s}, nil
+	helm, err := newNativeHelmRunner()
+	if err != nil {
+		return nil, err
+	}
+	return &NativeRunner{k8s: k8s, helm: helm, do: &NativeDORunner{}}, nil
 }
 
 // NativeRunner is the ToolRunner implementation that calls Go libraries directly.
 type NativeRunner struct {
-	k8s K8sRunner
+	k8s  K8sRunner
+	helm HelmRunner
+	do   DORunner
 }
 
-func (r *NativeRunner) K8s() K8sRunner { return r.k8s }
+func (r *NativeRunner) K8s() K8sRunner   { return r.k8s }
+func (r *NativeRunner) Helm() HelmRunner { return r.helm }
+func (r *NativeRunner) DO() DORunner     { return r.do }
 
 // ShellOutRunner is the legacy ToolRunner that delegates to external binaries
 // via ExecuteCommand. It is always available as a fallback.
 type ShellOutRunner struct{}
 
-func (r *ShellOutRunner) K8s() K8sRunner { return &ShellOutK8sRunner{} }
+func (r *ShellOutRunner) K8s() K8sRunner   { return &ShellOutK8sRunner{} }
+func (r *ShellOutRunner) Helm() HelmRunner { return &ShellOutHelmRunner{} }
+func (r *ShellOutRunner) DO() DORunner     { return &ShellOutDORunner{} }
 

@@ -58,7 +58,7 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 		t.logger.Warnf("Failed to cleanup unused backup resources: %v", err)
 	}
 
-	helmReleases, err := utils.GetHelmReleases(ctx, namespace)
+	helmReleases, err := t.helmList(ctx, namespace)
 	if err != nil {
 		t.logger.Warnf("Failed to retrieve Helm releases: %v. Continuing without uninstalling Helm releases.", err)
 		helmReleases = []string{} // Continue with empty list
@@ -69,8 +69,7 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 		for _, release := range helmReleases {
 			if strings.Contains(release, namespace) || strings.Contains(release, "op-bridge") || strings.Contains(release, "block-explorer") || strings.Contains(release, constants.MonitoringNamespace) {
 				t.logger.Infof("Uninstalling Helm release: %s in namespace: %s...", release, namespace)
-				_, err := utils.ExecuteCommand(ctx, "helm", "uninstall", release, "--namespace", namespace)
-				if err != nil {
+				if err := t.helmUninstall(ctx, release, namespace); err != nil {
 					t.logger.Warnf("Failed to uninstall Helm release %s in namespace %s: %v. Continuing with other releases.", release, namespace, err)
 					failedReleases = append(failedReleases, release)
 				}
@@ -158,7 +157,7 @@ func (t *ThanosStack) destroyInfraOnDigitalOcean(ctx context.Context) error {
 	}
 
 	// Uninstall Helm releases
-	helmReleases, err := utils.GetHelmReleases(ctx, namespace)
+	helmReleases, err := t.helmList(ctx, namespace)
 	if err != nil {
 		t.logger.Warnf("Failed to retrieve Helm releases: %v. Continuing.", err)
 		helmReleases = []string{}
@@ -167,7 +166,7 @@ func (t *ThanosStack) destroyInfraOnDigitalOcean(ctx context.Context) error {
 	for _, release := range helmReleases {
 		if strings.Contains(release, namespace) || strings.Contains(release, "op-bridge") || strings.Contains(release, "block-explorer") {
 			t.logger.Infof("Uninstalling Helm release: %s in namespace: %s...", release, namespace)
-			if _, err := utils.ExecuteCommand(ctx, "helm", "uninstall", release, "--namespace", namespace); err != nil {
+			if err := t.helmUninstall(ctx, release, namespace); err != nil {
 				t.logger.Warnf("Failed to uninstall Helm release %s: %v. Continuing.", release, err)
 			}
 		}

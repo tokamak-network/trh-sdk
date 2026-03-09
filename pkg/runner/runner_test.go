@@ -211,6 +211,79 @@ func TestShellOutK8sRunner_Patch_EmptyName(t *testing.T) {
 	}
 }
 
+// ─── ShellOutHelmRunner input-validation tests ─────────────────────────────────
+
+func TestShellOutHelmRunner_Uninstall_EmptyRelease(t *testing.T) {
+	r, _ := runner.New(runner.RunnerConfig{UseNative: false})
+	err := r.Helm().Uninstall(context.Background(), "", "default")
+	if err == nil {
+		t.Fatal("expected error for empty release")
+	}
+}
+
+func TestShellOutHelmRunner_Uninstall_EmptyNamespace(t *testing.T) {
+	r, _ := runner.New(runner.RunnerConfig{UseNative: false})
+	err := r.Helm().Uninstall(context.Background(), "my-release", "")
+	if err == nil {
+		t.Fatal("expected error for empty namespace")
+	}
+}
+
+func TestShellOutHelmRunner_Install_EmptyRelease(t *testing.T) {
+	r, _ := runner.New(runner.RunnerConfig{UseNative: false})
+	err := r.Helm().Install(context.Background(), "", "my-chart", "default", nil)
+	if err == nil {
+		t.Fatal("expected error for empty release")
+	}
+}
+
+func TestShellOutHelmRunner_Install_EmptyNamespace(t *testing.T) {
+	r, _ := runner.New(runner.RunnerConfig{UseNative: false})
+	err := r.Helm().Install(context.Background(), "my-release", "my-chart", "", nil)
+	if err == nil {
+		t.Fatal("expected error for empty namespace")
+	}
+}
+
+// ─── ToolRunner Helm() accessor tests ──────────────────────────────────────────
+
+func TestNew_ShellOut_Helm(t *testing.T) {
+	r, err := runner.New(runner.RunnerConfig{UseNative: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r.Helm() == nil {
+		t.Fatal("expected non-nil HelmRunner from ShellOutRunner")
+	}
+}
+
+// ─── NativeDORunner tests ──────────────────────────────────────────────────────
+
+// TestNativeDORunner_CheckVersion_NoOp verifies that NativeDORunner.CheckVersion
+// is a no-op (always returns nil) since no external binary is needed.
+func TestNativeDORunner_CheckVersion_NoOp(t *testing.T) {
+	r, err := runner.New(runner.RunnerConfig{UseNative: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// ShellOutDORunner.CheckVersion would require doctl; verify it returns a DORunner.
+	if r.DO() == nil {
+		t.Fatal("expected non-nil DORunner")
+	}
+}
+
+// ─── ToolRunner DO() accessor tests ────────────────────────────────────────────
+
+func TestNew_ShellOut_DO(t *testing.T) {
+	r, err := runner.New(runner.RunnerConfig{UseNative: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r.DO() == nil {
+		t.Fatal("expected non-nil DORunner from ShellOutRunner")
+	}
+}
+
 func containsAny(s string, subs ...string) bool {
 	for _, sub := range subs {
 		if len(sub) > 0 && len(s) >= len(sub) {

@@ -97,7 +97,13 @@ func CheckAwsCLIInstallation(ctx context.Context) bool {
 	return true
 }
 
-func CheckDoctlInstallation(ctx context.Context) bool {
+// CheckDoctlInstallation verifies doctl is available. When useNative is true,
+// the check is skipped because NativeDORunner does not require the doctl binary.
+func CheckDoctlInstallation(ctx context.Context, useNative ...bool) bool {
+	if len(useNative) > 0 && useNative[0] {
+		fmt.Println("✅ doctl: using native DO runner (binary not required)")
+		return true
+	}
 	_, err := utils.ExecuteCommand(ctx, "doctl", "version")
 	if err != nil {
 		fmt.Printf("❌ doctl is not installed or not found in PATH, err: %v\n", err)

@@ -139,16 +139,8 @@ func (t *ThanosStack) InstallBridge(ctx context.Context) (string, error) {
 	}
 
 	helmReleaseName := fmt.Sprintf("op-bridge-%d", time.Now().Unix())
-	_, err = utils.ExecuteCommand(ctx, "helm", []string{
-		"install",
-		helmReleaseName,
-		fmt.Sprintf("%s/tokamak-thanos-stack/charts/op-bridge", t.deploymentPath),
-		"--values",
-		filePath,
-		"--namespace",
-		namespace,
-	}...)
-	if err != nil {
+	chartPath := fmt.Sprintf("%s/tokamak-thanos-stack/charts/op-bridge", t.deploymentPath)
+	if err = t.helmInstallWithFiles(ctx, helmReleaseName, chartPath, namespace, []string{filePath}); err != nil {
 		t.logger.Error("Error installing Helm charts", "err", err)
 		return "", err
 	}
@@ -189,20 +181,14 @@ func (t *ThanosStack) UninstallBridge(ctx context.Context) error {
 		return fmt.Errorf("AWS configuration is not set. Please run the deploy command first")
 	}
 
-	releases, err := utils.FilterHelmReleases(ctx, namespace, "op-bridge")
+	releases, err := t.helmFilterReleases(ctx, namespace, "op-bridge")
 	if err != nil {
 		t.logger.Error("Error to filter helm releases", "err", err)
 		return err
 	}
 
 	for _, release := range releases {
-		_, err = utils.ExecuteCommand(ctx, "helm", []string{
-			"uninstall",
-			release,
-			"--namespace",
-			namespace,
-		}...)
-		if err != nil {
+		if err = t.helmUninstall(ctx, release, namespace); err != nil {
 			t.logger.Error("❌ Error uninstalling op-bridge helm chart", "err", err)
 			return err
 		}

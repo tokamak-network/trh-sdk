@@ -2,9 +2,11 @@ package thanos
 
 import (
 	"context"
+	"strings"
 
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/digitalocean"
+	"github.com/tokamak-network/trh-sdk/pkg/runner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 
@@ -20,6 +22,86 @@ type ThanosStack struct {
 	logger            *zap.SugaredLogger
 	deploymentPath    string
 	registerCandidate bool
+	helmRunner        runner.HelmRunner // optional; when nil, falls back to shellout
+}
+
+// SetHelmRunner injects a HelmRunner for native Helm operations.
+// When set, Helm calls use the runner instead of shelling out to the helm binary.
+func (t *ThanosStack) SetHelmRunner(hr runner.HelmRunner) {
+	t.helmRunner = hr
+}
+
+// helmList returns all release names in a namespace. Uses HelmRunner when available.
+func (t *ThanosStack) helmList(ctx context.Context, namespace string) ([]string, error) {
+	if t.helmRunner != nil {
+		return t.helmRunner.List(ctx, namespace)
+	}
+	return utils.GetHelmReleases(ctx, namespace)
+}
+
+// helmUninstall uninstalls a Helm release. Uses HelmRunner when available.
+func (t *ThanosStack) helmUninstall(ctx context.Context, release, namespace string) error {
+	if t.helmRunner != nil {
+		return t.helmRunner.Uninstall(ctx, release, namespace)
+	}
+	_, err := utils.ExecuteCommand(ctx, "helm", "uninstall", release, "--namespace", namespace)
+	return err
+}
+
+// helmInstallWithFiles installs a Helm chart using values files. Uses HelmRunner when available.
+func (t *ThanosStack) helmInstallWithFiles(ctx context.Context, release, chart, namespace string, valueFiles []string) error {
+	if t.helmRunner != nil {
+		return t.helmRunner.UpgradeWithFiles(ctx, release, chart, namespace, valueFiles)
+	}
+	args := []string{"install", release, chart, "--values", valueFiles[0], "--namespace", namespace}
+	_, err := utils.ExecuteCommand(ctx, "helm", args...)
+	return err
+}
+
+// helmUpgradeWithFiles upgrades a Helm release using values files. Uses HelmRunner when available.
+func (t *ThanosStack) helmUpgradeWithFiles(ctx context.Context, release, chart, namespace string, valueFiles []string) error {
+	if t.helmRunner != nil {
+		return t.helmRunner.UpgradeWithFiles(ctx, release, chart, namespace, valueFiles)
+	}
+	args := []string{"upgrade", release, chart, "--values", valueFiles[0], "--namespace", namespace}
+	_, err := utils.ExecuteCommand(ctx, "helm", args...)
+	return err
+}
+
+// helmDependencyUpdate updates chart dependencies. Uses HelmRunner when available.
+func (t *ThanosStack) helmDependencyUpdate(ctx context.Context, chartPath string) error {
+	if t.helmRunner != nil {
+		return t.helmRunner.DependencyUpdate(ctx, chartPath)
+	}
+	_, err := utils.ExecuteCommand(ctx, "helm", "dependency", "update", chartPath)
+	return err
+}
+
+// helmUpgradeInstallWithFiles performs helm upgrade --install using values files and extra args.
+// Uses HelmRunner when available; extra args are only used in shellout mode.
+func (t *ThanosStack) helmUpgradeInstallWithFiles(ctx context.Context, release, chart, namespace string, valueFiles []string, extraArgs ...string) error {
+	if t.helmRunner != nil {
+		return t.helmRunner.UpgradeWithFiles(ctx, release, chart, namespace, valueFiles)
+	}
+	args := []string{"upgrade", "--install", release, chart, "--values", valueFiles[0], "--namespace", namespace}
+	args = append(args, extraArgs...)
+	_, err := utils.ExecuteCommand(ctx, "helm", args...)
+	return err
+}
+
+// helmFilterReleases lists releases and filters by name substring. Uses HelmRunner when available.
+func (t *ThanosStack) helmFilterReleases(ctx context.Context, namespace, releaseName string) ([]string, error) {
+	releases, err := t.helmList(ctx, namespace)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]string, 0)
+	for _, r := range releases {
+		if strings.Contains(r, releaseName) {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered, nil
 }
 
 func NewThanosStack(
