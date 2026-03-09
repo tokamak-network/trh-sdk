@@ -38,6 +38,12 @@ func (r *ShellOutK8sRunner) Apply(ctx context.Context, manifest []byte) error {
 }
 
 func (r *ShellOutK8sRunner) Delete(ctx context.Context, resource, name, namespace string, ignoreNotFound bool) error {
+	if resource == "" {
+		return fmt.Errorf("shellout delete: resource name cannot be empty")
+	}
+	if name == "" {
+		return fmt.Errorf("shellout delete: object name cannot be empty")
+	}
 	args := []string{"delete", resource, name}
 	if namespace != "" {
 		args = append(args, "-n", namespace)
@@ -53,6 +59,12 @@ func (r *ShellOutK8sRunner) Delete(ctx context.Context, resource, name, namespac
 }
 
 func (r *ShellOutK8sRunner) Get(ctx context.Context, resource, name, namespace string) ([]byte, error) {
+	if resource == "" {
+		return nil, fmt.Errorf("shellout get: resource name cannot be empty")
+	}
+	if name == "" {
+		return nil, fmt.Errorf("shellout get: object name cannot be empty")
+	}
 	args := []string{"get", resource, name, "-o", "json"}
 	if namespace != "" {
 		args = append(args, "-n", namespace)
@@ -65,6 +77,9 @@ func (r *ShellOutK8sRunner) Get(ctx context.Context, resource, name, namespace s
 }
 
 func (r *ShellOutK8sRunner) List(ctx context.Context, resource, namespace, labelSelector string) ([]byte, error) {
+	if resource == "" {
+		return nil, fmt.Errorf("shellout list: resource name cannot be empty")
+	}
 	args := []string{"get", resource, "-o", "json"}
 	if namespace != "" {
 		args = append(args, "-n", namespace)
@@ -80,6 +95,12 @@ func (r *ShellOutK8sRunner) List(ctx context.Context, resource, namespace, label
 }
 
 func (r *ShellOutK8sRunner) Patch(ctx context.Context, resource, name, namespace string, patch []byte) error {
+	if resource == "" {
+		return fmt.Errorf("shellout patch: resource name cannot be empty")
+	}
+	if name == "" {
+		return fmt.Errorf("shellout patch: object name cannot be empty")
+	}
 	args := []string{"patch", resource, name, "-p", string(patch), "--type=merge"}
 	if namespace != "" {
 		args = append(args, "-n", namespace)
@@ -108,15 +129,14 @@ func (r *ShellOutK8sRunner) Wait(ctx context.Context, resource, name, namespace,
 }
 
 func (r *ShellOutK8sRunner) EnsureNamespace(ctx context.Context, namespace string) error {
-	exists, err := r.NamespaceExists(ctx, namespace)
+	// Optimistic create: attempt first, then inspect the error.
+	// This avoids the TOCTOU race inherent in a check-then-create pattern.
+	_, err := utils.ExecuteCommand(ctx, "kubectl", "create", "namespace", namespace)
 	if err != nil {
-		return err
-	}
-	if exists {
-		return nil
-	}
-	_, err = utils.ExecuteCommand(ctx, "kubectl", "create", "namespace", namespace)
-	if err != nil {
+		// kubectl reports "AlreadyExists" when the namespace was concurrently created.
+		if strings.Contains(err.Error(), "AlreadyExists") || strings.Contains(err.Error(), "already exists") {
+			return nil
+		}
 		return fmt.Errorf("shellout create namespace %s: %w", namespace, err)
 	}
 	return nil

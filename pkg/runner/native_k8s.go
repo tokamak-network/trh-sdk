@@ -26,7 +26,10 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-const gvrCacheTTL = 60 * time.Second
+const (
+	gvrCacheTTL      = 60 * time.Second
+	waitPollInterval = 2 * time.Second
+)
 
 // gvrEntry is a single cached discovery result.
 type gvrEntry struct {
@@ -72,6 +75,9 @@ func loadKubeConfig(path string) (*rest.Config, error) {
 		return clientcmd.BuildConfigFromFlags("", path)
 	}
 	// Try in-cluster first (running inside a Pod).
+	// The error from InClusterConfig is intentionally discarded: it is expected
+	// whenever the process runs outside a cluster, and the ~/.kube/config fallback
+	// below is the correct behaviour in that case.
 	if cfg, err := rest.InClusterConfig(); err == nil {
 		return cfg, nil
 	}
@@ -281,7 +287,7 @@ func (r *NativeK8sRunner) Wait(ctx context.Context, resource, name, namespace, c
 	}
 
 	// PollUntilContextTimeout enforces the timeout internally; no child context needed.
-	return wait.PollUntilContextTimeout(ctx, 2*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
+	return wait.PollUntilContextTimeout(ctx, waitPollInterval, timeout, true, func(ctx context.Context) (bool, error) {
 		var currentObj *unstructured.Unstructured
 		var getErr error
 		if namespace != "" {
@@ -343,6 +349,18 @@ func (r *NativeK8sRunner) Logs(ctx context.Context, pod, namespace, container st
 
 // ─── discovery helpers ───────────────────────────────────────────────────────
 
+// runDiscovery calls ServerPreferredResources once and returns the result.
+// ServerPreferredResources may return partial results alongside a non-nil error
+// (e.g. when some API groups are unavailable). We treat partial results as
+// usable and only hard-fail when the returned list is nil.
+func (r *NativeK8sRunner) runDiscovery() ([]*metav1.APIResourceList, error) {
+	lists, err := r.client.Discovery().ServerPreferredResources()
+	if lists == nil {
+		return nil, fmt.Errorf("discovery failed: %w", err)
+	}
+	return lists, nil
+}
+
 // resolveGVR maps a GVK to a GroupVersionResource via server-side discovery.
 // Results are cached for gvrCacheTTL to avoid redundant API round-trips.
 func (r *NativeK8sRunner) resolveGVR(ctx context.Context, gvk *schema.GroupVersionKind) (*gvrEntry, error) {
@@ -351,11 +369,9 @@ func (r *NativeK8sRunner) resolveGVR(ctx context.Context, gvk *schema.GroupVersi
 		return cached, nil
 	}
 
-	lists, err := r.client.Discovery().ServerPreferredResources()
-	// ServerPreferredResources returns partial results even when some groups fail.
-	// Only hard-fail when no lists were returned at all.
-	if lists == nil {
-		return nil, fmt.Errorf("discovery failed: %w", err)
+	lists, err := r.runDiscovery()
+	if err != nil {
+		return nil, err
 	}
 
 	for _, list := range lists {
@@ -392,9 +408,9 @@ func (r *NativeK8sRunner) resolveGVRByResource(ctx context.Context, resource str
 		return cached, nil
 	}
 
-	lists, err := r.client.Discovery().ServerPreferredResources()
-	if lists == nil {
-		return nil, fmt.Errorf("discovery failed: %w", err)
+	lists, err := r.runDiscovery()
+	if err != nil {
+		return nil, err
 	}
 
 	for _, list := range lists {
@@ -449,40 +465,44 @@ func matchesShortName(shortNames []string, target string) bool {
 
 // ─── pure helpers (no IO) ────────────────────────────────────────────────────
 
+// resourceAliases maps common short forms and singular names to their canonical
+// plural API resource names. Initialised once at package level to avoid
+// allocating a new map on every normaliseResourceName call.
+var resourceAliases = map[string]string{
+	"namespace":             "namespaces",
+	"pod":                   "pods",
+	"svc":                   "services",
+	"service":               "services",
+	"ingress":               "ingresses",
+	"pvc":                   "persistentvolumeclaims",
+	"persistentvolumeclaim": "persistentvolumeclaims",
+	"pv":                    "persistentvolumes",
+	"persistentvolume":      "persistentvolumes",
+	"deployment":            "deployments",
+	"configmap":             "configmaps",
+	"clusterrolebinding":    "clusterrolebindings",
+	"clusterrole":           "clusterroles",
+	"serviceaccount":        "serviceaccounts",
+	"secret":                "secrets",
+	"storageclass":          "storageclasses",
+	"statefulset":           "statefulsets",
+	"daemonset":             "daemonsets",
+	"job":                   "jobs",
+	"cronjob":               "cronjobs",
+	"endpoint":              "endpoints",
+	"rolebinding":           "rolebindings",
+	"role":                  "roles",
+	"networkpolicy":         "networkpolicies",
+	"crd":                   "customresourcedefinitions",
+	"customresourcedefinition": "customresourcedefinitions",
+	"replicaset":            "replicasets",
+	"horizontalpodautoscaler": "horizontalpodautoscalers",
+	"hpa":                   "horizontalpodautoscalers",
+}
+
 // normaliseResourceName maps common short forms to their canonical plural names.
 func normaliseResourceName(r string) string {
-	aliases := map[string]string{
-		"namespace":             "namespaces",
-		"pod":                   "pods",
-		"svc":                   "services",
-		"service":               "services",
-		"ingress":               "ingresses",
-		"pvc":                   "persistentvolumeclaims",
-		"persistentvolumeclaim": "persistentvolumeclaims",
-		"pv":                    "persistentvolumes",
-		"persistentvolume":      "persistentvolumes",
-		"deployment":            "deployments",
-		"configmap":             "configmaps",
-		"clusterrolebinding":    "clusterrolebindings",
-		"clusterrole":           "clusterroles",
-		"serviceaccount":        "serviceaccounts",
-		"secret":                "secrets",
-		"storageclass":          "storageclasses",
-		"statefulset":           "statefulsets",
-		"daemonset":             "daemonsets",
-		"job":                     "jobs",
-		"cronjob":                  "cronjobs",
-		"endpoint":                 "endpoints",
-		"rolebinding":              "rolebindings",
-		"role":                     "roles",
-		"networkpolicy":            "networkpolicies",
-		"crd":                      "customresourcedefinitions",
-		"customresourcedefinition": "customresourcedefinitions",
-		"replicaset":               "replicasets",
-		"horizontalpodautoscaler":  "horizontalpodautoscalers",
-		"hpa":                      "horizontalpodautoscalers",
-	}
-	if canonical, ok := aliases[strings.ToLower(r)]; ok {
+	if canonical, ok := resourceAliases[strings.ToLower(r)]; ok {
 		return canonical
 	}
 	return r
@@ -529,8 +549,12 @@ func checkCondition(obj *unstructured.Unstructured, condition string) bool {
 }
 
 // splitYAMLDocuments splits a multi-document YAML byte slice on "---" separators.
-// It correctly handles documents that start with "---" and skips empty documents.
+// It correctly handles documents that start with "---", skips empty documents,
+// and normalises Windows-style CRLF line endings before splitting.
 func splitYAMLDocuments(data []byte) [][]byte {
+	// Normalise CRLF → LF so Windows-authored manifests are handled correctly.
+	data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+
 	// Normalise: if the document starts with "---", drop that prefix so the
 	// subsequent split on "\n---" handles it uniformly.
 	trimmed := bytes.TrimSpace(data)

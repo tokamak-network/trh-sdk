@@ -24,6 +24,16 @@ func newTestRunner(objs ...runtime.Object) *NativeK8sRunner {
 	return &NativeK8sRunner{client: client, dynamic: dynClient, fieldManager: "trh-sdk"}
 }
 
+func TestNativeK8sRunner_Apply_CommentOnlyManifest(t *testing.T) {
+	r := newTestRunner()
+	// A manifest composed entirely of comments should be silently skipped;
+	// no API calls are made and Apply must return nil.
+	manifest := []byte("# this is a comment\n# another comment\n")
+	if err := r.Apply(context.Background(), manifest); err != nil {
+		t.Fatalf("unexpected error for comment-only manifest: %v", err)
+	}
+}
+
 func TestNativeK8sRunner_NamespaceExists_True(t *testing.T) {
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "my-ns"}}
 	r := newTestRunner(ns)
@@ -271,6 +281,15 @@ func TestSplitYAMLDocuments_ConsecutiveSeparators(t *testing.T) {
 	docs := splitYAMLDocuments(input)
 	if len(docs) != 1 {
 		t.Fatalf("expected 1 doc (empty docs skipped), got %d", len(docs))
+	}
+}
+
+func TestSplitYAMLDocuments_CRLF(t *testing.T) {
+	// Windows-style CRLF line endings must be normalised before splitting.
+	input := []byte("apiVersion: v1\r\nkind: Pod\r\n---\r\napiVersion: v1\r\nkind: Service")
+	docs := splitYAMLDocuments(input)
+	if len(docs) != 2 {
+		t.Fatalf("expected 2 docs with CRLF line endings, got %d", len(docs))
 	}
 }
 
