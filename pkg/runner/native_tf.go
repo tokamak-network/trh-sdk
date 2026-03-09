@@ -28,6 +28,22 @@ type NativeTFRunner struct {
 // Verified against TRH integration tests as of 2026-03. Bump requires re-testing.
 const terraformVersion = "1.9.8"
 
+// execLookPath and tfCheckVersion are package-level vars so unit tests can inject
+// fakes without spawning real processes.
+var (
+	execLookPath = exec.LookPath
+
+	// tfCheckVersion returns the version reported by the terraform binary at path.
+	tfCheckVersion = func(ctx context.Context, path string) (*version.Version, error) {
+		tf, err := tfexec.NewTerraform(os.TempDir(), path)
+		if err != nil {
+			return nil, err
+		}
+		v, _, err := tf.Version(ctx, false)
+		return v, err
+	}
+)
+
 // newNativeTFRunner creates a NativeTFRunner by locating or installing terraform.
 // hc-install v0.9+ moved the Installer type to the root package (install alias).
 // ctx is forwarded to hc-install so callers can cancel long downloads.
@@ -38,18 +54,12 @@ func newNativeTFRunner(ctx context.Context) (*NativeTFRunner, error) {
 	}
 
 	// Try to find a matching terraform version in PATH first.
-	if path, err := exec.LookPath("terraform"); err == nil {
-		tf, err := tfexec.NewTerraform(".", path)
-		if err == nil {
-			if v, _, err := tf.Version(ctx, false); err == nil && v.Equal(pinnedVersion) {
-				return &NativeTFRunner{execPath: path, stdout: os.Stdout}, nil
-			}
-		}
+	if path := findPinnedTerraformInPath(ctx, pinnedVersion); path != "" {
+		return &NativeTFRunner{execPath: path, stdout: os.Stdout}, nil
 	}
 
 	// Fall back to hc-install to download the pinned terraform version.
 	i := install.NewInstaller()
-	defer func() { _ = i.Remove(context.Background()) }()
 	execPath, err := i.Ensure(ctx, []src.Source{
 		&releases.ExactVersion{
 			Product:    product.Terraform,
@@ -58,9 +68,34 @@ func newNativeTFRunner(ctx context.Context) (*NativeTFRunner, error) {
 		},
 	})
 	if err != nil {
+		_ = i.Remove(context.Background())
 		return nil, fmt.Errorf("native tf: locate/install terraform %s: %w", terraformVersion, err)
 	}
 	return &NativeTFRunner{execPath: execPath, stdout: os.Stdout}, nil
+}
+
+// findPinnedTerraformInPath looks for a terraform binary in PATH whose version
+// matches pinnedVersion. Returns the binary path on a match, or "" otherwise.
+// A diagnostic is written to stderr when a binary is found but skipped, so
+// operators know why hc-install was invoked.
+func findPinnedTerraformInPath(ctx context.Context, pinnedVersion *version.Version) string {
+	path, lookErr := execLookPath("terraform")
+	if lookErr != nil {
+		return ""
+	}
+
+	v, vErr := tfCheckVersion(ctx, path)
+	if vErr != nil || !v.Equal(pinnedVersion) {
+		var reason string
+		if vErr != nil {
+			reason = vErr.Error()
+		} else {
+			reason = fmt.Sprintf("version %s != pinned %s", v, pinnedVersion)
+		}
+		fmt.Fprintf(os.Stderr, "native tf: PATH terraform skipped (%s) — falling back to hc-install\n", reason)
+		return ""
+	}
+	return path
 }
 
 func (r *NativeTFRunner) SetStdout(w io.Writer) { r.stdout = w }
@@ -122,7 +157,7 @@ func (r *NativeTFRunner) Destroy(ctx context.Context, workDir string, env []stri
 }
 
 func (r *NativeTFRunner) CheckVersion(ctx context.Context) error {
-	tf, err := tfexec.NewTerraform(".", r.execPath)
+	tf, err := tfexec.NewTerraform(os.TempDir(), r.execPath)
 	if err != nil {
 		return fmt.Errorf("native tf version: %w", err)
 	}

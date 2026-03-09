@@ -3,24 +3,14 @@ package thanos
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/runner"
 	"github.com/tokamak-network/trh-sdk/pkg/runner/mock"
-	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"go.uber.org/zap/zaptest/observer"
 )
-
-func noopLogger() *zap.SugaredLogger { return zap.NewNop().Sugar() }
-
-// observedLogger returns a SugaredLogger whose output is captured in the returned
-// *observer.ObservedLogs, allowing tests to assert on log calls.
-func observedLogger(lvl zapcore.Level) (*zap.SugaredLogger, *observer.ObservedLogs) {
-	core, logs := observer.New(lvl)
-	return zap.New(core).Sugar(), logs
-}
 
 // ─── deleteOrphanedLoadBalancers ───────────────────────────────────────────
 
@@ -118,7 +108,8 @@ func TestDeleteOrphanedEKS_ClusterNotFound(t *testing.T) {
 }
 
 // TestDeleteOrphanedEKS_ClusterExistsAPIError verifies that an API error from
-// EKSClusterExists returns unchanged counts and emits a Warn log.
+// EKSClusterExists returns unchanged counts and emits a Warn log containing
+// "EKS cluster existence".
 func TestDeleteOrphanedEKS_ClusterExistsAPIError(t *testing.T) {
 	m := &mock.AWSRunner{}
 	m.OnEKSClusterExists = func(_ context.Context, _, _ string) (bool, error) {
@@ -133,10 +124,14 @@ func TestDeleteOrphanedEKS_ClusterExistsAPIError(t *testing.T) {
 	if logs.Len() == 0 {
 		t.Fatal("expected a Warn log for EKSClusterExists API error, got none")
 	}
+	if got := logs.All()[0].Message; !strings.Contains(got, "EKS cluster existence") {
+		t.Fatalf("expected log to mention 'EKS cluster existence', got %q", got)
+	}
 }
 
 // TestDeleteOrphanedRDS_InstanceExistsAPIError verifies that an API error from
-// RDSInstanceExists returns unchanged counts and emits a Warn log.
+// RDSInstanceExists returns unchanged counts and emits a Warn log containing
+// "RDS instance existence".
 func TestDeleteOrphanedRDS_InstanceExistsAPIError(t *testing.T) {
 	m := &mock.AWSRunner{}
 	m.OnRDSInstanceExists = func(_ context.Context, _, _ string) (bool, error) {
@@ -151,10 +146,13 @@ func TestDeleteOrphanedRDS_InstanceExistsAPIError(t *testing.T) {
 	if logs.Len() == 0 {
 		t.Fatal("expected a Warn log for RDSInstanceExists API error, got none")
 	}
+	if got := logs.All()[0].Message; !strings.Contains(got, "RDS instance existence") {
+		t.Fatalf("expected log to mention 'RDS instance existence', got %q", got)
+	}
 }
 
 // TestDeleteOrphanedVPC_DescribeAPIError verifies that an EC2DescribeVPCs API error
-// returns unchanged counts and emits a Warn log.
+// returns unchanged counts and emits a Warn log containing "list VPCs".
 func TestDeleteOrphanedVPC_DescribeAPIError(t *testing.T) {
 	m := &mock.AWSRunner{}
 	m.OnEC2DescribeVPCs = func(_ context.Context, _, _ string) ([]string, error) {
@@ -168,6 +166,9 @@ func TestDeleteOrphanedVPC_DescribeAPIError(t *testing.T) {
 	}
 	if logs.Len() == 0 {
 		t.Fatal("expected a Warn log for EC2DescribeVPCs API error, got none")
+	}
+	if got := logs.All()[0].Message; !strings.Contains(got, "list VPCs") {
+		t.Fatalf("expected log to mention 'list VPCs', got %q", got)
 	}
 }
 

@@ -1,7 +1,11 @@
 package runner
 
 import (
+	"context"
+	"errors"
 	"testing"
+
+	version "github.com/hashicorp/go-version"
 )
 
 // ─── envSliceToMap ────────────────────────────────────────────────────────
@@ -55,5 +59,87 @@ func TestEnvSliceToMap_Empty(t *testing.T) {
 	m := envSliceToMap(nil)
 	if len(m) != 0 {
 		t.Fatalf("expected empty map, got %v", m)
+	}
+}
+
+// ─── findPinnedTerraformInPath ────────────────────────────────────────────
+//
+// These tests swap the injectable package vars to avoid real process execution.
+
+func TestFindPinnedTerraformInPath_NotFound(t *testing.T) {
+	orig := execLookPath
+	t.Cleanup(func() { execLookPath = orig })
+	execLookPath = func(string) (string, error) {
+		return "", errors.New("terraform: executable file not found in $PATH")
+	}
+
+	pinnedVersion, _ := version.NewVersion(terraformVersion)
+	if got := findPinnedTerraformInPath(context.Background(), pinnedVersion); got != "" {
+		t.Fatalf("expected empty path when terraform not in PATH, got %q", got)
+	}
+}
+
+func TestFindPinnedTerraformInPath_VersionMatch(t *testing.T) {
+	origLook := execLookPath
+	origCheck := tfCheckVersion
+	t.Cleanup(func() {
+		execLookPath = origLook
+		tfCheckVersion = origCheck
+	})
+
+	const fakePath = "/usr/local/bin/terraform"
+	execLookPath = func(string) (string, error) { return fakePath, nil }
+
+	pinnedVersion, _ := version.NewVersion(terraformVersion)
+	tfCheckVersion = func(_ context.Context, _ string) (*version.Version, error) {
+		return pinnedVersion, nil
+	}
+
+	if got := findPinnedTerraformInPath(context.Background(), pinnedVersion); got != fakePath {
+		t.Fatalf("expected %q, got %q", fakePath, got)
+	}
+}
+
+// TestFindPinnedTerraformInPath_VersionMismatch verifies that a PATH terraform
+// with a different version is skipped (returns "") and triggers a stderr diagnostic.
+func TestFindPinnedTerraformInPath_VersionMismatch(t *testing.T) {
+	origLook := execLookPath
+	origCheck := tfCheckVersion
+	t.Cleanup(func() {
+		execLookPath = origLook
+		tfCheckVersion = origCheck
+	})
+
+	execLookPath = func(string) (string, error) { return "/usr/local/bin/terraform", nil }
+
+	differentVersion, _ := version.NewVersion("1.8.0")
+	tfCheckVersion = func(_ context.Context, _ string) (*version.Version, error) {
+		return differentVersion, nil
+	}
+
+	pinnedVersion, _ := version.NewVersion(terraformVersion)
+	if got := findPinnedTerraformInPath(context.Background(), pinnedVersion); got != "" {
+		t.Fatalf("expected empty path on version mismatch, got %q", got)
+	}
+}
+
+// TestFindPinnedTerraformInPath_VersionCheckError verifies that a version-check
+// failure (e.g. binary not executable) causes the PATH branch to be skipped.
+func TestFindPinnedTerraformInPath_VersionCheckError(t *testing.T) {
+	origLook := execLookPath
+	origCheck := tfCheckVersion
+	t.Cleanup(func() {
+		execLookPath = origLook
+		tfCheckVersion = origCheck
+	})
+
+	execLookPath = func(string) (string, error) { return "/usr/local/bin/terraform", nil }
+	tfCheckVersion = func(_ context.Context, _ string) (*version.Version, error) {
+		return nil, errors.New("version check failed: binary not executable")
+	}
+
+	pinnedVersion, _ := version.NewVersion(terraformVersion)
+	if got := findPinnedTerraformInPath(context.Background(), pinnedVersion); got != "" {
+		t.Fatalf("expected empty path on version check error, got %q", got)
 	}
 }

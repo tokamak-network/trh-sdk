@@ -6,7 +6,21 @@ import (
 	"testing"
 
 	"github.com/tokamak-network/trh-sdk/pkg/runner/mock"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
+
+// noopLogger returns a no-op SugaredLogger suitable for tests that do not
+// assert on log output.
+func noopLogger() *zap.SugaredLogger { return zap.NewNop().Sugar() }
+
+// observedLogger returns a SugaredLogger whose output is captured in the returned
+// *observer.ObservedLogs, allowing tests to assert on log calls.
+func observedLogger(lvl zapcore.Level) (*zap.SugaredLogger, *observer.ObservedLogs) {
+	core, logs := observer.New(lvl)
+	return zap.New(core).Sugar(), logs
+}
 
 // minimalStack returns a ThanosStack with only the helmRunner set,
 // sufficient for testing helper methods that do not access other fields.
