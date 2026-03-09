@@ -54,17 +54,21 @@ func (t *ThanosStack) SetAWSRunner(ar runner.AWSRunner) {
 	t.awsRunner = ar
 }
 
-// PodLogs reads logs from the named pod. Uses K8sRunner when available.
-// container may be empty to select the pod's first container.
-// since limits the log window; zero means all available logs (native runner always fetches all).
+// maxLogBytes caps the amount of log data read into memory by PodLogs.
+const maxLogBytes = 100 << 20 // 100 MiB
+
+// PodLogs reads logs from the named pod. Uses K8sRunner when since is zero;
+// falls back to shell-out when since > 0 because K8sRunner.Logs does not
+// support time-windowed retrieval. container may be empty to select the
+// pod's first container.
 func (t *ThanosStack) PodLogs(ctx context.Context, pod, namespace, container string, since time.Duration) ([]byte, error) {
-	if t.k8sRunner != nil {
+	if t.k8sRunner != nil && since == 0 {
 		rc, err := t.k8sRunner.Logs(ctx, pod, namespace, container, false)
 		if err != nil {
 			return nil, fmt.Errorf("pod logs %s/%s: %w", namespace, pod, err)
 		}
 		defer rc.Close() //nolint:errcheck
-		return io.ReadAll(rc)
+		return io.ReadAll(io.LimitReader(rc, maxLogBytes))
 	}
 	args := []string{"logs", pod, "-n", namespace}
 	if since > 0 {
@@ -281,17 +285,26 @@ func NewThanosStack(
 		deployConfig:   config,
 	}
 
-	// Wire native runners. On failure, fall back to nil runners which causes each
-	// helper method (tfInit, helmUpgradeInstallWithFiles, etc.) to shell out.
-	tr, runnerErr := runner.New(runner.RunnerConfig{UseNative: true, KubeconfigPath: kubeconfigPath})
-	if runnerErr != nil {
-		l.Warnf("Native runner init failed, falling back to shell-out: %v", runnerErr)
-	} else {
-		stack.helmRunner = tr.Helm()
-		stack.k8sRunner = tr.K8s()
-		stack.tfRunner = tr.TF()
-		stack.awsRunner = tr.AWS()
+	// Only attempt runner wiring when an infra provider is configured.
+	// Callers that pass nil/nil (e.g. shutdown introspection) do not need runners.
+	if awsConfig != nil || doConfig != nil {
+		injectRunners(stack, l, kubeconfigPath)
 	}
 
 	return stack, nil
+}
+
+// injectRunners initialises native runners and injects them into stack.
+// On failure it logs a warning and leaves all runner fields nil so that
+// each helper method falls back to shell-out transparently.
+func injectRunners(stack *ThanosStack, l *zap.SugaredLogger, kubeconfigPath string) {
+	tr, err := runner.New(runner.RunnerConfig{UseNative: true, KubeconfigPath: kubeconfigPath})
+	if err != nil {
+		l.Warnf("Native runner init failed, falling back to shell-out: %v", err)
+		return
+	}
+	stack.helmRunner = tr.Helm()
+	stack.k8sRunner = tr.K8s()
+	stack.tfRunner = tr.TF()
+	stack.awsRunner = tr.AWS()
 }
