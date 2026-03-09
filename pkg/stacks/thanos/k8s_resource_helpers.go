@@ -87,7 +87,7 @@ func (t *ThanosStack) k8sGetPodNameByLabel(ctx context.Context, namespace, label
 	out, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pod", "-n", namespace,
 		"-l", labelSelector, "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
 	if err != nil {
-		return "", nil
+		return "", fmt.Errorf("k8sGetPodNameByLabel: %w", err)
 	}
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[0]) == "" {
@@ -117,7 +117,7 @@ func (t *ThanosStack) k8sListResourceNames(ctx context.Context, resource, namesp
 	if t.k8sRunner != nil {
 		raw, err := t.k8sRunner.List(ctx, resource, namespace, "")
 		if err != nil {
-			return nil, nil
+			return nil, fmt.Errorf("k8sListResourceNames: %w", err)
 		}
 		var list struct {
 			Items []struct {
@@ -138,7 +138,7 @@ func (t *ThanosStack) k8sListResourceNames(ctx context.Context, resource, namesp
 	out, err := utils.ExecuteCommand(ctx, "kubectl", "get", resource, "-n", namespace,
 		"-o", "jsonpath={.items[*].metadata.name}")
 	if err != nil {
-		return nil, nil
+		return nil, fmt.Errorf("k8sListResourceNames: %w", err)
 	}
 	if strings.TrimSpace(out) == "" {
 		return nil, nil

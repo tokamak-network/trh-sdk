@@ -58,7 +58,7 @@ func VerifyEFSData(ctx context.Context, namespace string, verify func(context.Co
 // RestartStatefulSets restarts comma-separated StatefulSets and waits for rollout.
 // rollout restart/status have no K8sRunner equivalent and always shell out to kubectl.
 func RestartStatefulSets(ctx context.Context, l *zap.SugaredLogger, namespace, stsCSV string) error {
-	return defaultClient.restartStatefulSets(ctx, l, namespace, stsCSV)
+	return getDefaultClient().restartStatefulSets(ctx, l, namespace, stsCSV)
 }
 
 // restartStatefulSets is the BackupClient method implementation.
@@ -100,7 +100,7 @@ func (b *BackupClient) restartStatefulSets(ctx context.Context, l *zap.SugaredLo
 
 // findStatefulSetByName finds the actual StatefulSet name by pattern matching
 func findStatefulSetByName(ctx context.Context, namespace, pattern string) (string, error) {
-	return defaultClient.findStatefulSetByName(ctx, namespace, pattern)
+	return getDefaultClient().findStatefulSetByName(ctx, namespace, pattern)
 }
 
 // findStatefulSetByName finds the actual StatefulSet name by pattern matching.
@@ -202,7 +202,7 @@ func ExecuteBackupAttach(
 		if err := verify(ctx, attachInfo.Namespace); err != nil {
 			l.Warnf("Current EFS data verification failed: %v", err)
 		}
-		_ = defaultClient.k8sDeletePod(ctx, "verify-efs", attachInfo.Namespace)
+		_ = getDefaultClient().k8sDeletePod(ctx, "verify-efs", attachInfo.Namespace)
 	}
 
 	// Handle StatefulSet restarts
@@ -440,7 +440,7 @@ func backupPvPvcWithDir(ctx context.Context, l *zap.SugaredLogger, namespace str
 
 // UpdatePVVolumeHandles recreates PV/PVCs pointing to the new EFS ID
 func UpdatePVVolumeHandles(ctx context.Context, l *zap.SugaredLogger, namespace, newEfs string, pvcs *string) error {
-	return defaultClient.updatePVVolumeHandles(ctx, l, namespace, newEfs, pvcs)
+	return getDefaultClient().updatePVVolumeHandles(ctx, l, namespace, newEfs, pvcs)
 }
 
 // updatePVVolumeHandles is the BackupClient method implementation.
@@ -630,7 +630,7 @@ func ExecuteEFSOperationsFull(
 	backupPvPvcFlag *bool,
 	progressReporter func(string, float64),
 ) error {
-	return defaultClient.executeEFSOperationsFull(ctx, l, attachInfo, verify, backupPvPvcFlag, progressReporter)
+	return getDefaultClient().executeEFSOperationsFull(ctx, l, attachInfo, verify, backupPvPvcFlag, progressReporter)
 }
 
 // executeEFSOperationsFull is the BackupClient method implementation.
@@ -709,7 +709,7 @@ func (b *BackupClient) executeEFSOperationsFull(
 
 // VerifyEFSDataImpl verifies EFS data integrity by creating a verification pod
 func VerifyEFSDataImpl(ctx context.Context, l *zap.SugaredLogger, namespace string) error {
-	return defaultClient.verifyEFSDataImpl(ctx, l, namespace)
+	return getDefaultClient().verifyEFSDataImpl(ctx, l, namespace)
 }
 
 // verifyEFSDataImpl is the BackupClient method implementation.

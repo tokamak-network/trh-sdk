@@ -12,6 +12,23 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
+// podListWithVolumes is a shared struct for parsing kubectl pod-list JSON in k8sListPodsUsingPVC.
+// Both the k8sRunner and shellout paths decode into this type to avoid duplication.
+type podListWithVolumes struct {
+	Items []struct {
+		Metadata struct {
+			Name string `json:"name"`
+		} `json:"metadata"`
+		Spec struct {
+			Volumes []struct {
+				PVC *struct {
+					ClaimName string `json:"claimName"`
+				} `json:"persistentVolumeClaim"`
+			} `json:"volumes"`
+		} `json:"spec"`
+	} `json:"items"`
+}
+
 // writeTempFile writes data to a temporary YAML file and returns its path.
 // The caller is responsible for removing the file when done.
 func writeTempFile(data []byte) (string, error) {
@@ -157,20 +174,7 @@ func (b *BackupClient) k8sListPodsUsingPVC(ctx context.Context, claimName, names
 		if err != nil {
 			return nil, fmt.Errorf("k8sListPodsUsingPVC: %w", err)
 		}
-		var list struct {
-			Items []struct {
-				Metadata struct {
-					Name string `json:"name"`
-				} `json:"metadata"`
-				Spec struct {
-					Volumes []struct {
-						PVC *struct {
-							ClaimName string `json:"claimName"`
-						} `json:"persistentVolumeClaim"`
-					} `json:"volumes"`
-				} `json:"spec"`
-			} `json:"items"`
-		}
+		var list podListWithVolumes
 		if err := json.Unmarshal(raw, &list); err != nil {
 			return nil, fmt.Errorf("k8sListPodsUsingPVC: failed to parse JSON: %w", err)
 		}
@@ -186,24 +190,14 @@ func (b *BackupClient) k8sListPodsUsingPVC(ctx context.Context, claimName, names
 		return names, nil
 	}
 	out, err := utils.ExecuteCommand(ctx, "kubectl", "-n", namespace, "get", "pods", "-o", "json")
-	if err != nil || strings.TrimSpace(out) == "" {
+	if err != nil {
+		return nil, fmt.Errorf("k8sListPodsUsingPVC: %w", err)
+	}
+	if strings.TrimSpace(out) == "" {
 		return nil, nil
 	}
 	// Parse JSON inline — avoids shell injection via namespace/claimName interpolation.
-	var podList struct {
-		Items []struct {
-			Metadata struct {
-				Name string `json:"name"`
-			} `json:"metadata"`
-			Spec struct {
-				Volumes []struct {
-					PVC *struct {
-						ClaimName string `json:"claimName"`
-					} `json:"persistentVolumeClaim"`
-				} `json:"volumes"`
-			} `json:"spec"`
-		} `json:"items"`
-	}
+	var podList podListWithVolumes
 	if err := json.Unmarshal([]byte(out), &podList); err != nil {
 		return nil, fmt.Errorf("k8sListPodsUsingPVC: failed to parse pod list: %w", err)
 	}

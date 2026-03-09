@@ -137,7 +137,7 @@ func (t *ThanosStack) k8sSecretDataField(ctx context.Context, namespace, secretN
 	return strings.TrimSpace(out), nil
 }
 
-// k8sPrometheusRuleOutput returns the serialized PrometheusRule list for namespace.
+// k8sPrometheusRuleYAML returns the serialized PrometheusRule list for namespace.
 // When k8sRunner is set the output is JSON; the shellout path requests YAML via kubectl.
 // JSON is a strict subset of YAML so downstream parsers that accept YAML will handle both.
 func (t *ThanosStack) k8sPrometheusRuleYAML(ctx context.Context, namespace string) (string, error) {
