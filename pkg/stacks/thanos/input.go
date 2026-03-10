@@ -1346,6 +1346,11 @@ func makeDeployContractConfigJsonFile(
 	deployContractTemplate.L1StartingBlockTag = latest.Hash().Hex()
 	deployContractTemplate.L2OutputOracleStartingTimestamp = latest.Time()
 
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		fmt.Printf("Failed to create directory for configuration file: %s", err)
+		return err
+	}
+
 	file, err := os.Create(filePath)
 	if err != nil {
 		fmt.Printf("Failed to create configuration file: %s", err)
