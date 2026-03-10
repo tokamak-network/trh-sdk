@@ -251,7 +251,7 @@ func (c *UpdateNetworkInput) Validate(ctx context.Context) error {
 	return nil
 }
 
-func InputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
+func InputDeployContracts(ctx context.Context, enableFaultProof bool) (*DeployContractsInput, error) {
 	l1RPCUrl, _, l1ChainID, err := inputL1RPC(ctx)
 	if err != nil {
 		fmt.Printf("Error while reading L1 RPC URL: %s", err)
@@ -270,13 +270,7 @@ func InputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
 		return nil, fmt.Errorf("seed phrase cannot be empty")
 	}
 
-	fraudProof := false
-	//fmt.Print("Would you like to enable the fault-proof system on your chain? [Y or N] (default: N): ")
-	//fraudProof, err = scanner.ScanBool()
-	//if err != nil {
-	//	fmt.Printf("Error while reading the fault-proof system setting: %s", err)
-	//	return nil, err
-	//}
+	fraudProof := enableFaultProof
 
 	// Select operators Accounts
 	l1Client, err := ethclient.Dial(l1RPCUrl)
@@ -412,7 +406,8 @@ func InputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
 			ChallengePeriod:          challengePeriod,
 			OutputRootFrequency:      outputFrequency,
 		},
-		Operators: operators,
+		Operators:        operators,
+		EnableFaultProof: enableFaultProof,
 	}, nil
 }
 
