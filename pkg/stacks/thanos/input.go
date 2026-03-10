@@ -1497,7 +1497,7 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	writer.WriteString(fmt.Sprintf("export TF_VAR_genesis_file_path=\"%s\"\n", "config-files/genesis.json"))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_rollup_file_path=\"%s\"\n", "config-files/rollup.json"))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_prestate_file_path=\"%s\"\n", "config-files/prestate.json"))
-	writer.WriteString(fmt.Sprintf("export TF_VAR_prestate_hash=\"%s\"\n", "0x03ab262ce124af0d5d328e09bf886a2b272fe960138115ad8b94fdc3034e3155"))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_prestate_hash=\"%s\"\n", config.PrestateHash))
 
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_deployments_path=\"%s\"\n", config.DeploymentFilePath))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_l1_rpc_url=\"%s\"\n", config.L1RpcUrl))
