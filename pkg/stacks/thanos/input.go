@@ -1426,7 +1426,7 @@ func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainI
 		FaultGameClockExtension:                  10800,
 		FaultGameMaxClockDuration:                302400,
 		FaultGameGenesisBlock:                    0,
-		FaultGameGenesisOutputRoot:               "0xDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF",
+		FaultGameGenesisOutputRoot:               "0x0000000000000000000000000000000000000000000000000000000000000000",
 		FaultGameSplitDepth:                      30,
 		FaultGameWithdrawalDelay:                 604800,
 		PreimageOracleMinProposalSize:            126000,
