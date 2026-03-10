@@ -38,6 +38,7 @@ type DeployContractsInput struct {
 	Operators          *types.Operators
 	RegisterCandidate  *RegisterCandidateInput
 	ReuseDeployment    bool
+	EnableFaultProof   bool
 }
 
 func (c *DeployContractsInput) Validate(ctx context.Context, registerCandidate bool) error {
