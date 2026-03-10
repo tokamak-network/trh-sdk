@@ -39,6 +39,7 @@ func (t *ThanosStack) InstallUptimeService(ctx context.Context, config *types.Up
 		existingReleases, err := utils.FilterHelmReleases(ctx, config.Namespace, "uptime-service")
 		if err != nil || len(existingReleases) == 0 {
 			t.logger.Warn("Could not find existing Helm release, trying to get service URL with label selector")
+			return "", fmt.Errorf("no existing uptime-service helm release found in namespace %s", config.Namespace)
 		}
 		// Use the first existing release name
 		existingReleaseName := existingReleases[0]
@@ -174,24 +175,10 @@ func (t *ThanosStack) InstallUptimeService(ctx context.Context, config *types.Up
 		return "", fmt.Errorf("failed to update volume.size: %w", err)
 	}
 
-	args := []string{
-		"install",
-		helmReleaseName,
-		fmt.Sprintf("%s/tokamak-thanos-stack/charts/uptime-service", t.deploymentPath),
-		"--values", valuesFilePath,
-		"--namespace", config.Namespace,
-		"--create-namespace",
-	}
-
 	//Installing helm chart for uptime-service
-	output, err := utils.ExecuteCommand(ctx, "helm", args...)
-
-	if err != nil {
-		t.logger.Error(
-			"❌ Error installing uptime service",
-			"err", err,
-			"helm_output", output,
-		)
+	uptimeChart := fmt.Sprintf("%s/tokamak-thanos-stack/charts/uptime-service", t.deploymentPath)
+	if err := t.helmUpgradeInstallWithFiles(ctx, helmReleaseName, uptimeChart, config.Namespace, []string{valuesFilePath}, "--create-namespace"); err != nil {
+		t.logger.Error("❌ Error installing uptime service", "err", err)
 		return "", err
 	}
 	t.logger.Info("✅ Install uptime service successfully")
@@ -241,7 +228,7 @@ func (t *ThanosStack) UninstallUptimeService(ctx context.Context) error {
 	}
 
 	uptimeNamespace := constants.UptimeServiceNamespace
-	fmt.Printf("namespace while uninstalling : %s ", uptimeNamespace)
+	t.logger.Infow("uninstalling uptime-service", "namespace", uptimeNamespace)
 
 	// Check if namespace exists first
 	exists, err := utils.CheckNamespaceExists(ctx, uptimeNamespace)
@@ -256,7 +243,7 @@ func (t *ThanosStack) UninstallUptimeService(ctx context.Context) error {
 	}
 
 	// Uninstall Helm releases
-	releases, err := utils.FilterHelmReleases(ctx, uptimeNamespace, "uptime-service")
+	releases, err := t.helmFilterReleases(ctx, uptimeNamespace, "uptime-service")
 	if err != nil {
 		t.logger.Error("Error to filter helm releases", "err", err)
 		return err
@@ -264,13 +251,7 @@ func (t *ThanosStack) UninstallUptimeService(ctx context.Context) error {
 
 	for _, release := range releases {
 		t.logger.Infow("Uninstalling Helm release", "release", release, "namespace", uptimeNamespace)
-		_, err = utils.ExecuteCommand(ctx, "helm", []string{
-			"uninstall",
-			release,
-			"--namespace",
-			uptimeNamespace,
-		}...)
-		if err != nil {
+		if err = t.helmUninstall(ctx, release, uptimeNamespace); err != nil {
 			t.logger.Error("❌ Error uninstalling uptime-service helm chart", "err", err)
 			return err
 		}
@@ -351,7 +332,7 @@ func (t *ThanosStack) deployUptimeServiceInfrastructure(ctx context.Context, con
 	if err := utils.ApplyPVCManifest(ctx, t.deploymentPath, "uptime-service", uptimePVC, "UptimeService"); err != nil {
 		return fmt.Errorf("failed to create uptime-service PVC: %w", err)
 	}
-	fmt.Println("✅ Created uptime-service PV and PVC")
+	t.logger.Info("✅ Created uptime-service PV and PVC")
 
 	return nil
 }
@@ -360,14 +341,14 @@ func (t *ThanosStack) deployUptimeServiceInfrastructure(ctx context.Context, con
 func (t *ThanosStack) waitForPVCBound(ctx context.Context, namespace string, pvcName string) error {
 	maxRetries := 5
 	for i := 0; i < maxRetries; i++ {
-		status, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", pvcName, "-n", namespace, "-o", "jsonpath={.status.phase}", "--ignore-not-found=true")
+		status, err := t.k8sPVCPhase(ctx, pvcName, namespace)
 		if err != nil {
 			t.logger.Warnw("Error checking PVC status", "err", err, "pvc", pvcName, "attempt", i+1)
-		} else if strings.TrimSpace(status) == "Bound" {
+		} else if status == "Bound" {
 			t.logger.Info(fmt.Sprintf("PVC is bound: %s", pvcName))
 			return nil
 		} else {
-			t.logger.Infow("Waiting for PVC to be bound", "pvc", pvcName, "status", strings.TrimSpace(status), "attempt", i+1)
+			t.logger.Infow("Waiting for PVC to be bound", "pvc", pvcName, "status", status, "attempt", i+1)
 		}
 		time.Sleep(5 * time.Second)
 	}
@@ -376,61 +357,53 @@ func (t *ThanosStack) waitForPVCBound(ctx context.Context, namespace string, pvc
 
 // cleanupExistingUptimeServiceStorage removes existing uptime-service PVs and PVCs
 func (t *ThanosStack) cleanupExistingUptimeServiceStorage(ctx context.Context, config *types.UptimeServiceConfig) error {
-	// Get existing monitoring PVCs
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", "-n", config.Namespace, "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
+	// Get existing PVCs in the namespace
+	pvcNames, err := t.k8sPVCNames(ctx, config.Namespace)
 	if err != nil {
 		return fmt.Errorf("failed to get existing PVCs: %w", err)
 	}
 
-	lines := strings.Split(strings.TrimSpace(output), "\n")
 	deletedPVCs := 0
 
-	for _, line := range lines {
-		pvcName := strings.TrimSpace(line)
-		if pvcName == "" {
-			continue
-		}
-
-		// Check if PVC is bound to a pod
-		boundOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", pvcName, "-n", config.Namespace, "-o", "jsonpath={.status.phase}")
-		if err == nil && strings.TrimSpace(boundOutput) == "Bound" {
-			// Check if any pod is using this PVC
-			podOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pods", "-n", config.Namespace, "-o", "jsonpath={.items[*].spec.volumes[*].persistentVolumeClaim.claimName}")
-			if err == nil && strings.Contains(podOutput, pvcName) {
-				continue
+	for _, pvcName := range pvcNames {
+		// Check if PVC is bound
+		phase, err := t.k8sPVCPhase(ctx, pvcName, config.Namespace)
+		if err == nil && phase == "Bound" {
+			// Skip if any pod is actively using this PVC
+			claims, err := t.k8sPodPVCClaims(ctx, config.Namespace)
+			if err == nil {
+				inUse := false
+				for _, c := range claims {
+					if c == pvcName {
+						inUse = true
+						break
+					}
+				}
+				if inUse {
+					continue
+				}
 			}
 		}
 
 		// Delete PVC
-		_, err = utils.ExecuteCommand(ctx, "kubectl", "delete", "pvc", pvcName, "-n", config.Namespace, "--ignore-not-found=true")
-		if err == nil {
+		if err := t.k8sDeletePVC(ctx, pvcName, config.Namespace); err == nil {
 			deletedPVCs++
 		}
 	}
 
-	// Get existing monitoring PVs
-	output, err = utils.ExecuteCommand(ctx, "kubectl", "get", "pv", "--no-headers", "-o", "custom-columns=NAME:.metadata.name,STATUS:.status.phase")
+	// Get existing PVs (cluster-scoped)
+	pvs, err := t.k8sPVList(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get existing PVs: %w", err)
 	}
 
-	lines = strings.Split(strings.TrimSpace(output), "\n")
 	deletedPVs := 0
 
-	for _, line := range lines {
-		parts := strings.Fields(line)
-		if len(parts) < 2 {
-			continue
-		}
-
-		pvName := parts[0]
-		status := parts[1]
-
-		// Only delete Released PVs (not Bound or Available)
-		if status == "Released" && (strings.Contains(pvName, "uptime-service")) {
-			// Remove claimRef to allow reuse
-			_, err = utils.ExecuteCommand(ctx, "kubectl", "patch", "pv", pvName, "-p", `{"spec":{"claimRef":null}}`, "--type=merge")
-			if err == nil {
+	for _, pv := range pvs {
+		// Only patch Released uptime-service PVs to allow reuse
+		if pv.Phase == "Released" && strings.Contains(pv.Name, "uptime-service") {
+			patch := []byte(`{"spec":{"claimRef":null}}`)
+			if err := t.k8sPatchPV(ctx, pv.Name, patch); err == nil {
 				deletedPVs++
 			}
 		}

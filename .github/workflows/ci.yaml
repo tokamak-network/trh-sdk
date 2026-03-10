@@ -50,3 +50,27 @@ jobs:
           go-version: "1.24.11"
       - name: Run test
         run: go test -race -v ./...
+
+  build:
+    name: Build binary
+    runs-on: [ubuntu-24.04]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Install Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.24.11"
+      - name: Build (stripped)
+        # -s: omit symbol table, -w: omit DWARF debug info
+        # Limit raised to 150 MB: Phase 2/3 native runners (Helm SDK, AWS SDK v2,
+        # terraform-exec, hc-install, godo) add ~25 MB over the Phase 1 baseline.
+        run: go build -ldflags="-s -w" -o trh-sdk .
+      - name: Check binary size (≤ 150 MB)
+        run: |
+          SIZE=$(du -m trh-sdk | cut -f1)
+          echo "Binary size: ${SIZE} MB"
+          if [ "$SIZE" -gt 150 ]; then
+            echo "ERROR: binary exceeds 150 MB limit (got ${SIZE} MB)"
+            exit 1
+          fi

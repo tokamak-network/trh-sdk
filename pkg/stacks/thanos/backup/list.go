@@ -9,15 +9,52 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/tokamak-network/trh-sdk/pkg/runner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
 // ListRecoveryPoints queries recovery points and returns parsed entries
-func ListRecoveryPoints(ctx context.Context, region, arn, limit string) ([]types.RecoveryPoint, error) {
+func ListRecoveryPoints(ctx context.Context, ar runner.AWSRunner, region, arn, limit string) ([]types.RecoveryPoint, error) {
 	if strings.TrimSpace(limit) == "" {
 		limit = "20"
 	}
+
+	if ar != nil {
+		rps, err := ar.BackupListRecoveryPointsByResource(ctx, region, arn)
+		if err != nil {
+			return nil, err
+		}
+		if len(rps) == 0 {
+			return nil, nil
+		}
+		// Sort by creation date descending and limit
+		// The runner returns all; we sort and limit here
+		sortRecoveryPoints(rps)
+		limitN := 20
+		if v, parseErr := fmt.Sscanf(limit, "%d", &limitN); v != 1 || parseErr != nil {
+			limitN = 20
+		}
+		if len(rps) > limitN {
+			rps = rps[:limitN]
+		}
+		var result []types.RecoveryPoint
+		for _, rp := range rps {
+			expiry := ""
+			if rp.ExpiryDate != nil {
+				expiry = rp.ExpiryDate.Format(time.RFC3339)
+			}
+			result = append(result, types.RecoveryPoint{
+				RecoveryPointARN: rp.RecoveryPointArn,
+				Vault:            rp.BackupVaultName,
+				Created:          rp.CreationDate.Format(time.RFC3339),
+				Expiry:           expiry,
+				Status:           rp.Status,
+			})
+		}
+		return result, nil
+	}
+
 	jsonQuery := fmt.Sprintf("reverse(sort_by(RecoveryPoints,&CreationDate))[:%s].{RecoveryPointARN:RecoveryPointArn,Vault:BackupVaultName,Created:CreationDate,Expiry:ExpiryDate,Status:Status}", limit)
 	out, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-recovery-points-by-resource",
 		"--region", region,
@@ -37,6 +74,15 @@ func ListRecoveryPoints(ctx context.Context, region, arn, limit string) ([]types
 		return nil, err
 	}
 	return rps, nil
+}
+
+// sortRecoveryPoints sorts by CreationDate descending
+func sortRecoveryPoints(rps []runner.BackupRecoveryPoint) {
+	for i := 1; i < len(rps); i++ {
+		for j := i; j > 0 && rps[j].CreationDate.After(rps[j-1].CreationDate); j-- {
+			rps[j], rps[j-1] = rps[j-1], rps[j]
+		}
+	}
 }
 
 // DisplayRecoveryPoints renders recovery points in card style format

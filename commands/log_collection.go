@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -72,7 +71,7 @@ func ActionLogCollection() cli.ActionFunc {
 		}
 
 		// Initialize ThanosStack
-		thanosStack, err := thanos.NewThanosStack(ctx, logger, config.Network, true, deploymentPath, config.AWS)
+		thanosStack, err := thanos.NewThanosStack(ctx, logger, config.Network, true, deploymentPath, config.AWS, nil)
 		if err != nil {
 			logger.Errorw("Failed to initialize ThanosStack", "err", err)
 			return fmt.Errorf("failed to initialize ThanosStack: %w", err)
@@ -372,13 +371,13 @@ func handleLogDownload(ctx context.Context, thanosStack *thanos.ThanosStack, log
 	if component == "all" || component == "" {
 		// Download logs for all components
 		for _, comp := range []string{"op-node", "op-geth", "op-batcher", "op-proposer"} {
-			if err := downloadComponentLogs(ctx, logger, namespace, comp, duration, keyword, downloadDir); err != nil {
+			if err := downloadComponentLogs(ctx, thanosStack, logger, namespace, comp, duration, keyword, downloadDir); err != nil {
 				logger.Warnw("Failed to download logs for component", "component", comp, "err", err)
 			}
 		}
 	} else {
 		// Download logs for specific component
-		if err := downloadComponentLogs(ctx, logger, namespace, component, duration, keyword, downloadDir); err != nil {
+		if err := downloadComponentLogs(ctx, thanosStack, logger, namespace, component, duration, keyword, downloadDir); err != nil {
 			logger.Errorw("Failed to download logs", "component", component, "err", err)
 			return err
 		}
@@ -390,7 +389,7 @@ func handleLogDownload(ctx context.Context, thanosStack *thanos.ThanosStack, log
 }
 
 // downloadComponentLogs downloads logs for a specific component
-func downloadComponentLogs(ctx context.Context, logger *zap.SugaredLogger, namespace, component string, duration time.Duration, keyword, downloadDir string) error {
+func downloadComponentLogs(ctx context.Context, stack *thanos.ThanosStack, logger *zap.SugaredLogger, namespace, component string, duration time.Duration, keyword, downloadDir string) error {
 	logger.Infow("Downloading logs for component", "component", component, "namespace", namespace)
 
 	// Get pod name for the component
@@ -405,19 +404,10 @@ func downloadComponentLogs(ctx context.Context, logger *zap.SugaredLogger, names
 		return fmt.Errorf("no pod found for component: %s", component)
 	}
 
-	// Build kubectl logs command
-	cmdArgs := []string{"logs", podName, "-n", namespace}
-
-	// Add time duration if specified
-	if duration > 0 {
-		cmdArgs = append(cmdArgs, "--since", duration.String())
-	}
-
-	// Execute kubectl command
-	cmd := exec.Command("kubectl", cmdArgs...)
-	output, err := cmd.CombinedOutput()
+	// Fetch logs via ThanosStack (uses native K8sRunner when available, shell-out otherwise)
+	output, err := stack.PodLogs(ctx, podName, namespace, "", duration)
 	if err != nil {
-		logger.Errorw("Failed to execute kubectl logs", "component", component, "err", err, "output", string(output))
+		logger.Errorw("Failed to fetch pod logs", "component", component, "err", err)
 		return fmt.Errorf("failed to get logs for %s: %w", component, err)
 	}
 

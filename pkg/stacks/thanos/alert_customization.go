@@ -13,7 +13,6 @@ import (
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
-	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"gopkg.in/yaml.v3"
 )
 
@@ -28,19 +27,19 @@ func (a *AlertCustomization) GetAlertManagerConfig(ctx context.Context) (string,
 	var secretName string
 
 	// Method 1: Try to get from pod volume mount
-	podOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pods", "-n", constants.MonitoringNamespace, "-l", "app.kubernetes.io/name=alertmanager", "-o", "jsonpath={.items[0].spec.volumes[?(@.name=='config-volume')].secret.secretName}")
-	if err == nil && strings.TrimSpace(podOutput) != "" {
-		secretName = strings.TrimSpace(podOutput)
+	podOutput, err := a.Stack.k8sAlertManagerPodConfigSecretName(ctx, constants.MonitoringNamespace)
+	if err == nil && podOutput != "" {
+		secretName = podOutput
 	} else {
 		// Method 2: Try to get from AlertManager resource
-		amOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "alertmanager", "-n", constants.MonitoringNamespace, "-o", "jsonpath={.items[0].spec.configSecret}")
-		if err == nil && strings.TrimSpace(amOutput) != "" {
-			secretName = strings.TrimSpace(amOutput)
+		amOutput, err := a.Stack.k8sAlertManagerResourceConfigSecret(ctx, constants.MonitoringNamespace)
+		if err == nil && amOutput != "" {
+			secretName = amOutput
 		} else {
 			// Method 3: Find the generated secret by prometheus-operator
-			secretOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "secret", "-n", constants.MonitoringNamespace, "-l", "managed-by=prometheus-operator", "-o", "jsonpath={.items[?(@.metadata.name contains 'alertmanager' && @.metadata.name contains 'generated')].metadata.name}")
-			if err == nil && strings.TrimSpace(secretOutput) != "" {
-				secretName = strings.TrimSpace(secretOutput)
+			secretOutput, err := a.Stack.k8sAlertManagerGeneratedSecretName(ctx, constants.MonitoringNamespace)
+			if err == nil && secretOutput != "" {
+				secretName = secretOutput
 			} else {
 				return "", fmt.Errorf("could not find AlertManager config secret")
 			}
@@ -51,7 +50,7 @@ func (a *AlertCustomization) GetAlertManagerConfig(ctx context.Context) (string,
 		return "", fmt.Errorf("could not find AlertManager config secret")
 	}
 
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "secret", "-n", constants.MonitoringNamespace, secretName, "-o", "jsonpath={.data.alertmanager\\.yaml\\.gz}")
+	output, err := a.Stack.k8sSecretDataField(ctx, constants.MonitoringNamespace, secretName, "alertmanager.yaml.gz")
 	if err != nil {
 		return "", fmt.Errorf("failed to get AlertManager config from secret %s: %w", secretName, err)
 	}
@@ -99,7 +98,7 @@ func (a *AlertCustomization) GetChannelStatus(config string, channelType string)
 
 // GetPrometheusRules retrieves all PrometheusRule items in the monitoring namespace
 func (a *AlertCustomization) GetPrometheusRules(ctx context.Context) ([]types.AlertRule, error) {
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", constants.MonitoringNamespace, "-o", "yaml")
+	output, err := a.Stack.k8sPrometheusRuleYAML(ctx, constants.MonitoringNamespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get PrometheusRules: %w", err)
 	}
@@ -126,7 +125,7 @@ func (a *AlertCustomization) GetPrometheusRules(ctx context.Context) ([]types.Al
 // EnableRule enables a specific alert rule by name
 func (a *AlertCustomization) EnableRule(ctx context.Context, ruleName string) error {
 	// Get the PrometheusRule name first
-	ruleNameOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", constants.MonitoringNamespace, "-o", "jsonpath={.items[0].metadata.name}")
+	ruleNameOutput, err := a.Stack.k8sPrometheusRuleName(ctx, constants.MonitoringNamespace)
 	if err != nil {
 		return fmt.Errorf("failed to get PrometheusRule name: %w", err)
 	}
@@ -151,12 +150,11 @@ func (a *AlertCustomization) EnableRule(ctx context.Context, ruleName string) er
 	}
 
 	// Get all alert names to find the correct insertion index
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", constants.MonitoringNamespace, "-o", "jsonpath={.items[0].spec.groups[0].rules[*].alert}")
+	alertNames, err := a.Stack.k8sPrometheusRuleAlertNames(ctx, constants.MonitoringNamespace)
 	if err != nil {
 		return fmt.Errorf("failed to get PrometheusRule alerts: %w", err)
 	}
 
-	alertNames := strings.Fields(output)
 	insertIndex := len(alertNames) // Insert at the end
 
 	// Create a JSON patch to add the rule
@@ -179,7 +177,7 @@ func (a *AlertCustomization) EnableRule(ctx context.Context, ruleName string) er
 	}
 
 	// Apply the JSON patch
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "patch", "prometheusrule", ruleNameOutput, "-n", constants.MonitoringNamespace, "--type=json", "-p", patchData); err != nil {
+	if err := a.Stack.k8sPatchPrometheusRuleJSON(ctx, ruleNameOutput, constants.MonitoringNamespace, []byte(patchData)); err != nil {
 		return fmt.Errorf("failed to apply updated PrometheusRule: %w", err)
 	}
 
@@ -189,7 +187,7 @@ func (a *AlertCustomization) EnableRule(ctx context.Context, ruleName string) er
 // DisableRule disables a specific alert rule by name
 func (a *AlertCustomization) DisableRule(ctx context.Context, ruleName string) error {
 	// Get the PrometheusRule name first
-	ruleNameOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", constants.MonitoringNamespace, "-o", "jsonpath={.items[0].metadata.name}")
+	ruleNameOutput, err := a.Stack.k8sPrometheusRuleName(ctx, constants.MonitoringNamespace)
 	if err != nil {
 		return fmt.Errorf("failed to get PrometheusRule name: %w", err)
 	}
@@ -199,12 +197,11 @@ func (a *AlertCustomization) DisableRule(ctx context.Context, ruleName string) e
 	}
 
 	// Get all alert names and find the index of the target rule
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", constants.MonitoringNamespace, "-o", "jsonpath={.items[0].spec.groups[0].rules[*].alert}")
+	alertNames, err := a.Stack.k8sPrometheusRuleAlertNames(ctx, constants.MonitoringNamespace)
 	if err != nil {
 		return fmt.Errorf("failed to get PrometheusRule alerts: %w", err)
 	}
 
-	alertNames := strings.Fields(output)
 	targetIndex := -1
 
 	for i, alertName := range alertNames {
@@ -222,7 +219,7 @@ func (a *AlertCustomization) DisableRule(ctx context.Context, ruleName string) e
 	patchData := fmt.Sprintf(`[{"op":"remove","path":"/spec/groups/0/rules/%d"}]`, targetIndex)
 
 	// Apply the JSON patch
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "patch", "prometheusrule", ruleNameOutput, "-n", constants.MonitoringNamespace, "--type=json", "-p", patchData); err != nil {
+	if err := a.Stack.k8sPatchPrometheusRuleJSON(ctx, ruleNameOutput, constants.MonitoringNamespace, []byte(patchData)); err != nil {
 		return fmt.Errorf("failed to apply updated PrometheusRule: %w", err)
 	}
 
@@ -232,7 +229,7 @@ func (a *AlertCustomization) DisableRule(ctx context.Context, ruleName string) e
 // ResetPrometheusRules resets all configurable alert rules to default values
 func (a *AlertCustomization) ResetPrometheusRules(ctx context.Context) error {
 	// Get the PrometheusRule name first
-	ruleNameOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", constants.MonitoringNamespace, "-o", "jsonpath={.items[0].metadata.name}")
+	ruleNameOutput, err := a.Stack.k8sPrometheusRuleName(ctx, constants.MonitoringNamespace)
 	if err != nil {
 		return fmt.Errorf("failed to get PrometheusRule name: %w", err)
 	}
@@ -242,12 +239,10 @@ func (a *AlertCustomization) ResetPrometheusRules(ctx context.Context) error {
 	}
 
 	// Get all alert names to find the indices of configurable rules
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", constants.MonitoringNamespace, "-o", "jsonpath={.items[0].spec.groups[0].rules[*].alert}")
+	alertNames, err := a.Stack.k8sPrometheusRuleAlertNames(ctx, constants.MonitoringNamespace)
 	if err != nil {
 		return fmt.Errorf("failed to get PrometheusRule alerts: %w", err)
 	}
-
-	alertNames := strings.Fields(output)
 
 	// Default values for configurable rules
 	defaultValues := map[string]string{
@@ -341,7 +336,7 @@ func (a *AlertCustomization) ResetPrometheusRules(ctx context.Context) error {
 	patchData += `]`
 
 	// Apply the JSON patch
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "patch", "prometheusrule", ruleNameOutput, "-n", constants.MonitoringNamespace, "--type=json", "-p", patchData); err != nil {
+	if err := a.Stack.k8sPatchPrometheusRuleJSON(ctx, ruleNameOutput, constants.MonitoringNamespace, []byte(patchData)); err != nil {
 		return fmt.Errorf("failed to apply updated PrometheusRule: %w", err)
 	}
 
@@ -351,7 +346,7 @@ func (a *AlertCustomization) ResetPrometheusRules(ctx context.Context) error {
 // UpdatePrometheusRule updates a specific rule's expression value
 func (a *AlertCustomization) UpdatePrometheusRule(ctx context.Context, ruleName, newValue string) error {
 	// Get the PrometheusRule name first
-	ruleNameOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", constants.MonitoringNamespace, "-o", "jsonpath={.items[0].metadata.name}")
+	ruleNameOutput, err := a.Stack.k8sPrometheusRuleName(ctx, constants.MonitoringNamespace)
 	if err != nil {
 		return fmt.Errorf("failed to get PrometheusRule name: %w", err)
 	}
@@ -361,12 +356,11 @@ func (a *AlertCustomization) UpdatePrometheusRule(ctx context.Context, ruleName,
 	}
 
 	// Get all alert names to find the index of the target rule
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", constants.MonitoringNamespace, "-o", "jsonpath={.items[0].spec.groups[0].rules[*].alert}")
+	alertNames, err := a.Stack.k8sPrometheusRuleAlertNames(ctx, constants.MonitoringNamespace)
 	if err != nil {
 		return fmt.Errorf("failed to get PrometheusRule alerts: %w", err)
 	}
 
-	alertNames := strings.Fields(output)
 	targetIndex := -1
 
 	for i, alertName := range alertNames {
@@ -401,7 +395,7 @@ func (a *AlertCustomization) UpdatePrometheusRule(ctx context.Context, ruleName,
 	}
 
 	// Apply the JSON patch
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "patch", "prometheusrule", ruleNameOutput, "-n", constants.MonitoringNamespace, "--type=json", "-p", patchData); err != nil {
+	if err := a.Stack.k8sPatchPrometheusRuleJSON(ctx, ruleNameOutput, constants.MonitoringNamespace, []byte(patchData)); err != nil {
 		return fmt.Errorf("failed to apply updated PrometheusRule: %w", err)
 	}
 
@@ -508,7 +502,7 @@ func (a *AlertCustomization) UpdateEmailConfig(ctx context.Context, smtpServer, 
 	}
 
 	// Get Grafana URL for templates by finding the actual Helm release
-	helmReleaseOutput, _ := utils.ExecuteCommand(ctx, "kubectl", "get", "ingress", "-n", constants.MonitoringNamespace, "-o", "jsonpath={.items[0].metadata.name}")
+	helmReleaseOutput, _ := a.Stack.k8sFirstIngressName(ctx, constants.MonitoringNamespace)
 
 	// Extract Helm release name from ingress name (remove -grafana suffix)
 	helmReleaseName := strings.TrimSuffix(helmReleaseOutput, "-grafana")
@@ -786,27 +780,14 @@ func (a *AlertCustomization) applyAlertManagerConfig(ctx context.Context, config
 	encodedConfig := base64.StdEncoding.EncodeToString([]byte(configYAML))
 
 	// Update the AlertManager configuration secret
-	patchCmd := []string{
-		"patch", "secret", "alertmanager-config",
-		"-n", constants.MonitoringNamespace,
-		"--type", "merge",
-		"-p", fmt.Sprintf("{\"data\":{\"alertmanager.yaml\":\"%s\"}}", encodedConfig),
-	}
-
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", patchCmd...); err != nil {
+	patch := []byte(fmt.Sprintf("{\"data\":{\"alertmanager.yaml\":\"%s\"}}", encodedConfig))
+	if err := a.Stack.k8sPatchSecretMerge(ctx, "alertmanager-config", constants.MonitoringNamespace, patch); err != nil {
 		return fmt.Errorf("failed to patch AlertManager config secret: %w", err)
 	}
 
 	// Restart AlertManager pod to apply the new configuration
 	// This ensures the updated config is loaded immediately without waiting for auto-reload
-	deleteCmd := []string{
-		"delete", "pod",
-		"-n", constants.MonitoringNamespace,
-		"-l", "app.kubernetes.io/name=alertmanager",
-		"--ignore-not-found=true",
-	}
-
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", deleteCmd...); err != nil {
+	if err := a.Stack.k8sDeletePodsByLabel(ctx, constants.MonitoringNamespace, "app.kubernetes.io/name=alertmanager"); err != nil {
 		return fmt.Errorf("failed to restart AlertManager pod: %w", err)
 	}
 
@@ -878,12 +859,11 @@ func (a *AlertCustomization) GetTelegramConfiguration(config string) types.Teleg
 // GetCurrentRuleValue gets the current value of a rule from the configuration
 func (a *AlertCustomization) GetCurrentRuleValue(ctx context.Context, ruleName string) string {
 	// Get all alert names and expressions from the PrometheusRule
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", constants.MonitoringNamespace, "-o", "jsonpath={.items[0].spec.groups[0].rules[*].alert}")
+	alertNames, err := a.Stack.k8sPrometheusRuleAlertNames(ctx, constants.MonitoringNamespace)
 	if err != nil {
 		return ""
 	}
 
-	alertNames := strings.Fields(output)
 	if len(alertNames) == 0 {
 		return ""
 	}
@@ -902,7 +882,7 @@ func (a *AlertCustomization) GetCurrentRuleValue(ctx context.Context, ruleName s
 	}
 
 	// Get the expression for the target rule
-	exprOutput, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", constants.MonitoringNamespace, "-o", fmt.Sprintf("jsonpath={.items[0].spec.groups[0].rules[%d].expr}", targetIndex))
+	exprOutput, err := a.Stack.k8sPrometheusRuleAlertExpr(ctx, constants.MonitoringNamespace, targetIndex)
 	if err != nil {
 		return ""
 	}
@@ -972,13 +952,12 @@ func (a *AlertCustomization) GetCurrentRuleValue(ctx context.Context, ruleName s
 // IsRuleEnabled checks if a specific rule is currently enabled
 func (a *AlertCustomization) IsRuleEnabled(ctx context.Context, ruleName string) (bool, error) {
 	// Get all alert names from the PrometheusRule
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "prometheusrule", "-n", constants.MonitoringNamespace, "-o", "jsonpath={.items[0].spec.groups[0].rules[*].alert}")
+	alertNames, err := a.Stack.k8sPrometheusRuleAlertNames(ctx, constants.MonitoringNamespace)
 	if err != nil {
 		return false, fmt.Errorf("failed to get PrometheusRule alerts: %w", err)
 	}
 
-	// Split the output and check if the rule name exists
-	alertNames := strings.Fields(output)
+	// Check if the rule name exists
 	for _, alertName := range alertNames {
 		if alertName == ruleName {
 			return true, nil

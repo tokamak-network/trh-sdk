@@ -131,6 +131,9 @@ type Config struct {
 	// AWS config
 	AWS *AWSConfig `json:"aws,omitempty"`
 
+	// DigitalOcean config
+	DigitalOcean *DigitalOceanConfig `json:"digitalocean,omitempty"`
+
 	// K8s config
 	K8s *K8sConfig `json:"k8s,omitempty"`
 

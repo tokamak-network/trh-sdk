@@ -140,7 +140,7 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, inputs *UpdateNetworkIn
 	}
 
 	// Step 3.3. Update the network
-	helmReleases, err := utils.GetHelmReleases(ctx, t.deployConfig.K8s.Namespace)
+	helmReleases, err := t.helmList(ctx, t.deployConfig.K8s.Namespace)
 	if err != nil {
 		t.logger.Error("Error getting helm releases:", "err", err)
 		return err
@@ -165,17 +165,8 @@ func (t *ThanosStack) UpdateNetwork(ctx context.Context, inputs *UpdateNetworkIn
 			continue
 		}
 		// Update the helm release
-		output, err := utils.ExecuteCommand(ctx, "helm", []string{
-			"upgrade",
-			release,
-			chartPath,
-			"--values",
-			fileValuesPath,
-			"--namespace",
-			namespace,
-		}...)
-		if err != nil {
-			t.logger.Error("Error updating helm release", "release", release, "err", err, "output", output)
+		if err := t.helmUpgradeWithFiles(ctx, release, chartPath, namespace, []string{fileValuesPath}); err != nil {
+			t.logger.Error("Error updating helm release", "release", release, "err", err)
 			return err
 		}
 	}

@@ -18,6 +18,9 @@ func (t *ThanosStack) Destroy(ctx context.Context) error {
 	case constants.LocalDevnet:
 		return t.destroyDevnet(ctx)
 	case constants.Testnet, constants.Mainnet:
+		if t.doProfile != nil {
+			return t.destroyInfraOnDigitalOcean(ctx)
+		}
 		return t.destroyInfraOnAWS(ctx)
 	}
 	return nil
@@ -55,7 +58,7 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 		t.logger.Warnf("Failed to cleanup unused backup resources: %v", err)
 	}
 
-	helmReleases, err := utils.GetHelmReleases(ctx, namespace)
+	helmReleases, err := t.helmList(ctx, namespace)
 	if err != nil {
 		t.logger.Warnf("Failed to retrieve Helm releases: %v. Continuing without uninstalling Helm releases.", err)
 		helmReleases = []string{} // Continue with empty list
@@ -66,8 +69,7 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 		for _, release := range helmReleases {
 			if strings.Contains(release, namespace) || strings.Contains(release, "op-bridge") || strings.Contains(release, "block-explorer") || strings.Contains(release, constants.MonitoringNamespace) {
 				t.logger.Infof("Uninstalling Helm release: %s in namespace: %s...", release, namespace)
-				_, err := utils.ExecuteCommand(ctx, "helm", "uninstall", release, "--namespace", namespace)
-				if err != nil {
+				if err := t.helmUninstall(ctx, release, namespace); err != nil {
 					t.logger.Warnf("Failed to uninstall Helm release %s in namespace %s: %v. Continuing with other releases.", release, namespace, err)
 					failedReleases = append(failedReleases, release)
 				}
@@ -109,7 +111,7 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 	if t.deployConfig.AWS != nil {
 		if efsID, detectErr := utils.DetectEFSId(ctx, namespace); detectErr == nil && efsID != "" {
 			t.logger.Infof("Deleting EFS mount targets for %s before terraform destroy...", efsID)
-			if mtErr := backup.DeleteEFSMountTargets(ctx, t.logger, t.deployConfig.AWS.Region, efsID); mtErr != nil {
+			if mtErr := backup.DeleteEFSMountTargets(ctx, t.awsRunner, t.logger, t.deployConfig.AWS.Region, efsID); mtErr != nil {
 				t.logger.Warnf("Failed to delete EFS mount targets: %v. Continuing with destroy.", mtErr)
 			} else {
 				t.logger.Info("EFS mount targets deleted, waiting for cleanup...")
@@ -140,5 +142,68 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 	}
 
 	t.logger.Info("The chain has been destroyed successfully!")
+	return nil
+}
+
+func (t *ThanosStack) destroyInfraOnDigitalOcean(ctx context.Context) error {
+	if t.doProfile == nil {
+		return fmt.Errorf("DigitalOcean profile is not set")
+	}
+
+	doConfig := t.doProfile.Config
+	namespace := ""
+	if t.deployConfig.K8s != nil {
+		namespace = t.deployConfig.K8s.Namespace
+	}
+
+	// Uninstall Helm releases
+	helmReleases, err := t.helmList(ctx, namespace)
+	if err != nil {
+		t.logger.Warnf("Failed to retrieve Helm releases: %v. Continuing.", err)
+		helmReleases = []string{}
+	}
+
+	for _, release := range helmReleases {
+		if strings.Contains(release, namespace) || strings.Contains(release, "op-bridge") || strings.Contains(release, "block-explorer") {
+			t.logger.Infof("Uninstalling Helm release: %s in namespace: %s...", release, namespace)
+			if err := t.helmUninstall(ctx, release, namespace); err != nil {
+				t.logger.Warnf("Failed to uninstall Helm release %s: %v. Continuing.", release, err)
+			}
+		}
+	}
+
+	// Delete K8s namespace
+	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	if err := t.tryToDeleteK8sNamespace(ctxTimeout, namespace); err != nil {
+		t.logger.Error("Failed to delete namespace", "namespace", namespace, "err", err)
+		return err
+	}
+	t.logger.Info("✅ Namespace destroyed successfully!")
+
+	// Terraform destroy — env vars are passed directly to the process, not embedded in shell args.
+	// AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY authenticate the S3 backend to read state from DO Spaces.
+	thanosStackDir := fmt.Sprintf("%s/terraform/digitalocean/thanos-stack", t.deploymentPath)
+	destroyEnv := []string{
+		"AWS_ACCESS_KEY_ID=" + doConfig.SpacesAccessKey,
+		"AWS_SECRET_ACCESS_KEY=" + doConfig.SpacesSecretKey,
+		"TF_VAR_do_token=" + doConfig.Token,
+		"TF_VAR_do_region=" + doConfig.Region,
+		"TF_VAR_namespace=" + namespace,
+	}
+	if err := t.tfDestroy(ctx, thanosStackDir, destroyEnv); err != nil {
+		t.logger.Error("Error destroying DigitalOcean infrastructure", "err", err)
+		return err
+	}
+
+	t.deployConfig.K8s = nil
+	t.deployConfig.ChainName = ""
+	t.deployConfig.DigitalOcean = nil
+	if err := t.deployConfig.WriteToJSONFile(t.deploymentPath); err != nil {
+		t.logger.Warnf("Failed to write the updated config: %v.", err)
+	}
+
+	t.logger.Info("✅ DigitalOcean chain destroyed successfully!")
 	return nil
 }

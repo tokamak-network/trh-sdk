@@ -78,12 +78,25 @@ The tokamak rollup hub SDK allows anyone to quickly deploy customized and autono
 ## Testnet/Mainnet deployment
 
 ### Prerequisites
+
+#### AWS (default)
 - L1 PRC URL (You can can get it from [Alchemy](https://www.alchemy.com/), [Infura](https://infura.io/), [QuickNode](https://www.quicknode.com/), etc.)
 - Beacon Chain RPC URL (You can can get it from [QuickNode](https://www.quicknode.com/))
 - Prepare AWS credentials & configuration to access AWS EKS.
   - [What is IAM?](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) (\*_Note: This IAM user has to have the following policies_)
     - `arn:aws:iam::aws:policy/aws-service-role/AmazonEKSServiceRolePolicy`
   - [How to create aws access key and secret key for a IAM user](https://repost.aws/knowledge-center/create-access-key).
+- Prepare seed phrase for the L1 account.
+
+#### DigitalOcean
+- L1 RPC URL and Beacon Chain RPC URL (same as above)
+- **DigitalOcean API Token** — for DOKS cluster and resource provisioning.
+  Get it from: [DigitalOcean API settings](https://cloud.digitalocean.com/account/api/tokens)
+- **Spaces HMAC credentials** — for Terraform state storage (S3-compatible).
+  These are **separate** from the API token. Get them from: DigitalOcean → API → Spaces Keys.
+  - `Spaces Access Key` (looks like an AWS access key)
+  - `Spaces Secret Key` (entered masked at deploy time; **never saved to disk**)
+- [`doctl`](https://docs.digitalocean.com/reference/doctl/how-to/install/) CLI installed and authenticated.
 - Prepare seed phrase for the L1 account.
 
 ### Deploy L1 contracts
@@ -172,7 +185,9 @@ To terminate the network, we can run the command looks like:
 trh-sdk destroy
 ```
 
-Same as the deploy infra command, this command looks the config files located at the current directory to choose the network and stack
+Same as the deploy infra command, this command looks the config files located at the current directory to choose the network and stack.
+
+> **DigitalOcean note**: The Spaces Secret Key is never saved to disk. You will be prompted to re-enter it when running `trh-sdk destroy`.
 
 ### Install the plugin
 ```bash
@@ -199,6 +214,100 @@ After deploying the chain successfully, we can get the chain information by:
 ```bash
 trh-sdk info
 ```
+
+## Native Runner Architecture
+
+TRH SDK uses native Go libraries instead of shelling out to external CLI tools. This means **you do not need to pre-install kubectl, helm, aws CLI, or doctl** to run `trh-sdk deploy`.
+
+### How it works
+
+| Tool | Replaced by | Call sites eliminated |
+|------|------------|----------------------|
+| `kubectl` | `k8s.io/client-go` | 114 |
+| `helm` | `helm.sh/helm/v3` | 21 |
+| `aws` CLI | `aws-sdk-go-v2` | 78 |
+| `terraform` | `hashicorp/terraform-exec` | 6 |
+| `doctl` | `digitalocean/godo` | 4 |
+
+### Performance
+
+Native library calls are **~11,000× faster** than fork+exec shell-outs:
+
+| Method | Latency / call | Memory / call |
+|--------|---------------|---------------|
+| Shell-out | ~1.4 ms | ~12 KB |
+| Native | ~0.13 µs | ~340 B |
+
+### Fallback to legacy mode
+
+If you need the old shell-out behaviour for debugging:
+
+```bash
+TRHS_LEGACY=1 trh-sdk deploy
+```
+
+For detailed analysis and before/after code comparisons, see [docs/runner-comparison.md](docs/runner-comparison.md).
+
+---
+
+## Testing
+
+### Unit tests
+
+```bash
+go test ./...
+```
+
+No external tools (kubectl, helm, etc.) required — all runners use mock interfaces in tests.
+
+### Integration tests (requires kind)
+
+Integration tests run against a real local Kubernetes cluster via [kind](https://kind.sigs.k8s.io/).
+
+```bash
+# 1. Install kind (macOS)
+brew install kind
+
+# 2. Create a test cluster
+kind create cluster --name trh-test --kubeconfig /tmp/trh-test.kubeconfig
+
+# 3. Run integration tests
+KUBECONFIG=/tmp/trh-test.kubeconfig \
+go test -v -tags=integration -timeout=120s ./pkg/runner/
+```
+
+### Benchmarks
+
+```bash
+# Compile test binary first (avoids output filtering by shell hooks)
+go test -c -o /tmp/runner.test ./pkg/runner/
+
+# Run benchmarks with memory stats
+/tmp/runner.test -test.bench=. -test.benchmem
+```
+
+### Log streaming demo
+
+Demonstrates native vs shell-out log streaming without a real cluster:
+
+```bash
+bash demo/run-log-streaming.sh
+```
+
+---
+
+## Known Limitations
+
+See [TODO.md](TODO.md) for the full list. Key items:
+
+| # | Issue | Impact |
+|---|-------|--------|
+| TODO-1 | `terraform` auto-downloaded at runtime if not in PATH | Air-gap deployments may fail |
+| TODO-2 | Helm `context.Cancel()` stops Go goroutine but not internal Helm action | Partial deploy state possible on timeout |
+| TODO-3 | `extraArgs` not forwarded to `HelmRunner` | Native mode silently ignores extra Helm flags |
+| TODO-5 | `kubectl rollout` not in `K8sRunner` interface | Some backup paths still shell out |
+
+---
 
 ## Monitoring Plugin
 

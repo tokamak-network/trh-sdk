@@ -89,7 +89,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		return "", err
 	}
 
-	chainReleaseName, err := utils.FilterHelmReleases(ctx, namespace, namespace)
+	chainReleaseName, err := t.helmFilterReleases(ctx, namespace, namespace)
 	if err != nil {
 		t.logger.Error("Error filtering helm releases", "err", err)
 		return "", err
@@ -216,15 +216,8 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	// Install backend first
 	blockExplorerBackendReleaseName := fmt.Sprintf("%s-%d", "block-explorer-be", time.Now().Unix())
 	fileValue := fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack/block-explorer-value.yaml", t.deploymentPath)
-	_, err = utils.ExecuteCommand(ctx, "helm", []string{
-		"install",
-		blockExplorerBackendReleaseName,
-		fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack", t.deploymentPath),
-		"--values",
-		fileValue,
-		"--namespace",
-		namespace,
-	}...)
+	chartPath := fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack", t.deploymentPath)
+	err = t.helmInstallWithFiles(ctx, blockExplorerBackendReleaseName, chartPath, namespace, []string{fileValue})
 	if err != nil {
 		t.logger.Error("Error installing block explorer backend component", "err", err)
 		return "", err
@@ -289,15 +282,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	}
 
 	blockExplorerFrontendReleaseName := fmt.Sprintf("%s-%d", "block-explorer-fe", time.Now().Unix())
-	_, err = utils.ExecuteCommand(ctx, "helm", []string{
-		"install",
-		blockExplorerFrontendReleaseName,
-		fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack", t.deploymentPath),
-		"--values",
-		fileValue,
-		"--namespace",
-		namespace,
-	}...)
+	err = t.helmInstallWithFiles(ctx, blockExplorerFrontendReleaseName, chartPath, namespace, []string{fileValue})
 	if err != nil {
 		t.logger.Error("Error installing block explorer front-end component", "err", err)
 		return "", err
@@ -324,20 +309,14 @@ func (t *ThanosStack) UninstallBlockExplorer(ctx context.Context) error {
 	)
 
 	// 1. Uninstall helm charts
-	releases, err := utils.FilterHelmReleases(ctx, namespace, "block-explorer")
+	releases, err := t.helmFilterReleases(ctx, namespace, "block-explorer")
 	if err != nil {
-		t.logger.Error("Error to filter helm releases", "err", err)
+		t.logger.Error("Error filtering helm releases", "err", err)
 		return err
 	}
 
 	for _, release := range releases {
-		_, err = utils.ExecuteCommand(ctx, "helm", []string{
-			"uninstall",
-			release,
-			"--namespace",
-			namespace,
-		}...)
-		if err != nil {
+		if err = t.helmUninstall(ctx, release, namespace); err != nil {
 			t.logger.Error("❌ Error uninstalling op-bridge helm chart", "err", err)
 			return err
 		}

@@ -11,8 +11,9 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/backup"
+	awsbackup "github.com/aws/aws-sdk-go-v2/service/backup"
 	"github.com/aws/aws-sdk-go-v2/service/efs"
+	"github.com/tokamak-network/trh-sdk/pkg/runner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
@@ -20,6 +21,7 @@ import (
 // InteractiveRestoreWithSelection displays recovery points and lets user select one
 func InteractiveRestoreWithSelection(
 	ctx context.Context,
+	ar runner.AWSRunner,
 	l *zap.SugaredLogger,
 	region, namespace string,
 	attachWorkloads bool,
@@ -39,7 +41,7 @@ func InteractiveRestoreWithSelection(
 	resourceArn := utils.BuildEFSArn(region, accountID, efsID)
 
 	// List recovery points
-	rps, err := ListRecoveryPoints(ctx, region, resourceArn, "20")
+	rps, err := ListRecoveryPoints(ctx, ar, region, resourceArn, "20")
 	if err != nil {
 		return fmt.Errorf("failed to list recovery points: %w", err)
 	}
@@ -101,6 +103,7 @@ func InteractiveRestoreWithSelection(
 // DirectRestore executes restore from a specific recovery point ARN without user interaction
 func DirectRestore(
 	ctx context.Context,
+	ar runner.AWSRunner,
 	l *zap.SugaredLogger,
 	region, namespace string,
 	recoveryPointArn string,
@@ -150,7 +153,7 @@ func DirectRestore(
 	}
 
 	// Step 3: Tag EFS
-	if err := TagEFSWithName(ctx, region, newEfsID, namespace); err != nil {
+	if err := TagEFSWithName(ctx, ar, region, newEfsID, namespace); err != nil {
 		l.Warnf("Failed to tag EFS %s with Name=%s: %v", newEfsID, namespace, err)
 	} else {
 		l.Infof("✅ Tagged EFS %s with Name=%s", newEfsID, namespace)
@@ -226,6 +229,7 @@ func DirectRestore(
 // - Optionally attach the restored EFS to workloads
 func InteractiveRestore(
 	ctx context.Context,
+	ar runner.AWSRunner,
 	l *zap.SugaredLogger,
 	region, namespace string,
 	restoreEFS func(context.Context, string) (string, error),
@@ -243,39 +247,55 @@ func InteractiveRestore(
 	}
 	resourceArn := utils.BuildEFSArn(region, accountID, efsID)
 
-	query := "reverse(sort_by(RecoveryPoints,&CreationDate))[:20].{RecoveryPointArn:RecoveryPointArn,Created:CreationDate,Expiry:ExpiryDate,Status:Status,Vault:BackupVaultName}"
-	out, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-recovery-points-by-resource",
-		"--region", region,
-		"--resource-arn", resourceArn,
-		"--query", query,
-		"--output", "json",
-	)
-	if err != nil {
-		return fmt.Errorf("failed to list recovery points: %w", err)
-	}
-	out = strings.TrimSpace(out)
-	if out == "" || out == "[]" {
-		return fmt.Errorf("no recovery points found for %s", resourceArn)
-	}
-	var allItems []struct {
+	type rpItem struct {
 		RecoveryPointArn string `json:"RecoveryPointArn"`
 		Created          string `json:"Created"`
 		Expiry           string `json:"Expiry"`
 		Status           string `json:"Status"`
 		Vault            string `json:"Vault"`
 	}
-	if err := json.Unmarshal([]byte(out), &allItems); err != nil {
-		return fmt.Errorf("failed to parse recovery points: %w", err)
+
+	var allItems []rpItem
+	if ar != nil {
+		rps, err := ar.BackupListRecoveryPointsByResource(ctx, region, resourceArn)
+		if err != nil {
+			return fmt.Errorf("failed to list recovery points: %w", err)
+		}
+		for _, rp := range rps {
+			expiry := ""
+			if rp.ExpiryDate != nil {
+				expiry = rp.ExpiryDate.Format(time.RFC3339)
+			}
+			allItems = append(allItems, rpItem{
+				RecoveryPointArn: rp.RecoveryPointArn,
+				Created:          rp.CreationDate.Format(time.RFC3339),
+				Expiry:           expiry,
+				Status:           rp.Status,
+				Vault:            rp.BackupVaultName,
+			})
+		}
+	} else {
+		query := "reverse(sort_by(RecoveryPoints,&CreationDate))[:20].{RecoveryPointArn:RecoveryPointArn,Created:CreationDate,Expiry:ExpiryDate,Status:Status,Vault:BackupVaultName}"
+		out, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-recovery-points-by-resource",
+			"--region", region,
+			"--resource-arn", resourceArn,
+			"--query", query,
+			"--output", "json",
+		)
+		if err != nil {
+			return fmt.Errorf("failed to list recovery points: %w", err)
+		}
+		out = strings.TrimSpace(out)
+		if out == "" || out == "[]" {
+			return fmt.Errorf("no recovery points found for %s", resourceArn)
+		}
+		if err := json.Unmarshal([]byte(out), &allItems); err != nil {
+			return fmt.Errorf("failed to parse recovery points: %w", err)
+		}
 	}
 
 	// Filter only COMPLETED recovery points
-	var items []struct {
-		RecoveryPointArn string `json:"RecoveryPointArn"`
-		Created          string `json:"Created"`
-		Expiry           string `json:"Expiry"`
-		Status           string `json:"Status"`
-		Vault            string `json:"Vault"`
-	}
+	var items []rpItem
 	for _, item := range allItems {
 		if strings.ToUpper(item.Status) == "COMPLETED" {
 			items = append(items, item)
@@ -335,7 +355,7 @@ func InteractiveRestore(
 	l.Infof("✅ Restore completed. New EFS: %s", newEfsID)
 
 	// Tag restored EFS with Name=<namespace> for easier identification
-	if err := TagEFSWithName(ctx, region, newEfsID, namespace); err != nil {
+	if err := TagEFSWithName(ctx, ar, region, newEfsID, namespace); err != nil {
 		l.Warnf("Failed to tag EFS %s with Name=%s: %v", newEfsID, namespace, err)
 	} else {
 		l.Infof("✅ Tagged EFS %s with Name=%s", newEfsID, namespace)
@@ -378,10 +398,54 @@ func InteractiveRestore(
 }
 
 // RestoreEFS starts restore job and returns the job ID
-func RestoreEFS(ctx context.Context, region string, recoveryPointArn string, getIAMRole func(context.Context) (string, error)) (string, error) {
+func RestoreEFS(ctx context.Context, ar runner.AWSRunner, region string, recoveryPointArn string, getIAMRole func(context.Context) (string, error)) (string, error) {
 	if !strings.Contains(recoveryPointArn, "arn:aws:backup:") {
 		return "", fmt.Errorf("invalid recovery point ARN format: %s", recoveryPointArn)
 	}
+
+	if ar != nil {
+		// Use AWSRunner to find the vault containing the recovery point
+		vaults, err := ar.BackupListBackupVaults(ctx, region)
+		if err != nil {
+			return "", fmt.Errorf("failed to list backup vaults: %w", err)
+		}
+		var foundVault string
+		for _, v := range vaults {
+			if err := ar.BackupDescribeRecoveryPoint(ctx, region, v.BackupVaultName, recoveryPointArn); err == nil {
+				foundVault = v.BackupVaultName
+				break
+			}
+		}
+		if foundVault == "" {
+			return "", fmt.Errorf("recovery point not found or not accessible")
+		}
+
+		iamRoleArn, err := getIAMRole(ctx)
+		if err != nil {
+			return "", fmt.Errorf("failed to get IAM role for restore: %w", err)
+		}
+
+		fsID := fmt.Sprintf("fs-restored-%d", time.Now().Unix())
+		creationToken := fmt.Sprintf("restore-token-%d", time.Now().Unix())
+		kmsKeyId := "alias/aws/elasticfilesystem"
+
+		metadata := map[string]string{
+			"file-system-id":  fsID,
+			"newfilesystem":   "true",
+			"creationtoken":   creationToken,
+			"kmskeyid":        kmsKeyId,
+			"performancemode": "generalPurpose",
+			"encrypted":       "true",
+		}
+
+		jobId, err := ar.BackupStartRestoreJob(ctx, region, recoveryPointArn, iamRoleArn, metadata)
+		if err != nil {
+			return "", fmt.Errorf("failed to start restore job: %w", err)
+		}
+		return jobId, nil
+	}
+
+	// Fallback: shellout
 	vaultsOutput, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-backup-vaults",
 		"--region", region,
 		"--query", "BackupVaultList[].BackupVaultName",
@@ -415,12 +479,8 @@ func RestoreEFS(ctx context.Context, region string, recoveryPointArn string, get
 	if err != nil {
 		return "", fmt.Errorf("failed to get IAM role for restore: %w", err)
 	}
-	// For EFS restore, we need to provide file-system-id, newfilesystem flag, creationtoken, and kmskeyid
-	// Generate a unique filesystem ID and creation token using current timestamp
 	fsID := fmt.Sprintf("fs-restored-%d", time.Now().Unix())
 	creationToken := fmt.Sprintf("restore-token-%d", time.Now().Unix())
-
-	// Use AWS managed EFS encryption key (always available in all AWS accounts)
 	kmsKeyId := "alias/aws/elasticfilesystem"
 
 	meta := fmt.Sprintf(`{"file-system-id":"%s","newfilesystem":"true","creationtoken":"%s","kmskeyid":"%s","performancemode":"generalPurpose","encrypted":"true"}`, fsID, creationToken, kmsKeyId)
@@ -440,12 +500,12 @@ func RestoreEFS(ctx context.Context, region string, recoveryPointArn string, get
 }
 
 // MonitorEFSRestoreJob monitors the status of a restore job
-func MonitorEFSRestoreJob(ctx context.Context, l *zap.SugaredLogger, region string, jobId string, progressReporter func(string, float64)) (string, error) {
+func MonitorEFSRestoreJob(ctx context.Context, ar runner.AWSRunner, l *zap.SugaredLogger, region string, jobId string, progressReporter func(string, float64)) (string, error) {
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
 	if err != nil {
 		return "", fmt.Errorf("failed to load AWS config: %w", err)
 	}
-	client := backup.NewFromConfig(cfg)
+	client := awsbackup.NewFromConfig(cfg)
 	efsClient := efs.NewFromConfig(cfg)
 
 	l.Infof("⏳ Monitoring restore job %s...", jobId)
@@ -459,7 +519,7 @@ func MonitorEFSRestoreJob(ctx context.Context, l *zap.SugaredLogger, region stri
 		case <-ctx.Done():
 			return "", ctx.Err()
 		case <-ticker.C:
-			resp, err := client.DescribeRestoreJob(ctx, &backup.DescribeRestoreJobInput{
+			resp, err := client.DescribeRestoreJob(ctx, &awsbackup.DescribeRestoreJobInput{
 				RestoreJobId: aws.String(jobId),
 			})
 			if err != nil {
@@ -506,7 +566,7 @@ func MonitorEFSRestoreJob(ctx context.Context, l *zap.SugaredLogger, region stri
 				}
 
 				// Set EFS throughput mode to elastic for better performance
-				if err := SetEFSThroughputElastic(ctx, region, newFsID); err != nil {
+				if err := SetEFSThroughputElastic(ctx, ar, region, newFsID); err != nil {
 					l.Warnf("Failed to set EFS ThroughputMode to elastic: %v", err)
 				} else {
 					l.Info("✅ ThroughputMode set to elastic")
@@ -529,16 +589,25 @@ func MonitorEFSRestoreJob(ctx context.Context, l *zap.SugaredLogger, region stri
 }
 
 // HandleEFSRestoreCompletion extracts new EFS id and sets throughput
-func HandleEFSRestoreCompletion(ctx context.Context, l *zap.SugaredLogger, region string, jobId string, setThroughput func(context.Context, string, string) error) (string, error) {
-	createdArn, err := utils.ExecuteCommand(ctx, "aws", "backup", "describe-restore-job",
-		"--region", region,
-		"--restore-job-id", jobId,
-		"--query", "CreatedResourceArn",
-		"--output", "text")
-	if err != nil {
-		return "", fmt.Errorf("failed to get created resource ARN: %w", err)
+func HandleEFSRestoreCompletion(ctx context.Context, ar runner.AWSRunner, l *zap.SugaredLogger, region string, jobId string, setThroughput func(context.Context, string, string) error) (string, error) {
+	var createdArn string
+	if ar != nil {
+		status, err := ar.BackupDescribeRestoreJob(ctx, region, jobId)
+		if err != nil {
+			return "", fmt.Errorf("failed to get created resource ARN: %w", err)
+		}
+		createdArn = status.CreatedResourceArn
+	} else {
+		out, err := utils.ExecuteCommand(ctx, "aws", "backup", "describe-restore-job",
+			"--region", region,
+			"--restore-job-id", jobId,
+			"--query", "CreatedResourceArn",
+			"--output", "text")
+		if err != nil {
+			return "", fmt.Errorf("failed to get created resource ARN: %w", err)
+		}
+		createdArn = strings.TrimSpace(out)
 	}
-	createdArn = strings.TrimSpace(createdArn)
 	l.Infof("Restore completed. CreatedResourceArn: %s", createdArn)
 	if !strings.Contains(createdArn, ":file-system/") {
 		return "", nil
@@ -557,7 +626,7 @@ func HandleEFSRestoreCompletion(ctx context.Context, l *zap.SugaredLogger, regio
 }
 
 // GetRestoreIAMRole tries managed and namespace-based roles to restore
-func GetRestoreIAMRole(ctx context.Context, l *zap.SugaredLogger, region, namespace, accountID string) (string, error) {
+func GetRestoreIAMRole(ctx context.Context, ar runner.AWSRunner, l *zap.SugaredLogger, region, namespace, accountID string) (string, error) {
 	namespaceRoleArn := fmt.Sprintf("arn:aws:iam::%s:role/%s-backup-restore-role", accountID, namespace)
 	awsManagedRoles := []string{
 		"AWSBackupDefaultServiceRole",
@@ -566,13 +635,19 @@ func GetRestoreIAMRole(ctx context.Context, l *zap.SugaredLogger, region, namesp
 	for _, roleName := range awsManagedRoles {
 		var roleArn string
 		if roleName == "AWSBackupDefaultServiceRole" {
-			// AWS managed role has /service-role/ path
 			roleArn = fmt.Sprintf("arn:aws:iam::%s:role/service-role/%s", accountID, roleName)
 		} else {
 			roleArn = fmt.Sprintf("arn:aws:iam::%s:role/%s", accountID, roleName)
 		}
-		if _, err := utils.ExecuteCommand(ctx, "aws", "iam", "get-role", "--role-name", roleName); err == nil {
-			return roleArn, nil
+		if ar != nil {
+			exists, err := ar.IAMRoleExists(ctx, roleName)
+			if err == nil && exists {
+				return roleArn, nil
+			}
+		} else {
+			if _, err := utils.ExecuteCommand(ctx, "aws", "iam", "get-role", "--role-name", roleName); err == nil {
+				return roleArn, nil
+			}
 		}
 	}
 	l.Warnf("No suitable IAM role found, using namespace-based role: %s", namespaceRoleArn)
@@ -580,12 +655,36 @@ func GetRestoreIAMRole(ctx context.Context, l *zap.SugaredLogger, region, namesp
 }
 
 // SetEFSThroughputElastic updates an EFS to elastic throughput mode
-func SetEFSThroughputElastic(ctx context.Context, region, fsId string) error {
+func SetEFSThroughputElastic(ctx context.Context, ar runner.AWSRunner, region, fsId string) error {
 	if strings.TrimSpace(fsId) == "" {
 		return fmt.Errorf("empty file system id")
 	}
 
-	// First, check current EFS status and throughput mode
+	if ar != nil {
+		fsList, err := ar.EFSDescribeFileSystems(ctx, region, fsId)
+		if err != nil {
+			return fmt.Errorf("failed to describe EFS %s: %w", fsId, err)
+		}
+		if len(fsList) == 0 {
+			return fmt.Errorf("EFS %s not found", fsId)
+		}
+		fs := fsList[0]
+		if fs.LifeCycleState != "available" {
+			return fmt.Errorf("EFS %s is not in available state (current: %s)", fsId, fs.LifeCycleState)
+		}
+		if fs.ThroughputMode == "elastic" {
+			return nil
+		}
+		if err := ar.EFSUpdateFileSystem(ctx, region, fsId, "elastic"); err != nil {
+			if strings.Contains(err.Error(), "254") || strings.Contains(err.Error(), "rate") {
+				return fmt.Errorf("EFS throughput mode change rate limited (24-hour restriction). EFS %s will remain in %s mode", fsId, fs.ThroughputMode)
+			}
+			return fmt.Errorf("failed to update EFS throughput mode: %w", err)
+		}
+		return nil
+	}
+
+	// Fallback: shellout
 	describeOutput, err := utils.ExecuteCommand(ctx, "aws", "efs", "describe-file-systems",
 		"--region", region,
 		"--file-system-id", fsId,
@@ -603,24 +702,20 @@ func SetEFSThroughputElastic(ctx context.Context, region, fsId string) error {
 		return fmt.Errorf("failed to parse EFS info: %w", err)
 	}
 
-	// Check if EFS is in a valid state for updates
 	if efsInfo.LifeCycleState != "available" {
 		return fmt.Errorf("EFS %s is not in available state (current: %s)", fsId, efsInfo.LifeCycleState)
 	}
 
-	// Check if throughput mode is already elastic
 	if efsInfo.ThroughputMode == "elastic" {
-		return nil // Already in elastic mode, no need to update
+		return nil
 	}
 
-	// Attempt to update throughput mode
 	_, err = utils.ExecuteCommand(ctx, "aws", "efs", "update-file-system",
 		"--region", region,
 		"--file-system-id", fsId,
 		"--throughput-mode", "elastic")
 
 	if err != nil {
-		// Check if it's a rate limiting error (24-hour limit)
 		if strings.Contains(err.Error(), "254") || strings.Contains(err.Error(), "rate") {
 			return fmt.Errorf("EFS throughput mode change rate limited (24-hour restriction). EFS %s will remain in %s mode", fsId, efsInfo.ThroughputMode)
 		}
@@ -631,11 +726,14 @@ func SetEFSThroughputElastic(ctx context.Context, region, fsId string) error {
 }
 
 // TagEFSWithName applies a Name tag to the given EFS file system
-func TagEFSWithName(ctx context.Context, region, fsId, name string) error {
+func TagEFSWithName(ctx context.Context, ar runner.AWSRunner, region, fsId, name string) error {
 	fsId = strings.TrimSpace(fsId)
 	name = strings.TrimSpace(name)
 	if fsId == "" || name == "" {
 		return nil
+	}
+	if ar != nil {
+		return ar.EFSTagResource(ctx, region, fsId, map[string]string{"Name": name})
 	}
 	_, err := utils.ExecuteCommand(ctx, "aws", "efs", "tag-resource",
 		"--region", region,

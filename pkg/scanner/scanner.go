@@ -6,7 +6,19 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"golang.org/x/term"
 )
+
+// ReadPassword reads a secret string from stdin without echoing characters to the terminal.
+func ReadPassword() (string, error) {
+	raw, err := term.ReadPassword(int(os.Stdin.Fd()))
+	if err != nil {
+		return "", err
+	}
+	fmt.Println() // restore newline suppressed by ReadPassword
+	return strings.TrimSpace(string(raw)), nil
+}
 
 func ScanBool(defaultResponse bool) (bool, error) {
 	var response string
