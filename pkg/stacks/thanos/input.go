@@ -1377,7 +1377,7 @@ func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainI
 		l1ChainId                        = l1ChainID
 		l2OutputOracleSubmissionInterval = chainConfiguration.GetL2OutputOracleSubmissionInterval()
 		finalizationPeriods              = chainConfiguration.GetFinalizationPeriodSeconds()
-		enableFraudProof                 = false
+		enableFraudProof                 = deployConfigInputs.EnableFaultProof
 	)
 
 	defaultTemplate := &types.DeployConfigTemplate{
