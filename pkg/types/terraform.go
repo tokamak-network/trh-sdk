@@ -37,6 +37,9 @@ type TerraformEnvConfig struct {
 	EfsBackupDeleteAfterDays int
 	// Fusaka Activation Time
 	TxmgrCellProofTime uint64
+
+	// Fault proof system
+	EnableFaultProof bool
 }
 
 type BlockExplorerEnvs struct {

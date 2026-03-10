@@ -203,6 +203,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		MaxChannelDuration:  chainConfiguration.GetMaxChannelDuration(),
 		TxmgrCellProofTime:  t.deployConfig.TxmgrCellProofTime,
 		PrestateHash:        prestateHash,
+		EnableFaultProof:    t.deployConfig.EnableFraudProof,
 	})
 	if err != nil {
 		t.logger.Error("Error generating Terraform environment configuration", "err", err)
