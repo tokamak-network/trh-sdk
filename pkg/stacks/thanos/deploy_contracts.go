@@ -23,7 +23,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		t.logger.Error("network %s does not require contract deployment, please run `trh-sdk deploy` instead", constants.LocalDevnet)
 		return fmt.Errorf("network %s does not require contract deployment, please run `trh-sdk deploy` instead", constants.LocalDevnet)
 	}
-	if t.network != constants.Testnet && t.network != constants.Mainnet {
+	if t.network != constants.Testnet && t.network != constants.Mainnet && t.network != constants.LocalTestnet {
 		t.logger.Error("network %s does not support", t.network)
 		return fmt.Errorf("network %s does not support", t.network)
 	}
@@ -257,7 +257,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		if !deployContractsConfig.ReuseDeployment {
 			t.logger.Info("Building smart contracts...")
 			scriptsDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "scripts")
-			err = utils.ExecuteCommandStreamInDir(ctx, t.logger, scriptsDir, "bash", "./start-deploy.sh", "build")
+			err = utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, scriptsDir, []string{"GOMODCACHE=/tmp/gomodcache"}, "bash", "./start-deploy.sh", "build")
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
 					t.logger.Error("Deployment canceled")
