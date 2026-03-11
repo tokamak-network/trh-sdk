@@ -298,6 +298,37 @@ func NewThanosStack(
 	return stack, nil
 }
 
+// NewLocalTestnetThanosStack creates a ThanosStack for a local kind-cluster deployment.
+// It reads settings.json when available (nil config is tolerated for fresh deployments),
+// wires native runners with the caller-supplied kubeconfigPath, and skips all AWS/DO setup.
+func NewLocalTestnetThanosStack(
+	ctx context.Context,
+	l *zap.SugaredLogger,
+	deploymentPath string,
+	kubeconfigPath string,
+) (*ThanosStack, error) {
+	l.Infof("Deployment Path: %s", deploymentPath)
+	l.Infof("Network: LocalTestnet")
+
+	config, err := utils.ReadConfigFromJSONFile(deploymentPath)
+	if err != nil {
+		l.Error("Error reading settings.json", "err", err)
+		return nil, err
+	}
+
+	stack := &ThanosStack{
+		network:        "LocalTestnet",
+		usePromptInput: false,
+		logger:         l,
+		deploymentPath: deploymentPath,
+		deployConfig:   config,
+	}
+
+	injectRunners(stack, l, kubeconfigPath)
+
+	return stack, nil
+}
+
 // injectRunners initialises native runners and injects them into stack.
 // On failure it logs a warning and leaves all runner fields nil so that
 // each helper method falls back to shell-out transparently.
