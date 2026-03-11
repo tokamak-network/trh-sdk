@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -16,26 +17,40 @@ import (
 	"helm.sh/helm/v3/pkg/cli/values"
 	"helm.sh/helm/v3/pkg/downloader"
 	"helm.sh/helm/v3/pkg/getter"
+	"helm.sh/helm/v3/pkg/kube"
 	"helm.sh/helm/v3/pkg/repo"
+	"helm.sh/helm/v3/pkg/storage/driver"
+	genericclioptions "k8s.io/cli-runtime/pkg/genericclioptions"
 )
 
 // NativeHelmRunner implements HelmRunner using the helm.sh/helm/v3 library.
 // No helm binary is required.
 type NativeHelmRunner struct {
-	settings *cli.EnvSettings
-	repoMu   sync.Mutex // guards concurrent RepoAdd calls (TOCTOU prevention)
+	settings       *cli.EnvSettings
+	kubeconfigPath string // explicit kubeconfig path; overrides default ~/.kube/config
+	repoMu         sync.Mutex // guards concurrent RepoAdd calls (TOCTOU prevention)
 }
 
 // newNativeHelmRunner creates a NativeHelmRunner backed by the Helm SDK.
-func newNativeHelmRunner() (*NativeHelmRunner, error) {
+// kubeconfigPath overrides the default ~/.kube/config when non-empty.
+func newNativeHelmRunner(kubeconfigPath string) (*NativeHelmRunner, error) {
 	settings := cli.New()
-	return &NativeHelmRunner{settings: settings}, nil
+	return &NativeHelmRunner{settings: settings, kubeconfigPath: kubeconfigPath}, nil
 }
 
 // actionConfig builds a per-namespace action.Configuration.
+// When kubeconfigPath is set, kube.GetConfig is used directly so the path
+// takes effect immediately (cli.EnvSettings.KubeConfig is only read at New()
+// time and does not retroactively update the internal RESTClientGetter).
 func (r *NativeHelmRunner) actionConfig(namespace string) (*action.Configuration, error) {
 	cfg := new(action.Configuration)
-	if err := cfg.Init(r.settings.RESTClientGetter(), namespace, os.Getenv("HELM_DRIVER"), log.Printf); err != nil {
+	var getter genericclioptions.RESTClientGetter
+	if r.kubeconfigPath != "" {
+		getter = kube.GetConfig(r.kubeconfigPath, "", namespace)
+	} else {
+		getter = r.settings.RESTClientGetter()
+	}
+	if err := cfg.Init(getter, namespace, os.Getenv("HELM_DRIVER"), log.Printf); err != nil {
 		return nil, fmt.Errorf("helm action config: %w", err)
 	}
 	return cfg, nil
@@ -94,36 +109,46 @@ func (r *NativeHelmRunner) Install(ctx context.Context, release, chartRef, names
 }
 
 // Upgrade performs helm upgrade --install for a release.
+// In Helm SDK v3, Upgrade.Install is purely informational; the SDK does NOT
+// automatically fall back to Install when the release does not exist.
+// We must detect driver.ErrNoDeployedReleases and retry with action.Install.
 func (r *NativeHelmRunner) Upgrade(ctx context.Context, release, chartRef, namespace string, vals map[string]interface{}) error {
 	cfg, err := r.actionConfig(namespace)
 	if err != nil {
 		return fmt.Errorf("helm upgrade: %w", err)
 	}
 
-	client := action.NewUpgrade(cfg)
-	client.Namespace = namespace
-	client.Install = true
-
 	chartObj, err := r.loadChart(chartRef)
 	if err != nil {
 		return fmt.Errorf("helm upgrade: %w", err)
 	}
 
-	errCh := make(chan error, 1)
+	upClient := action.NewUpgrade(cfg)
+	upClient.Namespace = namespace
+
+	type upgradeResult struct{ err error }
+	resCh := make(chan upgradeResult, 1)
 	go func() {
-		_, runErr := client.RunWithContext(ctx, release, chartObj, vals)
-		errCh <- runErr
+		_, runErr := upClient.RunWithContext(ctx, release, chartObj, vals)
+		resCh <- upgradeResult{runErr}
 	}()
 
+	var upgradeErr error
 	select {
 	case <-ctx.Done():
 		return fmt.Errorf("helm upgrade %s: %w", release, ctx.Err())
-	case err := <-errCh:
-		if err != nil {
-			return fmt.Errorf("helm upgrade %s: %w", release, err)
-		}
-		return nil
+	case res := <-resCh:
+		upgradeErr = res.err
 	}
+
+	// Helm SDK does not implement --install fallback; detect missing release and install.
+	if upgradeErr != nil && errors.Is(upgradeErr, driver.ErrNoDeployedReleases) {
+		return r.Install(ctx, release, chartRef, namespace, vals)
+	}
+	if upgradeErr != nil {
+		return fmt.Errorf("helm upgrade %s: %w", release, upgradeErr)
+	}
+	return nil
 }
 
 // UpgradeWithFiles performs helm upgrade --install using values file paths.
