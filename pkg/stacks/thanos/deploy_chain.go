@@ -419,6 +419,12 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	t.deployConfig.L2RpcUrl = l2RPCUrl
 	t.deployConfig.L1BeaconURL = inputs.L1BeaconURL
 
+	// Deploy post-genesis AA contracts for Gaming/Full presets
+	if err := t.DeployAAContracts(ctx); err != nil {
+		t.logger.Error("Failed to deploy post-genesis AA contracts", "err", err)
+		return err
+	}
+
 	backupEnabled := false
 	if t.network == constants.Mainnet {
 		// Mainnet always has backup enabled

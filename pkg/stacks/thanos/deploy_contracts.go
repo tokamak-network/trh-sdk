@@ -244,6 +244,8 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		t.deployConfig.L1RPCURL = deployContractsConfig.L1RPCurl
 		t.deployConfig.EnableFraudProof = deployContractsConfig.EnableFaultProof
 		t.deployConfig.ChainConfiguration = deployContractsConfig.ChainConfiguration
+		t.deployConfig.Preset = deployContractsConfig.Preset
+		t.deployConfig.FeeToken = deployContractsConfig.FeeToken
 
 		deployConfigFilePath := fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts/deploy-config.json", t.deploymentPath)
 

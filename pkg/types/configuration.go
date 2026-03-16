@@ -155,6 +155,14 @@ type Config struct {
 
 	// Shutdown configuration state (not for storing static addresses)
 	Shutdown *ShutdownConfig `json:"shutdown,omitempty"`
+
+	// Preset and fee token configuration
+	Preset   string `json:"preset,omitempty"`
+	FeeToken string `json:"fee_token,omitempty"` // "TON", "ETH", "USDT", "USDC"
+
+	// Post-genesis AA contract addresses (populated after deployment)
+	MultiTokenPaymasterAddress string `json:"multi_token_paymaster_address,omitempty"`
+	SimplePriceOracleAddress   string `json:"simple_price_oracle_address,omitempty"`
 }
 
 type BackupConfiguration struct {

@@ -39,6 +39,19 @@ type DeployContractsInput struct {
 	RegisterCandidate  *RegisterCandidateInput
 	ReuseDeployment    bool
 	EnableFaultProof   bool
+	// Preset and fee token selection
+	Preset   string // "general", "defi", "gaming", "full"
+	FeeToken string // "TON", "ETH", "USDT", "USDC"
+	// Gaming/Full preset additional inputs
+	VRFAdmin          string
+	AAPaymasterSigner string
+}
+
+// DeployContractsOptions holds CLI flag values for deploy-contracts command.
+// Non-empty values skip the interactive prompt for that field.
+type DeployContractsOptions struct {
+	Preset   string
+	FeeToken string
 }
 
 func (c *DeployContractsInput) Validate(ctx context.Context, registerCandidate bool) error {
@@ -66,6 +79,41 @@ func (c *DeployContractsInput) Validate(ctx context.Context, registerCandidate b
 
 	if err := c.ChainConfiguration.Validate(l1ChainId.Uint64()); err != nil {
 		return fmt.Errorf("chain configuration is invalid: %w", err)
+	}
+
+	// Preset validation
+	if c.Preset != "" {
+		valid := false
+		for _, p := range constants.ValidPresets {
+			if c.Preset == p {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("invalid preset: %s (valid: general, defi, gaming, full)", c.Preset)
+		}
+	}
+
+	// Fee token validation
+	if c.FeeToken != "" {
+		valid := false
+		for _, t := range constants.ValidFeeTokens {
+			if strings.EqualFold(c.FeeToken, t) {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("invalid fee token: %s (valid: TON, ETH, USDT, USDC)", c.FeeToken)
+		}
+		// Check that non-ETH token has an L1 address configured for this chain
+		if !strings.EqualFold(c.FeeToken, constants.FeeTokenETH) {
+			feeTokenConfig := constants.GetFeeTokenConfig(c.FeeToken, l1ChainId.Uint64())
+			if feeTokenConfig.L1Address == "" {
+				return fmt.Errorf("fee token %s is not configured for L1 chain %d", c.FeeToken, l1ChainId.Uint64())
+			}
+		}
 	}
 
 	if registerCandidate {
@@ -251,7 +299,11 @@ func (c *UpdateNetworkInput) Validate(ctx context.Context) error {
 	return nil
 }
 
-func InputDeployContracts(ctx context.Context, enableFaultProof bool) (*DeployContractsInput, error) {
+func InputDeployContracts(ctx context.Context, enableFaultProof bool, opts *DeployContractsOptions) (*DeployContractsInput, error) {
+	if opts == nil {
+		opts = &DeployContractsOptions{}
+	}
+
 	l1RPCUrl, _, l1ChainID, err := inputL1RPC(ctx)
 	if err != nil {
 		fmt.Printf("Error while reading L1 RPC URL: %s", err)
@@ -285,6 +337,33 @@ func InputDeployContracts(ctx context.Context, enableFaultProof bool) (*DeployCo
 
 	if operators == nil {
 		return nil, fmt.Errorf("no operators were found")
+	}
+
+	// --- Preset selection ---
+	preset := opts.Preset
+	if preset == "" {
+		preset, err = inputPreset()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// --- Fee token selection ---
+	feeToken := opts.FeeToken
+	if feeToken == "" {
+		feeToken, err = inputFeeToken()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// --- Gaming/Full: additional inputs ---
+	var vrfAdmin, aaPaymasterSigner string
+	if preset == constants.PresetGaming || preset == constants.PresetFull {
+		vrfAdmin, aaPaymasterSigner, err = inputAAVRFAddresses(operators)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	fmt.Print("Would you like to perform advanced configurations? (Refer to the SDK Guide for more details) (Y/n): ")
@@ -406,8 +485,12 @@ func InputDeployContracts(ctx context.Context, enableFaultProof bool) (*DeployCo
 			ChallengePeriod:          challengePeriod,
 			OutputRootFrequency:      outputFrequency,
 		},
-		Operators:        operators,
-		EnableFaultProof: enableFaultProof,
+		Operators:         operators,
+		EnableFaultProof:  enableFaultProof,
+		Preset:            preset,
+		FeeToken:          feeToken,
+		VRFAdmin:          vrfAdmin,
+		AAPaymasterSigner: aaPaymasterSigner,
 	}, nil
 }
 
@@ -1302,6 +1385,14 @@ func makeDeployContractConfigJsonFile(
 		deployContractTemplate.FiatTokenOwner = address.Hex()
 		deployContractTemplate.UniswapV3FactoryOwner = address.Hex()
 		deployContractTemplate.UniversalRouterRewardsDistributor = address.Hex()
+
+		// Gaming/Full preset: default VRF and AA admin to operator admin address
+		if deployContractTemplate.VRFAdmin == "" {
+			deployContractTemplate.VRFAdmin = address.Hex()
+		}
+		if deployContractTemplate.AAPaymasterSigner == "" {
+			deployContractTemplate.AAPaymasterSigner = address.Hex()
+		}
 	}
 	if account := operators.SequencerPrivateKey; account != "" {
 		address, err := utils.GetAddressFromPrivateKey(account)
@@ -1385,10 +1476,17 @@ func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainI
 		enableFraudProof                 = deployConfigInputs.EnableFaultProof
 	)
 
+	// Resolve fee token configuration
+	feeToken := deployConfigInputs.FeeToken
+	if feeToken == "" {
+		feeToken = constants.FeeTokenTON
+	}
+	feeTokenConfig := constants.GetFeeTokenConfig(feeToken, l1ChainId)
+
 	defaultTemplate := &types.DeployConfigTemplate{
-		NativeTokenName:                          "Tokamak Network Token",
-		NativeTokenSymbol:                        "TON",
-		NativeTokenAddress:                       constants.L1ChainConfigurations[l1ChainId].L2NativeTokenAddress,
+		NativeTokenName:                          feeTokenConfig.Name,
+		NativeTokenSymbol:                        feeTokenConfig.Symbol,
+		NativeTokenAddress:                       feeTokenConfig.L1Address,
 		L1ChainID:                                l1ChainId,
 		L2ChainID:                                l2ChainId,
 		L2BlockTime:                              l2BlockTime,
@@ -1439,7 +1537,7 @@ func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainI
 		L1UsdcAddr:                               constants.L1ChainConfigurations[l1ChainId].USDCAddress,
 		UsdcTokenName:                            "Bridged USDC (Tokamak Network)",
 		FactoryV2addr:                            "0x0000000000000000000000000000000000000000",
-		NativeCurrencyLabelBytes:                 []uint64{84, 87, 79, 78, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		NativeCurrencyLabelBytes:                 utils.StringToBytes32(feeTokenConfig.Symbol),
 		UniswapV3FactoryOwner:                    "0x7b91111ec983c13b3C2F36C8A84a5099225786FA",
 		UniswapV3FactoryFee500:                   500,
 		UniswapV3FactoryTickSpacing10:            10,
@@ -1456,10 +1554,122 @@ func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainI
 		GovernanceTokenSymbol:                    "OP",
 		L2OutputOracleChallenger:                 "0x0000000000000000000000000000000000000001",
 		ReuseDeployment:                          deployConfigInputs.ReuseDeployment,
+		Preset:                                   deployConfigInputs.Preset,
+	}
+
+	// Apply preset-specific overrides
+	preset := deployConfigInputs.Preset
+	switch preset {
+	case constants.PresetGeneral:
+		// Clear DeFi-specific fields for general preset
+		defaultTemplate.L1UsdcAddr = "0x0000000000000000000000000000000000000000"
+		defaultTemplate.UniswapV3FactoryOwner = "0x0000000000000000000000000000000000000000"
+		defaultTemplate.UniswapV3FactoryFee500 = 0
+		defaultTemplate.UniswapV3FactoryTickSpacing10 = 0
+		defaultTemplate.UniswapV3FactoryFee3000 = 0
+		defaultTemplate.UniswapV3FactoryTickSpacing60 = 0
+		defaultTemplate.UniswapV3FactoryFee10000 = 0
+		defaultTemplate.UniswapV3FactoryTickSpacing200 = 0
+		defaultTemplate.UniswapV3FactoryFee100 = 0
+		defaultTemplate.UniswapV3FactoryTickSpacing1 = 0
+	case constants.PresetGaming, constants.PresetFull:
+		// Gaming/Full: set VRF and AA admin addresses
+		defaultTemplate.VRFAdmin = deployConfigInputs.VRFAdmin
+		defaultTemplate.AAPaymasterSigner = deployConfigInputs.AAPaymasterSigner
 	}
 
 	return defaultTemplate
 
+}
+
+// inputPreset prompts the user to select a chain preset.
+func inputPreset() (string, error) {
+	fmt.Println("\nSelect your chain preset:")
+	fmt.Println("  1) General - Core contracts only (minimal predeploys)")
+	fmt.Println("  2) DeFi    - Core + Uniswap V3 + USDC (default)")
+	fmt.Println("  3) Gaming  - Core + VRF + Account Abstraction (ERC-4337)")
+	fmt.Println("  4) Full    - All predeploys (DeFi + Gaming)")
+	fmt.Print("Enter choice [1-4] (default: 2): ")
+
+	value, err := scanner.ScanInt()
+	if err != nil {
+		return "", fmt.Errorf("error while reading preset choice: %w", err)
+	}
+
+	switch value {
+	case 0, 2:
+		return constants.PresetDeFi, nil
+	case 1:
+		return constants.PresetGeneral, nil
+	case 3:
+		return constants.PresetGaming, nil
+	case 4:
+		return constants.PresetFull, nil
+	default:
+		fmt.Println("Invalid choice, defaulting to DeFi")
+		return constants.PresetDeFi, nil
+	}
+}
+
+// inputFeeToken prompts the user to select the L2 native fee token.
+func inputFeeToken() (string, error) {
+	fmt.Println("\nSelect L2 native fee token:")
+	fmt.Println("  1) TON  - Tokamak Network Token (default)")
+	fmt.Println("  2) ETH  - Ether")
+	fmt.Println("  3) USDT - Tether USD")
+	fmt.Println("  4) USDC - USD Coin")
+	fmt.Print("Enter choice [1-4] (default: 1): ")
+
+	value, err := scanner.ScanInt()
+	if err != nil {
+		return "", fmt.Errorf("error while reading fee token choice: %w", err)
+	}
+
+	switch value {
+	case 0, 1:
+		return constants.FeeTokenTON, nil
+	case 2:
+		return constants.FeeTokenETH, nil
+	case 3:
+		return constants.FeeTokenUSDT, nil
+	case 4:
+		return constants.FeeTokenUSDC, nil
+	default:
+		fmt.Println("Invalid choice, defaulting to TON")
+		return constants.FeeTokenTON, nil
+	}
+}
+
+// inputAAVRFAddresses prompts for VRF admin and AA paymaster signer addresses
+// for Gaming/Full presets. Defaults to the admin address if left empty.
+func inputAAVRFAddresses(operators *types.Operators) (vrfAdmin, aaPaymasterSigner string, err error) {
+	var defaultAddr string
+	if operators != nil && operators.AdminPrivateKey != "" {
+		addr, addrErr := utils.GetAddressFromPrivateKey(operators.AdminPrivateKey)
+		if addrErr == nil {
+			defaultAddr = addr.Hex()
+		}
+	}
+
+	fmt.Printf("\nVRF Admin address (default: %s): ", defaultAddr)
+	vrfAdmin, err = scanner.ScanString()
+	if err != nil {
+		return "", "", fmt.Errorf("error reading VRF Admin address: %w", err)
+	}
+	if vrfAdmin == "" {
+		vrfAdmin = defaultAddr
+	}
+
+	fmt.Printf("AA Paymaster Signer address (default: %s): ", defaultAddr)
+	aaPaymasterSigner, err = scanner.ScanString()
+	if err != nil {
+		return "", "", fmt.Errorf("error reading AA Paymaster Signer address: %w", err)
+	}
+	if aaPaymasterSigner == "" {
+		aaPaymasterSigner = defaultAddr
+	}
+
+	return vrfAdmin, aaPaymasterSigner, nil
 }
 
 func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error {

@@ -44,7 +44,11 @@ func ActionDeployContracts() cli.ActionFunc {
 			// STEP 1. Input the parameters
 			fmt.Println("You are about to deploy the L1 contracts.")
 
-			deployContractsConfig, err := thanos.InputDeployContracts(ctx, enableFaultProof)
+			opts := &thanos.DeployContractsOptions{
+				Preset:   cmd.String(flags.PresetFlag.Name),
+				FeeToken: cmd.String(flags.FeeTokenFlag.Name),
+			}
+			deployContractsConfig, err := thanos.InputDeployContracts(ctx, enableFaultProof, opts)
 			if err != nil {
 				return err
 			}
