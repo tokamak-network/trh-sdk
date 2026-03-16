@@ -1719,6 +1719,10 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_max_channel_duration=\"%d\"\n", config.MaxChannelDuration))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_txmgr_cell_proof_time=\"%d\"\n", config.TxmgrCellProofTime))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_enable_fault_proof=\"%t\"\n", config.EnableFaultProof))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_preset=\"%s\"\n", config.Preset))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_native_token_name=\"%s\"\n", config.NativeTokenName))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_native_token_symbol=\"%s\"\n", config.NativeTokenSymbol))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_native_token_address=\"%s\"\n", config.NativeTokenAddress))
 
 	// AWS Backup configuration - Always enabled for production-ready backup protection
 	scheduleCron := config.EfsBackupScheduleCron
@@ -1784,6 +1788,20 @@ func updateTerraformEnvFile(dirPath string, config types.UpdateTerraformEnvConfi
 		"TF_VAR_stack_l1_beacon_url":          config.L1BeaconUrl,
 		"TF_VAR_stack_op_geth_image_tag":      config.OpGethImageTag,
 		"TF_VAR_stack_thanos_stack_image_tag": config.ThanosStackImageTag,
+	}
+
+	// Update native token / preset values only if provided (non-empty)
+	if config.Preset != "" {
+		newValues["TF_VAR_preset"] = config.Preset
+	}
+	if config.NativeTokenName != "" {
+		newValues["TF_VAR_native_token_name"] = config.NativeTokenName
+	}
+	if config.NativeTokenSymbol != "" {
+		newValues["TF_VAR_native_token_symbol"] = config.NativeTokenSymbol
+	}
+	if config.NativeTokenAddress != "" {
+		newValues["TF_VAR_native_token_address"] = config.NativeTokenAddress
 	}
 
 	// Update or add new values

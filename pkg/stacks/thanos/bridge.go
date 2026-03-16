@@ -71,7 +71,8 @@ func (t *ThanosStack) InstallBridge(ctx context.Context) (string, error) {
 	opBridgeConfig.OpBridge.Env.L1NativeCurrencySymbol = constants.L1ChainConfigurations[l1ChainID].NativeTokenSymbol
 	opBridgeConfig.OpBridge.Env.L1NativeCurrencyDecimals = constants.L1ChainConfigurations[l1ChainID].NativeTokenDecimals
 
-	opBridgeConfig.OpBridge.Env.NativeTokenL1Address = constants.L1ChainConfigurations[l1ChainID].L2NativeTokenAddress
+	feeTokenConfig := constants.GetFeeTokenConfig(t.deployConfig.FeeToken, l1ChainID)
+	opBridgeConfig.OpBridge.Env.NativeTokenL1Address = feeTokenConfig.L1Address
 
 	opBridgeConfig.OpBridge.Env.L1BlockExplorer = constants.L1ChainConfigurations[l1ChainID].BlockExplorer
 	opBridgeConfig.OpBridge.Env.L1USDTAddress = constants.L1ChainConfigurations[l1ChainID].USDTAddress
@@ -80,8 +81,8 @@ func (t *ThanosStack) InstallBridge(ctx context.Context) (string, error) {
 	opBridgeConfig.OpBridge.Env.L2ChainName = chainName
 	opBridgeConfig.OpBridge.Env.L2ChainID = fmt.Sprintf("%d", t.deployConfig.L2ChainID)
 	opBridgeConfig.OpBridge.Env.L2RPC = t.deployConfig.L2RpcUrl
-	opBridgeConfig.OpBridge.Env.L2NativeCurrencyName = "Tokamak Network Token"
-	opBridgeConfig.OpBridge.Env.L2NativeCurrencySymbol = "TON"
+	opBridgeConfig.OpBridge.Env.L2NativeCurrencyName = feeTokenConfig.Name
+	opBridgeConfig.OpBridge.Env.L2NativeCurrencySymbol = feeTokenConfig.Symbol
 	opBridgeConfig.OpBridge.Env.L2NativeCurrencyDecimals = 18
 	opBridgeConfig.OpBridge.Env.L2USDTAddress = ""
 

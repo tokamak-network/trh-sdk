@@ -6,6 +6,14 @@ type UpdateTerraformEnvConfig struct {
 	L1BeaconUrl         string
 	OpGethImageTag      string
 	ThanosStackImageTag string
+
+	// Native token configuration (preserved during upgrade)
+	NativeTokenName    string
+	NativeTokenSymbol  string
+	NativeTokenAddress string
+
+	// Preset metadata (preserved during upgrade)
+	Preset string
 }
 
 type TerraformEnvConfig struct {
@@ -40,6 +48,14 @@ type TerraformEnvConfig struct {
 
 	// Fault proof system
 	EnableFaultProof bool
+
+	// Native token configuration (for block explorer and bridge display)
+	NativeTokenName    string
+	NativeTokenSymbol  string
+	NativeTokenAddress string
+
+	// Preset metadata
+	Preset string
 }
 
 type BlockExplorerEnvs struct {
