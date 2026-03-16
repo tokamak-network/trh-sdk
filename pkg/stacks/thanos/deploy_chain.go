@@ -93,6 +93,14 @@ func (t *ThanosStack) deployLocalDevnet(ctx context.Context) error {
 func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfraInput) error {
 	shellConfigFile := utils.GetShellConfigDefault()
 
+	if inputs == nil {
+		return fmt.Errorf("inputs is required")
+	}
+
+	if t.deployConfig.EnableFraudProof && t.deployConfig.ChallengerPrivateKey == "" {
+		return fmt.Errorf("fault proof is enabled but challenger private key is not set; re-run deploy-contracts with --enable-fault-proof")
+	}
+
 	// Check dependencies
 	// STEP 1. Verify required dependencies
 	if !dependencies.CheckTerraformInstallation(ctx) {
@@ -113,14 +121,6 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	if !dependencies.CheckK8sInstallation(ctx) {
 		t.logger.Warn("Try running `source %s` to set up your environment", shellConfigFile)
 		return nil
-	}
-
-	if inputs == nil {
-		return fmt.Errorf("inputs is required")
-	}
-
-	if t.deployConfig.EnableFraudProof && t.deployConfig.ChallengerPrivateKey == "" {
-		return fmt.Errorf("fault proof is enabled but challenger private key is not set; re-run deploy-contracts with --enable-fault-proof")
 	}
 
 	if err := inputs.Validate(ctx); err != nil {

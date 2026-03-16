@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
@@ -177,6 +178,9 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		export op_geth_svc=%s
 		export op_geth_public_url=%s
 		export next_public_rollup_l1_base_url=%s
+		export enable_fault_proof=%t
+		export stack_nativetoken_name=%s
+		export stack_nativetoken_symbol=%s
 		`,
 		t.deployConfig.DeploymentFilePath,
 		t.deployConfig.L1RPCURL,
@@ -192,6 +196,9 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		opGethSVC,
 		opGethPublicUrl,
 		t.deployConfig.NextPublicRollupL1BaseUrl,
+		t.deployConfig.EnableFraudProof,
+		constants.GetFeeTokenConfig(t.deployConfig.FeeToken, t.deployConfig.L1ChainID).Name,
+		constants.GetFeeTokenConfig(t.deployConfig.FeeToken, t.deployConfig.L1ChainID).Symbol,
 	)
 	_, err = utils.ExecuteCommand(ctx,
 		"bash",
