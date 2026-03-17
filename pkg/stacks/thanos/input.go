@@ -1557,6 +1557,17 @@ func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainI
 		Preset:                                   deployConfigInputs.Preset,
 	}
 
+	// Override fault-proof timing parameters for testnet chains.
+	// Mainnet values (days/weeks) make interactive testing impractical on Sepolia/Holesky.
+	if l1ChainId == constants.EthereumSepoliaChainID || l1ChainId == constants.EthereumHoleskyChainID {
+		defaultTemplate.FaultGameClockExtension = 300          // 5 minutes (mainnet: 3 hours)
+		defaultTemplate.FaultGameMaxClockDuration = 3600       // 1 hour (mainnet: 3.5 days)
+		defaultTemplate.FaultGameWithdrawalDelay = 12          // 1 L1 block (mainnet: 7 days)
+		defaultTemplate.PreimageOracleChallengePeriod = 300    // 5 minutes (mainnet: 1 day)
+		defaultTemplate.ProofMaturityDelaySeconds = 12         // 1 L1 block (mainnet: 7 days)
+		defaultTemplate.DisputeGameFinalityDelaySeconds = 6    // ~0.5 L1 block (mainnet: 3.5 days)
+	}
+
 	// Apply preset-specific overrides
 	preset := deployConfigInputs.Preset
 	switch preset {

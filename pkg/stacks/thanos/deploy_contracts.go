@@ -228,6 +228,19 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			return err
 		}
 
+		// STEP 2.1. Patch AnchorStateRegistry.sol to add setInitialAnchorState.
+		// The upstream contract requires a resolved FaultDisputeGame to set anchor state,
+		// which is impossible on a brand-new chain (bootstrapping problem). This patch
+		// adds a guardian-only function that accepts an OutputRoot directly.
+		if deployContractsConfig.EnableFaultProof {
+			tokamakThanosDir := filepath.Join(t.deploymentPath, "tokamak-thanos")
+			if patchErr := patchAnchorStateRegistry(tokamakThanosDir); patchErr != nil {
+				t.logger.Error("Failed to patch AnchorStateRegistry.sol", "err", patchErr)
+				return fmt.Errorf("failed to patch AnchorStateRegistry.sol: %w", patchErr)
+			}
+			t.logger.Info("✅ AnchorStateRegistry.sol patched with setInitialAnchorState")
+		}
+
 		// STEP 2.5. When fault proof is enabled, build cannon-prestate and extract the
 		// prestate hash BEFORE generating the deploy config. This ensures FaultGameAbsolutePrestate
 		// in the contract config matches the actual op-program binary hash, not a stale hardcoded value.

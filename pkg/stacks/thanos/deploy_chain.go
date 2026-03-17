@@ -2,14 +2,20 @@ package thanos
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
+	ethtypes "github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"go.uber.org/zap"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/dependencies"
@@ -444,6 +450,35 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	t.deployConfig.L2RpcUrl = l2RPCUrl
 	t.deployConfig.L1BeaconURL = inputs.L1BeaconURL
 
+	// Step 8.2.5. Initialize AnchorStateRegistry genesis anchor state (fault proof chains only).
+	// Without this, every FaultDisputeGame.initialize() reverts with AnchorRootNotFound because
+	// the registry starts with bytes32(0) as the anchor root for every game type.
+	if t.deployConfig.EnableFraudProof {
+		deployedContracts, contractsErr := t.readDeploymentContracts()
+		if contractsErr != nil {
+			t.logger.Warnf("⚠️ Could not read deployed contracts (skipping anchor init): %v", contractsErr)
+		} else if deployedContracts.AnchorStateRegistryProxy == "" {
+			t.logger.Warn("⚠️ AnchorStateRegistryProxy address not found (skipping anchor init)")
+		} else {
+			anchorErr := initGenesisAnchorState(
+				ctx,
+				t.logger,
+				t.deployConfig.L1RPCURL,
+				l2RPCUrl,
+				t.deployConfig.AdminPrivateKey,
+				deployedContracts.AnchorStateRegistryProxy,
+				t.deployConfig.L1ChainID,
+				0, // gameType 0 = CANNON (default respected game type)
+			)
+			if anchorErr != nil {
+				t.logger.Warnf("⚠️ Failed to initialize genesis anchor state: %v", anchorErr)
+				t.logger.Warn("Dispute games may fail with AnchorRootNotFound until anchor state is set manually")
+			} else {
+				t.logger.Info("✅ Genesis anchor state initialized in AnchorStateRegistry")
+			}
+		}
+	}
+
 	backupEnabled := false
 	if t.network == constants.Mainnet {
 		// Mainnet always has backup enabled
@@ -578,4 +613,179 @@ func readPrestateHash(prestatePath string) (string, error) {
 		return "", fmt.Errorf("prestate file %s has empty 'pre' field", prestatePath)
 	}
 	return prestate.Pre, nil
+}
+
+// patchAnchorStateRegistry adds setInitialAnchorState to AnchorStateRegistry.sol after cloning.
+// This function enables the guardian to bootstrap a fresh chain's anchor state without needing a
+// resolved FaultDisputeGame (which is impossible on a brand-new chain).
+// The patch is idempotent: calling it multiple times on the same file is safe.
+func patchAnchorStateRegistry(tokamakThanosDir string) error {
+	contractsDir := filepath.Join(tokamakThanosDir, "packages", "tokamak", "contracts-bedrock", "src", "dispute")
+
+	// Patch AnchorStateRegistry.sol
+	solPath := filepath.Join(contractsDir, "AnchorStateRegistry.sol")
+	solData, err := os.ReadFile(solPath)
+	if err != nil {
+		return fmt.Errorf("failed to read AnchorStateRegistry.sol: %w", err)
+	}
+	solContent := string(solData)
+	const setInitialMarker = "function setInitialAnchorState("
+	if !strings.Contains(solContent, setInitialMarker) {
+		const insertBefore = "    /// @inheritdoc IAnchorStateRegistry\n    function setAnchorState(IFaultDisputeGame _game) external {"
+		const newFn = `    /// @notice Sets the initial anchor state for a game type directly using an OutputRoot.
+    ///         This is intended for bootstrapping new chains where no resolved game exists yet.
+    ///         Only callable by the guardian. Does not require a resolved FaultDisputeGame.
+    /// @param _gameType The game type to set the anchor state for.
+    /// @param _outputRoot The initial anchor OutputRoot (l2BlockNumber + root hash).
+    function setInitialAnchorState(GameType _gameType, OutputRoot calldata _outputRoot) external {
+        if (msg.sender != superchainConfig.guardian()) revert Unauthorized();
+        anchors[_gameType] = _outputRoot;
+    }
+
+    ` + insertBefore
+		if !strings.Contains(solContent, insertBefore) {
+			return fmt.Errorf("AnchorStateRegistry.sol: expected anchor text not found, cannot apply patch")
+		}
+		solContent = strings.Replace(solContent, insertBefore, newFn, 1)
+		if err := os.WriteFile(solPath, []byte(solContent), 0644); err != nil {
+			return fmt.Errorf("failed to write patched AnchorStateRegistry.sol: %w", err)
+		}
+	}
+
+	// Patch IAnchorStateRegistry.sol
+	ifacePath := filepath.Join(contractsDir, "interfaces", "IAnchorStateRegistry.sol")
+	ifaceData, err := os.ReadFile(ifacePath)
+	if err != nil {
+		return fmt.Errorf("failed to read IAnchorStateRegistry.sol: %w", err)
+	}
+	ifaceContent := string(ifaceData)
+	if !strings.Contains(ifaceContent, setInitialMarker) {
+		const ifaceInsertBefore = "    function setAnchorState(IFaultDisputeGame _game) external;\n}"
+		const ifaceNewFn = `    function setAnchorState(IFaultDisputeGame _game) external;
+
+    /// @notice Sets the initial anchor state directly using an OutputRoot.
+    ///         For bootstrapping new chains where no resolved game exists yet.
+    ///         Only callable by the guardian.
+    function setInitialAnchorState(GameType _gameType, OutputRoot calldata _outputRoot) external;
+}`
+		if !strings.Contains(ifaceContent, ifaceInsertBefore) {
+			return fmt.Errorf("IAnchorStateRegistry.sol: expected anchor text not found, cannot apply patch")
+		}
+		ifaceContent = strings.Replace(ifaceContent, ifaceInsertBefore, ifaceNewFn, 1)
+		if err := os.WriteFile(ifacePath, []byte(ifaceContent), 0644); err != nil {
+			return fmt.Errorf("failed to write patched IAnchorStateRegistry.sol: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// initGenesisAnchorState bootstraps the AnchorStateRegistry for a brand-new chain.
+//
+// Problem: FaultDisputeGame.initialize() reverts with AnchorRootNotFound when
+// anchors[gameType].root == bytes32(0). On a fresh chain there are no resolved games,
+// so the only way to set the first anchor is via a guardian-privileged call. The patched
+// AnchorStateRegistry.setInitialAnchorState satisfies this.
+//
+// The genesis output root is computed as:
+//
+//	keccak256(version(32) || stateRoot(32) || messagePasserStorageRoot(32) || blockHash(32))
+//
+// At genesis:
+//   - version = bytes32(0)
+//   - stateRoot = genesis block header Root field
+//   - messagePasserStorageRoot = empty MPT root (L2ToL1MessagePasser has no storage at block 0)
+//   - blockHash = genesis block hash
+func initGenesisAnchorState(
+	ctx context.Context,
+	logger *zap.SugaredLogger,
+	l1RPCURL string,
+	l2RPCURL string,
+	adminPrivateKey string,
+	anchorStateRegistryAddr string,
+	l1ChainID uint64,
+	gameType uint32,
+) error {
+	// 1. Connect to L2 and wait for genesis block.
+	l2Client, err := ethclient.DialContext(ctx, l2RPCURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to L2 RPC %s: %w", l2RPCURL, err)
+	}
+	defer l2Client.Close()
+
+	var genesisBlock *ethtypes.Block
+	for attempt := 1; attempt <= 20; attempt++ {
+		genesisBlock, err = l2Client.BlockByNumber(ctx, big.NewInt(0))
+		if err == nil {
+			break
+		}
+		logger.Warnf("Waiting for L2 genesis block (attempt %d/20): %v", attempt, err)
+		time.Sleep(5 * time.Second)
+	}
+	if err != nil {
+		return fmt.Errorf("L2 genesis block unavailable after retries: %w", err)
+	}
+	logger.Infof("Genesis block: hash=%s stateRoot=%s", genesisBlock.Hash().Hex(), genesisBlock.Root().Hex())
+
+	// 2. Compute genesis output root.
+	// At genesis the L2ToL1MessagePasser (0x4200...0016) has no storage, so its
+	// storage root equals the canonical empty MPT root.
+	emptyMPTRoot := common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+	var preimage [128]byte
+	// [0:32]   = version = 0 (left as zero)
+	copy(preimage[32:64], genesisBlock.Root().Bytes())  // stateRoot
+	copy(preimage[64:96], emptyMPTRoot.Bytes())         // messagePasserStorageRoot
+	copy(preimage[96:128], genesisBlock.Hash().Bytes()) // blockHash
+	outputRootHash := crypto.Keccak256Hash(preimage[:])
+	logger.Infof("Genesis output root: %s", outputRootHash.Hex())
+
+	// 3. Build calldata for setInitialAnchorState(uint32,(bytes32,uint256)).
+	// Static ABI layout (no dynamic types):
+	//   [0:4]    selector
+	//   [4:36]   gameType  (uint32, right-aligned in 32 bytes)
+	//   [36:68]  root      (bytes32)
+	//   [68:100] l2BlockNumber (uint256 = 0 for genesis)
+	selector := crypto.Keccak256([]byte("setInitialAnchorState(uint32,(bytes32,uint256))"))[:4]
+	calldata := make([]byte, 100)
+	copy(calldata[0:4], selector)
+	binary.BigEndian.PutUint32(calldata[32:36], gameType) // right-aligned uint32
+	copy(calldata[36:68], outputRootHash.Bytes())
+	// calldata[68:100] = 0 already (genesis l2BlockNumber = 0)
+
+	// 4. Connect to L1 and send transaction from admin (= guardian).
+	l1Client, err := ethclient.DialContext(ctx, l1RPCURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to L1 RPC: %w", err)
+	}
+	defer l1Client.Close()
+
+	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(adminPrivateKey, "0x"))
+	if err != nil {
+		return fmt.Errorf("invalid admin private key: %w", err)
+	}
+	adminAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	chainID := big.NewInt(int64(l1ChainID))
+
+	nonce, err := l1Client.PendingNonceAt(ctx, adminAddr)
+	if err != nil {
+		return fmt.Errorf("failed to get nonce: %w", err)
+	}
+	gasPrice, err := l1Client.SuggestGasPrice(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get gas price: %w", err)
+	}
+	// Double gas price for reliable inclusion.
+	gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(2))
+
+	anchorAddr := common.HexToAddress(anchorStateRegistryAddr)
+	tx := ethtypes.NewTransaction(nonce, anchorAddr, big.NewInt(0), 200_000, gasPrice, calldata)
+	signedTx, err := ethtypes.SignTx(tx, ethtypes.NewEIP155Signer(chainID), privKey)
+	if err != nil {
+		return fmt.Errorf("failed to sign transaction: %w", err)
+	}
+	if err := l1Client.SendTransaction(ctx, signedTx); err != nil {
+		return fmt.Errorf("failed to send setInitialAnchorState tx: %w", err)
+	}
+	logger.Infof("✅ setInitialAnchorState tx sent: %s", signedTx.Hash().Hex())
+	return nil
 }
