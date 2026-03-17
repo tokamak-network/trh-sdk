@@ -1459,7 +1459,7 @@ func makeDeployContractConfigJsonFile(
 	return nil
 }
 
-func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainID, l2ChainId uint64) *types.DeployConfigTemplate {
+func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainID, l2ChainId uint64, prestateHash string) *types.DeployConfigTemplate {
 	var (
 		chainConfiguration = deployConfigInputs.ChainConfiguration
 	)
@@ -1520,7 +1520,7 @@ func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainI
 		SystemConfigStartBlock:                   0,
 		RequiredProtocolVersion:                  "0x0000000000000000000000000000000000000003000000010000000000000000",
 		RecommendedProtocolVersion:               "0x0000000000000000000000000000000000000003000000010000000000000000",
-		FaultGameAbsolutePrestate:                "0x03ab262ce124af0d5d328e09bf886a2b272fe960138115ad8b94fdc3034e3155",
+		FaultGameAbsolutePrestate:                prestateHash,
 		FaultGameMaxDepth:                        73,
 		FaultGameClockExtension:                  10800,
 		FaultGameMaxClockDuration:                302400,

@@ -44,7 +44,7 @@ func TestInitDeployConfigTemplate_FeeTokenMapping(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.feeToken, func(t *testing.T) {
 			input := makeTestInput(constants.PresetDeFi, tc.feeToken)
-			tpl := initDeployConfigTemplate(input, l1ChainID, l2ChainID)
+			tpl := initDeployConfigTemplate(input, l1ChainID, l2ChainID, "")
 
 			if tpl.NativeTokenName != tc.wantName {
 				t.Errorf("NativeTokenName: got %q, want %q", tpl.NativeTokenName, tc.wantName)
@@ -63,7 +63,7 @@ func TestInitDeployConfigTemplate_FeeTokenMapping(t *testing.T) {
 // are cleared for the General preset.
 func TestInitDeployConfigTemplate_PresetGeneral(t *testing.T) {
 	input := makeTestInput(constants.PresetGeneral, constants.FeeTokenTON)
-	tpl := initDeployConfigTemplate(input, constants.EthereumSepoliaChainID, 5678)
+	tpl := initDeployConfigTemplate(input, constants.EthereumSepoliaChainID, 5678, "")
 
 	if tpl.L1UsdcAddr != "0x0000000000000000000000000000000000000000" {
 		t.Errorf("General preset should clear L1UsdcAddr, got %s", tpl.L1UsdcAddr)
@@ -80,7 +80,7 @@ func TestInitDeployConfigTemplate_PresetGaming(t *testing.T) {
 	input.VRFAdmin = "0xABCDEF"
 	input.AAPaymasterSigner = "0x123456"
 
-	tpl := initDeployConfigTemplate(input, constants.EthereumSepoliaChainID, 9999)
+	tpl := initDeployConfigTemplate(input, constants.EthereumSepoliaChainID, 9999, "")
 
 	if tpl.VRFAdmin != "0xABCDEF" {
 		t.Errorf("VRFAdmin: got %q, want %q", tpl.VRFAdmin, "0xABCDEF")
@@ -96,7 +96,7 @@ func TestInitDeployConfigTemplate_PresetFull(t *testing.T) {
 	input.VRFAdmin = "0xVRF"
 	input.AAPaymasterSigner = "0xAA"
 
-	tpl := initDeployConfigTemplate(input, constants.EthereumSepoliaChainID, 11111)
+	tpl := initDeployConfigTemplate(input, constants.EthereumSepoliaChainID, 11111, "")
 
 	if tpl.VRFAdmin != "0xVRF" {
 		t.Errorf("VRFAdmin: got %q, want %q", tpl.VRFAdmin, "0xVRF")
@@ -122,7 +122,7 @@ func TestInitDeployConfigTemplate_NativeCurrencyLabelBytes(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.feeToken, func(t *testing.T) {
 			input := makeTestInput(constants.PresetDeFi, tc.feeToken)
-			tpl := initDeployConfigTemplate(input, constants.EthereumSepoliaChainID, 1)
+			tpl := initDeployConfigTemplate(input, constants.EthereumSepoliaChainID, 1, "")
 
 			if len(tpl.NativeCurrencyLabelBytes) != 32 {
 				t.Fatalf("NativeCurrencyLabelBytes length: got %d, want 32", len(tpl.NativeCurrencyLabelBytes))

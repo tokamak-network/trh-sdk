@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/dependencies"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
@@ -173,7 +175,25 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 
 	// STEP 3. Create .envrc file
 	// Read prestate hash from the cannon prestate file built by start-deploy.sh build.
+	// When EnableFraudProof is set and the file is missing (e.g., re-deploy after env reset),
+	// automatically build it by running 'make cannon-prestate' in tokamak-thanos.
 	prestateSrc := fmt.Sprintf("%s/tokamak-thanos/op-program/bin/prestate.json", t.deploymentPath)
+	if t.deployConfig.EnableFraudProof {
+		if _, statErr := os.Stat(prestateSrc); os.IsNotExist(statErr) {
+			t.logger.Info("Cannon prestate not found, building...", "path", prestateSrc)
+			if cloneErr := t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git"); cloneErr != nil {
+				t.logger.Error("Failed to clone tokamak-thanos for cannon build", "err", cloneErr)
+				return fmt.Errorf("failed to clone tokamak-thanos for cannon build: %w", cloneErr)
+			}
+			tokamakThanosDir := fmt.Sprintf("%s/tokamak-thanos", t.deploymentPath)
+			if buildErr := buildCannonPrestate(ctx, t.logger, tokamakThanosDir); buildErr != nil {
+				t.logger.Error("Failed to build cannon prestate", "err", buildErr,
+					"hint", "Ensure Go toolchain and build tools are installed")
+				return fmt.Errorf("failed to build cannon prestate: %w", buildErr)
+			}
+			t.logger.Info("✅ Cannon prestate built successfully")
+		}
+	}
 	prestateHash, err := readPrestateHash(prestateSrc)
 	if err != nil {
 		t.logger.Error("Failed to read cannon prestate hash",
@@ -472,8 +492,76 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	return nil
 }
 
+// buildCannonPrestate builds the cannon prestate artifacts in the given tokamak-thanos
+// directory and writes prestate.json containing the "pre" hash for FaultDisputeGame.
+//
+// The root Makefile's cannon-prestate target references op-program-client.elf (without
+// the 64 suffix) but the build actually produces op-program-client64.elf. We therefore
+// drive the steps manually:
+//  1. make op-program  — builds op-program-client64.elf (MIPS64) and cannon binaries
+//  2. make cannon      — builds cannon/bin/cannon64-impl
+//  3. cannon64-impl load-elf  → prestate.bin.gz + meta.json
+//  4. cannon run at step 0    → 0.json (proof), which contains the "pre" hash
+//  5. copy 0.json → prestate.json  (readPrestateHash reads "pre" from this file)
+func buildCannonPrestate(ctx context.Context, logger *zap.SugaredLogger, tokamakThanosDir string) error {
+	steps := []struct {
+		desc string
+		args []string
+	}{
+		{"build op-program (MIPS64)", []string{"make", "op-program"}},
+		{"build cannon binary", []string{"make", "cannon"}},
+	}
+	for _, s := range steps {
+		logger.Info("Cannon prestate: "+s.desc, "dir", tokamakThanosDir)
+		if err := utils.ExecuteCommandStreamInDir(ctx, logger, tokamakThanosDir, s.args[0], s.args[1:]...); err != nil {
+			return fmt.Errorf("cannon prestate build step %q failed: %w", s.desc, err)
+		}
+	}
+
+	elfPath := filepath.Join(tokamakThanosDir, "op-program", "bin", "op-program-client64.elf")
+	prestateBin := filepath.Join(tokamakThanosDir, "op-program", "bin", "prestate.bin.gz")
+	metaPath := filepath.Join(tokamakThanosDir, "op-program", "bin", "meta.json")
+	proofFmt := filepath.Join(tokamakThanosDir, "op-program", "bin", "%d.json")
+	proofStep0 := filepath.Join(tokamakThanosDir, "op-program", "bin", "0.json")
+	prestateJSON := filepath.Join(tokamakThanosDir, "op-program", "bin", "prestate.json")
+	cannonImpl := filepath.Join(tokamakThanosDir, "cannon", "bin", "cannon64-impl")
+
+	logger.Info("Cannon prestate: load-elf → prestate.bin.gz")
+	if err := utils.ExecuteCommandStreamInDir(ctx, logger, tokamakThanosDir,
+		cannonImpl, "load-elf",
+		"--type", "multithreaded64-5",
+		"--path", elfPath,
+		"--out", prestateBin,
+		"--meta", metaPath,
+	); err != nil {
+		return fmt.Errorf("cannon load-elf failed: %w", err)
+	}
+
+	logger.Info("Cannon prestate: run step 0 → 0.json")
+	if err := utils.ExecuteCommandStreamInDir(ctx, logger, tokamakThanosDir,
+		cannonImpl, "run",
+		"--proof-at", "=0",
+		"--stop-at", "=1",
+		"--input", prestateBin,
+		"--meta", metaPath,
+		"--proof-fmt", proofFmt,
+		"--output", "",
+	); err != nil {
+		return fmt.Errorf("cannon run step 0 failed: %w", err)
+	}
+
+	data, err := os.ReadFile(proofStep0)
+	if err != nil {
+		return fmt.Errorf("cannon run did not produce 0.json at %s: %w", proofStep0, err)
+	}
+	if err := os.WriteFile(prestateJSON, data, 0o644); err != nil {
+		return fmt.Errorf("failed to write prestate.json: %w", err)
+	}
+	return nil
+}
+
 // readPrestateHash reads the absolute prestate hash from the cannon prestate JSON file.
-// The prestate JSON is generated by `make cannon-prestate` and contains the "pre" field
+// The prestate JSON is generated by buildCannonPrestate and contains the "pre" field
 // with the hash used to initialize the FaultDisputeGame contract.
 func readPrestateHash(prestatePath string) (string, error) {
 	data, err := os.ReadFile(prestatePath)
