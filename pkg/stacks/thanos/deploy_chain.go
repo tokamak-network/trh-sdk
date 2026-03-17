@@ -520,6 +520,37 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		}
 	}
 
+	// Auto-install preset modules that don't require user configuration
+	if t.deployConfig.Preset != "" {
+		presetModules := constants.PresetModules[t.deployConfig.Preset]
+
+		if enabled := presetModules["uptimeService"]; enabled {
+			t.logger.Info("🔧 Auto-installing Uptime Service (preset: " + t.deployConfig.Preset + ")")
+			uptimeConfig, err := t.GetUptimeServiceConfig(ctx)
+			if err != nil {
+				t.logger.Error("Failed to get uptime service config for auto-install", "err", err)
+			} else {
+				if _, err := t.InstallUptimeService(ctx, uptimeConfig); err != nil {
+					t.logger.Error("Failed to auto-install uptime service", "err", err)
+				} else {
+					t.logger.Info("✅ Uptime Service installed successfully")
+				}
+			}
+		}
+
+		if enabled := presetModules["monitoring"]; enabled {
+			t.logger.Info("ℹ️  Monitoring is included in your preset. Run 'trh install monitoring' to configure and deploy it.")
+		}
+
+		if enabled := presetModules["blockExplorer"]; enabled {
+			t.logger.Info("ℹ️  Block Explorer is included in your preset. Run 'trh install block-explorer' to configure and deploy it.")
+		}
+
+		if enabled := presetModules["crossTrade"]; enabled {
+			t.logger.Info("ℹ️  Cross-Chain Trade is included in your preset. Run 'trh install cross-trade' to configure and deploy it.")
+		}
+	}
+
 	t.logger.Info("🎉 Thanos Stack installation completed successfully!")
 	t.logger.Info("🚀 Your network is now up and running.")
 	t.logger.Info("🔧 You can start interacting with your deployed infrastructure.")

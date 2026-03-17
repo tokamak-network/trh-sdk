@@ -12,6 +12,35 @@ const (
 
 var ValidPresets = []string{PresetGeneral, PresetDeFi, PresetGaming, PresetFull}
 
+// PresetModules defines which operational tools are enabled for each preset.
+// bridge is always included. uptimeService and crossTrade are auto-installed.
+// blockExplorer and monitoring require user configuration after deployment.
+var PresetModules = map[string]map[string]bool{
+	PresetGeneral: {
+		"bridge": true,
+	},
+	PresetDeFi: {
+		"bridge":        true,
+		"blockExplorer": true,
+		"monitoring":    true,
+		"uptimeService": true,
+	},
+	PresetGaming: {
+		"bridge":        true,
+		"blockExplorer": true,
+		"monitoring":    true,
+		"crossTrade":    true,
+		"uptimeService": true,
+	},
+	PresetFull: {
+		"bridge":        true,
+		"blockExplorer": true,
+		"monitoring":    true,
+		"crossTrade":    true,
+		"uptimeService": true,
+	},
+}
+
 // Fee token constants
 const (
 	FeeTokenTON  = "TON"
