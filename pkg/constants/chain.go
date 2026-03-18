@@ -17,7 +17,8 @@ var ValidPresets = []string{PresetGeneral, PresetDeFi, PresetGaming, PresetFull}
 // blockExplorer and monitoring require user configuration after deployment.
 var PresetModules = map[string]map[string]bool{
 	PresetGeneral: {
-		"bridge": true,
+		"bridge":        true,
+		"blockExplorer": true,
 	},
 	PresetDeFi: {
 		"bridge":        true,
