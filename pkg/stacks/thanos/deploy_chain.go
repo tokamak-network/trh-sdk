@@ -41,7 +41,7 @@ func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string, inputs *Deplo
 			return err
 		}
 		return nil
-	case constants.Testnet, constants.Mainnet:
+	case constants.Testnet:
 		switch infraOpt {
 		case constants.AWS:
 			err := t.deployNetworkToAWS(ctx, inputs)
@@ -67,9 +67,41 @@ func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string, inputs *Deplo
 				}
 			}
 			return nil
+		case constants.Local:
+			return t.deployLocalNetwork(ctx)
 		default:
 			t.logger.Error("infrastructure provider %s is not supported", infraOpt)
 			return fmt.Errorf("infrastructure provider %s is not supported", infraOpt)
+		}
+	case constants.Mainnet:
+		switch infraOpt {
+		case constants.AWS:
+			err := t.deployNetworkToAWS(ctx, inputs)
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					t.logger.Warn("Deployment canceled")
+					return err
+				}
+				t.logger.Error("Failed to deploy the mainnet chain", "err", err)
+
+				if destroyErr := t.destroyInfraOnAWS(ctx); destroyErr != nil {
+					t.logger.Error("Failed to destroy the mainnet chain after deploying the chain failed", "err", destroyErr)
+				}
+
+				return err
+			}
+
+			if inputs != nil && inputs.GithubCredentials != nil && inputs.MetadataInfo != nil {
+				_, err = t.RegisterMetadata(ctx, inputs.GithubCredentials, inputs.MetadataInfo)
+				if err != nil {
+					t.logger.Error("Failed to register metadata", "err", err)
+					return err
+				}
+			}
+			return nil
+		default:
+			t.logger.Error("infrastructure provider %s is not supported for mainnet", infraOpt)
+			return fmt.Errorf("infrastructure provider %s is not supported for mainnet; only aws is allowed", infraOpt)
 		}
 	default:
 		t.logger.Error("network %s is not supported", t.network)

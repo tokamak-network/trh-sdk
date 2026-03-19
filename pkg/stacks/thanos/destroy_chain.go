@@ -18,6 +18,10 @@ func (t *ThanosStack) Destroy(ctx context.Context) error {
 	case constants.LocalDevnet:
 		return t.destroyDevnet(ctx)
 	case constants.Testnet, constants.Mainnet:
+		// Check if this is a local network deployment
+		if t.awsProfile == nil {
+			return t.destroyLocalNetwork(ctx)
+		}
 		return t.destroyInfraOnAWS(ctx)
 	}
 	return nil
