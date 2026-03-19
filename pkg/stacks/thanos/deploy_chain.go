@@ -68,6 +68,7 @@ func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string, inputs *Deplo
 			}
 			return nil
 		case constants.Local:
+			t.deployConfig.L1BeaconURL = inputs.L1BeaconURL
 			return t.deployLocalNetwork(ctx)
 		default:
 			t.logger.Error("infrastructure provider %s is not supported", infraOpt)
