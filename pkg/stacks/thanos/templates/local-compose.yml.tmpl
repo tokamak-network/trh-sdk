@@ -1,0 +1,211 @@
+services:
+  op-geth:
+    image: {{.OpGethImage}}
+    ports:
+      - "8545:8545"
+      - "8546:8546"
+      - "8551:8551"
+    volumes:
+      - op-geth-data:/data
+      - {{.GenesisPath}}:/config/genesis.json:ro
+      - {{.JWTPath}}:/config/jwt.txt:ro
+    command:
+      - --datadir=/data
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.port=8545
+      - --http.corsdomain=*
+      - --http.vhosts=*
+      - --http.api=web3,debug,eth,txpool,net,engine
+      - --ws
+      - --ws.addr=0.0.0.0
+      - --ws.port=8546
+      - --ws.origins=*
+      - --ws.api=debug,eth,txpool,net,engine
+      - --authrpc.addr=0.0.0.0
+      - --authrpc.port=8551
+      - --authrpc.jwtsecret=/config/jwt.txt
+      - --authrpc.vhosts=*
+      - --rollup.sequencerhttp=http://op-node:9545
+      - --rollup.disabletxpoolgossip=true
+      - --gcmode=archive
+      - --nodiscover
+      - --maxpeers=0
+      - --networkid={{.L2ChainID}}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8545"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  op-node:
+    image: {{.OpNodeImage}}
+    ports:
+      - "9545:9545"
+      - "7300:7300"
+    volumes:
+      - {{.RollupPath}}:/config/rollup.json:ro
+      - {{.JWTPath}}:/config/jwt.txt:ro
+    environment:
+      - OP_NODE_L1_ETH_RPC={{.L1RpcUrl}}
+      - OP_NODE_L1_BEACON={{.L1BeaconUrl}}
+      - OP_NODE_L2_ENGINE_RPC=http://op-geth:8551
+      - OP_NODE_L2_ENGINE_AUTH=/config/jwt.txt
+      - OP_NODE_ROLLUP_CONFIG=/config/rollup.json
+      - OP_NODE_SEQUENCER_ENABLED=true
+      - OP_NODE_SEQUENCER_L1_CONFS=4
+      - OP_NODE_SEQUENCER_PRIVATE_KEY={{.SequencerKey}}
+      - OP_NODE_P2P_DISABLE=true
+      - OP_NODE_RPC_ADDR=0.0.0.0
+      - OP_NODE_RPC_PORT=9545
+      - OP_NODE_METRICS_ENABLED=true
+      - OP_NODE_METRICS_ADDR=0.0.0.0
+      - OP_NODE_METRICS_PORT=7300
+    depends_on:
+      op-geth:
+        condition: service_healthy
+    restart: unless-stopped
+
+  op-batcher:
+    image: {{.OpBatcherImage}}
+    ports:
+      - "8548:8548"
+    environment:
+      - OP_BATCHER_L1_ETH_RPC={{.L1RpcUrl}}
+      - OP_BATCHER_L2_ETH_RPC=http://op-geth:8545
+      - OP_BATCHER_ROLLUP_RPC=http://op-node:9545
+      - OP_BATCHER_PRIVATE_KEY={{.BatcherKey}}
+      - OP_BATCHER_MAX_CHANNEL_DURATION={{.MaxChannelDuration}}
+      - OP_BATCHER_SUB_SAFETY_MARGIN=6
+      - OP_BATCHER_NUM_CONFIRMATIONS=1
+      - OP_BATCHER_RPC_ADDR=0.0.0.0
+      - OP_BATCHER_RPC_PORT=8548
+    depends_on:
+      op-geth:
+        condition: service_healthy
+    restart: unless-stopped
+
+  op-proposer:
+    image: {{.OpProposerImage}}
+    ports:
+      - "8560:8560"
+    environment:
+      - OP_PROPOSER_L1_ETH_RPC={{.L1RpcUrl}}
+      - OP_PROPOSER_ROLLUP_RPC=http://op-node:9545
+      - OP_PROPOSER_PRIVATE_KEY={{.ProposerKey}}
+      - OP_PROPOSER_L2OO_ADDRESS={{.L2OutputOracleAddress}}
+      - OP_PROPOSER_NUM_CONFIRMATIONS=1
+      - OP_PROPOSER_RPC_ADDR=0.0.0.0
+      - OP_PROPOSER_RPC_PORT=8560
+    depends_on:
+      op-geth:
+        condition: service_healthy
+    profiles: ["proposer"]
+    restart: unless-stopped
+
+  op-challenger:
+    image: {{.OpChallengerImage}}
+    volumes:
+      - {{.GenesisPath}}:/config/genesis.json:ro
+      - {{.RollupPath}}:/config/rollup.json:ro
+      - {{.PrestatePath}}:/config/prestate.json:ro
+      - op-challenger-data:/data
+    environment:
+      - OP_CHALLENGER_L1_ETH_RPC={{.L1RpcUrl}}
+      - OP_CHALLENGER_L1_BEACON={{.L1BeaconUrl}}
+      - OP_CHALLENGER_ROLLUP_RPC=http://op-node:9545
+      - OP_CHALLENGER_L2_ETH_RPC=http://op-geth:8545
+      - OP_CHALLENGER_PRIVATE_KEY={{.ChallengerKey}}
+      - OP_CHALLENGER_GAME_FACTORY_ADDRESS={{.DisputeGameFactoryAddress}}
+      - OP_CHALLENGER_TRACE_TYPE=cannon
+      - OP_CHALLENGER_CANNON_L2_GENESIS=/config/genesis.json
+      - OP_CHALLENGER_CANNON_ROLLUP_CONFIG=/config/rollup.json
+      - OP_CHALLENGER_CANNON_PRESTATES_URL=file:///config
+      - OP_CHALLENGER_DATADIR=/data
+    depends_on:
+      op-geth:
+        condition: service_healthy
+    profiles: ["challenger"]
+    restart: unless-stopped
+
+  op-bridge:
+    image: tokamaknetwork/trh-op-bridge-app:latest
+    ports:
+      - "3001:80"
+    profiles: ["bridge"]
+    restart: unless-stopped
+
+  blockscout-db:
+    image: postgres:15
+    environment:
+      - POSTGRES_PASSWORD=blockscout
+      - POSTGRES_DB=blockscout
+      - POSTGRES_USER=postgres
+    volumes:
+      - blockscout-db-data:/var/lib/postgresql/data
+    profiles: ["blockExplorer"]
+    restart: unless-stopped
+
+  blockscout:
+    image: blockscout/blockscout:latest
+    ports:
+      - "4000:4000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:blockscout@blockscout-db:5432/blockscout
+      - ETHEREUM_JSONRPC_HTTP_URL=http://op-geth:8545
+      - ETHEREUM_JSONRPC_WS_URL=ws://op-geth:8546
+      - ETHEREUM_JSONRPC_VARIANT=geth
+      - COIN=ETH
+      - NETWORK=L2
+    depends_on:
+      - blockscout-db
+    profiles: ["blockExplorer"]
+    restart: unless-stopped
+
+  blockscout-frontend:
+    image: ghcr.io/blockscout/frontend:latest
+    ports:
+      - "4001:3000"
+    environment:
+      - NEXT_PUBLIC_API_HOST=http://localhost:4000
+      - NEXT_PUBLIC_API_PROTOCOL=http
+      - NEXT_PUBLIC_STATS_API_HOST=http://localhost:4000
+    depends_on:
+      - blockscout
+    profiles: ["blockExplorer"]
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    profiles: ["monitoring"]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3002:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+    profiles: ["monitoring"]
+    restart: unless-stopped
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1.23.16-debian
+    ports:
+      - "3003:3001"
+    volumes:
+      - uptime-kuma-data:/app/data
+    profiles: ["uptimeService"]
+    restart: unless-stopped
+
+volumes:
+  op-geth-data:
+  op-challenger-data:
+  blockscout-db-data:
+  grafana-data:
+  uptime-kuma-data:
