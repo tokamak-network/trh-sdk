@@ -1577,8 +1577,9 @@ func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainI
 	preset := deployConfigInputs.Preset
 	switch preset {
 	case constants.PresetGeneral:
-		// Clear DeFi-specific fields for general preset
-		defaultTemplate.L1UsdcAddr = "0x0000000000000000000000000000000000000000"
+		// Clear DeFi-specific fields for general preset.
+		// Keep L1UsdcAddr from L1ChainConfigurations — the forge deploy script always
+		// deploys L1UsdcBridge and reverts on a zero USDC address.
 		defaultTemplate.UniswapV3FactoryOwner = "0x0000000000000000000000000000000000000000"
 		defaultTemplate.UniswapV3FactoryFee500 = 0
 		defaultTemplate.UniswapV3FactoryTickSpacing10 = 0
