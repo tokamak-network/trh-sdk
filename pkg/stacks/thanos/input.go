@@ -1520,7 +1520,12 @@ func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainI
 		SystemConfigStartBlock:                   0,
 		RequiredProtocolVersion:                  "0x0000000000000000000000000000000000000003000000010000000000000000",
 		RecommendedProtocolVersion:               "0x0000000000000000000000000000000000000003000000010000000000000000",
-		FaultGameAbsolutePrestate:                prestateHash,
+		FaultGameAbsolutePrestate:                func() string {
+			if prestateHash != "" {
+				return prestateHash
+			}
+			return "0x0000000000000000000000000000000000000000000000000000000000000000"
+		}(),
 		FaultGameMaxDepth:                        73,
 		FaultGameClockExtension:                  10800,
 		FaultGameMaxClockDuration:                302400,
