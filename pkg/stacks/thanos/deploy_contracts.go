@@ -1,6 +1,7 @@
 package thanos
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -296,6 +297,19 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			return err
 		}
 
+		// STEP 2.9. Patch start-deploy.sh to skip cannon prestate when fault proof is disabled.
+		// The upstream buildSource() always runs `make cannon-prestate`, but the cannon binary
+		// has changed its CLI to require --type flag which the Makefile does not pass. For
+		// non-fault-proof deployments, cannon prestate is not needed at all.
+		if !deployContractsConfig.EnableFaultProof {
+			tokamakThanosDir := filepath.Join(t.deploymentPath, "tokamak-thanos")
+			if patchErr := patchStartDeploySkipCannonPrestate(tokamakThanosDir); patchErr != nil {
+				t.logger.Warn("Failed to patch start-deploy.sh, cannon prestate build may fail", "err", patchErr)
+			} else {
+				t.logger.Info("✅ start-deploy.sh patched: cannon prestate build will be skipped (fault proof disabled)")
+			}
+		}
+
 		// STEP 3. Build the contracts
 		scriptsDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "scripts")
 		if !deployContractsConfig.ReuseDeployment {
@@ -491,4 +505,43 @@ func (t *ThanosStack) deployContracts(ctx context.Context,
 		return err
 	}
 	return nil
+}
+
+// patchStartDeploySkipCannonPrestate patches the start-deploy.sh script in the cloned
+// tokamak-thanos repository to skip cannon prestate build when fault proof is disabled.
+// The cannon binary CLI has changed to require --type flag, and cannon prestate is only
+// needed for fault proof (challenger) deployments.
+func patchStartDeploySkipCannonPrestate(tokamakThanosDir string) error {
+	scriptPath := filepath.Join(tokamakThanosDir, "packages", "tokamak", "contracts-bedrock", "scripts", "start-deploy.sh")
+
+	content, err := os.ReadFile(scriptPath)
+	if err != nil {
+		return fmt.Errorf("failed to read start-deploy.sh: %w", err)
+	}
+
+	oldSection := `  # Build cannon prestate
+  echo "Building cannon prestate..."
+  if ! retryCommand "make cannon-prestate" "Building cannon prestate"; then
+    echo "❌ Error: Failed to build cannon prestate after $MAX_RETRIES attempts"
+    return 1
+  fi`
+
+	newSection := `  # Build cannon prestate (only when fault proof is enabled)
+  if [ "${ENABLE_FAULT_PROOF:-false}" = "true" ]; then
+    echo "Building cannon prestate..."
+    if ! retryCommand "make cannon-prestate" "Building cannon prestate"; then
+      echo "❌ Error: Failed to build cannon prestate after $MAX_RETRIES attempts"
+      return 1
+    fi
+  else
+    echo "ℹ️ Skipping cannon prestate build (ENABLE_FAULT_PROOF not set)"
+  fi`
+
+	if !bytes.Contains(content, []byte(oldSection)) {
+		// Section not found — either already patched or script changed upstream; skip silently
+		return nil
+	}
+
+	patched := bytes.Replace(content, []byte(oldSection), []byte(newSection), 1)
+	return os.WriteFile(scriptPath, patched, 0755)
 }
