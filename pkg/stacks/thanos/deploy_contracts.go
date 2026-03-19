@@ -580,7 +580,7 @@ func patchStartDeployScript(tokamakThanosDir string) error {
 	// to OOM SIGKILL on resource-constrained hosts (Docker Desktop / CI). Using optimizer_runs=200
 	// (the solc default) produces functionally identical contracts with much lower memory usage.
 	forgeCleanOld := `forge clean && forge build`
-	forgeCleanNew := `sed -i 's/optimizer_runs = 999999/optimizer_runs = 200/' foundry.toml 2>/dev/null || true && sed -i "s/extra_output = \[.*\]/extra_output = []/" foundry.toml 2>/dev/null || true && sed -i 's/build_info = true/build_info = false/' foundry.toml 2>/dev/null || true && forge clean && forge build`
+	forgeCleanNew := `sed -i 's/optimizer_runs = 999999/optimizer_runs = 200/' foundry.toml 2>/dev/null || true && sed -i '/^extra_output/d' foundry.toml 2>/dev/null || true && sed -i 's/build_info = true/build_info = false/' foundry.toml 2>/dev/null || true && forge clean && forge build`
 	if bytes.Contains(content, []byte(forgeCleanOld)) {
 		content = bytes.Replace(content, []byte(forgeCleanOld), []byte(forgeCleanNew), 1)
 	}
