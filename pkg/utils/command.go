@@ -98,6 +98,9 @@ func ExecuteCommandStreamInDir(ctx context.Context, l *zap.SugaredLogger, dir st
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		// pty.Start may have partially set cmd.Stdout; reset before StdoutPipe
+		cmd.Stdout = nil
+		cmd.Stderr = nil
 		// Fallback to StdoutPipe
 		var rd io.ReadCloser
 		rd, err = cmd.StdoutPipe()
