@@ -7,8 +7,7 @@ services:
       - "8551:8551"
     volumes:
       - op-geth-data:/data
-      - {{.GenesisPath}}:/config/genesis.json:ro
-      - {{.JWTPath}}:/config/jwt.txt:ro
+      - trh_backend_storage:{{.StorageMountBase}}:ro
     command:
       - --datadir=/data
       - --http
@@ -24,7 +23,7 @@ services:
       - --ws.api=debug,eth,txpool,net,engine
       - --authrpc.addr=0.0.0.0
       - --authrpc.port=8551
-      - --authrpc.jwtsecret=/config/jwt.txt
+      - --authrpc.jwtsecret={{.JWTPath}}
       - --authrpc.vhosts=*
       - --rollup.sequencerhttp=http://op-node:9545
       - --rollup.disabletxpoolgossip=true
@@ -45,14 +44,13 @@ services:
       - "9545:9545"
       - "7300:7300"
     volumes:
-      - {{.RollupPath}}:/config/rollup.json:ro
-      - {{.JWTPath}}:/config/jwt.txt:ro
+      - trh_backend_storage:{{.StorageMountBase}}:ro
     environment:
       - OP_NODE_L1_ETH_RPC={{.L1RpcUrl}}
       - OP_NODE_L1_BEACON={{.L1BeaconUrl}}
       - OP_NODE_L2_ENGINE_RPC=http://op-geth:8551
-      - OP_NODE_L2_ENGINE_AUTH=/config/jwt.txt
-      - OP_NODE_ROLLUP_CONFIG=/config/rollup.json
+      - OP_NODE_L2_ENGINE_AUTH={{.JWTPath}}
+      - OP_NODE_ROLLUP_CONFIG={{.RollupPath}}
       - OP_NODE_SEQUENCER_ENABLED=true
       - OP_NODE_SEQUENCER_L1_CONFS=4
       - OP_NODE_SEQUENCER_PRIVATE_KEY={{.SequencerKey}}
@@ -107,9 +105,7 @@ services:
   op-challenger:
     image: {{.OpChallengerImage}}
     volumes:
-      - {{.GenesisPath}}:/config/genesis.json:ro
-      - {{.RollupPath}}:/config/rollup.json:ro
-      - {{.PrestatePath}}:/config/prestate.json:ro
+      - trh_backend_storage:{{.StorageMountBase}}:ro
       - op-challenger-data:/data
     environment:
       - OP_CHALLENGER_L1_ETH_RPC={{.L1RpcUrl}}
@@ -119,8 +115,8 @@ services:
       - OP_CHALLENGER_PRIVATE_KEY={{.ChallengerKey}}
       - OP_CHALLENGER_GAME_FACTORY_ADDRESS={{.DisputeGameFactoryAddress}}
       - OP_CHALLENGER_TRACE_TYPE=cannon
-      - OP_CHALLENGER_CANNON_L2_GENESIS=/config/genesis.json
-      - OP_CHALLENGER_CANNON_ROLLUP_CONFIG=/config/rollup.json
+      - OP_CHALLENGER_CANNON_L2_GENESIS={{.GenesisPath}}
+      - OP_CHALLENGER_CANNON_ROLLUP_CONFIG={{.RollupPath}}
       - OP_CHALLENGER_CANNON_PRESTATES_URL=file:///config
       - OP_CHALLENGER_DATADIR=/data
     depends_on:
@@ -209,3 +205,6 @@ volumes:
   blockscout-db-data:
   grafana-data:
   uptime-kuma-data:
+  trh_backend_storage:
+    external: true
+    name: trh_backend_storage

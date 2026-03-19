@@ -36,6 +36,7 @@ type localComposeData struct {
 	RollupPath                string
 	PrestatePath              string
 	JWTPath                   string
+	StorageMountBase          string // mount point for the shared storage volume
 	L2ChainID                 uint64
 	MaxChannelDuration        uint64
 	L2OutputOracleAddress     string
@@ -99,6 +100,10 @@ func (t *ThanosStack) generateLocalComposeFile(composePath string) error {
 	prestatePath := filepath.Join(t.deploymentPath, "tokamak-thanos/op-program/bin/prestate.json")
 	jwtPath := filepath.Join(t.deploymentPath, "jwt.txt")
 
+	// The trh_backend_storage volume is mounted at /app/storage in both the backend
+	// container and the L2 containers. File paths use /app/storage as the base.
+	storageMountBase := "/app/storage"
+
 	data := localComposeData{
 		OpGethImage:               fmt.Sprintf("tokamaknetwork/thanos-op-geth:nightly-%s", imageTags.OpGethImageTag),
 		OpNodeImage:               fmt.Sprintf("tokamaknetwork/thanos-op-node:nightly-%s", imageTags.ThanosStackImageTag),
@@ -115,6 +120,7 @@ func (t *ThanosStack) generateLocalComposeFile(composePath string) error {
 		RollupPath:                rollupPath,
 		PrestatePath:              prestatePath,
 		JWTPath:                   jwtPath,
+		StorageMountBase:          storageMountBase,
 		L2ChainID:                 t.deployConfig.L2ChainID,
 		MaxChannelDuration:        l1ChainConfig.MaxChannelDuration,
 		L2OutputOracleAddress:     contracts.L2OutputOracleProxy,
@@ -151,10 +157,11 @@ func (t *ThanosStack) initLocalOpGeth(ctx context.Context, composePath string) e
 	}
 
 	t.logger.Info("Initializing op-geth genesis...")
+	genesisPath := filepath.Join(t.deploymentPath, "tokamak-thanos/build/genesis.json")
 	return utils.ExecuteCommandStream(ctx, t.logger, "docker", "compose",
 		"-f", composePath,
 		"run", "--rm", "op-geth",
-		"--datadir=/data", "init", "/config/genesis.json")
+		"--datadir=/data", "init", genesisPath)
 }
 
 func (t *ThanosStack) startLocalCoreServices(ctx context.Context, composePath string) error {
