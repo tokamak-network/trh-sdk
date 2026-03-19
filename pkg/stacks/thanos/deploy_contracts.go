@@ -575,5 +575,15 @@ func patchStartDeployScript(tokamakThanosDir string) error {
 		content = bytes.Replace(content, []byte(sdkBuildOld), []byte(sdkBuildNew), 1)
 	}
 
+	// Patch 4: lower optimizer_runs in foundry.toml before forge build to reduce peak solc
+	// memory usage. The default optimizer_runs=999999 causes heavy optimizer work that leads
+	// to OOM SIGKILL on resource-constrained hosts (Docker Desktop / CI). Using optimizer_runs=200
+	// (the solc default) produces functionally identical contracts with much lower memory usage.
+	forgeCleanOld := `forge clean && forge build`
+	forgeCleanNew := `sed -i 's/optimizer_runs = 999999/optimizer_runs = 200/' foundry.toml 2>/dev/null || true && forge clean && forge build`
+	if bytes.Contains(content, []byte(forgeCleanOld)) {
+		content = bytes.Replace(content, []byte(forgeCleanOld), []byte(forgeCleanNew), 1)
+	}
+
 	return os.WriteFile(scriptPath, content, 0755)
 }
