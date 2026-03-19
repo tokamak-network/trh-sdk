@@ -551,5 +551,29 @@ func patchStartDeployScript(tokamakThanosDir string) error {
 		content = bytes.Replace(content, []byte(opNodeOld), []byte(opNodeNew), 1)
 	}
 
+	// Patch 3: forge artifacts symlinks — newer forge versions name artifacts with solidity version
+	// suffix (e.g. L1UsdcBridge.0.8.15.json) but the TypeScript SDK imports the unversioned name
+	// (e.g. L1UsdcBridge.json). Create symlinks before the SDK TypeScript build.
+	sdkBuildOld := `  # Build SDK with retry logic
+  if ! retryCommand "pnpm build" "Building SDK"; then`
+	sdkBuildNew := `  # Create non-versioned symlinks for versioned forge artifacts (needed for TypeScript resolution)
+  echo "Creating artifact symlinks for TypeScript resolution..."
+  find $projectRoot/packages/tokamak/contracts-bedrock/forge-artifacts -name "*.json" | while read f; do
+    dir=$(dirname "$f")
+    base=$(basename "$f")
+    nonversioned=$(echo "$base" | sed 's/\(\.[0-9][0-9]*\)\+\.json$/.json/')
+    if [ "$base" != "$nonversioned" ] && [ ! -f "$dir/$nonversioned" ]; then
+      ln -sf "$base" "$dir/$nonversioned"
+    fi
+  done
+  echo "✅ Artifact symlinks created"
+
+  # Build SDK with retry logic
+  if ! retryCommand "pnpm build" "Building SDK"; then`
+
+	if bytes.Contains(content, []byte(sdkBuildOld)) {
+		content = bytes.Replace(content, []byte(sdkBuildOld), []byte(sdkBuildNew), 1)
+	}
+
 	return os.WriteFile(scriptPath, content, 0755)
 }
