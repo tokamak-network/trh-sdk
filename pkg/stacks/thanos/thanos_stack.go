@@ -2,7 +2,6 @@ package thanos
 
 import (
 	"context"
-	"os"
 
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
@@ -106,10 +105,9 @@ func NewLocalTestnetThanosStack(
 		return nil, err
 	}
 
-	// Set KUBECONFIG so kubectl/helm commands reach the kind cluster
-	if kubeconfigPath != "" {
-		os.Setenv("KUBECONFIG", kubeconfigPath)
-	}
+	// Note: KUBECONFIG is NOT set via os.Setenv (process-global, race condition).
+	// Instead, kubeconfigPath is stored and passed via --kubeconfig flag
+	// to kubectl/helm commands by the caller.
 
 	return &ThanosStack{
 		network:        constants.LocalTestnet,

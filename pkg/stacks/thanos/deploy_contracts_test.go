@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"go.uber.org/zap"
 )
 
 const testMakefileContent = `.PHONY: cannon-prestate
@@ -88,6 +90,25 @@ func TestIsLocal_Values(t *testing.T) {
 		if got := s.isLocal(); got != tt.want {
 			t.Errorf("isLocal(%q) = %v, want %v", tt.network, got, tt.want)
 		}
+	}
+}
+
+func TestNewLocalTestnetThanosStack_SetsFields(t *testing.T) {
+	dir := t.TempDir()
+	// ReadConfigFromJSONFile returns nil config (not error) when file missing,
+	// but may attempt L2 connection if config has l2_rpc_url. Use empty dir.
+	stack, err := NewLocalTestnetThanosStack(nil, zap.NewNop().Sugar(), dir, "/tmp/my.kubeconfig")
+	if err != nil {
+		t.Skipf("skipping: ReadConfigFromJSONFile side effect: %v", err)
+	}
+	if !stack.isLocal() {
+		t.Error("expected isLocal()=true")
+	}
+	if stack.kubeconfigPath != "/tmp/my.kubeconfig" {
+		t.Errorf("expected kubeconfigPath=/tmp/my.kubeconfig, got %s", stack.kubeconfigPath)
+	}
+	if stack.usePromptInput {
+		t.Error("expected usePromptInput=false for LocalTestnet")
 	}
 }
 

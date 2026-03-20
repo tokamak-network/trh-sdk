@@ -41,8 +41,7 @@ func patchMakefileCannonPrestate(tokamakThanosDir string) error {
 		return fmt.Errorf("failed to read Makefile: %w", err)
 	}
 
-	original := string(data)
-	content := original
+	content := string(data)
 
 	if strings.Contains(content, "cannon64-impl load-elf") {
 		return nil // already patched
@@ -184,6 +183,12 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		if err != nil {
 			t.logger.Error("failed to clone the repository", "err", err)
 			return err
+		}
+
+		// Patch Makefile cannon-prestate target (wrong binary name / missing flags)
+		if patchErr := patchMakefileCannonPrestate(filepath.Join(t.deploymentPath, "tokamak-thanos")); patchErr != nil {
+			t.logger.Error("Failed to patch Makefile cannon-prestate", "err", patchErr)
+			return fmt.Errorf("failed to patch Makefile cannon-prestate: %w", patchErr)
 		}
 
 		err = t.deployContracts(ctx, l1Client, true)
