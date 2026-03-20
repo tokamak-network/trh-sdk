@@ -60,13 +60,17 @@ func TestInitDeployConfigTemplate_FeeTokenMapping(t *testing.T) {
 }
 
 // TestInitDeployConfigTemplate_PresetGeneral verifies that DeFi-specific fields
-// are cleared for the General preset.
+// are cleared for the General preset, while L1UsdcAddr is preserved because the
+// forge deploy script always deploys L1UsdcBridge and reverts on a zero address.
 func TestInitDeployConfigTemplate_PresetGeneral(t *testing.T) {
 	input := makeTestInput(constants.PresetGeneral, constants.FeeTokenTON)
 	tpl := initDeployConfigTemplate(input, constants.EthereumSepoliaChainID, 5678, "")
 
-	if tpl.L1UsdcAddr != "0x0000000000000000000000000000000000000000" {
-		t.Errorf("General preset should clear L1UsdcAddr, got %s", tpl.L1UsdcAddr)
+	// L1UsdcAddr must NOT be cleared for the general preset: the forge deploy script
+	// always deploys L1UsdcBridge and calls setAddress() which reverts on zero.
+	// Verify it uses the real Sepolia USDC address (non-zero).
+	if tpl.L1UsdcAddr == "" || tpl.L1UsdcAddr == "0x0000000000000000000000000000000000000000" {
+		t.Errorf("General preset must keep real L1UsdcAddr (non-zero), got %s", tpl.L1UsdcAddr)
 	}
 	if tpl.UniswapV3FactoryFee500 != 0 {
 		t.Errorf("General preset should clear UniswapV3FactoryFee500, got %d", tpl.UniswapV3FactoryFee500)
