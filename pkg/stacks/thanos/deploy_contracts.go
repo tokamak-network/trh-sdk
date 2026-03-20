@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
@@ -17,6 +18,53 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
+// Makefile cannon-prestate patch pairs.
+var cannonPrestatePatches = []struct{ old, new string }{
+	{
+		old: `cannon/bin/cannon load-elf --path op-program/bin/op-program-client.elf --out op-program/bin/prestate.json`,
+		new: `cannon/bin/cannon64-impl load-elf --type multithreaded64-5 --path op-program/bin/op-program-client64.elf --out op-program/bin/prestate.bin.gz`,
+	},
+	{
+		old: `cannon/bin/cannon run --proof-at '%(%)' --stop-at '=%(%)' --input op-program/bin/prestate.json --meta "" --proof-fmt 'op-program/bin/%d.json' --output ""`,
+		new: "cannon/bin/cannon64-impl run --type multithreaded64-5 --proof-at '%(%)' --stop-at '=%(%)' --input op-program/bin/prestate.bin.gz --meta \"\" --proof-fmt 'op-program/bin/%d.json' --output \"\"\n" +
+			"\tcp op-program/bin/0.json op-program/bin/prestate-proof.json\n" +
+			"\tcp op-program/bin/prestate-proof.json op-program/bin/prestate.json",
+	},
+}
+
+// patchMakefileCannonPrestate patches the Makefile cannon-prestate target to use
+// cannon64-impl with --type multithreaded64-5. Idempotent.
+func patchMakefileCannonPrestate(tokamakThanosDir string) error {
+	makefilePath := filepath.Join(tokamakThanosDir, "Makefile")
+	data, err := os.ReadFile(makefilePath)
+	if err != nil {
+		return fmt.Errorf("failed to read Makefile: %w", err)
+	}
+
+	content := string(data)
+
+	if strings.Contains(content, "cannon64-impl load-elf") {
+		return nil // already patched
+	}
+
+	matched := 0
+	for _, p := range cannonPrestatePatches {
+		if strings.Contains(content, p.old) {
+			content = strings.ReplaceAll(content, p.old, p.new)
+			matched++
+		}
+	}
+
+	if matched == 0 {
+		return fmt.Errorf("Makefile cannon-prestate patch: no patterns matched — upstream may have changed")
+	}
+
+	if err := os.WriteFile(makefilePath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write patched Makefile: %w", err)
+	}
+	return nil
+}
+
 // ----------------------------------------- Deploy contracts command  ----------------------------- //
 
 func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig *DeployContractsInput) error {
@@ -24,7 +72,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		t.logger.Error("network %s does not require contract deployment, please run `trh-sdk deploy` instead", constants.LocalDevnet)
 		return fmt.Errorf("network %s does not require contract deployment, please run `trh-sdk deploy` instead", constants.LocalDevnet)
 	}
-	if t.network != constants.Testnet && t.network != constants.Mainnet {
+	if t.network != constants.Testnet && t.network != constants.Mainnet && t.network != constants.LocalTestnet {
 		t.logger.Error("network %s does not support", t.network)
 		return fmt.Errorf("network %s does not support", t.network)
 	}
@@ -137,6 +185,12 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			return err
 		}
 
+		// Patch Makefile cannon-prestate target (wrong binary name / missing flags)
+		if patchErr := patchMakefileCannonPrestate(filepath.Join(t.deploymentPath, "tokamak-thanos")); patchErr != nil {
+			t.logger.Error("Failed to patch Makefile cannon-prestate", "err", patchErr)
+			return fmt.Errorf("failed to patch Makefile cannon-prestate: %w", patchErr)
+		}
+
 		err = t.deployContracts(ctx, l1Client, true)
 		if err != nil {
 			t.logger.Error("❌ Resume the contracts deployment failed!", "err", err)
@@ -222,11 +276,22 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			return nil
 		}
 
+		if !dependencies.CheckJustInstallation(ctx) {
+			t.logger.Warn("just is not installed, run `brew install just` to install it")
+			return nil
+		}
+
 		// STEP 2. Clone the repository (always required regardless of ReuseDeployment)
 		err = t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
 		if err != nil {
 			t.logger.Error("failed to clone the repository", "err", err)
 			return err
+		}
+
+		// Patch Makefile cannon-prestate target (wrong binary name / missing flags)
+		if patchErr := patchMakefileCannonPrestate(filepath.Join(t.deploymentPath, "tokamak-thanos")); patchErr != nil {
+			t.logger.Error("Failed to patch Makefile cannon-prestate", "err", patchErr)
+			return fmt.Errorf("failed to patch Makefile cannon-prestate: %w", patchErr)
 		}
 
 		// STEP 2.1. Patch AnchorStateRegistry.sol to add setInitialAnchorState.
@@ -344,6 +409,19 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 				}
 				t.logger.Info("✅ op-node built successfully!")
 			}
+		}
+
+		// BuildOnly mode: return after build without deploying contracts
+		if deployContractsConfig.BuildOnly {
+			t.logger.Info("✅ Build-only mode: contracts built successfully, skipping deployment")
+			t.deployConfig.DeployContractState = &types.DeployContractState{
+				Status: types.DeployContractStatusInProgress,
+			}
+			if writeErr := t.deployConfig.WriteToJSONFile(t.deploymentPath); writeErr != nil {
+				t.logger.Error("Failed to write settings file", "err", writeErr)
+				return writeErr
+			}
+			return nil
 		}
 
 		// STEP 4. Deploy the contracts

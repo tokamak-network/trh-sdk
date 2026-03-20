@@ -27,10 +27,15 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		return "", err
 	}
 
-	var (
-		namespace = t.deployConfig.K8s.Namespace
-		vpcId     = t.deployConfig.AWS.VpcID
-	)
+	namespace := t.deployConfig.K8s.Namespace
+
+	var vpcId string
+	if !t.isLocal() {
+		if t.deployConfig.AWS == nil {
+			return "", fmt.Errorf("AWS configuration is not set")
+		}
+		vpcId = t.deployConfig.AWS.VpcID
+	}
 
 	blockExplorerPods, err := utils.GetPodsByName(ctx, namespace, "block-explorer")
 	if err != nil {
@@ -38,20 +43,20 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		return "", err
 	}
 	if len(blockExplorerPods) > 0 {
-		t.logger.Info("Block Explorer is running: \n")
+		t.logger.Info("Block Explorer is running")
+		if t.isLocal() {
+			return "http://localhost:4000", nil
+		}
 		var blockExplorerURL string
 		for {
 			k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, "block-explorer")
 			if err != nil {
-				t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
 				return "", err
 			}
-
 			if len(k8sIngresses) > 0 {
 				blockExplorerURL = "http://" + k8sIngresses[0]
 				break
 			}
-
 			time.Sleep(15 * time.Second)
 		}
 		return blockExplorerURL, nil
@@ -65,8 +70,6 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 
 	t.logger.Info("Installing a block explorer component...")
 
-	// Make .envrc file
-
 	var (
 		databasePassword     = inputs.DatabasePassword
 		databaseUserName     = inputs.DatabaseUsername
@@ -74,61 +77,63 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		coinmarketcapTokenID = inputs.CoinmarketcapTokenID
 		walletConnectID      = inputs.WalletConnectProjectID
 	)
-	err = makeBlockExplorerEnvs(
-		fmt.Sprintf("%s/tokamak-thanos-stack/terraform", t.deploymentPath),
-		".envrc",
-		types.BlockExplorerEnvs{
-			BlockExplorerDatabasePassword: databasePassword,
-			BlockExplorerDatabaseUserName: databaseUserName,
-			BlockExplorerDatabaseName:     "blockscout",
-			VpcId:                         vpcId,
-			AwsRegion:                     t.deployConfig.AWS.Region,
-		},
-	)
-	if err != nil {
-		t.logger.Error("Error creating block explorer environments file", "err", err)
-		return "", err
+
+	var rdsConnectionUrl string
+
+	if t.isLocal() {
+		// Local: deploy a PostgreSQL pod instead of AWS RDS
+		rdsConnectionUrl, err = t.deployLocalPostgres(ctx, namespace, databaseUserName, databasePassword)
+		if err != nil {
+			return "", fmt.Errorf("failed to deploy local PostgreSQL: %w", err)
+		}
+	} else {
+		// Cloud: Terraform RDS provisioning
+		err = makeBlockExplorerEnvs(
+			fmt.Sprintf("%s/tokamak-thanos-stack/terraform", t.deploymentPath),
+			".envrc",
+			types.BlockExplorerEnvs{
+				BlockExplorerDatabasePassword: databasePassword,
+				BlockExplorerDatabaseUserName: databaseUserName,
+				BlockExplorerDatabaseName:     "blockscout",
+				VpcId:                         vpcId,
+				AwsRegion:                     t.deployConfig.AWS.Region,
+			},
+		)
+		if err != nil {
+			return "", err
+		}
+
+		err = utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
+			"-c",
+			fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
+			source .envrc && cd block-explorer &&
+			terraform init && terraform plan && terraform apply -auto-approve
+			`, t.deploymentPath),
+		}...)
+		if err != nil {
+			return "", err
+		}
+
+		rdsOutput, err := utils.ExecuteCommand(ctx, "bash", []string{
+			"-c",
+			fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
+			source .envrc && cd block-explorer &&
+			terraform output -json rds_connection_url`, t.deploymentPath),
+		}...)
+		if err != nil {
+			return "", fmt.Errorf("failed to get terraform output: %w", err)
+		}
+		rdsConnectionUrl = strings.Trim(rdsOutput, `"`)
 	}
 
 	chainReleaseName, err := utils.FilterHelmReleases(ctx, namespace, namespace)
 	if err != nil {
-		t.logger.Error("Error filtering helm releases", "err", err)
 		return "", err
 	}
 	if len(chainReleaseName) == 0 {
-		t.logger.Error("No helm releases found")
-		return "", nil
+		return "", fmt.Errorf("no helm releases found")
 	}
-
 	releaseName := chainReleaseName[0]
-
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
-		"-c",
-		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
-		source .envrc &&
-		cd block-explorer &&
-		terraform init &&
-		terraform plan &&
-		terraform apply -auto-approve
-		`, t.deploymentPath),
-	}...)
-	if err != nil {
-		t.logger.Error("Error initializing Terraform backend", "err", err)
-		return "", err
-	}
-
-	rdsConnectionUrl, err := utils.ExecuteCommand(ctx, "bash", []string{
-		"-c",
-		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
-		source .envrc &&
-		cd block-explorer &&	
-		terraform output -json rds_connection_url`, t.deploymentPath),
-	}...)
-	if err != nil {
-		return "", fmt.Errorf("failed to get terraform output for %s: %w", "vpc_id", err)
-	}
-
-	rdsConnectionUrl = strings.Trim(rdsConnectionUrl, `"`)
 
 	var opGethSVC string
 	for {
@@ -147,19 +152,20 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	}
 
 	var opGethPublicUrl string
-	for {
-		k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, "op-geth")
-		if err != nil {
-			t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
-			return "", err
+	if t.isLocal() {
+		opGethPublicUrl = fmt.Sprintf("%s.%s.svc.cluster.local", opGethSVC, namespace)
+	} else {
+		for {
+			k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, "op-geth")
+			if err != nil {
+				return "", err
+			}
+			if len(k8sIngresses) > 0 {
+				opGethPublicUrl = k8sIngresses[0]
+				break
+			}
+			time.Sleep(15 * time.Second)
 		}
-
-		if len(k8sIngresses) > 0 {
-			opGethPublicUrl = k8sIngresses[0]
-			break
-		}
-
-		time.Sleep(15 * time.Second)
 	}
 
 	// generate the helm chart value file
@@ -223,7 +229,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	// Install backend first
 	blockExplorerBackendReleaseName := fmt.Sprintf("%s-%d", "block-explorer-be", time.Now().Unix())
 	fileValue := fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack/block-explorer-value.yaml", t.deploymentPath)
-	_, err = utils.ExecuteCommand(ctx, "helm", []string{
+	_, err = t.helm(ctx, []string{
 		"install",
 		blockExplorerBackendReleaseName,
 		fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack", t.deploymentPath),
@@ -238,22 +244,23 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	}
 	t.logger.Info("✅ Install block explorer backend component successfully")
 
-	// Install the frontend
-	// Get the ingress
+	// Get backend URL for frontend configuration
 	var blockExplorerUrl string
-	for {
-		k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, blockExplorerBackendReleaseName)
-		if err != nil {
-			t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
-			return "", err
+	if t.isLocal() {
+		blockExplorerUrl = "localhost:4000"
+		t.logger.Infof("Local block explorer. Access via: kubectl port-forward -n %s svc/%s 4000:4000", namespace, blockExplorerBackendReleaseName)
+	} else {
+		for {
+			k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, blockExplorerBackendReleaseName)
+			if err != nil {
+				return "", err
+			}
+			if len(k8sIngresses) > 0 {
+				blockExplorerUrl = k8sIngresses[0]
+				break
+			}
+			time.Sleep(15 * time.Second)
 		}
-
-		if len(k8sIngresses) > 0 {
-			blockExplorerUrl = k8sIngresses[0]
-			break
-		}
-
-		time.Sleep(15 * time.Second)
 	}
 
 	// update the values file
@@ -296,7 +303,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	}
 
 	blockExplorerFrontendReleaseName := fmt.Sprintf("%s-%d", "block-explorer-fe", time.Now().Unix())
-	_, err = utils.ExecuteCommand(ctx, "helm", []string{
+	_, err = t.helm(ctx, []string{
 		"install",
 		blockExplorerFrontendReleaseName,
 		fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack", t.deploymentPath),
@@ -317,48 +324,112 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 
 func (t *ThanosStack) UninstallBlockExplorer(ctx context.Context) error {
 	if t.deployConfig.K8s == nil {
-		t.logger.Error("K8s configuration is not set. Please run the deploy command first")
-		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+		return fmt.Errorf("K8s configuration is not set")
+	}
+	if !t.isLocal() && t.deployConfig.AWS == nil {
+		return fmt.Errorf("AWS configuration is not set")
 	}
 
-	if t.deployConfig.AWS == nil {
-		t.logger.Error("AWS configuration is not set. Please run the deploy command first")
-		return fmt.Errorf("AWS configuration is not set. Please run the deploy command first")
-	}
-
-	var (
-		namespace = t.deployConfig.K8s.Namespace
-	)
+	namespace := t.deployConfig.K8s.Namespace
 
 	// 1. Uninstall helm charts
 	releases, err := utils.FilterHelmReleases(ctx, namespace, "block-explorer")
 	if err != nil {
-		t.logger.Error("Error to filter helm releases", "err", err)
 		return err
 	}
-
 	for _, release := range releases {
-		_, err = utils.ExecuteCommand(ctx, "helm", []string{
-			"uninstall",
-			release,
-			"--namespace",
-			namespace,
-		}...)
-		if err != nil {
-			t.logger.Error("❌ Error uninstalling op-bridge helm chart", "err", err)
+		if _, err := t.helm(ctx, "uninstall", release, "--namespace", namespace); err != nil {
+			t.logger.Error("❌ Error uninstalling block-explorer helm chart", "err", err)
 			return err
 		}
 	}
 
-	// 2. Destroy terraform resources
-	err = t.destroyTerraform(ctx, fmt.Sprintf("%s/tokamak-thanos-stack/terraform/block-explorer", t.deploymentPath))
-	if err != nil {
-		t.logger.Error("❌ Error running block-explorer terraform destroy", "err", err)
-		return err
+	// 2. Clean up database
+	if t.isLocal() {
+		// Delete local PostgreSQL
+		t.kubectl(ctx, "delete", "deployment", "blockscout-postgres", "-n", namespace, "--ignore-not-found=true")
+		t.kubectl(ctx, "delete", "service", "blockscout-postgres", "-n", namespace, "--ignore-not-found=true")
+	} else {
+		if err := t.destroyTerraform(ctx, fmt.Sprintf("%s/tokamak-thanos-stack/terraform/block-explorer", t.deploymentPath)); err != nil {
+			t.logger.Error("❌ Error running block-explorer terraform destroy", "err", err)
+			return err
+		}
 	}
 
 	t.logger.Info("✅ Uninstall block explorer components successfully")
 	return nil
+}
+
+// deployLocalPostgres creates a PostgreSQL pod + service for local block explorer.
+func (t *ThanosStack) deployLocalPostgres(ctx context.Context, namespace, username, password string) (string, error) {
+	t.logger.Info("Deploying local PostgreSQL for block explorer...")
+
+	manifest := fmt.Sprintf(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blockscout-postgres
+  namespace: %s
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: blockscout-postgres
+  template:
+    metadata:
+      labels:
+        app: blockscout-postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15-alpine
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_USER
+          value: "%s"
+        - name: POSTGRES_PASSWORD
+          value: "%s"
+        - name: POSTGRES_DB
+          value: "blockscout"
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/postgresql/data
+      volumes:
+      - name: data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blockscout-postgres
+  namespace: %s
+spec:
+  selector:
+    app: blockscout-postgres
+  ports:
+  - port: 5432
+    targetPort: 5432
+`, namespace, username, password, namespace)
+
+	if err := t.kubectlApplyManifest(ctx, manifest); err != nil {
+		return "", fmt.Errorf("apply postgres manifest: %w", err)
+	}
+
+	// Wait for postgres pod
+	t.logger.Info("Waiting for PostgreSQL to be ready...")
+	for i := 0; i < 60; i++ {
+		pods, err := utils.GetPodsByName(ctx, namespace, "blockscout-postgres")
+		if err == nil && len(pods) > 0 {
+			t.logger.Info("✅ Local PostgreSQL is ready")
+			return fmt.Sprintf("postgresql://%s:%s@blockscout-postgres.%s.svc.cluster.local:5432/blockscout", username, password, namespace), nil
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+	}
+	return "", fmt.Errorf("PostgreSQL did not become ready")
 }
 
 func (t *ThanosStack) GetBlockExplorerURL(ctx context.Context) (string, error) {

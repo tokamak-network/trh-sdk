@@ -139,3 +139,13 @@ func CheckFoundryInstallation(ctx context.Context) bool {
 	fmt.Println("✅ Foundry is installed")
 	return true
 }
+
+func CheckJustInstallation(ctx context.Context) bool {
+	_, err := utils.ExecuteCommand(ctx, "just", "--version")
+	if err != nil {
+		fmt.Printf("❌ just is not installed or not found in PATH. Install with: brew install just\n")
+		return false
+	}
+	fmt.Println("✅ just is installed")
+	return true
+}
