@@ -2,11 +2,13 @@ package thanos
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
@@ -15,6 +17,67 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
+
+// Makefile cannon-prestate patch pairs: old pattern → new pattern.
+// Separated as constants for readability and testability.
+var cannonPrestatePatches = []struct{ old, new string }{
+	{
+		// load-elf: wrong binary name, missing --type flag, wrong elf path and output format
+		old: `cannon/bin/cannon load-elf --path op-program/bin/op-program-client.elf --out op-program/bin/prestate.json`,
+		new: `cannon/bin/cannon64-impl load-elf --type multithreaded64-5 --path op-program/bin/op-program-client64.elf --out op-program/bin/prestate.bin.gz`,
+	},
+	{
+		// run: wrong binary name, missing --type flag, wrong input format.
+		// Also append cp commands to produce prestate-proof.json and prestate.json.
+		old: `cannon/bin/cannon run --proof-at '%(%)' --stop-at '=%(%)' --input op-program/bin/prestate.json --meta "" --proof-fmt 'op-program/bin/%d.json' --output ""`,
+		new: "cannon/bin/cannon64-impl run --type multithreaded64-5 --proof-at '%(%)' --stop-at '=%(%)' --input op-program/bin/prestate.bin.gz --meta \"\" --proof-fmt 'op-program/bin/%d.json' --output \"\"\n" +
+			"\tcp op-program/bin/0.json op-program/bin/prestate-proof.json\n" +
+			"\tcp op-program/bin/prestate-proof.json op-program/bin/prestate.json",
+	},
+}
+
+// patchMakefileCannonPrestate patches the tokamak-thanos Makefile so that the
+// cannon-prestate target uses the correct binary name and flags.
+// Without this patch `make cannon-prestate` fails because the upstream Makefile
+// references `cannon` (32-bit) instead of `cannon64-impl` with `--type multithreaded64-5`.
+// Returns nil if the Makefile is already patched (idempotent).
+// Returns error if the Makefile exists but no patterns matched (upstream changed).
+func patchMakefileCannonPrestate(tokamakThanosDir string) error {
+	makefilePath := filepath.Join(tokamakThanosDir, "Makefile")
+	data, err := os.ReadFile(makefilePath)
+	if err != nil {
+		return fmt.Errorf("failed to read Makefile: %w", err)
+	}
+
+	original := string(data)
+	content := original
+
+	// Check if already patched (idempotent).
+	// Use the specific load-elf replacement to detect prior patching —
+	// "cannon64-impl load-elf" only appears after our patch, unlike
+	// "cannon64-impl" alone which can appear in build commands.
+	alreadyPatched := strings.Contains(content, "cannon64-impl load-elf")
+	if alreadyPatched {
+		return nil
+	}
+
+	matched := 0
+	for _, p := range cannonPrestatePatches {
+		if strings.Contains(content, p.old) {
+			content = strings.ReplaceAll(content, p.old, p.new)
+			matched++
+		}
+	}
+
+	if matched == 0 {
+		return fmt.Errorf("Makefile cannon-prestate patch: no patterns matched — upstream Makefile may have changed")
+	}
+
+	if err := os.WriteFile(makefilePath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write patched Makefile: %w", err)
+	}
+	return nil
+}
 
 // ----------------------------------------- Deploy contracts command  ----------------------------- //
 
@@ -136,6 +199,12 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			return err
 		}
 
+		// Patch Makefile cannon-prestate target (wrong binary name / missing flags)
+		if patchErr := patchMakefileCannonPrestate(filepath.Join(t.deploymentPath, "tokamak-thanos")); patchErr != nil {
+			t.logger.Error("Failed to patch Makefile cannon-prestate", "err", patchErr)
+			return fmt.Errorf("failed to patch Makefile cannon-prestate: %w", patchErr)
+		}
+
 		err = t.deployContracts(ctx, l1Client, true)
 		if err != nil {
 			t.logger.Error("❌ Resume the contracts deployment failed!", "err", err)
@@ -221,11 +290,22 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			return nil
 		}
 
+		if !dependencies.CheckJustInstallation(ctx) {
+			t.logger.Warn("just is not installed, run `brew install just` to install it")
+			return nil
+		}
+
 		// STEP 2. Clone the repository (always required regardless of ReuseDeployment)
 		err = t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
 		if err != nil {
 			t.logger.Error("failed to clone the repository", "err", err)
 			return err
+		}
+
+		// Patch Makefile cannon-prestate target (wrong binary name / missing flags)
+		if patchErr := patchMakefileCannonPrestate(filepath.Join(t.deploymentPath, "tokamak-thanos")); patchErr != nil {
+			t.logger.Error("Failed to patch Makefile cannon-prestate", "err", patchErr)
+			return fmt.Errorf("failed to patch Makefile cannon-prestate: %w", patchErr)
 		}
 
 		// STEP 2.1. Patch AnchorStateRegistry.sol to add setInitialAnchorState.
@@ -241,29 +321,36 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			t.logger.Info("✅ AnchorStateRegistry.sol patched with setInitialAnchorState")
 		}
 
-		// STEP 2.5. When fault proof is enabled, build cannon-prestate and extract the
-		// prestate hash BEFORE generating the deploy config. This ensures FaultGameAbsolutePrestate
-		// in the contract config matches the actual op-program binary hash, not a stale hardcoded value.
+		// STEP 2.5. Build cannon-prestate and extract the prestate hash BEFORE generating the
+		// deploy config. The Solidity Deploy script always parses faultGameAbsolutePrestate,
+		// so a valid value is required even when fault proofs are disabled.
 		var prestateHash string
-		if deployContractsConfig.EnableFaultProof {
-			tokamakThanosDir := filepath.Join(t.deploymentPath, "tokamak-thanos")
-			prestatePath := filepath.Join(tokamakThanosDir, "op-program", "bin", "prestate.json")
-			if _, statErr := os.Stat(prestatePath); os.IsNotExist(statErr) {
+		tokamakThanosDir := filepath.Join(t.deploymentPath, "tokamak-thanos")
+		prestatePath := filepath.Join(tokamakThanosDir, "op-program", "bin", "prestate.json")
+		if _, statErr := os.Stat(prestatePath); os.IsNotExist(statErr) {
+			if deployContractsConfig.EnableFaultProof {
 				t.logger.Info("Building cannon prestate before contract deployment...")
 				if buildErr := buildCannonPrestate(ctx, t.logger, tokamakThanosDir); buildErr != nil {
 					t.logger.Error("Failed to build cannon prestate", "err", buildErr)
 					return fmt.Errorf("failed to build cannon prestate: %w", buildErr)
 				}
 				t.logger.Info("✅ Cannon prestate built successfully")
-			} else {
-				t.logger.Info("Cannon prestate already exists, reading hash", "path", prestatePath)
 			}
+		} else {
+			t.logger.Info("Cannon prestate exists, reading hash", "path", prestatePath)
+		}
+		if _, statErr := os.Stat(prestatePath); statErr == nil {
 			prestateHash, err = readPrestateHash(prestatePath)
 			if err != nil {
 				t.logger.Error("Failed to read cannon prestate hash", "err", err)
 				return err
 			}
 			t.logger.Info("Cannon prestate hash loaded", "hash", prestateHash)
+		}
+		if prestateHash == "" {
+			// Solidity script requires a valid hex uint256; use zero hash as placeholder.
+			prestateHash = "0x" + strings.Repeat("0", 64)
+			t.logger.Info("Using zero prestate hash (fault proofs disabled)")
 		}
 
 		deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig, l1ChainId.Uint64(), l2ChainID, prestateHash)
@@ -330,6 +417,20 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 				}
 				t.logger.Info("✅ op-node built successfully!")
 			}
+		}
+
+		// BuildOnly mode: return after build without deploying contracts
+		if deployContractsConfig.BuildOnly {
+			t.logger.Info("✅ Build-only mode: contracts built successfully, skipping deployment")
+			// Persist config so Resume can pick up later
+			t.deployConfig.DeployContractState = &types.DeployContractState{
+				Status: types.DeployContractStatusInProgress,
+			}
+			if writeErr := t.deployConfig.WriteToJSONFile(t.deploymentPath); writeErr != nil {
+				t.logger.Error("Failed to write settings file", "err", writeErr)
+				return writeErr
+			}
+			return nil
 		}
 
 		// STEP 4. Deploy the contracts
@@ -400,6 +501,32 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 	t.logger.Info("✅ Successfully generated rollup and genesis files!")
 	t.logger.Infof("Genesis file path: %s/tokamak-thanos/build/genesis.json", t.deploymentPath)
 	t.logger.Infof("Rollup file path: %s/tokamak-thanos/build/rollup.json", t.deploymentPath)
+
+	// Patch rollup.json: ensure pectra_blob_schedule_time is set (required for Sepolia L1).
+	// The op-node genesis command doesn't emit this field, so we add it post-generation.
+	rollupPath := filepath.Join(t.deploymentPath, "tokamak-thanos", "build", "rollup.json")
+	if rollupRaw, readErr := os.ReadFile(rollupPath); readErr == nil {
+		var rollupCfg map[string]interface{}
+		if json.Unmarshal(rollupRaw, &rollupCfg) == nil {
+			patched := false
+			// Use fjord_time as the baseline for later forks
+			fjordTime, _ := rollupCfg["fjord_time"].(float64)
+			if _, ok := rollupCfg["granite_time"]; !ok {
+				rollupCfg["granite_time"] = fjordTime
+				patched = true
+			}
+			if _, ok := rollupCfg["pectra_blob_schedule_time"]; !ok {
+				rollupCfg["pectra_blob_schedule_time"] = fjordTime
+				patched = true
+			}
+			if patched {
+				if patchedRaw, marshalErr := json.MarshalIndent(rollupCfg, "", "  "); marshalErr == nil {
+					os.WriteFile(rollupPath, patchedRaw, 0644)
+					t.logger.Info("Patched rollup.json with granite_time and pectra_blob_schedule_time")
+				}
+			}
+		}
+	}
 
 	t.logger.Infof("✅ Configuration successfully saved to: %s/settings.json", t.deploymentPath)
 
