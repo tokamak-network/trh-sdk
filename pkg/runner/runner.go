@@ -43,7 +43,7 @@ func newNativeRunner(cfg RunnerConfig) (*NativeRunner, error) {
 	if err != nil {
 		return nil, err
 	}
-	helm, err := newNativeHelmRunner()
+	helm, err := newNativeHelmRunner(cfg.KubeconfigPath)
 	if err != nil {
 		return nil, err
 	}

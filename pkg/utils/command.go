@@ -32,6 +32,27 @@ func ExecuteCommand(ctx context.Context, command string, args ...string) (string
 	return trimmedOutput, err
 }
 
+// ExecuteCommandWithStdin executes a command with the given bytes piped to its stdin.
+func ExecuteCommandWithStdin(ctx context.Context, stdin []byte, command string, args ...string) error {
+	cmd := exec.CommandContext(ctx, command, args...)
+	pipe, err := cmd.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("stdin pipe: %w", err)
+	}
+	go func() {
+		defer pipe.Close()
+		pipe.Write(stdin) //nolint:errcheck
+	}()
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err != nil {
+		return fmt.Errorf("%s: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // ExecuteCommandWithEnv executes a command with additional environment variables
 func ExecuteCommandWithEnv(ctx context.Context, env []string, command string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
