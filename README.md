@@ -78,12 +78,25 @@ The tokamak rollup hub SDK allows anyone to quickly deploy customized and autono
 ## Testnet/Mainnet deployment
 
 ### Prerequisites
+
+#### AWS (default)
 - L1 PRC URL (You can can get it from [Alchemy](https://www.alchemy.com/), [Infura](https://infura.io/), [QuickNode](https://www.quicknode.com/), etc.)
 - Beacon Chain RPC URL (You can can get it from [QuickNode](https://www.quicknode.com/))
 - Prepare AWS credentials & configuration to access AWS EKS.
   - [What is IAM?](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) (\*_Note: This IAM user has to have the following policies_)
     - `arn:aws:iam::aws:policy/aws-service-role/AmazonEKSServiceRolePolicy`
   - [How to create aws access key and secret key for a IAM user](https://repost.aws/knowledge-center/create-access-key).
+- Prepare seed phrase for the L1 account.
+
+#### DigitalOcean
+- L1 RPC URL and Beacon Chain RPC URL (same as above)
+- **DigitalOcean API Token** — for DOKS cluster and resource provisioning.
+  Get it from: [DigitalOcean API settings](https://cloud.digitalocean.com/account/api/tokens)
+- **Spaces HMAC credentials** — for Terraform state storage (S3-compatible).
+  These are **separate** from the API token. Get them from: DigitalOcean → API → Spaces Keys.
+  - `Spaces Access Key` (looks like an AWS access key)
+  - `Spaces Secret Key` (entered masked at deploy time; **never saved to disk**)
+- [`doctl`](https://docs.digitalocean.com/reference/doctl/how-to/install/) CLI installed and authenticated.
 - Prepare seed phrase for the L1 account.
 
 ### Deploy L1 contracts
@@ -172,7 +185,9 @@ To terminate the network, we can run the command looks like:
 trh-sdk destroy
 ```
 
-Same as the deploy infra command, this command looks the config files located at the current directory to choose the network and stack
+Same as the deploy infra command, this command looks the config files located at the current directory to choose the network and stack.
+
+> **DigitalOcean note**: The Spaces Secret Key is never saved to disk. You will be prompted to re-enter it when running `trh-sdk destroy`.
 
 ### Install the plugin
 ```bash
