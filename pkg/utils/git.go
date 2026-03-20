@@ -40,7 +40,7 @@ func CloneRepo(ctx context.Context, l *zap.SugaredLogger, deploymentPath string,
 		return fmt.Errorf("destination path '%s' already exists", clonePath)
 	}
 
-	return ExecuteCommandStream(ctx, l, "git", "clone", url, clonePath)
+	return ExecuteCommandStream(ctx, l, "git", "clone", "--recurse-submodules", url, clonePath)
 }
 
 func PullLatestCode(ctx context.Context, l *zap.SugaredLogger, deploymentPath string, folderName string) error {
@@ -68,8 +68,13 @@ func PullLatestCode(ctx context.Context, l *zap.SugaredLogger, deploymentPath st
 		return fmt.Errorf("failed to change directory to '%s': %v", clonePath, err)
 	}
 
-	// Execute the git pull command
-	return ExecuteCommandStream(ctx, l, "git", "pull")
+	// Execute the git pull command (explicitly from origin main to avoid branch tracking issues)
+	if err := ExecuteCommandStream(ctx, l, "git", "pull", "origin", "main"); err != nil {
+		return err
+	}
+
+	// Update submodules after pull
+	return ExecuteCommandStream(ctx, l, "git", "submodule", "update", "--init", "--recursive")
 }
 
 func CheckIfForkExists(username, token, repoName string) (bool, error) {

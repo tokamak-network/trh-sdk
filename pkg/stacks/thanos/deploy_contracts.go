@@ -129,6 +129,13 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 	registerCandidate := deployContractsConfig.RegisterCandidate
 
 	if isResume {
+		// Clone is always required so the source and submodules are available
+		err = t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
+		if err != nil {
+			t.logger.Error("failed to clone the repository", "err", err)
+			return err
+		}
+
 		err = t.deployContracts(ctx, l1Client, true)
 		if err != nil {
 			t.logger.Error("❌ Resume the contracts deployment failed!", "err", err)
@@ -163,8 +170,6 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			t.logger.Error("Failed to get L1 ChainID", "err", err)
 			return err
 		}
-
-		deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig, l1ChainId.Uint64(), l2ChainID)
 
 		operators := deployContractsConfig.Operators
 
@@ -216,34 +221,72 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			return nil
 		}
 
-		// STEP 2. Clone the repository
-		if !deployContractsConfig.ReuseDeployment {
-			err = t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
+		// STEP 2. Clone the repository (always required regardless of ReuseDeployment)
+		err = t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
+		if err != nil {
+			t.logger.Error("failed to clone the repository", "err", err)
+			return err
+		}
+
+		// STEP 2.1. Patch AnchorStateRegistry.sol to add setInitialAnchorState.
+		// The upstream contract requires a resolved FaultDisputeGame to set anchor state,
+		// which is impossible on a brand-new chain (bootstrapping problem). This patch
+		// adds a guardian-only function that accepts an OutputRoot directly.
+		if deployContractsConfig.EnableFaultProof {
+			tokamakThanosDir := filepath.Join(t.deploymentPath, "tokamak-thanos")
+			if patchErr := patchAnchorStateRegistry(tokamakThanosDir); patchErr != nil {
+				t.logger.Error("Failed to patch AnchorStateRegistry.sol", "err", patchErr)
+				return fmt.Errorf("failed to patch AnchorStateRegistry.sol: %w", patchErr)
+			}
+			t.logger.Info("✅ AnchorStateRegistry.sol patched with setInitialAnchorState")
+		}
+
+		// STEP 2.5. When fault proof is enabled, build cannon-prestate and extract the
+		// prestate hash BEFORE generating the deploy config. This ensures FaultGameAbsolutePrestate
+		// in the contract config matches the actual op-program binary hash, not a stale hardcoded value.
+		var prestateHash string
+		if deployContractsConfig.EnableFaultProof {
+			tokamakThanosDir := filepath.Join(t.deploymentPath, "tokamak-thanos")
+			prestatePath := filepath.Join(tokamakThanosDir, "op-program", "bin", "prestate.json")
+			if _, statErr := os.Stat(prestatePath); os.IsNotExist(statErr) {
+				t.logger.Info("Building cannon prestate before contract deployment...")
+				if buildErr := buildCannonPrestate(ctx, t.logger, tokamakThanosDir); buildErr != nil {
+					t.logger.Error("Failed to build cannon prestate", "err", buildErr)
+					return fmt.Errorf("failed to build cannon prestate: %w", buildErr)
+				}
+				t.logger.Info("✅ Cannon prestate built successfully")
+			} else {
+				t.logger.Info("Cannon prestate already exists, reading hash", "path", prestatePath)
+			}
+			prestateHash, err = readPrestateHash(prestatePath)
 			if err != nil {
-				t.logger.Error("failed to clone the repository", "err", err)
+				t.logger.Error("Failed to read cannon prestate hash", "err", err)
 				return err
 			}
-		} else {
-			t.logger.Info("ℹ️ ReuseDeployment: Skipping repository cloning")
+			t.logger.Info("Cannon prestate hash loaded", "hash", prestateHash)
 		}
+
+		deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig, l1ChainId.Uint64(), l2ChainID, prestateHash)
 
 		t.deployConfig.AdminPrivateKey = operators.AdminPrivateKey
 		t.deployConfig.SequencerPrivateKey = operators.SequencerPrivateKey
 		t.deployConfig.BatcherPrivateKey = operators.BatcherPrivateKey
 		t.deployConfig.ProposerPrivateKey = operators.ProposerPrivateKey
-		// if deployContractsConfig.FraudProof {
-		// 	if operators.ChallengerPrivateKey == "" {
-		// 		return fmt.Errorf("challenger operator is required for fault proof but was not found")
-		// 	}
-		// 	t.deployConfig.ChallengerPrivateKey = operators.ChallengerPrivateKey
-		// }
+		if deployContractsConfig.EnableFaultProof {
+			if operators.ChallengerPrivateKey == "" {
+				return fmt.Errorf("challenger operator is required for fault proof but was not found")
+			}
+			t.deployConfig.ChallengerPrivateKey = operators.ChallengerPrivateKey
+		}
 		t.deployConfig.DeploymentFilePath = fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", t.deploymentPath, deployContractsTemplate.L1ChainID)
 		t.deployConfig.L1RPCProvider = utils.DetectRPCKind(deployContractsConfig.L1RPCurl)
 		t.deployConfig.L1ChainID = deployContractsTemplate.L1ChainID
 		t.deployConfig.L2ChainID = l2ChainID
 		t.deployConfig.L1RPCURL = deployContractsConfig.L1RPCurl
-		t.deployConfig.EnableFraudProof = false
+		t.deployConfig.EnableFraudProof = deployContractsConfig.EnableFaultProof
 		t.deployConfig.ChainConfiguration = deployContractsConfig.ChainConfiguration
+		t.deployConfig.Preset = deployContractsConfig.Preset
+		t.deployConfig.FeeToken = deployContractsConfig.FeeToken
 
 		deployConfigFilePath := fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts/deploy-config.json", t.deploymentPath)
 
@@ -254,9 +297,9 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		}
 
 		// STEP 3. Build the contracts
+		scriptsDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "scripts")
 		if !deployContractsConfig.ReuseDeployment {
 			t.logger.Info("Building smart contracts...")
-			scriptsDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "scripts")
 			err = utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, scriptsDir, []string{"GOMODCACHE=/tmp/gomodcache"}, "bash", "./start-deploy.sh", "build")
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
@@ -269,6 +312,24 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			t.logger.Info("✅ Build the contracts completed!")
 		} else {
 			t.logger.Info("ℹ️ ReuseDeployment: Skipping contracts build")
+
+			// op-node binary is always required for genesis generation.
+			// Build it if it doesn't exist yet.
+			opNodeBin := filepath.Join(t.deploymentPath, "tokamak-thanos", "op-node", "bin", "op-node")
+			if _, statErr := os.Stat(opNodeBin); os.IsNotExist(statErr) {
+				t.logger.Info("op-node binary not found, building op-node...")
+				opNodeDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "op-node")
+				err = utils.ExecuteCommandStreamInDir(ctx, t.logger, opNodeDir, "just", "op-node")
+				if err != nil {
+					if errors.Is(err, context.Canceled) {
+						t.logger.Error("Deployment canceled")
+						return err
+					}
+					t.logger.Error("❌ Failed to build op-node!")
+					return err
+				}
+				t.logger.Info("✅ op-node built successfully!")
+			}
 		}
 
 		// STEP 4. Deploy the contracts

@@ -1,5 +1,100 @@
 package constants
 
+import "strings"
+
+// Preset constants
+const (
+	PresetGeneral = "general"
+	PresetDeFi    = "defi"
+	PresetGaming  = "gaming"
+	PresetFull    = "full"
+)
+
+var ValidPresets = []string{PresetGeneral, PresetDeFi, PresetGaming, PresetFull}
+
+// PresetModules defines which operational tools are enabled for each preset.
+// bridge is always included. uptimeService and crossTrade are auto-installed.
+// blockExplorer and monitoring require user configuration after deployment.
+var PresetModules = map[string]map[string]bool{
+	PresetGeneral: {
+		"bridge": true,
+	},
+	PresetDeFi: {
+		"bridge":        true,
+		"blockExplorer": true,
+		"monitoring":    true,
+		"uptimeService": true,
+	},
+	PresetGaming: {
+		"bridge":        true,
+		"blockExplorer": true,
+		"monitoring":    true,
+		"crossTrade":    true,
+		"uptimeService": true,
+	},
+	PresetFull: {
+		"bridge":        true,
+		"blockExplorer": true,
+		"monitoring":    true,
+		"crossTrade":    true,
+		"uptimeService": true,
+	},
+}
+
+// Fee token constants
+const (
+	FeeTokenTON  = "TON"
+	FeeTokenETH  = "ETH"
+	FeeTokenUSDT = "USDT"
+	FeeTokenUSDC = "USDC"
+)
+
+var ValidFeeTokens = []string{FeeTokenTON, FeeTokenETH, FeeTokenUSDT, FeeTokenUSDC}
+
+// FeeTokenConfig holds the L1 metadata for a fee token.
+type FeeTokenConfig struct {
+	Name      string
+	Symbol    string
+	L1Address string
+}
+
+// GetFeeTokenConfig returns the fee token configuration for the given token and L1 chain.
+func GetFeeTokenConfig(token string, l1ChainID uint64) FeeTokenConfig {
+	chainConfig := L1ChainConfigurations[l1ChainID]
+	switch strings.ToUpper(token) {
+	case FeeTokenTON:
+		return FeeTokenConfig{
+			Name:      "Tokamak Network Token",
+			Symbol:    "TON",
+			L1Address: chainConfig.TON,
+		}
+	case FeeTokenETH:
+		return FeeTokenConfig{
+			Name:      "Ether",
+			Symbol:    "ETH",
+			L1Address: "0x0000000000000000000000000000000000000000",
+		}
+	case FeeTokenUSDT:
+		return FeeTokenConfig{
+			Name:      "Tether USD",
+			Symbol:    "USDT",
+			L1Address: chainConfig.USDTAddress,
+		}
+	case FeeTokenUSDC:
+		return FeeTokenConfig{
+			Name:      "USD Coin",
+			Symbol:    "USDC",
+			L1Address: chainConfig.USDCAddress,
+		}
+	default:
+		return FeeTokenConfig{
+			Name:      "Tokamak Network Token",
+			Symbol:    "TON",
+			L1Address: chainConfig.TON,
+		}
+	}
+}
+
 const EthereumMainnetChainID uint64 = 1
 const EthereumSepoliaChainID uint64 = 11155111
 const EthereumHoleskyChainID uint64 = 17000

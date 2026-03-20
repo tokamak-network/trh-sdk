@@ -178,6 +178,20 @@ func ConvertChainNameToNamespace(chainName string) string {
 	return fmt.Sprintf("%s-%s", processed, string(randomStr))
 }
 
+// StringToBytes32 converts a string symbol (e.g. "TON") into a 32-element []uint64
+// slice where each element represents one byte of the ASCII string, left-aligned
+// and zero-padded to 32 bytes. Used for NativeCurrencyLabelBytes.
+func StringToBytes32(s string) []uint64 {
+	result := make([]uint64, 32)
+	for i, b := range []byte(s) {
+		if i >= 32 {
+			break
+		}
+		result[i] = uint64(b)
+	}
+	return result
+}
+
 // IsURLReachable checks if a URL is publicly reachable via HTTP
 func IsURLReachable(url string) bool {
 	client := &http.Client{

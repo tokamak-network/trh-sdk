@@ -5,7 +5,7 @@ var DockerImageTag = map[string]struct {
 	ThanosStackImageTag string
 }{
 	// LocalTestnet uses Sepolia L1, so it shares image tags with Testnet.
-	LocalTestnet: {OpGethImageTag: "f8c04dcb", ThanosStackImageTag: "80a6da51"},
-	Testnet:      {OpGethImageTag: "f8c04dcb", ThanosStackImageTag: "80a6da51"},
+	LocalTestnet: {OpGethImageTag: "f8c04dcb", ThanosStackImageTag: "c9d8d16a"},
+	Testnet:      {OpGethImageTag: "f8c04dcb", ThanosStackImageTag: "c9d8d16a"},
 	Mainnet:      {OpGethImageTag: "a7c74c7e", ThanosStackImageTag: "49e37d47"},
 }

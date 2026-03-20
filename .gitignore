@@ -44,4 +44,4 @@ logs/
 stack-info.json
 crossTrade
 
-k8s-efs-backup
+k8s-efs-backup.worktrees

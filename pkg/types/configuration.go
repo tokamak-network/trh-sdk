@@ -158,6 +158,11 @@ type Config struct {
 
 	// Shutdown configuration state (not for storing static addresses)
 	Shutdown *ShutdownConfig `json:"shutdown,omitempty"`
+
+	// Preset and fee token configuration
+	Preset   string `json:"preset,omitempty"`
+	FeeToken string `json:"fee_token,omitempty"` // "TON", "ETH", "USDT", "USDC"
+
 }
 
 type BackupConfiguration struct {

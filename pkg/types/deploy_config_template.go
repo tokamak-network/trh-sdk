@@ -87,4 +87,11 @@ type DeployConfigTemplate struct {
 	PoolInitCodeHash                         string   `json:"poolInitCodeHash"`
 	UniversalRouterRewardsDistributor        string   `json:"universalRouterRewardsDistributor"`
 	ReuseDeployment                          bool     `json:"reuseDeployment"`
+
+	// Preset selection
+	Preset string `json:"preset,omitempty"`
+
+	// Gaming/Full preset: VRF and AA admin addresses
+	VRFAdmin          string `json:"vrfAdmin,omitempty"`
+	AAPaymasterSigner string `json:"aaPaymasterSigner,omitempty"`
 }

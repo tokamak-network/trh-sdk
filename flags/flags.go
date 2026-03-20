@@ -36,6 +36,25 @@ var (
 		Usage:   "Reuse existing deployment artifacts and skip contract deployment",
 		Value:   true,
 	}
+
+	EnableFaultProofFlag = &cli.BoolFlag{
+		Name:    "enable-fault-proof",
+		Usage:   "Enable the fault proof system (deploys DisputeGameFactory and FaultDisputeGame contracts)",
+		Value:   false,
+		Sources: cli.EnvVars(PrefixEnvVars(envPrefix, "ENABLE_FAULT_PROOF")...),
+	}
+
+	PresetFlag = &cli.StringFlag{
+		Name:    "preset",
+		Usage:   "Predeploy preset: general, defi, gaming, full (default: interactive prompt)",
+		Sources: cli.EnvVars(PrefixEnvVars(envPrefix, "PRESET")...),
+	}
+
+	FeeTokenFlag = &cli.StringFlag{
+		Name:    "fee-token",
+		Usage:   "L2 native fee token: TON, ETH, USDT, USDC (default: interactive prompt)",
+		Sources: cli.EnvVars(PrefixEnvVars(envPrefix, "FEE_TOKEN")...),
+	}
 )
 
 var DeployContractsFlag = []cli.Flag{
@@ -43,6 +62,9 @@ var DeployContractsFlag = []cli.Flag{
 	NetworkFlag,
 	NoCandidateFlag,
 	ReuseDeploymentFlag,
+	EnableFaultProofFlag,
+	PresetFlag,
+	FeeTokenFlag,
 }
 
 var (
