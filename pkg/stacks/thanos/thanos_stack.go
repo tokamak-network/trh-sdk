@@ -3,7 +3,10 @@ package thanos
 import (
 	"context"
 	"fmt"
+	"io"
+	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/digitalocean"
@@ -49,6 +52,33 @@ func (t *ThanosStack) SetTFRunner(tr runner.TFRunner) {
 // SetAWSRunner injects an AWSRunner for native AWS operations.
 func (t *ThanosStack) SetAWSRunner(ar runner.AWSRunner) {
 	t.awsRunner = ar
+}
+
+// maxLogBytes caps the amount of log data read into memory by PodLogs.
+const maxLogBytes = 100 << 20 // 100 MiB
+
+// PodLogs reads logs from the named pod. Uses K8sRunner when since is zero;
+// falls back to shell-out when since > 0 because K8sRunner.Logs does not
+// support time-windowed retrieval. container may be empty to select the
+// pod's first container.
+func (t *ThanosStack) PodLogs(ctx context.Context, pod, namespace, container string, since time.Duration) ([]byte, error) {
+	if t.k8sRunner != nil && since == 0 {
+		rc, err := t.k8sRunner.Logs(ctx, pod, namespace, container, false)
+		if err != nil {
+			return nil, fmt.Errorf("pod logs %s/%s: %w", namespace, pod, err)
+		}
+		defer rc.Close() //nolint:errcheck
+		return io.ReadAll(io.LimitReader(rc, maxLogBytes))
+	}
+	args := []string{"logs", pod, "-n", namespace}
+	if since > 0 {
+		args = append(args, "--since", since.String())
+	}
+	raw, err := exec.CommandContext(ctx, "kubectl", args...).CombinedOutput()
+	if int64(len(raw)) > maxLogBytes {
+		raw = raw[:maxLogBytes]
+	}
+	return raw, err
 }
 
 // tfInit runs terraform init in workDir. Uses TFRunner when available.
@@ -204,6 +234,7 @@ func NewThanosStack(
 
 	// Login AWS
 	var awsProfile *types.AWSProfile
+	var kubeconfigPath string
 
 	if awsConfig != nil {
 		if _, err := utils.SetAWSConfigFile(deploymentPath); err != nil {
@@ -214,7 +245,8 @@ func NewThanosStack(
 			l.Error("Failed to set AWS credentials file", "err", err)
 			return nil, err
 		}
-		if _, err := utils.SetKubeconfigFile(deploymentPath); err != nil {
+		kubeconfigPath, err = utils.SetKubeconfigFile(deploymentPath)
+		if err != nil {
 			l.Error("Failed to set kubeconfig file", "err", err)
 			return nil, err
 		}
@@ -247,7 +279,7 @@ func NewThanosStack(
 		}
 	}
 
-	return &ThanosStack{
+	stack := &ThanosStack{
 		network:        network,
 		usePromptInput: usePromptInput,
 		awsProfile:     awsProfile,
@@ -255,5 +287,28 @@ func NewThanosStack(
 		logger:         l,
 		deploymentPath: deploymentPath,
 		deployConfig:   config,
-	}, nil
+	}
+
+	// Only attempt runner wiring when an infra provider is configured.
+	// Callers that pass nil/nil (e.g. shutdown introspection) do not need runners.
+	if awsConfig != nil || doConfig != nil {
+		injectRunners(stack, l, kubeconfigPath)
+	}
+
+	return stack, nil
+}
+
+// injectRunners initialises native runners and injects them into stack.
+// On failure it logs a warning and leaves all runner fields nil so that
+// each helper method falls back to shell-out transparently.
+func injectRunners(stack *ThanosStack, l *zap.SugaredLogger, kubeconfigPath string) {
+	tr, err := runner.New(runner.RunnerConfig{UseNative: true, KubeconfigPath: kubeconfigPath})
+	if err != nil {
+		l.Warnf("Native runner init failed, falling back to shell-out: %v", err)
+		return
+	}
+	stack.helmRunner = tr.Helm()
+	stack.k8sRunner = tr.K8s()
+	stack.tfRunner = tr.TF()
+	stack.awsRunner = tr.AWS()
 }

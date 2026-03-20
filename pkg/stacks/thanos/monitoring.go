@@ -1852,11 +1852,16 @@ func (t *ThanosStack) updateCollectionInterval(ctx context.Context, namespace st
 
 	// Delete existing sidecar deployment
 	logger.Info("Deleting existing sidecar deployment to apply new interval...")
-	cmd := exec.CommandContext(ctx, "kubectl", "delete", "deployment", "thanos-logs-sidecar",
-		"-n", namespace, "--ignore-not-found=true")
-
-	if _, err := cmd.CombinedOutput(); err != nil {
-		logger.Warnw("Failed to delete existing sidecar deployment", "error", err)
+	if t.k8sRunner != nil {
+		if err := t.k8sRunner.Delete(ctx, "deployment", "thanos-logs-sidecar", namespace, true); err != nil {
+			logger.Warnw("Failed to delete existing sidecar deployment", "error", err)
+		}
+	} else {
+		cmd := exec.CommandContext(ctx, "kubectl", "delete", "deployment", "thanos-logs-sidecar",
+			"-n", namespace, "--ignore-not-found=true")
+		if _, err := cmd.CombinedOutput(); err != nil {
+			logger.Warnw("Failed to delete existing sidecar deployment", "error", err)
+		}
 	}
 
 	// Wait for deployment to be fully deleted
