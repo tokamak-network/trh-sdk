@@ -2,8 +2,10 @@ package thanos
 
 import (
 	"context"
+	"os"
 
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 
@@ -18,6 +20,12 @@ type ThanosStack struct {
 	logger            *zap.SugaredLogger
 	deploymentPath    string
 	registerCandidate bool
+	kubeconfigPath    string // LocalTestnet only: path to kind kubeconfig
+}
+
+// isLocal returns true when the stack targets a local kind cluster.
+func (t *ThanosStack) isLocal() bool {
+	return t.network == constants.LocalTestnet
 }
 
 func NewThanosStack(
@@ -78,5 +86,37 @@ func NewThanosStack(
 		logger:         l,
 		deploymentPath: deploymentPath,
 		deployConfig:   config,
+	}, nil
+}
+
+// NewLocalTestnetThanosStack creates a ThanosStack for LocalTestnet deployments.
+// It skips all AWS/DO setup and uses the provided kubeconfig to access the kind cluster.
+func NewLocalTestnetThanosStack(
+	ctx context.Context,
+	l *zap.SugaredLogger,
+	deploymentPath string,
+	kubeconfigPath string,
+) (*ThanosStack, error) {
+	l.Infof("Deployment Path: %s", deploymentPath)
+	l.Infof("Network: %s", constants.LocalTestnet)
+
+	config, err := utils.ReadConfigFromJSONFile(deploymentPath)
+	if err != nil {
+		l.Error("Error reading settings.json", "err", err)
+		return nil, err
+	}
+
+	// Set KUBECONFIG so kubectl/helm commands reach the kind cluster
+	if kubeconfigPath != "" {
+		os.Setenv("KUBECONFIG", kubeconfigPath)
+	}
+
+	return &ThanosStack{
+		network:        constants.LocalTestnet,
+		usePromptInput: false,
+		logger:         l,
+		deploymentPath: deploymentPath,
+		deployConfig:   config,
+		kubeconfigPath: kubeconfigPath,
 	}, nil
 }

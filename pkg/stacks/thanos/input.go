@@ -39,6 +39,7 @@ type DeployContractsInput struct {
 	RegisterCandidate  *RegisterCandidateInput
 	ReuseDeployment    bool
 	EnableFaultProof   bool
+	BuildOnly          bool // When true, only build contracts and return (no deploy)
 	// Preset and fee token selection
 	Preset   string // "general", "defi", "gaming", "full"
 	FeeToken string // "TON", "ETH", "USDT", "USDC"
