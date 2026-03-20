@@ -696,6 +696,31 @@ spec:
 	return fmt.Sprintf("http://%s", svcName), nil
 }
 
+// loadImageToKind pulls a Docker image and loads it into the kind cluster.
+// It derives the kind cluster name from the node container name (e.g. "trh-test-control-plane" → "trh-test").
+func (t *ThanosStack) loadImageToKind(ctx context.Context, image string) error {
+	t.logger.Infof("Loading image %s into kind cluster...", image)
+
+	// Pull image first
+	if _, err := utils.ExecuteCommand(ctx, "docker", "pull", image); err != nil {
+		return fmt.Errorf("docker pull %s: %w", image, err)
+	}
+
+	// Find kind cluster name from node container
+	nodeName, err := t.findKindNodeName(ctx)
+	if err != nil {
+		return err
+	}
+	// "trh-test-control-plane" → "trh-test"
+	clusterName := strings.TrimSuffix(nodeName, "-control-plane")
+
+	if _, err := utils.ExecuteCommand(ctx, "kind", "load", "docker-image", image, "--name", clusterName); err != nil {
+		return fmt.Errorf("kind load docker-image %s: %w", image, err)
+	}
+	t.logger.Infof("✅ Image %s loaded into kind cluster %s", image, clusterName)
+	return nil
+}
+
 // findKindNodeName returns the Docker container name of the first kind cluster
 // control-plane node.  It runs `docker ps` and looks for containers whose names
 // end in "-control-plane".

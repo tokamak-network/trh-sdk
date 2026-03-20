@@ -10,6 +10,7 @@ import (
 
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/digitalocean"
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/runner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -30,6 +31,11 @@ type ThanosStack struct {
 	k8sRunner         runner.K8sRunner  // optional; when nil, falls back to shellout
 	tfRunner          runner.TFRunner   // optional; when nil, falls back to shellout
 	awsRunner         runner.AWSRunner  // optional; when nil, falls back to shellout
+}
+
+// isLocal returns true when the stack targets a local kind cluster rather than cloud infrastructure.
+func (t *ThanosStack) isLocal() bool {
+	return t.network == constants.LocalTestnet
 }
 
 // SetHelmRunner injects a HelmRunner for native Helm operations.

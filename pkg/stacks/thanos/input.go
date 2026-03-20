@@ -40,6 +40,7 @@ type DeployContractsInput struct {
 	RegisterCandidate  *RegisterCandidateInput
 	ReuseDeployment    bool
 	EnableFaultProof   bool
+	BuildOnly          bool // When true, only build contracts and return (no deploy)
 	// Preset and fee token selection
 	Preset   string // "general", "defi", "gaming", "full"
 	FeeToken string // "TON", "ETH", "USDT", "USDC"
@@ -1618,6 +1619,7 @@ func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainI
 		L2GenesisDeltaTimeOffset:                 "0x0",
 		L2GenesisEcotoneTimeOffset:               "0x0",
 		L2GenesisFjordTimeOffset:                 "0x0",
+		L2GenesisGraniteTimeOffset:               "0x0",
 		SystemConfigStartBlock:                   0,
 		RequiredProtocolVersion:                  "0x0000000000000000000000000000000000000003000000010000000000000000",
 		RecommendedProtocolVersion:               "0x0000000000000000000000000000000000000003000000010000000000000000",
