@@ -10,12 +10,13 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/tokamak-network/trh-sdk/pkg/runner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
 // GatherBackupStatusInfo collects backup status information using region/namespace
-func GatherBackupStatusInfo(ctx context.Context, region, namespace string) (*types.BackupStatusInfo, error) {
+func GatherBackupStatusInfo(ctx context.Context, ar runner.AWSRunner, region, namespace string) (*types.BackupStatusInfo, error) {
 	accountID, err := utils.DetectAWSAccountID(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to detect AWS account ID: %w", err)
@@ -34,12 +35,12 @@ func GatherBackupStatusInfo(ctx context.Context, region, namespace string) (*typ
 
 	statusInfo.EFSID = efsID
 	statusInfo.ARN = utils.BuildEFSArn(region, accountID, efsID)
-	statusInfo.IsProtected = checkEFSProtectionStatus(ctx, region, statusInfo.ARN)
-	statusInfo.LatestRecoveryPoint = getLatestRecoveryPoint(ctx, region, statusInfo.ARN)
+	statusInfo.IsProtected = checkEFSProtectionStatus(ctx, ar, region, statusInfo.ARN)
+	statusInfo.LatestRecoveryPoint = getLatestRecoveryPoint(ctx, ar, region, statusInfo.ARN)
 
-	statusInfo.BackupVaults = getBackupVaults(ctx, region, statusInfo.ARN)
+	statusInfo.BackupVaults = getBackupVaults(ctx, ar, region, statusInfo.ARN)
 
-	schedule, nextBackup, expiryDate, err := getBackupPlanInfo(ctx, region, namespace, statusInfo.LatestRecoveryPoint)
+	schedule, nextBackup, expiryDate, err := getBackupPlanInfo(ctx, ar, region, namespace, statusInfo.LatestRecoveryPoint)
 	if err != nil {
 		return statusInfo, fmt.Errorf("failed to get backup plan info: %w", err)
 	}
@@ -98,7 +99,14 @@ func DisplayBackupStatus(l *zap.SugaredLogger, statusInfo *types.BackupStatusInf
 	l.Info("")
 }
 
-func checkEFSProtectionStatus(ctx context.Context, region, arn string) bool {
+func checkEFSProtectionStatus(ctx context.Context, ar runner.AWSRunner, region, arn string) bool {
+	if ar != nil {
+		protected, err := ar.BackupIsResourceProtected(ctx, region, arn)
+		if err != nil {
+			return false
+		}
+		return protected
+	}
 	cnt, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-protected-resources",
 		"--region", region,
 		"--query", fmt.Sprintf("length(Results[?ResourceArn=='%s'])", arn),
@@ -109,7 +117,20 @@ func checkEFSProtectionStatus(ctx context.Context, region, arn string) bool {
 	return strings.TrimSpace(cnt) == "1"
 }
 
-func getLatestRecoveryPoint(ctx context.Context, region, arn string) string {
+func getLatestRecoveryPoint(ctx context.Context, ar runner.AWSRunner, region, arn string) string {
+	if ar != nil {
+		rps, err := ar.BackupListRecoveryPointsByResource(ctx, region, arn)
+		if err != nil || len(rps) == 0 {
+			return ""
+		}
+		latest := rps[0].CreationDate
+		for _, rp := range rps[1:] {
+			if rp.CreationDate.After(latest) {
+				latest = rp.CreationDate
+			}
+		}
+		return latest.Format(time.RFC3339)
+	}
 	rp, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-recovery-points-by-resource",
 		"--region", region,
 		"--resource-arn", arn,
@@ -121,7 +142,22 @@ func getLatestRecoveryPoint(ctx context.Context, region, arn string) string {
 	return strings.TrimSpace(rp)
 }
 
-func getBackupVaults(ctx context.Context, region, arn string) []string {
+func getBackupVaults(ctx context.Context, ar runner.AWSRunner, region, arn string) []string {
+	if ar != nil {
+		rps, err := ar.BackupListRecoveryPointsByResource(ctx, region, arn)
+		if err != nil {
+			return nil
+		}
+		seen := map[string]struct{}{}
+		var unique []string
+		for _, rp := range rps {
+			if _, ok := seen[rp.BackupVaultName]; !ok {
+				seen[rp.BackupVaultName] = struct{}{}
+				unique = append(unique, rp.BackupVaultName)
+			}
+		}
+		return unique
+	}
 	vaultsJSON, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-recovery-points-by-resource",
 		"--region", region,
 		"--resource-arn", arn,
@@ -151,80 +187,100 @@ func getBackupVaults(ctx context.Context, region, arn string) []string {
 
 // getBackupPlanInfo retrieves comprehensive backup plan information from AWS Backup
 // Returns: (schedule, nextBackupTime, expiryDate, error)
-func getBackupPlanInfo(ctx context.Context, region, namespace, latestRecoveryPoint string) (string, string, string, error) {
-	// Try to find backup plans associated with the namespace
+func getBackupPlanInfo(ctx context.Context, ar runner.AWSRunner, region, namespace, latestRecoveryPoint string) (string, string, string, error) {
 	planName := fmt.Sprintf("%s-backup-plan", namespace)
 
-	// Step 1: List backup plans to find the namespace-specific plan
-	plansJSON, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-backup-plans",
-		"--region", region,
-		"--query", fmt.Sprintf("BackupPlansList[?BackupPlanName=='%s']", planName),
-		"--output", "json")
-	if err != nil {
-		return "", "", "", fmt.Errorf("failed to list backup plans: %w", err)
+	var scheduleExpr string
+	var deleteAfterDays int
+
+	if ar != nil {
+		plans, err := ar.BackupListBackupPlans(ctx, region)
+		if err != nil {
+			return "", "", "", fmt.Errorf("failed to list backup plans: %w", err)
+		}
+		var planId string
+		for _, p := range plans {
+			if p.BackupPlanName == planName {
+				planId = p.BackupPlanID
+				break
+			}
+		}
+		if planId == "" {
+			return "", "", "", fmt.Errorf("no backup plan found with name '%s'", planName)
+		}
+		detail, err := ar.BackupGetBackupPlan(ctx, region, planId)
+		if err != nil {
+			return "", "", "", fmt.Errorf("failed to get backup plan details (plan ID: %s): %w", planId, err)
+		}
+		if len(detail.Rules) == 0 {
+			return "", "", "", fmt.Errorf("backup plan '%s' has no rules configured", planName)
+		}
+		scheduleExpr = detail.Rules[0].ScheduleExpression
+		deleteAfterDays = detail.Rules[0].DeleteAfterDays
+	} else {
+		plansJSON, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-backup-plans",
+			"--region", region,
+			"--query", fmt.Sprintf("BackupPlansList[?BackupPlanName=='%s']", planName),
+			"--output", "json")
+		if err != nil {
+			return "", "", "", fmt.Errorf("failed to list backup plans: %w", err)
+		}
+		plansJSON = strings.TrimSpace(plansJSON)
+		if plansJSON == "" || plansJSON == "null" || plansJSON == "[]" {
+			return "", "", "", fmt.Errorf("no backup plan found with name '%s'", planName)
+		}
+		var plans []struct {
+			BackupPlanId   string `json:"BackupPlanId"`
+			BackupPlanName string `json:"BackupPlanName"`
+		}
+		if err := json.Unmarshal([]byte(plansJSON), &plans); err != nil {
+			return "", "", "", fmt.Errorf("failed to parse backup plans JSON: %w", err)
+		}
+		if len(plans) == 0 {
+			return "", "", "", fmt.Errorf("backup plan list is empty for '%s'", planName)
+		}
+		planId := plans[0].BackupPlanId
+		planDetails, err := utils.ExecuteCommand(ctx, "aws", "backup", "get-backup-plan",
+			"--region", region,
+			"--backup-plan-id", planId,
+			"--output", "json")
+		if err != nil {
+			return "", "", "", fmt.Errorf("failed to get backup plan details (plan ID: %s): %w", planId, err)
+		}
+		var planInfo struct {
+			BackupPlan struct {
+				Rules []struct {
+					ScheduleExpression string `json:"ScheduleExpression"`
+					Lifecycle          *struct {
+						DeleteAfterDays int `json:"DeleteAfterDays"`
+					} `json:"Lifecycle"`
+				} `json:"Rules"`
+			} `json:"BackupPlan"`
+		}
+		if err := json.Unmarshal([]byte(planDetails), &planInfo); err != nil {
+			return "", "", "", fmt.Errorf("failed to parse backup plan details JSON: %w", err)
+		}
+		if len(planInfo.BackupPlan.Rules) == 0 {
+			return "", "", "", fmt.Errorf("backup plan '%s' has no rules configured", planName)
+		}
+		scheduleExpr = planInfo.BackupPlan.Rules[0].ScheduleExpression
+		if planInfo.BackupPlan.Rules[0].Lifecycle != nil {
+			deleteAfterDays = planInfo.BackupPlan.Rules[0].Lifecycle.DeleteAfterDays
+		}
 	}
 
-	plansJSON = strings.TrimSpace(plansJSON)
-	if plansJSON == "" || plansJSON == "null" || plansJSON == "[]" {
-		return "", "", "", fmt.Errorf("no backup plan found with name '%s'", planName)
+	humanSchedule := parseCronToHuman(scheduleExpr)
+	nextBackup := calculateNextBackupTime(scheduleExpr)
+
+	var lifecycle *struct {
+		DeleteAfterDays int `json:"DeleteAfterDays"`
 	}
-
-	// Step 2: Parse backup plan list to get plan ID
-	var plans []struct {
-		BackupPlanId   string `json:"BackupPlanId"`
-		BackupPlanName string `json:"BackupPlanName"`
+	if deleteAfterDays > 0 {
+		lifecycle = &struct {
+			DeleteAfterDays int `json:"DeleteAfterDays"`
+		}{DeleteAfterDays: deleteAfterDays}
 	}
-
-	if err := json.Unmarshal([]byte(plansJSON), &plans); err != nil {
-		return "", "", "", fmt.Errorf("failed to parse backup plans JSON: %w", err)
-	}
-
-	if len(plans) == 0 {
-		return "", "", "", fmt.Errorf("backup plan list is empty for '%s'", planName)
-	}
-
-	planId := plans[0].BackupPlanId
-
-	// Step 3: Get detailed backup plan information
-	planDetails, err := utils.ExecuteCommand(ctx, "aws", "backup", "get-backup-plan",
-		"--region", region,
-		"--backup-plan-id", planId,
-		"--output", "json")
-	if err != nil {
-		return "", "", "", fmt.Errorf("failed to get backup plan details (plan ID: %s): %w", planId, err)
-	}
-
-	// Step 4: Parse backup plan details to extract schedule and lifecycle information
-	var planInfo struct {
-		BackupPlan struct {
-			Rules []struct {
-				ScheduleExpression string `json:"ScheduleExpression"`
-				Lifecycle          *struct {
-					DeleteAfterDays int `json:"DeleteAfterDays"`
-				} `json:"Lifecycle"`
-			} `json:"Rules"`
-		} `json:"BackupPlan"`
-	}
-
-	if err := json.Unmarshal([]byte(planDetails), &planInfo); err != nil {
-		return "", "", "", fmt.Errorf("failed to parse backup plan details JSON: %w", err)
-	}
-
-	if len(planInfo.BackupPlan.Rules) == 0 {
-		return "", "", "", fmt.Errorf("backup plan '%s' has no rules configured", planName)
-	}
-
-	rule := planInfo.BackupPlan.Rules[0]
-
-	// Step 5: Extract and process information
-	// - Schedule: Convert cron expression to human-readable format
-	humanSchedule := parseCronToHuman(rule.ScheduleExpression)
-
-	// - Next Backup Time: Calculate next backup based on schedule
-	nextBackup := calculateNextBackupTime(rule.ScheduleExpression)
-
-	// - Expiry Date: Calculate based on lifecycle policy and latest recovery point
-	expiryDate := calculateExpiryDateFromPlan(rule.Lifecycle, latestRecoveryPoint)
+	expiryDate := calculateExpiryDateFromPlan(lifecycle, latestRecoveryPoint)
 
 	return humanSchedule, nextBackup, expiryDate, nil
 }

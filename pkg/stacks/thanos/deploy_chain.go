@@ -326,28 +326,17 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 
 	// ---------------------------------------- Deploy chain --------------------------//
 	// Step 8. Add Helm repository
-	helmAddOuput, err := utils.ExecuteCommand(ctx, "helm", []string{
-		"repo",
-		"add",
-		"thanos-stack",
-		"https://tokamak-network.github.io/tokamak-thanos-stack",
-	}...)
-	if err != nil {
-		t.logger.Error("Error adding Helm repository", "err", err, "details", helmAddOuput)
+	if err := t.helmRepoAdd(ctx, "thanos-stack", "https://tokamak-network.github.io/tokamak-thanos-stack"); err != nil {
+		t.logger.Error("Error adding Helm repository", "err", err)
 		return err
 	}
 
-	// Step 8.1 Search available Helm charts
-	helmSearchOutput, err := utils.ExecuteCommand(ctx, "helm", []string{
-		"search",
-		"repo",
-		"thanos-stack",
-	}...)
-	if err != nil {
-		t.logger.Error("Error searching Helm charts", "err", err, "details", helmSearchOutput)
+	// Step 8.1 Search available Helm charts — validates the repository is reachable; result is informational.
+	if _, err := t.helmSearch(ctx, "thanos-stack"); err != nil {
+		t.logger.Error("Error searching Helm charts", "err", err)
 		return err
 	}
-	t.logger.Info("Helm repository added successfully: \n", helmSearchOutput)
+	t.logger.Info("Helm repository added successfully")
 
 	// Step 8.2. Install Helm charts
 	helmReleaseName := fmt.Sprintf("%s-%d", namespace, time.Now().Unix())
@@ -377,6 +366,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	err = utils.UpdateYAMLField(valueFile, "enable_deployment", true)
 	if err != nil {
 		t.logger.Error("Error updating `enable_deployment` configuration", "err", err)
+		return err
 	}
 
 	err = utils.InstallHelmRelease(ctx, helmReleaseName, chartFile, valueFile, namespace)
@@ -432,7 +422,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 
 	// Step 8.3. Initialize backup system (conditional - only if BackupConfig.Enabled is true)
 	if backupEnabled {
-		fmt.Println("Initializing backup system...")
+		t.logger.Info("Initializing backup system...")
 		err = t.initializeBackupSystem(ctx, inputs.ChainName)
 		if err != nil {
 			t.logger.Warnf("Warning: Failed to initialize backup system: %v\n", err)
@@ -462,8 +452,8 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 // ----------------------------------------- Deploy to DigitalOcean ----------------------------- //
 
 const (
-	l2RPCScheme        = "http://"
-	ingressPollTimeout = 10 * time.Minute
+	l2RPCScheme         = "http://"
+	ingressPollTimeout  = 10 * time.Minute
 	ingressPollInterval = 15 * time.Second
 )
 
@@ -536,10 +526,10 @@ func (t *ThanosStack) deployNetworkToDigitalOcean(ctx context.Context, inputs *D
 		"TF_VAR_do_region=" + doConfig.Region,
 		"TF_VAR_namespace=" + namespace,
 	}
-	if err := utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, backendDir, backendEnv, "terraform", "init"); err != nil {
+	if err := t.tfInit(ctx, backendDir, backendEnv, nil); err != nil {
 		return fmt.Errorf("terraform init failed for state backend: %w", err)
 	}
-	if err := utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, backendDir, backendEnv, "terraform", "apply", "-auto-approve"); err != nil {
+	if err := t.tfApply(ctx, backendDir, backendEnv); err != nil {
 		return fmt.Errorf("terraform apply failed for state backend: %w", err)
 	}
 
@@ -566,20 +556,20 @@ func (t *ThanosStack) deployNetworkToDigitalOcean(ctx context.Context, inputs *D
 		"TF_VAR_thanos_stack_image_tag=" + imgTags.ThanosStackImageTag,
 		"TF_VAR_op_geth_image_tag=" + imgTags.OpGethImageTag,
 	}
-	if err := utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, thanosStackDir, infraEnv, "terraform",
-		"init",
-		"-backend-config=bucket="+stateBucket,
-		"-backend-config=endpoint="+stateEndpoint,
-		"-backend-config=region=us-east-1",
-		"-backend-config=key=thanos-stack/terraform.tfstate",
-		"-backend-config=skip_credentials_validation=true",
-		"-backend-config=skip_metadata_api_check=true",
-		"-backend-config=skip_region_validation=true",
-		"-backend-config=force_path_style=true",
-	); err != nil {
+	backendConfigs := []string{
+		"bucket=" + stateBucket,
+		"endpoint=" + stateEndpoint,
+		"region=us-east-1",
+		"key=thanos-stack/terraform.tfstate",
+		"skip_credentials_validation=true",
+		"skip_metadata_api_check=true",
+		"skip_region_validation=true",
+		"force_path_style=true",
+	}
+	if err := t.tfInit(ctx, thanosStackDir, infraEnv, backendConfigs); err != nil {
 		return fmt.Errorf("terraform init failed for thanos-stack: %w", err)
 	}
-	if err := utils.ExecuteCommandStreamWithEnvInDir(ctx, t.logger, thanosStackDir, infraEnv, "terraform", "apply", "-auto-approve"); err != nil {
+	if err := t.tfApply(ctx, thanosStackDir, infraEnv); err != nil {
 		return fmt.Errorf("terraform apply failed for thanos-stack: %w", err)
 	}
 

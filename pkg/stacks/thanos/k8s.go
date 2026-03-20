@@ -3,7 +3,6 @@ package thanos
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"time"
 
@@ -37,14 +36,14 @@ func (t *ThanosStack) tryToDeleteK8sNamespace(ctx context.Context, namespace str
 		return nil
 	}
 
-	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "namespace", namespace, "-o", "json")
+	rawNS, err := t.k8sGetNamespaceJSON(ctx, namespace)
 	if err != nil {
 		t.logger.Error("Error getting namespace status", "err", err)
 		return err
 	}
 
 	var status K8sNamespaceStatus
-	if err := json.Unmarshal([]byte(output), &status); err != nil {
+	if err := json.Unmarshal(rawNS, &status); err != nil {
 		t.logger.Error("Error unmarshalling namespace", "err", err)
 		return err
 	}
@@ -71,7 +70,7 @@ func (t *ThanosStack) tryToDeleteK8sNamespace(ctx context.Context, namespace str
 		}
 
 		// apply the changes
-		_, err = utils.ExecuteCommand(ctx, "kubectl", "replace", "--raw", fmt.Sprintf("/api/v1/namespaces/%s/finalize", namespace), "-f", "/tmp/namespace.json")
+		err = t.k8sReplaceNamespaceFinalize(ctx, namespace, "/tmp/namespace.json")
 		if err != nil {
 			t.logger.Error("Error applying changes to namespace", "err", err)
 			return err
@@ -89,7 +88,7 @@ func (t *ThanosStack) tryToDeleteK8sNamespace(ctx context.Context, namespace str
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := utils.ExecuteCommand(ctx, "kubectl", "delete", "namespace", namespace)
+		err := t.k8sDeleteNamespace(ctx, namespace)
 		if err != nil {
 			t.logger.Error("Error deleting namespace", "err", err)
 			done <- err
