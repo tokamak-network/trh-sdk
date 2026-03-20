@@ -128,6 +128,7 @@ services:
 
   op-bridge:
     image: tokamaknetwork/trh-op-bridge-app:latest
+    platform: linux/amd64
     ports:
       - "3001:80"
     profiles: ["bridge"]
@@ -145,7 +146,8 @@ services:
     restart: unless-stopped
 
   blockscout:
-    image: blockscout/blockscout:latest
+    image: blockscout/blockscout:6.10.1
+    command: ["bin/blockscout", "start"]
     ports:
       - "4000:4000"
     environment:
@@ -155,19 +157,33 @@ services:
       - ETHEREUM_JSONRPC_VARIANT=geth
       - COIN=ETH
       - NETWORK=L2
+      - SUBNETWORK=Optimism
+      - CHAIN_ID={{.L2ChainID}}
+      - SECRET_KEY_BASE=RMgI4C1HSkxsEjdhtGMfwAHfyT6CKWXOgzCboJflfSm4cuBCN4bJkY2T/E5VHm4l
+      - ECTO_USE_SSL=false
+      - MIX_ENV=prod
+      - PORT=4000
+      - POOL_SIZE=10
     depends_on:
       - blockscout-db
     profiles: ["blockExplorer"]
     restart: unless-stopped
 
   blockscout-frontend:
-    image: ghcr.io/blockscout/frontend:latest
+    image: ghcr.io/blockscout/frontend:v1.38.0
     ports:
       - "4001:3000"
     environment:
       - NEXT_PUBLIC_API_HOST=http://localhost:4000
       - NEXT_PUBLIC_API_PROTOCOL=http
       - NEXT_PUBLIC_STATS_API_HOST=http://localhost:4000
+      - NEXT_PUBLIC_APP_HOST=localhost
+      - NEXT_PUBLIC_APP_PORT=4001
+      - NEXT_PUBLIC_APP_PROTOCOL=http
+      - NEXT_PUBLIC_API_BASE_PATH=/
+      - NEXT_PUBLIC_NETWORK_NAME=Thanos L2
+      - NEXT_PUBLIC_NETWORK_SHORT_NAME=L2
+      - NEXT_PUBLIC_NETWORK_ID={{.L2ChainID}}
     depends_on:
       - blockscout
     profiles: ["blockExplorer"]

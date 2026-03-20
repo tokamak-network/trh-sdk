@@ -188,6 +188,27 @@ func (t *ThanosStack) startLocalModules(ctx context.Context, composePath string,
 		return nil
 	}
 
+	// Run blockscout DB migration before starting (idempotent, no-op if already migrated)
+	for _, p := range profiles {
+		if p == "blockExplorer" {
+			t.logger.Info("Running blockscout database migration...")
+			// Start blockscout-db first
+			if err := utils.ExecuteCommandStream(ctx, t.logger, "docker", "compose",
+				"-f", composePath, "--profile", "blockExplorer",
+				"up", "-d", "blockscout-db"); err != nil {
+				t.logger.Warnf("Failed to start blockscout-db: %v", err)
+			}
+			// Run migration
+			if err := utils.ExecuteCommandStream(ctx, t.logger, "docker", "compose",
+				"-f", composePath, "--profile", "blockExplorer",
+				"run", "--rm", "blockscout",
+				"bin/blockscout", "eval", "Elixir.Explorer.ReleaseTasks.create_and_migrate()"); err != nil {
+				t.logger.Warnf("Blockscout migration warning (may be already migrated): %v", err)
+			}
+			break
+		}
+	}
+
 	// Re-up with all profiles (already running services are skipped)
 	args := []string{"compose", "-f", composePath}
 	if t.deployConfig.EnableFraudProof {
