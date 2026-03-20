@@ -105,10 +105,6 @@ func NewLocalTestnetThanosStack(
 		return nil, err
 	}
 
-	// Note: KUBECONFIG is NOT set via os.Setenv (process-global, race condition).
-	// Instead, kubeconfigPath is stored and passed via --kubeconfig flag
-	// to kubectl/helm commands by the caller.
-
 	return &ThanosStack{
 		network:        constants.LocalTestnet,
 		usePromptInput: false,
@@ -117,4 +113,20 @@ func NewLocalTestnetThanosStack(
 		deployConfig:   config,
 		kubeconfigPath: kubeconfigPath,
 	}, nil
+}
+
+// kubectl runs a kubectl command, automatically injecting --kubeconfig for local deployments.
+func (t *ThanosStack) kubectl(ctx context.Context, args ...string) (string, error) {
+	if t.kubeconfigPath != "" {
+		args = append([]string{"--kubeconfig", t.kubeconfigPath}, args...)
+	}
+	return utils.ExecuteCommand(ctx, "kubectl", args...)
+}
+
+// helm runs a helm command, automatically injecting --kubeconfig for local deployments.
+func (t *ThanosStack) helm(ctx context.Context, args ...string) (string, error) {
+	if t.kubeconfigPath != "" {
+		args = append([]string{"--kubeconfig", t.kubeconfigPath}, args...)
+	}
+	return utils.ExecuteCommand(ctx, "helm", args...)
 }

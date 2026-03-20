@@ -46,10 +46,10 @@ func (t *ThanosStack) DeployLocalInfrastructure(ctx context.Context, inputs *Dep
 	t.logger.Infof("Using namespace: %s", namespace)
 
 	// STEP 2. Create the Kubernetes namespace (idempotent).
-	if _, err := utils.ExecuteCommand(ctx, "kubectl", "create", "namespace", namespace, "--dry-run=client", "-o", "name"); err != nil {
+	if _, err := t.kubectl(ctx, "create", "namespace", namespace, "--dry-run=client", "-o", "name"); err != nil {
 		t.logger.Warnf("kubectl namespace dry-run failed: %v (continuing)", err)
 	} else {
-		if _, createErr := utils.ExecuteCommand(ctx, "kubectl", "create", "namespace", namespace); createErr != nil {
+		if _, createErr := t.kubectl(ctx, "create", "namespace", namespace); createErr != nil {
 			t.logger.Warnf("kubectl create namespace %s: %v (may already exist)", namespace, createErr)
 		}
 	}
@@ -115,7 +115,7 @@ func (t *ThanosStack) DeployLocalInfrastructure(ctx context.Context, inputs *Dep
 
 	// STEP 5a. Helm install (initial phase).
 	t.logger.Info("Installing Helm release (initial phase)...")
-	if _, err := utils.ExecuteCommand(ctx, "helm", "upgrade", "--install", helmReleaseName, chartFile,
+	if _, err := t.helm(ctx, "upgrade", "--install", helmReleaseName, chartFile,
 		"--values", valueFile, "--namespace", namespace, "--create-namespace"); err != nil {
 		return fmt.Errorf("helm install initial phase: %w", err)
 	}
@@ -131,7 +131,7 @@ func (t *ThanosStack) DeployLocalInfrastructure(ctx context.Context, inputs *Dep
 	}
 
 	t.logger.Info("Upgrading Helm release (deployment phase)...")
-	if _, err := utils.ExecuteCommand(ctx, "helm", "upgrade", helmReleaseName, chartFile,
+	if _, err := t.helm(ctx, "upgrade", helmReleaseName, chartFile,
 		"--values", valueFile, "--namespace", namespace); err != nil {
 		return fmt.Errorf("helm upgrade deployment phase: %w", err)
 	}
@@ -369,7 +369,7 @@ func (t *ThanosStack) waitForLocalPVCs(ctx context.Context, namespace string) er
 }
 
 func (t *ThanosStack) allPVCsBound(ctx context.Context, namespace string) (bool, error) {
-	out, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc",
+	out, err := t.kubectl(ctx, "get", "pvc",
 		"-n", namespace,
 		"-o", `jsonpath={range .items[*]}{.status.phase}{"\n"}{end}`)
 	if err != nil {
@@ -459,7 +459,7 @@ spec:
       targetPort: 80
 `, svcName, namespace, svcName, svcName, nodePath, svcName, namespace, svcName)
 
-	if err := kubectlApplyManifest(ctx, manifest); err != nil {
+	if err := t.kubectlApplyManifest(ctx, manifest); err != nil {
 		return "", fmt.Errorf("apply config server manifests: %w", err)
 	}
 
@@ -540,7 +540,7 @@ spec:
       storage: 10Gi
 `, pvName, hostPath, pvName, namespace)
 
-		if err := kubectlApplyManifest(ctx, manifest); err != nil {
+		if err := t.kubectlApplyManifest(ctx, manifest); err != nil {
 			return fmt.Errorf("apply PV/PVC %s: %w", pvName, err)
 		}
 	}
@@ -592,7 +592,7 @@ spec:
 `
 
 func (t *ThanosStack) ensureESOCRDs(ctx context.Context) error {
-	return kubectlApplyManifest(ctx, esoCRDManifest)
+	return t.kubectlApplyManifest(ctx, esoCRDManifest)
 }
 
 func (t *ThanosStack) ensureStackSecret(ctx context.Context, secretName, namespace string) error {
@@ -612,11 +612,12 @@ stringData:
 		t.deployConfig.BatcherPrivateKey,
 		t.deployConfig.ProposerPrivateKey,
 	)
-	return kubectlApplyManifest(ctx, manifest)
+	return t.kubectlApplyManifest(ctx, manifest)
 }
 
-// kubectlApplyManifest writes a manifest to a temp file and runs kubectl apply.
-func kubectlApplyManifest(ctx context.Context, manifest string) error {
+// kubectlApplyManifest writes a manifest to a temp file and runs kubectl apply
+// with --kubeconfig if kubeconfigPath is set.
+func (t *ThanosStack) kubectlApplyManifest(ctx context.Context, manifest string) error {
 	tmpFile, err := os.CreateTemp("", "k8s-manifest-*.yaml")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
@@ -626,6 +627,6 @@ func kubectlApplyManifest(ctx context.Context, manifest string) error {
 		return fmt.Errorf("write manifest: %w", err)
 	}
 	tmpFile.Close()
-	_, err = utils.ExecuteCommand(ctx, "kubectl", "apply", "-f", tmpFile.Name())
+	_, err = t.kubectl(ctx, "apply", "-f", tmpFile.Name())
 	return err
 }

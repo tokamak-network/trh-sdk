@@ -146,7 +146,7 @@ func (t *ThanosStack) InstallBridge(ctx context.Context) (string, error) {
 		// Override imagePullPolicy for pre-loaded image
 		helmArgs = append(helmArgs, "--set", "op_bridge.spec.imagePullPolicy=IfNotPresent")
 	}
-	if _, err := utils.ExecuteCommand(ctx, "helm", helmArgs...); err != nil {
+	if _, err := t.helm(ctx, helmArgs...); err != nil {
 		t.logger.Error("Error installing Helm charts", "err", err)
 		return "", err
 	}
@@ -218,7 +218,7 @@ func (t *ThanosStack) UninstallBridge(ctx context.Context) error {
 	}
 
 	for _, release := range releases {
-		if _, err := utils.ExecuteCommand(ctx, "helm", "uninstall", release, "--namespace", namespace); err != nil {
+		if _, err := t.helm(ctx, "uninstall", release, "--namespace", namespace); err != nil {
 			t.logger.Error("❌ Error uninstalling op-bridge helm chart", "err", err)
 			return err
 		}

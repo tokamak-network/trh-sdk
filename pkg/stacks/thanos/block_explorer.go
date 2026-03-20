@@ -229,7 +229,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	// Install backend first
 	blockExplorerBackendReleaseName := fmt.Sprintf("%s-%d", "block-explorer-be", time.Now().Unix())
 	fileValue := fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack/block-explorer-value.yaml", t.deploymentPath)
-	_, err = utils.ExecuteCommand(ctx, "helm", []string{
+	_, err = t.helm(ctx, []string{
 		"install",
 		blockExplorerBackendReleaseName,
 		fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack", t.deploymentPath),
@@ -303,7 +303,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	}
 
 	blockExplorerFrontendReleaseName := fmt.Sprintf("%s-%d", "block-explorer-fe", time.Now().Unix())
-	_, err = utils.ExecuteCommand(ctx, "helm", []string{
+	_, err = t.helm(ctx, []string{
 		"install",
 		blockExplorerFrontendReleaseName,
 		fmt.Sprintf("%s/tokamak-thanos-stack/charts/blockscout-stack", t.deploymentPath),
@@ -338,7 +338,7 @@ func (t *ThanosStack) UninstallBlockExplorer(ctx context.Context) error {
 		return err
 	}
 	for _, release := range releases {
-		if _, err := utils.ExecuteCommand(ctx, "helm", "uninstall", release, "--namespace", namespace); err != nil {
+		if _, err := t.helm(ctx, "uninstall", release, "--namespace", namespace); err != nil {
 			t.logger.Error("❌ Error uninstalling block-explorer helm chart", "err", err)
 			return err
 		}
@@ -347,8 +347,8 @@ func (t *ThanosStack) UninstallBlockExplorer(ctx context.Context) error {
 	// 2. Clean up database
 	if t.isLocal() {
 		// Delete local PostgreSQL
-		utils.ExecuteCommand(ctx, "kubectl", "delete", "deployment", "blockscout-postgres", "-n", namespace, "--ignore-not-found=true")
-		utils.ExecuteCommand(ctx, "kubectl", "delete", "service", "blockscout-postgres", "-n", namespace, "--ignore-not-found=true")
+		t.kubectl(ctx, "delete", "deployment", "blockscout-postgres", "-n", namespace, "--ignore-not-found=true")
+		t.kubectl(ctx, "delete", "service", "blockscout-postgres", "-n", namespace, "--ignore-not-found=true")
 	} else {
 		if err := t.destroyTerraform(ctx, fmt.Sprintf("%s/tokamak-thanos-stack/terraform/block-explorer", t.deploymentPath)); err != nil {
 			t.logger.Error("❌ Error running block-explorer terraform destroy", "err", err)
@@ -411,7 +411,7 @@ spec:
     targetPort: 5432
 `, namespace, username, password, namespace)
 
-	if err := kubectlApplyManifest(ctx, manifest); err != nil {
+	if err := t.kubectlApplyManifest(ctx, manifest); err != nil {
 		return "", fmt.Errorf("apply postgres manifest: %w", err)
 	}
 
