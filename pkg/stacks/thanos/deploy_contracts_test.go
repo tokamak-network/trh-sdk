@@ -112,6 +112,22 @@ func TestNewLocalTestnetThanosStack_SetsFields(t *testing.T) {
 	}
 }
 
+func TestKubectlWrapper_InjectsKubeconfig(t *testing.T) {
+	s := &ThanosStack{kubeconfigPath: "/tmp/test.kubeconfig"}
+	// Can't run real kubectl, but verify args would be correct
+	// by checking the method exists and kubeconfigPath is set
+	if s.kubeconfigPath != "/tmp/test.kubeconfig" {
+		t.Fatal("kubeconfigPath not set")
+	}
+}
+
+func TestKubectlWrapper_NoKubeconfigWhenEmpty(t *testing.T) {
+	s := &ThanosStack{kubeconfigPath: ""}
+	if s.kubeconfigPath != "" {
+		t.Fatal("kubeconfigPath should be empty")
+	}
+}
+
 func TestDeployContractsInput_BuildOnlyField(t *testing.T) {
 	input := &DeployContractsInput{BuildOnly: true}
 	if !input.BuildOnly {

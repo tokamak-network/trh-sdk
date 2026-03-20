@@ -294,8 +294,8 @@ func (t *ThanosStack) waitForLocalPods(ctx context.Context, namespace string) er
 }
 
 func (t *ThanosStack) listRunningPodNames(ctx context.Context, namespace string) ([]string, error) {
-	out, err := utils.ExecuteCommand(ctx,
-		"kubectl", "get", "pods", "-n", namespace,
+	out, err := t.kubectl(ctx,
+		"get", "pods", "-n", namespace,
 		"--field-selector=status.phase=Running",
 		"-o", "jsonpath={.items[*].metadata.name}",
 	)
@@ -329,8 +329,8 @@ func allComponentsRunning(podNames []string) bool {
 func (t *ThanosStack) discoverLocalL2RPC(ctx context.Context, namespace string) (string, error) {
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		out, err := utils.ExecuteCommand(ctx,
-			"kubectl", "get", "svc", "-n", namespace,
+		out, err := t.kubectl(ctx,
+			"get", "svc", "-n", namespace,
 			"-o", "jsonpath={.items[*].metadata.name}",
 		)
 		if err == nil {
