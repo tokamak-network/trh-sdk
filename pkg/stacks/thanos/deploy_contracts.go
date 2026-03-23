@@ -312,39 +312,17 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 
 		// STEP 3. Build the contracts
 		scriptsDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "scripts")
-		if !deployContractsConfig.ReuseDeployment {
-			t.logger.Info("Building smart contracts...")
-			err = utils.ExecuteCommandStreamInDir(ctx, t.logger, scriptsDir, "bash", "./start-deploy.sh", "build")
-			if err != nil {
-				if errors.Is(err, context.Canceled) {
-					t.logger.Error("Deployment canceled")
-					return err
-				}
-				t.logger.Error("❌ Build the contracts failed!")
+		t.logger.Info("Building smart contracts...")
+		err = utils.ExecuteCommandStreamInDir(ctx, t.logger, scriptsDir, "bash", "./start-deploy.sh", "build")
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				t.logger.Warn("Deployment canceled")
 				return err
 			}
-			t.logger.Info("✅ Build the contracts completed!")
-		} else {
-			t.logger.Info("ℹ️ ReuseDeployment: Skipping contracts build")
-
-			// op-node binary is always required for genesis generation.
-			// Build it if it doesn't exist yet.
-			opNodeBin := filepath.Join(t.deploymentPath, "tokamak-thanos", "op-node", "bin", "op-node")
-			if _, statErr := os.Stat(opNodeBin); os.IsNotExist(statErr) {
-				t.logger.Info("op-node binary not found, building op-node...")
-				opNodeDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "op-node")
-				err = utils.ExecuteCommandStreamInDir(ctx, t.logger, opNodeDir, "just", "op-node")
-				if err != nil {
-					if errors.Is(err, context.Canceled) {
-						t.logger.Error("Deployment canceled")
-						return err
-					}
-					t.logger.Error("❌ Failed to build op-node!")
-					return err
-				}
-				t.logger.Info("✅ op-node built successfully!")
-			}
+			t.logger.Error("❌ Build the contracts failed!")
+			return err
 		}
+		t.logger.Info("✅ Build the contracts completed!")
 
 		// STEP 4. Deploy the contracts
 		// Check admin balance and estimated deployment cost
@@ -386,12 +364,11 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		}
 
 		if deployContractsConfig.ReuseDeployment {
-			t.logger.Info("ℹ️ ReuseDeployment: Proceeding with deployment using existing implementation contracts (if available)...")
+			t.logger.Info("ℹ️ ReuseDeployment: Deploying with existing implementation contracts...")
 		}
 
-		// Always execute deployment step.
-		// If ReuseDeployment is true, cloning/building were skipped, so 'start-deploy.sh deploy'
-		// will use existing artifacts/broadcasts to reuse implementation contracts.
+		// Deploy contracts. If ReuseDeployment is true, deploy-config.json instructs the deploy
+		// script to reuse existing implementation contracts on the network.
 		err = t.deployContracts(ctx, l1Client, false)
 		if err != nil {
 			t.logger.Error("failed to deploy contracts", "err", err)
