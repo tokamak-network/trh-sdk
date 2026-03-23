@@ -552,13 +552,13 @@ func patchStartDeployScript(tokamakThanosDir string) error {
 		content = bytes.Replace(content, []byte(sdkBuildOld), []byte(sdkBuildNew), 1)
 	}
 
-	// Patch 4: limit forge parallelism and reduce non-essential build output to prevent OOM.
-	// Forge compiles 6 Solc versions in parallel by default, exhausting Docker Desktop memory.
-	// --jobs 1 forces sequential compilation. We strip extra_output and build_info to reduce
-	// memory, but keep optimizer_runs=999999 as the deploy script's chain assertions validate
-	// bytecode compiled with that exact setting.
+	// Patch 4: limit forge parallelism to prevent OOM on resource-constrained hosts.
+	// Forge compiles 6 Solc versions in parallel by default, which exhausts Docker Desktop
+	// memory (7.75GB default). --jobs 1 forces sequential Solc compilation, keeping peak
+	// memory within limits. All other foundry.toml settings (optimizer_runs, extra_output,
+	// build_info) are left unchanged as the deploy script depends on them.
 	forgeCleanOld := `forge clean && forge build`
-	forgeCleanNew := `sed -i '/^extra_output/d' foundry.toml 2>/dev/null || true && sed -i 's/build_info = true/build_info = false/' foundry.toml 2>/dev/null || true && forge clean && forge build --jobs 1`
+	forgeCleanNew := `forge clean && forge build --jobs 1`
 	if bytes.Contains(content, []byte(forgeCleanOld)) {
 		content = bytes.Replace(content, []byte(forgeCleanOld), []byte(forgeCleanNew), 1)
 	}
