@@ -552,13 +552,13 @@ func patchStartDeployScript(tokamakThanosDir string) error {
 		content = bytes.Replace(content, []byte(sdkBuildOld), []byte(sdkBuildNew), 1)
 	}
 
-	// Patch 4: lower optimizer_runs in foundry.toml and limit forge parallelism before build
-	// to reduce peak solc memory usage. The default optimizer_runs=999999 causes heavy optimizer
-	// work, and forge compiles 6 Solc versions in parallel — both lead to OOM SIGKILL on
-	// resource-constrained hosts (Docker Desktop / CI). Using optimizer_runs=200 and --jobs 1
-	// (sequential Solc compilation) keeps peak memory well within Docker Desktop defaults.
+	// Patch 4: limit forge parallelism and reduce non-essential build output to prevent OOM.
+	// Forge compiles 6 Solc versions in parallel by default, exhausting Docker Desktop memory.
+	// --jobs 1 forces sequential compilation. We strip extra_output and build_info to reduce
+	// memory, but keep optimizer_runs=999999 as the deploy script's chain assertions validate
+	// bytecode compiled with that exact setting.
 	forgeCleanOld := `forge clean && forge build`
-	forgeCleanNew := `sed -i 's/optimizer_runs = 999999/optimizer_runs = 200/' foundry.toml 2>/dev/null || true && sed -i '/^extra_output/d' foundry.toml 2>/dev/null || true && sed -i 's/build_info = true/build_info = false/' foundry.toml 2>/dev/null || true && forge clean && forge build --jobs 1`
+	forgeCleanNew := `sed -i '/^extra_output/d' foundry.toml 2>/dev/null || true && sed -i 's/build_info = true/build_info = false/' foundry.toml 2>/dev/null || true && forge clean && forge build --jobs 1`
 	if bytes.Contains(content, []byte(forgeCleanOld)) {
 		content = bytes.Replace(content, []byte(forgeCleanOld), []byte(forgeCleanNew), 1)
 	}
