@@ -105,11 +105,11 @@ func (t *ThanosStack) generateLocalComposeFile(composePath string) error {
 	storageMountBase := "/app/storage"
 
 	data := localComposeData{
-		OpGethImage:               fmt.Sprintf("tokamaknetwork/thanos-op-geth:nightly-%s", imageTags.OpGethImageTag),
-		OpNodeImage:               fmt.Sprintf("tokamaknetwork/thanos-op-node:nightly-%s", imageTags.ThanosStackImageTag),
-		OpBatcherImage:            fmt.Sprintf("tokamaknetwork/thanos-op-batcher:nightly-%s", imageTags.ThanosStackImageTag),
-		OpProposerImage:           fmt.Sprintf("tokamaknetwork/thanos-op-proposer:nightly-%s", imageTags.ThanosStackImageTag),
-		OpChallengerImage:         fmt.Sprintf("tokamaknetwork/thanos-op-challenger:nightly-%s", imageTags.ThanosStackImageTag),
+		OpGethImage:               fmt.Sprintf("tokamaknetwork/thanos-op-geth:%s", imageTags.OpGethImageTag),
+		OpNodeImage:               fmt.Sprintf("tokamaknetwork/thanos-op-node:%s", imageTags.ThanosStackImageTag),
+		OpBatcherImage:            fmt.Sprintf("tokamaknetwork/thanos-op-batcher:%s", imageTags.ThanosStackImageTag),
+		OpProposerImage:           fmt.Sprintf("tokamaknetwork/thanos-op-proposer:%s", imageTags.ThanosStackImageTag),
+		OpChallengerImage:         fmt.Sprintf("tokamaknetwork/thanos-op-challenger:%s", imageTags.ThanosStackImageTag),
 		L1RpcUrl:                  t.deployConfig.L1RPCURL,
 		L1BeaconUrl:               t.deployConfig.L1BeaconURL,
 		SequencerKey:              t.deployConfig.SequencerPrivateKey,
