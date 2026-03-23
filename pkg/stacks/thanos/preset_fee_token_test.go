@@ -65,8 +65,9 @@ func TestInitDeployConfigTemplate_PresetGeneral(t *testing.T) {
 	input := makeTestInput(constants.PresetGeneral, constants.FeeTokenTON)
 	tpl := initDeployConfigTemplate(input, constants.EthereumSepoliaChainID, 5678, "")
 
-	if tpl.L1UsdcAddr != "0x0000000000000000000000000000000000000000" {
-		t.Errorf("General preset should clear L1UsdcAddr, got %s", tpl.L1UsdcAddr)
+	expectedUsdc := constants.L1ChainConfigurations[constants.EthereumSepoliaChainID].USDCAddress
+	if tpl.L1UsdcAddr != expectedUsdc {
+		t.Errorf("General preset should keep L1UsdcAddr from chain config, got %s", tpl.L1UsdcAddr)
 	}
 	if tpl.UniswapV3FactoryFee500 != 0 {
 		t.Errorf("General preset should clear UniswapV3FactoryFee500, got %d", tpl.UniswapV3FactoryFee500)
