@@ -8,8 +8,10 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/shirou/gopsutil/mem"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/dependencies"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
@@ -311,7 +313,13 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		}
 
 		// STEP 3. Build the contracts
-		scriptsDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "scripts")
+		contractsDir := filepath.Join(tokamakThanosDir, "packages", "tokamak", "contracts-bedrock")
+		scriptsDir := filepath.Join(contractsDir, "scripts")
+		forgeCacheDir := filepath.Join(t.deploymentPath, ".forge-cache")
+
+		// Restore cached forge artifacts if available (survives re-clones)
+		restoreForgeCache(t.logger, forgeCacheDir, contractsDir)
+
 		t.logger.Info("Building smart contracts...")
 		err = utils.ExecuteCommandStreamInDir(ctx, t.logger, scriptsDir, "bash", "./start-deploy.sh", "build")
 		if err != nil {
@@ -323,6 +331,9 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			return err
 		}
 		t.logger.Info("✅ Build the contracts completed!")
+
+		// Cache forge artifacts for future builds
+		saveForgeCache(t.logger, forgeCacheDir, contractsDir)
 
 		// STEP 4. Deploy the contracts
 		// Check admin balance and estimated deployment cost
@@ -552,16 +563,170 @@ func patchStartDeployScript(tokamakThanosDir string) error {
 		content = bytes.Replace(content, []byte(sdkBuildOld), []byte(sdkBuildNew), 1)
 	}
 
-	// Patch 4: limit forge parallelism to prevent OOM on resource-constrained hosts.
-	// Forge compiles 6 Solc versions in parallel by default, which exhausts Docker Desktop
-	// memory (7.75GB default). --jobs 1 forces sequential Solc compilation, keeping peak
-	// memory within limits. All other foundry.toml settings (optimizer_runs, extra_output,
-	// build_info) are left unchanged as the deploy script depends on them.
+	// Patch 4: incremental builds + memory-based parallelism.
+	// - Skip `forge clean` when forge-artifacts already exist to enable incremental builds
+	//   (Forge uses solidity-files-cache.json to recompile only changed files).
+	// - Dynamically set --jobs based on available system memory to balance speed vs OOM risk.
+	//   Docker Desktop defaults to 7.75GB which only supports --jobs 1.
+	jobs := getForgeJobs()
+	jobsFlag := " --jobs " + strconv.Itoa(jobs)
 	forgeCleanOld := `forge clean && forge build`
-	forgeCleanNew := `forge clean && forge build --jobs 1`
+	forgeCleanNew := `if [ -d "forge-artifacts" ] && [ -n "$(ls -A forge-artifacts 2>/dev/null)" ]; then echo "Incremental build (reusing cached artifacts)..."; forge build` + jobsFlag + `; else echo "Clean build (no cached artifacts found)..."; forge clean && forge build` + jobsFlag + `; fi`
 	if bytes.Contains(content, []byte(forgeCleanOld)) {
 		content = bytes.Replace(content, []byte(forgeCleanOld), []byte(forgeCleanNew), 1)
 	}
 
+	// Patch 5: remove redundant waitForFileSystem between TypeScript builds.
+	// Modern filesystems (ext4, overlay2) don't need sleep+sync between sequential builds.
+	// Keep only the one after forge build for artifact verification.
+	// There are exactly 2 occurrences (before core-utils and before SDK builds).
+	waitOld := []byte(`  # Additional wait to ensure modules are properly synced
+  waitForFileSystem`)
+	waitNew := []byte(`  # filesystem sync skipped (not needed between sequential builds)`)
+	content = bytes.Replace(content, waitOld, waitNew, 2)
+
+	// Patch 6: shallow submodule update instead of full history clone.
+	submoduleOld := `make submodules`
+	submoduleNew := `git submodule update --init --recursive --depth 1`
+	if bytes.Contains(content, []byte(submoduleOld)) {
+		content = bytes.Replace(content, []byte(submoduleOld), []byte(submoduleNew), 1)
+	}
+
+	// Patch 7: skip TypeScript builds if already built (enables fast re-deploys).
+	coreUtilsBuildOld := `  if ! retryCommand "pnpm build" "Building core-utils"; then`
+	coreUtilsBuildNew := `  if [ -f "dist/index.js" ]; then
+    echo "core-utils already built, skipping"
+  elif ! retryCommand "pnpm build" "Building core-utils"; then`
+	if bytes.Contains(content, []byte(coreUtilsBuildOld)) {
+		content = bytes.Replace(content, []byte(coreUtilsBuildOld), []byte(coreUtilsBuildNew), 1)
+	}
+
 	return os.WriteFile(scriptPath, content, 0755)
+}
+
+// getForgeJobs returns the number of parallel Solc compilation jobs based on available memory.
+// Forge compiles up to 6 Solc versions in parallel by default, which can exhaust memory
+// on resource-constrained hosts like Docker Desktop (7.75GB default).
+func getForgeJobs() int {
+	v, err := mem.VirtualMemory()
+	if err != nil {
+		return 1
+	}
+	totalGB := v.Total / (1024 * 1024 * 1024)
+	switch {
+	case totalGB >= 16:
+		return 4
+	case totalGB >= 10:
+		return 2
+	default:
+		return 1
+	}
+}
+
+// restoreForgeCache restores cached forge build artifacts from the deployment-level cache
+// directory into the contracts-bedrock directory. This enables incremental builds even after
+// re-cloning the tokamak-thanos repository, since the cache lives outside the repo directory.
+// Cache errors are logged but never fail the build — caching is best-effort.
+func restoreForgeCache(logger interface{ Info(args ...interface{}) }, cacheDir, contractsDir string) {
+	forgeArtifactsCache := filepath.Join(cacheDir, "forge-artifacts")
+	forgeSolcCache := filepath.Join(cacheDir, "cache")
+
+	if _, err := os.Stat(forgeArtifactsCache); os.IsNotExist(err) {
+		return
+	}
+
+	destArtifacts := filepath.Join(contractsDir, "forge-artifacts")
+	destCache := filepath.Join(contractsDir, "cache")
+
+	// Only restore if the destination doesn't already have artifacts
+	if _, err := os.Stat(destArtifacts); !os.IsNotExist(err) {
+		return
+	}
+
+	logger.Info("Restoring cached forge artifacts for incremental build...")
+
+	// Always copy (not rename) to preserve the cache for future use
+	if err := copyDir(forgeArtifactsCache, destArtifacts); err != nil {
+		logger.Info("Failed to restore forge artifacts cache, will do clean build", err)
+		os.RemoveAll(destArtifacts) // Clean up partial copy
+		return
+	}
+	if _, err := os.Stat(forgeSolcCache); !os.IsNotExist(err) {
+		if err := copyDir(forgeSolcCache, destCache); err != nil {
+			logger.Info("Failed to restore forge solc cache", err)
+			os.RemoveAll(destCache)
+		}
+	}
+}
+
+// saveForgeCache saves forge build artifacts to the deployment-level cache directory.
+// Cache errors are logged but never fail the build — caching is best-effort.
+func saveForgeCache(logger interface{ Info(args ...interface{}) }, cacheDir, contractsDir string) {
+	srcArtifacts := filepath.Join(contractsDir, "forge-artifacts")
+	srcCache := filepath.Join(contractsDir, "cache")
+
+	if _, err := os.Stat(srcArtifacts); os.IsNotExist(err) {
+		return
+	}
+
+	logger.Info("Caching forge artifacts for future builds...")
+
+	// Clean old cache and replace
+	os.RemoveAll(filepath.Join(cacheDir, "forge-artifacts"))
+	os.RemoveAll(filepath.Join(cacheDir, "cache"))
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		logger.Info("Failed to create forge cache directory", err)
+		return
+	}
+
+	if err := copyDir(srcArtifacts, filepath.Join(cacheDir, "forge-artifacts")); err != nil {
+		logger.Info("Failed to save forge artifacts cache", err)
+		os.RemoveAll(filepath.Join(cacheDir, "forge-artifacts")) // Clean up partial copy
+		return
+	}
+	if _, err := os.Stat(srcCache); !os.IsNotExist(err) {
+		if err := copyDir(srcCache, filepath.Join(cacheDir, "cache")); err != nil {
+			logger.Info("Failed to save forge solc cache", err)
+			os.RemoveAll(filepath.Join(cacheDir, "cache"))
+		}
+	}
+}
+
+// copyDir recursively copies a directory tree, preserving symlinks as symlinks.
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relPath, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		dstPath := filepath.Join(dst, relPath)
+
+		// Check if the original entry is a symlink (filepath.Walk follows symlinks,
+		// so we need to Lstat the original path to detect them)
+		linfo, lstatErr := os.Lstat(path)
+		if lstatErr != nil {
+			return lstatErr
+		}
+		if linfo.Mode()&os.ModeSymlink != 0 {
+			target, readErr := os.Readlink(path)
+			if readErr != nil {
+				return readErr
+			}
+			return os.Symlink(target, dstPath)
+		}
+
+		if info.IsDir() {
+			return os.MkdirAll(dstPath, info.Mode())
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(dstPath, data, info.Mode())
+	})
 }
