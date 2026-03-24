@@ -66,44 +66,42 @@ func TestInitDeployConfigTemplate_PresetGeneral(t *testing.T) {
 	input := makeTestInput(constants.PresetGeneral, constants.FeeTokenTON)
 	tpl := initDeployConfigTemplate(input, constants.EthereumSepoliaChainID, 5678, "")
 
-	// L1UsdcAddr must NOT be cleared for the general preset: the forge deploy script
-	// always deploys L1UsdcBridge and calls setAddress() which reverts on zero.
-	// Verify it uses the real Sepolia USDC address (non-zero).
-	if tpl.L1UsdcAddr == "" || tpl.L1UsdcAddr == "0x0000000000000000000000000000000000000000" {
-		t.Errorf("General preset must keep real L1UsdcAddr (non-zero), got %s", tpl.L1UsdcAddr)
+	expectedUsdc := constants.L1ChainConfigurations[constants.EthereumSepoliaChainID].USDCAddress
+	if tpl.L1UsdcAddr != expectedUsdc {
+		t.Errorf("General preset should keep L1UsdcAddr from chain config, got %s", tpl.L1UsdcAddr)
 	}
 	if tpl.UniswapV3FactoryFee500 != 0 {
 		t.Errorf("General preset should clear UniswapV3FactoryFee500, got %d", tpl.UniswapV3FactoryFee500)
 	}
 }
 
-// TestInitDeployConfigTemplate_PresetGaming verifies that VRF/AA fields are
+// TestInitDeployConfigTemplate_PresetGaming verifies that DRB/AA fields are
 // populated for the Gaming preset.
 func TestInitDeployConfigTemplate_PresetGaming(t *testing.T) {
 	input := makeTestInput(constants.PresetGaming, constants.FeeTokenTON)
-	input.VRFAdmin = "0xABCDEF"
+	input.DRBAdmin = "0xABCDEF"
 	input.AAPaymasterSigner = "0x123456"
 
 	tpl := initDeployConfigTemplate(input, constants.EthereumSepoliaChainID, 9999, "")
 
-	if tpl.VRFAdmin != "0xABCDEF" {
-		t.Errorf("VRFAdmin: got %q, want %q", tpl.VRFAdmin, "0xABCDEF")
+	if tpl.DRBAdmin != "0xABCDEF" {
+		t.Errorf("DRBAdmin: got %q, want %q", tpl.DRBAdmin, "0xABCDEF")
 	}
 	if tpl.AAPaymasterSigner != "0x123456" {
 		t.Errorf("AAPaymasterSigner: got %q, want %q", tpl.AAPaymasterSigner, "0x123456")
 	}
 }
 
-// TestInitDeployConfigTemplate_PresetFull verifies Full preset sets VRF/AA fields.
+// TestInitDeployConfigTemplate_PresetFull verifies Full preset sets DRB/AA fields.
 func TestInitDeployConfigTemplate_PresetFull(t *testing.T) {
 	input := makeTestInput(constants.PresetFull, constants.FeeTokenUSDC)
-	input.VRFAdmin = "0xVRF"
+	input.DRBAdmin = "0xDRB"
 	input.AAPaymasterSigner = "0xAA"
 
 	tpl := initDeployConfigTemplate(input, constants.EthereumSepoliaChainID, 11111, "")
 
-	if tpl.VRFAdmin != "0xVRF" {
-		t.Errorf("VRFAdmin: got %q, want %q", tpl.VRFAdmin, "0xVRF")
+	if tpl.DRBAdmin != "0xDRB" {
+		t.Errorf("DRBAdmin: got %q, want %q", tpl.DRBAdmin, "0xDRB")
 	}
 	if tpl.Preset != constants.PresetFull {
 		t.Errorf("Preset: got %q, want %q", tpl.Preset, constants.PresetFull)

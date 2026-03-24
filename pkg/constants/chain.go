@@ -32,6 +32,7 @@ var PresetModules = map[string]map[string]bool{
 		"monitoring":    true,
 		"crossTrade":    true,
 		"uptimeService": true,
+		"drb":           true,
 	},
 	PresetFull: {
 		"bridge":        true,
@@ -39,6 +40,7 @@ var PresetModules = map[string]map[string]bool{
 		"monitoring":    true,
 		"crossTrade":    true,
 		"uptimeService": true,
+		"drb":           true,
 	},
 }
 

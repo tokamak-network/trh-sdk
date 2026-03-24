@@ -8,9 +8,11 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/shirou/gopsutil/mem"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/dependencies"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
@@ -375,41 +377,52 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			t.logger.Info("✅ start-deploy.sh patched: cannon prestate and op-node build fixed")
 		}
 
-		// STEP 3. Build the contracts
-		scriptsDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "scripts")
-		if !deployContractsConfig.ReuseDeployment {
-			t.logger.Info("Building smart contracts...")
-			err = utils.ExecuteCommandStreamInDir(ctx, t.logger, scriptsDir, "bash", "./start-deploy.sh", "build")
-			if err != nil {
-				if errors.Is(err, context.Canceled) {
-					t.logger.Error("Deployment canceled")
-					return err
-				}
-				t.logger.Error("❌ Build the contracts failed!")
-				return err
-			}
-			t.logger.Info("✅ Build the contracts completed!")
-		} else {
-			t.logger.Info("ℹ️ ReuseDeployment: Skipping contracts build")
+		// Patch workspace dependency: pnpm overrides don't resolve workspace:* references.
+		// Replace the self-referencing devDependency with the actual package name.
+		if patchErr := patchContractsPkgJSON(tokamakThanosDir); patchErr != nil {
+			t.logger.Warn("Failed to patch package.json workspace dep", "err", patchErr)
+		}
 
-			// op-node binary is always required for genesis generation.
-			// Build it if it doesn't exist yet.
-			opNodeBin := filepath.Join(t.deploymentPath, "tokamak-thanos", "op-node", "bin", "op-node")
-			if _, statErr := os.Stat(opNodeBin); os.IsNotExist(statErr) {
-				t.logger.Info("op-node binary not found, building op-node...")
-				opNodeDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "op-node")
-				err = utils.ExecuteCommandStreamInDir(ctx, t.logger, opNodeDir, "just", "op-node")
-				if err != nil {
-					if errors.Is(err, context.Canceled) {
-						t.logger.Error("Deployment canceled")
-						return err
-					}
-					t.logger.Error("❌ Failed to build op-node!")
-					return err
+		// STEP 3. Build the contracts
+		contractsDir := filepath.Join(tokamakThanosDir, "packages", "tokamak", "contracts-bedrock")
+
+		// Remove broken test files that prevent forge build (upstream constructor mismatch).
+		removeBrokenTestFiles(t.logger, contractsDir)
+		scriptsDir := filepath.Join(contractsDir, "scripts")
+		forgeCacheDir := filepath.Join(t.deploymentPath, ".forge-cache")
+
+		// Try downloading pre-built artifacts from npm to skip forge build (~5min → ~10s)
+		if dlErr := downloadPrebuiltArtifacts(ctx, t.logger, contractsDir); dlErr != nil {
+			t.logger.Warn("Pre-built artifacts unavailable, will build from source", "err", dlErr)
+			// Restore cached forge artifacts if available (survives re-clones)
+			restoreForgeCache(t.logger, forgeCacheDir, contractsDir)
+		} else {
+			t.logger.Info("✅ Pre-built artifacts downloaded, forge build will be skipped")
+			os.Setenv("SKIP_FORGE_BUILD", "true")
+			defer os.Unsetenv("SKIP_FORGE_BUILD")
+
+			// Invalidate cache for patched files so forge recompiles only those contracts
+			if deployContractsConfig.EnableFaultProof {
+				if cacheErr := invalidateCacheEntry(contractsDir, "src/dispute/AnchorStateRegistry.sol"); cacheErr != nil {
+					t.logger.Warn("Failed to invalidate cache for patched contract", "err", cacheErr)
 				}
-				t.logger.Info("✅ op-node built successfully!")
 			}
 		}
+
+		t.logger.Info("Building smart contracts...")
+		err = utils.ExecuteCommandStreamInDir(ctx, t.logger, scriptsDir, "bash", "./start-deploy.sh", "build")
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				t.logger.Warn("Deployment canceled")
+				return err
+			}
+			t.logger.Error("❌ Build the contracts failed!")
+			return err
+		}
+		t.logger.Info("✅ Build the contracts completed!")
+
+		// Cache forge artifacts for future builds
+		saveForgeCache(t.logger, forgeCacheDir, contractsDir)
 
 		// BuildOnly mode: return after build without deploying contracts
 		if deployContractsConfig.BuildOnly {
@@ -464,12 +477,11 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		}
 
 		if deployContractsConfig.ReuseDeployment {
-			t.logger.Info("ℹ️ ReuseDeployment: Proceeding with deployment using existing implementation contracts (if available)...")
+			t.logger.Info("ℹ️ ReuseDeployment: Deploying with existing implementation contracts...")
 		}
 
-		// Always execute deployment step.
-		// If ReuseDeployment is true, cloning/building were skipped, so 'start-deploy.sh deploy'
-		// will use existing artifacts/broadcasts to reuse implementation contracts.
+		// Deploy contracts. If ReuseDeployment is true, deploy-config.json instructs the deploy
+		// script to reuse existing implementation contracts on the network.
 		err = t.deployContracts(ctx, l1Client, false)
 		if err != nil {
 			t.logger.Error("failed to deploy contracts", "err", err)
@@ -653,15 +665,227 @@ func patchStartDeployScript(tokamakThanosDir string) error {
 		content = bytes.Replace(content, []byte(sdkBuildOld), []byte(sdkBuildNew), 1)
 	}
 
-	// Patch 4: lower optimizer_runs in foundry.toml before forge build to reduce peak solc
-	// memory usage. The default optimizer_runs=999999 causes heavy optimizer work that leads
-	// to OOM SIGKILL on resource-constrained hosts (Docker Desktop / CI). Using optimizer_runs=200
-	// (the solc default) produces functionally identical contracts with much lower memory usage.
-	forgeCleanOld := `forge clean && forge build`
-	forgeCleanNew := `sed -i 's/optimizer_runs = 999999/optimizer_runs = 200/' foundry.toml 2>/dev/null || true && sed -i '/^extra_output/d' foundry.toml 2>/dev/null || true && sed -i 's/build_info = true/build_info = false/' foundry.toml 2>/dev/null || true && forge clean && forge build`
-	if bytes.Contains(content, []byte(forgeCleanOld)) {
-		content = bytes.Replace(content, []byte(forgeCleanOld), []byte(forgeCleanNew), 1)
+	// Patch 4: incremental builds + memory-based parallelism.
+	// - Skip `forge clean` when forge-artifacts already exist to enable incremental builds
+	//   (Forge uses solidity-files-cache.json to recompile only changed files).
+	// - Dynamically set --jobs based on available system memory to balance speed vs OOM risk.
+	//   Docker Desktop defaults to 7.75GB which only supports --jobs 1.
+	// Replace the entire retryCommand block (3 lines) to avoid nested-quote shell issues.
+	jobs := getForgeJobs()
+	jobsStr := strconv.Itoa(jobs)
+	forgeBuildBlockOld := `  if ! retryCommand "forge clean && forge build" "Building contracts"; then
+    echo "❌ Error: Failed to build contracts after $MAX_RETRIES attempts"
+    return 1
+  fi`
+	forgeBuildBlockNew := `  # Incremental build with memory-based parallelism (patched by trh-sdk)
+  if [ "${SKIP_FORGE_BUILD:-false}" = "true" ] && [ -d "forge-artifacts" ] && [ -n "$(ls -A forge-artifacts 2>/dev/null)" ]; then
+    echo "Pre-built artifacts found, skipping forge build"
+  elif [ -d "forge-artifacts" ] && [ -n "$(ls -A forge-artifacts 2>/dev/null)" ]; then
+    echo "Incremental build (reusing cached artifacts)..."
+    if ! retryCommand "forge build --jobs ` + jobsStr + `" "Building contracts (incremental)"; then
+      echo "❌ Error: Failed to build contracts after $MAX_RETRIES attempts"
+      return 1
+    fi
+  else
+    echo "Clean build (no cached artifacts found)..."
+    if ! retryCommand "forge clean && forge build --jobs ` + jobsStr + `" "Building contracts (clean)"; then
+      echo "❌ Error: Failed to build contracts after $MAX_RETRIES attempts"
+      return 1
+    fi
+  fi`
+	if bytes.Contains(content, []byte(forgeBuildBlockOld)) {
+		content = bytes.Replace(content, []byte(forgeBuildBlockOld), []byte(forgeBuildBlockNew), 1)
+	}
+
+	// Patch 5: remove redundant waitForFileSystem between TypeScript builds.
+	// Modern filesystems (ext4, overlay2) don't need sleep+sync between sequential builds.
+	// Keep only the one after forge build for artifact verification.
+	// There are exactly 2 occurrences (before core-utils and before SDK builds).
+	waitOld := []byte(`  # Additional wait to ensure modules are properly synced
+  waitForFileSystem`)
+	waitNew := []byte(`  # filesystem sync skipped (not needed between sequential builds)`)
+	content = bytes.Replace(content, waitOld, waitNew, 2)
+
+	// Patch 6: shallow submodule update instead of full history clone.
+	submoduleOld := `make submodules`
+	submoduleNew := `git submodule update --init --recursive --depth 1`
+	if bytes.Contains(content, []byte(submoduleOld)) {
+		content = bytes.Replace(content, []byte(submoduleOld), []byte(submoduleNew), 1)
+	}
+
+	// Patch 7: skip TypeScript builds if already built (enables fast re-deploys).
+	coreUtilsBuildOld := `  if ! retryCommand "pnpm build" "Building core-utils"; then`
+	coreUtilsBuildNew := `  if [ -f "dist/index.js" ]; then
+    echo "core-utils already built, skipping"
+  elif ! retryCommand "pnpm build" "Building core-utils"; then`
+	if bytes.Contains(content, []byte(coreUtilsBuildOld)) {
+		content = bytes.Replace(content, []byte(coreUtilsBuildOld), []byte(coreUtilsBuildNew), 1)
 	}
 
 	return os.WriteFile(scriptPath, content, 0755)
+}
+
+// removeBrokenTestFiles deletes test files that have compilation errors (e.g. constructor
+// argument mismatches) so they don't block `forge build`. These are test-only files that
+// are not needed for contract deployment.
+func removeBrokenTestFiles(logger interface{ Info(args ...interface{}) }, contractsDir string) {
+	brokenTests := []string{
+		"test/AA/MultiTokenPaymaster.t.sol",
+		"test/AA/SimplePriceOracle.t.sol",
+	}
+	for _, f := range brokenTests {
+		path := filepath.Join(contractsDir, f)
+		if _, err := os.Stat(path); err == nil {
+			if err := os.Remove(path); err == nil {
+				logger.Info("Removed broken test file: " + f)
+			}
+		}
+	}
+}
+
+// patchContractsPkgJSON fixes the workspace self-reference in contracts-bedrock/package.json.
+// The package declares "@eth-optimism/contracts-bedrock": "workspace:*" in devDependencies,
+// but pnpm overrides don't resolve workspace: protocol references. Replace with the actual
+// tokamak package name so pnpm can resolve it within the workspace.
+func patchContractsPkgJSON(tokamakThanosDir string) error {
+	pkgPath := filepath.Join(tokamakThanosDir, "packages", "tokamak", "contracts-bedrock", "package.json")
+	content, err := os.ReadFile(pkgPath)
+	if err != nil {
+		return fmt.Errorf("failed to read package.json: %w", err)
+	}
+
+	old := []byte(`"@eth-optimism/contracts-bedrock": "workspace:*"`)
+	replacement := []byte(`"@tokamak-network/thanos-contracts": "workspace:*"`)
+	if bytes.Contains(content, old) {
+		content = bytes.Replace(content, old, replacement, 1)
+		return os.WriteFile(pkgPath, content, 0644)
+	}
+	return nil
+}
+
+// getForgeJobs returns the number of parallel Solc compilation jobs based on available memory.
+// Forge compiles up to 6 Solc versions in parallel by default, which can exhaust memory
+// on resource-constrained hosts like Docker Desktop (7.75GB default).
+func getForgeJobs() int {
+	v, err := mem.VirtualMemory()
+	if err != nil {
+		return 1
+	}
+	totalGB := v.Total / (1024 * 1024 * 1024)
+	switch {
+	case totalGB >= 16:
+		return 4
+	case totalGB >= 10:
+		return 2
+	default:
+		return 1
+	}
+}
+
+// restoreForgeCache restores cached forge build artifacts from the deployment-level cache
+// directory into the contracts-bedrock directory. This enables incremental builds even after
+// re-cloning the tokamak-thanos repository, since the cache lives outside the repo directory.
+// Cache errors are logged but never fail the build — caching is best-effort.
+func restoreForgeCache(logger interface{ Info(args ...interface{}) }, cacheDir, contractsDir string) {
+	forgeArtifactsCache := filepath.Join(cacheDir, "forge-artifacts")
+	forgeSolcCache := filepath.Join(cacheDir, "cache")
+
+	if _, err := os.Stat(forgeArtifactsCache); os.IsNotExist(err) {
+		return
+	}
+
+	destArtifacts := filepath.Join(contractsDir, "forge-artifacts")
+	destCache := filepath.Join(contractsDir, "cache")
+
+	// Only restore if the destination doesn't already have artifacts
+	if _, err := os.Stat(destArtifacts); !os.IsNotExist(err) {
+		return
+	}
+
+	logger.Info("Restoring cached forge artifacts for incremental build...")
+
+	// Always copy (not rename) to preserve the cache for future use
+	if err := copyDir(forgeArtifactsCache, destArtifacts); err != nil {
+		logger.Info("Failed to restore forge artifacts cache, will do clean build", err)
+		os.RemoveAll(destArtifacts) // Clean up partial copy
+		return
+	}
+	if _, err := os.Stat(forgeSolcCache); !os.IsNotExist(err) {
+		if err := copyDir(forgeSolcCache, destCache); err != nil {
+			logger.Info("Failed to restore forge solc cache", err)
+			os.RemoveAll(destCache)
+		}
+	}
+}
+
+// saveForgeCache saves forge build artifacts to the deployment-level cache directory.
+// Cache errors are logged but never fail the build — caching is best-effort.
+func saveForgeCache(logger interface{ Info(args ...interface{}) }, cacheDir, contractsDir string) {
+	srcArtifacts := filepath.Join(contractsDir, "forge-artifacts")
+	srcCache := filepath.Join(contractsDir, "cache")
+
+	if _, err := os.Stat(srcArtifacts); os.IsNotExist(err) {
+		return
+	}
+
+	logger.Info("Caching forge artifacts for future builds...")
+
+	// Clean old cache and replace
+	os.RemoveAll(filepath.Join(cacheDir, "forge-artifacts"))
+	os.RemoveAll(filepath.Join(cacheDir, "cache"))
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		logger.Info("Failed to create forge cache directory", err)
+		return
+	}
+
+	if err := copyDir(srcArtifacts, filepath.Join(cacheDir, "forge-artifacts")); err != nil {
+		logger.Info("Failed to save forge artifacts cache", err)
+		os.RemoveAll(filepath.Join(cacheDir, "forge-artifacts")) // Clean up partial copy
+		return
+	}
+	if _, err := os.Stat(srcCache); !os.IsNotExist(err) {
+		if err := copyDir(srcCache, filepath.Join(cacheDir, "cache")); err != nil {
+			logger.Info("Failed to save forge solc cache", err)
+			os.RemoveAll(filepath.Join(cacheDir, "cache"))
+		}
+	}
+}
+
+// copyDir recursively copies a directory tree, preserving symlinks as symlinks.
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relPath, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		dstPath := filepath.Join(dst, relPath)
+
+		// Check if the original entry is a symlink (filepath.Walk follows symlinks,
+		// so we need to Lstat the original path to detect them)
+		linfo, lstatErr := os.Lstat(path)
+		if lstatErr != nil {
+			return lstatErr
+		}
+		if linfo.Mode()&os.ModeSymlink != 0 {
+			target, readErr := os.Readlink(path)
+			if readErr != nil {
+				return readErr
+			}
+			return os.Symlink(target, dstPath)
+		}
+
+		if info.IsDir() {
+			return os.MkdirAll(dstPath, info.Mode())
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(dstPath, data, info.Mode())
+	})
 }

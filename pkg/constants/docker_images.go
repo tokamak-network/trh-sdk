@@ -3,8 +3,9 @@ package constants
 var DockerImageTag = map[string]struct {
 	OpGethImageTag      string
 	ThanosStackImageTag string
+	DRBNodeImageTag     string
 }{
-	LocalTestnet: {OpGethImageTag: "f8c04dcb", ThanosStackImageTag: "c9d8d16a"},
-	Testnet:      {OpGethImageTag: "f8c04dcb", ThanosStackImageTag: "c9d8d16a"},
-	Mainnet:      {OpGethImageTag: "a7c74c7e", ThanosStackImageTag: "49e37d47"},
+	LocalTestnet: {OpGethImageTag: "nightly", ThanosStackImageTag: "nightly-b684fda0", DRBNodeImageTag: "latest"},
+	Testnet:      {OpGethImageTag: "nightly", ThanosStackImageTag: "nightly-b684fda0", DRBNodeImageTag: "latest"},
+	Mainnet:      {OpGethImageTag: "nightly", ThanosStackImageTag: "nightly-b684fda0", DRBNodeImageTag: "latest"},
 }

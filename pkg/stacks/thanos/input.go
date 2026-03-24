@@ -44,7 +44,7 @@ type DeployContractsInput struct {
 	Preset   string // "general", "defi", "gaming", "full"
 	FeeToken string // "TON", "ETH", "USDT", "USDC"
 	// Gaming/Full preset additional inputs
-	VRFAdmin          string
+	DRBAdmin          string
 	AAPaymasterSigner string
 }
 
@@ -359,9 +359,9 @@ func InputDeployContracts(ctx context.Context, enableFaultProof bool, opts *Depl
 	}
 
 	// --- Gaming/Full: additional inputs ---
-	var vrfAdmin, aaPaymasterSigner string
+	var drbAdmin, aaPaymasterSigner string
 	if preset == constants.PresetGaming || preset == constants.PresetFull {
-		vrfAdmin, aaPaymasterSigner, err = inputAAVRFAddresses(operators)
+		drbAdmin, aaPaymasterSigner, err = inputAADRBAddresses(operators)
 		if err != nil {
 			return nil, err
 		}
@@ -490,7 +490,7 @@ func InputDeployContracts(ctx context.Context, enableFaultProof bool, opts *Depl
 		EnableFaultProof:  enableFaultProof,
 		Preset:            preset,
 		FeeToken:          feeToken,
-		VRFAdmin:          vrfAdmin,
+		DRBAdmin:          drbAdmin,
 		AAPaymasterSigner: aaPaymasterSigner,
 	}, nil
 }
@@ -1387,9 +1387,9 @@ func makeDeployContractConfigJsonFile(
 		deployContractTemplate.UniswapV3FactoryOwner = address.Hex()
 		deployContractTemplate.UniversalRouterRewardsDistributor = address.Hex()
 
-		// Gaming/Full preset: default VRF and AA admin to operator admin address
-		if deployContractTemplate.VRFAdmin == "" {
-			deployContractTemplate.VRFAdmin = address.Hex()
+		// Gaming/Full preset: default DRB and AA admin to operator admin address
+		if deployContractTemplate.DRBAdmin == "" {
+			deployContractTemplate.DRBAdmin = address.Hex()
 		}
 		if deployContractTemplate.AAPaymasterSigner == "" {
 			deployContractTemplate.AAPaymasterSigner = address.Hex()
@@ -1591,8 +1591,8 @@ func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainI
 		defaultTemplate.UniswapV3FactoryFee100 = 0
 		defaultTemplate.UniswapV3FactoryTickSpacing1 = 0
 	case constants.PresetGaming, constants.PresetFull:
-		// Gaming/Full: set VRF and AA admin addresses
-		defaultTemplate.VRFAdmin = deployConfigInputs.VRFAdmin
+		// Gaming/Full: set DRB and AA admin addresses
+		defaultTemplate.DRBAdmin = deployConfigInputs.DRBAdmin
 		defaultTemplate.AAPaymasterSigner = deployConfigInputs.AAPaymasterSigner
 	}
 
@@ -1605,7 +1605,7 @@ func inputPreset() (string, error) {
 	fmt.Println("\nSelect your chain preset:")
 	fmt.Println("  1) General - Core contracts only (minimal predeploys)")
 	fmt.Println("  2) DeFi    - Core + Uniswap V3 + USDC (default)")
-	fmt.Println("  3) Gaming  - Core + VRF + Account Abstraction (ERC-4337)")
+	fmt.Println("  3) Gaming  - Core + DRB (Commit-Reveal Random Beacon) + Account Abstraction (ERC-4337)")
 	fmt.Println("  4) Full    - All predeploys (DeFi + Gaming)")
 	fmt.Print("Enter choice [1-4] (default: 2): ")
 
@@ -1658,9 +1658,9 @@ func inputFeeToken() (string, error) {
 	}
 }
 
-// inputAAVRFAddresses prompts for VRF admin and AA paymaster signer addresses
+// inputAADRBAddresses prompts for DRB admin and AA paymaster signer addresses
 // for Gaming/Full presets. Defaults to the admin address if left empty.
-func inputAAVRFAddresses(operators *types.Operators) (vrfAdmin, aaPaymasterSigner string, err error) {
+func inputAADRBAddresses(operators *types.Operators) (drbAdmin, aaPaymasterSigner string, err error) {
 	var defaultAddr string
 	if operators != nil && operators.AdminPrivateKey != "" {
 		addr, addrErr := utils.GetAddressFromPrivateKey(operators.AdminPrivateKey)
@@ -1669,13 +1669,13 @@ func inputAAVRFAddresses(operators *types.Operators) (vrfAdmin, aaPaymasterSigne
 		}
 	}
 
-	fmt.Printf("\nVRF Admin address (default: %s): ", defaultAddr)
-	vrfAdmin, err = scanner.ScanString()
+	fmt.Printf("\nDRB Admin address (default: %s): ", defaultAddr)
+	drbAdmin, err = scanner.ScanString()
 	if err != nil {
-		return "", "", fmt.Errorf("error reading VRF Admin address: %w", err)
+		return "", "", fmt.Errorf("error reading DRB Admin address: %w", err)
 	}
-	if vrfAdmin == "" {
-		vrfAdmin = defaultAddr
+	if drbAdmin == "" {
+		drbAdmin = defaultAddr
 	}
 
 	fmt.Printf("AA Paymaster Signer address (default: %s): ", defaultAddr)
@@ -1687,7 +1687,7 @@ func inputAAVRFAddresses(operators *types.Operators) (vrfAdmin, aaPaymasterSigne
 		aaPaymasterSigner = defaultAddr
 	}
 
-	return vrfAdmin, aaPaymasterSigner, nil
+	return drbAdmin, aaPaymasterSigner, nil
 }
 
 func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error {

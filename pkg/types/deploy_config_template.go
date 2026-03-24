@@ -91,7 +91,9 @@ type DeployConfigTemplate struct {
 	// Preset selection
 	Preset string `json:"preset,omitempty"`
 
-	// Gaming/Full preset: VRF and AA admin addresses
-	VRFAdmin          string `json:"vrfAdmin,omitempty"`
-	AAPaymasterSigner string `json:"aaPaymasterSigner,omitempty"`
+	// Gaming/Full preset: DRB and AA admin addresses
+	DRBAdmin               string `json:"drbAdmin,omitempty"`
+	DRBActivationThreshold string `json:"drbActivationThreshold,omitempty"`
+	DRBFlatFee             string `json:"drbFlatFee,omitempty"`
+	AAPaymasterSigner      string `json:"aaPaymasterSigner,omitempty"`
 }

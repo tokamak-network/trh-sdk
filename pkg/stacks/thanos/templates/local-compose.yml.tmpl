@@ -7,7 +7,7 @@ services:
       - "8551:8551"
     volumes:
       - op-geth-data:/data
-      - trh_backend_storage:{{.StorageMountBase}}:ro
+      - {{.JWTPath}}:/config/jwt.txt:ro
     command:
       - --datadir=/data
       - --http
@@ -23,7 +23,7 @@ services:
       - --ws.api=debug,eth,txpool,net,engine
       - --authrpc.addr=0.0.0.0
       - --authrpc.port=8551
-      - --authrpc.jwtsecret={{.JWTPath}}
+      - --authrpc.jwtsecret=/config/jwt.txt
       - --authrpc.vhosts=*
       - --rollup.sequencerhttp=http://op-node:9545
       - --rollup.disabletxpoolgossip=true
@@ -44,13 +44,14 @@ services:
       - "9545:9545"
       - "7300:7300"
     volumes:
-      - trh_backend_storage:{{.StorageMountBase}}:ro
+      - {{.JWTPath}}:/config/jwt.txt:ro
+      - {{.RollupPath}}:/config/rollup.json:ro
     environment:
       - OP_NODE_L1_ETH_RPC={{.L1RpcUrl}}
       - OP_NODE_L1_BEACON={{.L1BeaconUrl}}
       - OP_NODE_L2_ENGINE_RPC=http://op-geth:8551
-      - OP_NODE_L2_ENGINE_AUTH={{.JWTPath}}
-      - OP_NODE_ROLLUP_CONFIG={{.RollupPath}}
+      - OP_NODE_L2_ENGINE_AUTH=/config/jwt.txt
+      - OP_NODE_ROLLUP_CONFIG=/config/rollup.json
       - OP_NODE_SEQUENCER_ENABLED=true
       - OP_NODE_SEQUENCER_L1_CONFS=4
       - OP_NODE_P2P_SEQUENCER_KEY={{.SequencerKey}}
@@ -80,6 +81,9 @@ services:
       - OP_BATCHER_NUM_CONFIRMATIONS=1
       - OP_BATCHER_RPC_ADDR=0.0.0.0
       - OP_BATCHER_RPC_PORT=8548
+{{- if .UseBlobs}}
+      - OP_BATCHER_DATA_AVAILABILITY_TYPE=blobs
+{{- end}}
     depends_on:
       op-geth:
         condition: service_healthy
@@ -93,10 +97,17 @@ services:
       - OP_PROPOSER_L1_ETH_RPC={{.L1RpcUrl}}
       - OP_PROPOSER_ROLLUP_RPC=http://op-node:9545
       - OP_PROPOSER_PRIVATE_KEY={{.ProposerKey}}
+{{- if .EnableFraudProof}}
+      - OP_PROPOSER_GAME_FACTORY_ADDRESS={{.DisputeGameFactoryAddress}}
+      - OP_PROPOSER_PROPOSAL_INTERVAL=120s
+{{- else}}
       - OP_PROPOSER_L2OO_ADDRESS={{.L2OutputOracleAddress}}
+{{- end}}
       - OP_PROPOSER_NUM_CONFIRMATIONS=1
       - OP_PROPOSER_RPC_ADDR=0.0.0.0
       - OP_PROPOSER_RPC_PORT=8560
+      - OP_PROPOSER_POLL_INTERVAL=30s
+      - OP_PROPOSER_TXMGR_RECEIPT_QUERY_INTERVAL=30s
     depends_on:
       op-geth:
         condition: service_healthy
@@ -106,8 +117,10 @@ services:
   op-challenger:
     image: {{.OpChallengerImage}}
     volumes:
-      - trh_backend_storage:{{.StorageMountBase}}:ro
       - op-challenger-data:/data
+      - {{.GenesisPath}}:/config/genesis.json:ro
+      - {{.RollupPath}}:/config/rollup.json:ro
+      - {{.PrestatePath}}:/config/prestate.json:ro
     environment:
       - OP_CHALLENGER_L1_ETH_RPC={{.L1RpcUrl}}
       - OP_CHALLENGER_L1_BEACON={{.L1BeaconUrl}}
@@ -116,8 +129,8 @@ services:
       - OP_CHALLENGER_PRIVATE_KEY={{.ChallengerKey}}
       - OP_CHALLENGER_GAME_FACTORY_ADDRESS={{.DisputeGameFactoryAddress}}
       - OP_CHALLENGER_TRACE_TYPE=cannon
-      - OP_CHALLENGER_CANNON_L2_GENESIS={{.GenesisPath}}
-      - OP_CHALLENGER_CANNON_ROLLUP_CONFIG={{.RollupPath}}
+      - OP_CHALLENGER_CANNON_L2_GENESIS=/config/genesis.json
+      - OP_CHALLENGER_CANNON_ROLLUP_CONFIG=/config/rollup.json
       - OP_CHALLENGER_CANNON_PRESTATES_URL=file:///config
       - OP_CHALLENGER_DATADIR=/data
     depends_on:
@@ -216,12 +229,54 @@ services:
     profiles: ["uptimeService"]
     restart: unless-stopped
 
+{{- if or (eq .Preset "gaming") (eq .Preset "full") }}
+  drb-postgres:
+    image: postgres:14.13-alpine
+    environment:
+      POSTGRES_PASSWORD: drbpassword
+      POSTGRES_DB: drb_leader
+    volumes:
+      - drb-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  drb-leader:
+    image: {{.DRBNodeImage}}
+    depends_on:
+      op-geth:
+        condition: service_healthy
+      drb-postgres:
+        condition: service_healthy
+    environment:
+      NODE_TYPE: leader
+      LEADER_PRIVATE_KEY: {{.DRBLeaderPrivateKey}}
+      LEADER_EOA: {{.DRBLeaderEOA}}
+      LEADER_PORT: "9600"
+      ETH_RPC_URLS: http://op-geth:8545
+      CONTRACT_ADDRESS: "0x4200000000000000000000000000000000000060"
+      CHAIN_ID: "{{.L2ChainID}}"
+      STATUS: dev
+      POSTGRES_PASSWORD: drbpassword
+      POSTGRES_HOST: drb-postgres
+      POSTGRES_DB: drb_leader
+    ports:
+      - "9600:9600"
+    volumes:
+      - drb-leader-keys:/app/static-key
+    restart: unless-stopped
+{{- end }}
+
 volumes:
   op-geth-data:
   op-challenger-data:
   blockscout-db-data:
   grafana-data:
   uptime-kuma-data:
-  trh_backend_storage:
-    external: true
-    name: trh_backend_storage
+{{- if or (eq .Preset "gaming") (eq .Preset "full") }}
+  drb-postgres-data:
+  drb-leader-keys:
+{{- end }}
