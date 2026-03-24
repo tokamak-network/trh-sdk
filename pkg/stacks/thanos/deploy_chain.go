@@ -132,8 +132,6 @@ func (t *ThanosStack) deployLocalDevnet(ctx context.Context) error {
 }
 
 func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfraInput) error {
-	shellConfigFile := utils.GetShellConfigDefault()
-
 	if inputs == nil {
 		return fmt.Errorf("inputs is required")
 	}
@@ -142,27 +140,13 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		return fmt.Errorf("fault proof is enabled but challenger private key is not set; re-run deploy-contracts with --enable-fault-proof")
 	}
 
-	// Check dependencies
-	// STEP 1. Verify required dependencies
-	if !dependencies.CheckTerraformInstallation(ctx) {
-		t.logger.Warn("Try running `source %s` to set up your environment", shellConfigFile)
-		return nil
+	// Start parallel tool installation (non-blocking)
+	arch, err := dependencies.GetArchitecture(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to detect architecture: %w", err)
 	}
-
-	if !dependencies.CheckHelmInstallation(ctx) {
-		t.logger.Warn("Try running `source %s` to set up your environment", shellConfigFile)
-		return nil
-	}
-
-	if !dependencies.CheckAwsCLIInstallation(ctx) {
-		t.logger.Warn("Try running `source %s` to set up your environment", shellConfigFile)
-		return nil
-	}
-
-	if !dependencies.CheckK8sInstallation(ctx) {
-		t.logger.Warn("Try running `source %s` to set up your environment", shellConfigFile)
-		return nil
-	}
+	toolReadiness := NewToolReadiness(t.logger, arch)
+	toolReadiness.Start(ctx)
 
 	if err := inputs.Validate(ctx); err != nil {
 		t.logger.Error("Error validating inputs", "err", err)
@@ -175,7 +159,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	}
 
 	// STEP 1. Clone the charts repository
-	err := t.cloneSourcecode(ctx, "tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git")
+	err = t.cloneSourcecode(ctx, "tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git")
 	if err != nil {
 		t.logger.Error("Error cloning repository", "err", err)
 		return err
@@ -306,6 +290,11 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		return err
 	}
 
+	// Wait for terraform to be installed before infrastructure provisioning
+	if err := toolReadiness.WaitFor(ctx, "terraform"); err != nil {
+		return fmt.Errorf("tool installation failed before infrastructure provisioning: %w", err)
+	}
+
 	// STEP 5. Initialize Terraform backend
 	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
 		"-c",
@@ -368,6 +357,11 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	// Sleep for 30 seconds to allow the infrastructure to be fully deployed
 	time.Sleep(30 * time.Second)
 
+	// Wait for AWS CLI and kubectl before EKS configuration
+	if err := toolReadiness.WaitFor(ctx, "aws-cli", "kubectl"); err != nil {
+		return fmt.Errorf("tool installation failed before EKS configuration: %w", err)
+	}
+
 	// Step 7. Configure EKS access
 	if _, err := utils.SetAWSConfigFile(t.deploymentPath); err != nil {
 		t.logger.Error("Error setting AWS config file", "err", err)
@@ -397,6 +391,11 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	t.logger.Infof("✅ K8s cluster is ready: %t", k8sReady)
 
 	// ---------------------------------------- Deploy chain --------------------------//
+	// Wait for helm before chart deployment
+	if err := toolReadiness.WaitFor(ctx, "helm"); err != nil {
+		return fmt.Errorf("tool installation failed before Helm deployment: %w", err)
+	}
+
 	// Step 8. Add Helm repository
 	helmAddOuput, err := utils.ExecuteCommand(ctx, "helm", []string{
 		"repo",
