@@ -40,7 +40,7 @@ func CloneRepo(ctx context.Context, l *zap.SugaredLogger, deploymentPath string,
 		return fmt.Errorf("destination path '%s' already exists", clonePath)
 	}
 
-	return ExecuteCommandStream(ctx, l, "git", "clone", "--recurse-submodules", "--shallow-submodules", url, clonePath)
+	return ExecuteCommandStream(ctx, l, "git", "clone", "--depth", "1", "--recurse-submodules", "--shallow-submodules", url, clonePath)
 }
 
 func PullLatestCode(ctx context.Context, l *zap.SugaredLogger, deploymentPath string, folderName string) error {
