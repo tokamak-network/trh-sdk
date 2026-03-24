@@ -11,7 +11,6 @@ const (
 	SimplePriceOraclePredeploy  = "0x4200000000000000000000000000000000000066"
 	MultiTokenPaymasterPredeploy = "0x4200000000000000000000000000000000000067"
 
-	// VRF predeploys (Gaming/Full preset)
-	VRFPredeploy   = "0x4200000000000000000000000000000000000060"
-	VRFCoordinator = "0x4200000000000000000000000000000000000061"
+	// DRB predeploy (Gaming/Full preset) — Commit2RevealDRB replaces VRFCoordinator + VRFPredeploy
+	Commit2RevealDRB = "0x4200000000000000000000000000000000000060"
 )
