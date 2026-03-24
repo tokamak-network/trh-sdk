@@ -41,6 +41,7 @@ type localComposeData struct {
 	L2OutputOracleAddress     string
 	DisputeGameFactoryAddress string
 	UseBlobs                  bool
+	EnableFraudProof          bool
 	Preset                    string
 	DRBNodeImage              string
 	DRBLeaderPrivateKey       string
@@ -72,9 +73,36 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize op-geth: %w", err)
 	}
 
-	// Start core services + proposer or challenger
+	// Start core services (proposer always, challenger if fraud proof enabled)
 	if err := t.startLocalCoreServices(ctx, composePath); err != nil {
 		return fmt.Errorf("failed to start core services: %w", err)
+	}
+
+	// Initialize AnchorStateRegistry for fault proof chains
+	if t.deployConfig.EnableFraudProof {
+		deployedContracts, contractsErr := t.readDeploymentContracts()
+		if contractsErr != nil {
+			t.logger.Warnf("⚠️ Could not read deployed contracts (skipping anchor init): %v", contractsErr)
+		} else if deployedContracts.AnchorStateRegistryProxy == "" {
+			t.logger.Warn("⚠️ AnchorStateRegistryProxy address not found (skipping anchor init)")
+		} else {
+			anchorErr := initGenesisAnchorState(
+				ctx,
+				t.logger,
+				t.deployConfig.L1RPCURL,
+				"http://localhost:8545",
+				t.deployConfig.AdminPrivateKey,
+				deployedContracts.AnchorStateRegistryProxy,
+				t.deployConfig.L1ChainID,
+				0, // gameType 0 = CANNON
+			)
+			if anchorErr != nil {
+				t.logger.Warnf("⚠️ Failed to initialize genesis anchor state: %v", anchorErr)
+				t.logger.Warn("Dispute games may fail with AnchorRootNotFound until anchor state is set manually")
+			} else {
+				t.logger.Info("✅ Genesis anchor state initialized in AnchorStateRegistry")
+			}
+		}
 	}
 
 	// Start preset module services
@@ -125,6 +153,7 @@ func (t *ThanosStack) generateLocalComposeFile(composePath string) error {
 		L2OutputOracleAddress:     contracts.L2OutputOracleProxy,
 		DisputeGameFactoryAddress: contracts.DisputeGameFactoryProxy,
 		UseBlobs:                  t.network != constants.LocalDevnet,
+		EnableFraudProof:          t.deployConfig.EnableFraudProof,
 		Preset:                    t.deployConfig.Preset,
 		DRBNodeImage:              fmt.Sprintf("tokamaknetwork/drb-node:%s", imageTags.DRBNodeImageTag),
 		DRBLeaderPrivateKey:       t.deployConfig.AdminPrivateKey,

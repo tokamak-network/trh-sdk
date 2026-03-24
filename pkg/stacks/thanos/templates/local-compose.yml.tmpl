@@ -97,10 +97,17 @@ services:
       - OP_PROPOSER_L1_ETH_RPC={{.L1RpcUrl}}
       - OP_PROPOSER_ROLLUP_RPC=http://op-node:9545
       - OP_PROPOSER_PRIVATE_KEY={{.ProposerKey}}
+{{- if .EnableFraudProof}}
+      - OP_PROPOSER_GAME_FACTORY_ADDRESS={{.DisputeGameFactoryAddress}}
+      - OP_PROPOSER_PROPOSAL_INTERVAL=120s
+{{- else}}
       - OP_PROPOSER_L2OO_ADDRESS={{.L2OutputOracleAddress}}
+{{- end}}
       - OP_PROPOSER_NUM_CONFIRMATIONS=1
       - OP_PROPOSER_RPC_ADDR=0.0.0.0
       - OP_PROPOSER_RPC_PORT=8560
+      - OP_PROPOSER_POLL_INTERVAL=30s
+      - OP_PROPOSER_TXMGR_RECEIPT_QUERY_INTERVAL=30s
     depends_on:
       op-geth:
         condition: service_healthy
