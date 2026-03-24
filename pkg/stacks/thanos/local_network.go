@@ -274,8 +274,13 @@ func (t *ThanosStack) destroyLocalNetwork(ctx context.Context) error {
 		return nil
 	}
 	t.logger.Info("Stopping local L2 network...")
-	return utils.ExecuteCommandStream(ctx, t.logger, "docker", "compose",
-		"-f", composePath, "down", "-v", "--remove-orphans")
+	allProfiles := []string{"proposer", "challenger", "bridge", "blockExplorer", "monitoring", "uptimeService"}
+	args := []string{"compose", "-f", composePath}
+	for _, p := range allProfiles {
+		args = append(args, "--profile", p)
+	}
+	args = append(args, "down", "-v", "--remove-orphans")
+	return utils.ExecuteCommandStream(ctx, t.logger, "docker", args...)
 }
 
 func (t *ThanosStack) printLocalServiceURLs(modules map[string]bool) {
