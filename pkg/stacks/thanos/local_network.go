@@ -36,11 +36,15 @@ type localComposeData struct {
 	RollupPath                string
 	PrestatePath              string
 	JWTPath                   string
-	StorageMountBase          string // mount point for the shared storage volume
 	L2ChainID                 uint64
 	MaxChannelDuration        uint64
 	L2OutputOracleAddress     string
 	DisputeGameFactoryAddress string
+	UseBlobs                  bool
+	Preset                    string
+	DRBNodeImage              string
+	DRBLeaderPrivateKey       string
+	DRBLeaderEOA              string
 }
 
 func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
@@ -100,10 +104,6 @@ func (t *ThanosStack) generateLocalComposeFile(composePath string) error {
 	prestatePath := filepath.Join(t.deploymentPath, "tokamak-thanos/op-program/bin/prestate.json")
 	jwtPath := filepath.Join(t.deploymentPath, "jwt.txt")
 
-	// The trh_backend_storage volume is mounted at /app/storage in both the backend
-	// container and the L2 containers. File paths use /app/storage as the base.
-	storageMountBase := "/app/storage"
-
 	data := localComposeData{
 		OpGethImage:               fmt.Sprintf("tokamaknetwork/thanos-op-geth:%s", imageTags.OpGethImageTag),
 		OpNodeImage:               fmt.Sprintf("tokamaknetwork/thanos-op-node:%s", imageTags.ThanosStackImageTag),
@@ -120,11 +120,24 @@ func (t *ThanosStack) generateLocalComposeFile(composePath string) error {
 		RollupPath:                rollupPath,
 		PrestatePath:              prestatePath,
 		JWTPath:                   jwtPath,
-		StorageMountBase:          storageMountBase,
 		L2ChainID:                 t.deployConfig.L2ChainID,
 		MaxChannelDuration:        l1ChainConfig.MaxChannelDuration,
 		L2OutputOracleAddress:     contracts.L2OutputOracleProxy,
 		DisputeGameFactoryAddress: contracts.DisputeGameFactoryProxy,
+		UseBlobs:                  t.network != constants.LocalDevnet,
+		Preset:                    t.deployConfig.Preset,
+		DRBNodeImage:              fmt.Sprintf("tokamaknetwork/drb-node:%s", imageTags.DRBNodeImageTag),
+		DRBLeaderPrivateKey:       t.deployConfig.AdminPrivateKey,
+	}
+
+	// Derive DRB leader EOA from admin private key for gaming/full presets
+	if t.deployConfig.Preset == constants.PresetGaming || t.deployConfig.Preset == constants.PresetFull {
+		if t.deployConfig.AdminPrivateKey != "" {
+			addr, err := utils.GetAddressFromPrivateKey(t.deployConfig.AdminPrivateKey)
+			if err == nil {
+				data.DRBLeaderEOA = addr.Hex()
+			}
+		}
 	}
 
 	tmpl, err := template.New("local-compose").Parse(localComposeTmpl)
@@ -160,8 +173,10 @@ func (t *ThanosStack) initLocalOpGeth(ctx context.Context, composePath string) e
 	genesisPath := filepath.Join(t.deploymentPath, "tokamak-thanos/build/genesis.json")
 	return utils.ExecuteCommandStream(ctx, t.logger, "docker", "compose",
 		"-f", composePath,
-		"run", "--rm", "op-geth",
-		"--datadir=/data", "init", genesisPath)
+		"run", "--rm",
+		"-v", genesisPath+":/config/genesis.json:ro",
+		"op-geth",
+		"--datadir=/data", "init", "/config/genesis.json")
 }
 
 func (t *ThanosStack) startLocalCoreServices(ctx context.Context, composePath string) error {
@@ -178,8 +193,8 @@ func (t *ThanosStack) startLocalCoreServices(ctx context.Context, composePath st
 func (t *ThanosStack) startLocalModules(ctx context.Context, composePath string, modules map[string]bool) error {
 	var profiles []string
 	for module, enabled := range modules {
-		if !enabled || module == "crossTrade" {
-			// crossTrade requires additional contract deployment; skip for local
+		if !enabled || module == "crossTrade" || module == "drb" {
+			// crossTrade requires additional contract deployment; drb is started inline via compose
 			continue
 		}
 		profiles = append(profiles, module)
