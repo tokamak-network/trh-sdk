@@ -67,7 +67,7 @@
 |--------|-------------|----------|
 | **General** | Bridge, Block Explorer | 최소 기능, 커스텀 체인 |
 | **DeFi** | General + Monitoring + Uniswap V3 + USDC | DeFi 프로토콜 운영 |
-| **Gaming** | General + Monitoring + VRF + Account Abstraction (ERC-4337) | 게임/AA 기반 서비스 |
+| **Gaming** | General + Monitoring + DRB (Commit-Reveal Random Beacon) + Account Abstraction (ERC-4337) | 게임/AA 기반 서비스 |
 | **Full** | DeFi + Gaming 모두 포함 | 모든 기능 필요 시 |
 
 ### 수수료 토큰 옵션
@@ -133,11 +133,11 @@ trh-sdk deploy-contracts \
 
 게임 및 Account Abstraction(AA) 중심의 구성입니다.
 
-**포함 구성요소**: Bridge, Block Explorer, Monitoring, **VRF**, **Account Abstraction (ERC-4337)**, Uptime Service, Cross-Trade
+**포함 구성요소**: Bridge, Block Explorer, Monitoring, **DRB (Commit-Reveal Random Beacon)**, **Account Abstraction (ERC-4337)**, Uptime Service, Cross-Trade
 
 **언제 사용하나요?**
 
-- 온체인 게임을 구축할 때 (VRF로 공정한 난수 필요)
+- 온체인 게임을 구축할 때 (DRB로 검증 가능한 공정 난수 필요)
 - 가스리스 트랜잭션이 필요할 때 (AA Paymaster)
 - 사용자 경험을 위해 스마트 계정을 활용할 때
 
@@ -145,7 +145,7 @@ trh-sdk deploy-contracts \
 
 | 설정 | 설명 | 기본값 |
 |------|------|-------|
-| **VRF Admin Address** | VRF 컨트랙트 관리자 주소 | Admin 계정 주소 |
+| **DRB Admin Address** | DRB 컨트랙트 거버넌스 주소 | Admin 계정 주소 |
 | **AA Paymaster Signer** | Paymaster 서명자 주소 | Admin 계정 주소 |
 
 ```bash
@@ -160,7 +160,7 @@ trh-sdk deploy-contracts \
 
 DeFi와 Gaming의 모든 predeploy를 포함하는 완전한 구성입니다.
 
-**포함 구성요소**: DeFi 전체 + Gaming 전체 (Uniswap V3, USDC, VRF, AA, Uptime Service, Cross-Trade)
+**포함 구성요소**: DeFi 전체 + Gaming 전체 (Uniswap V3, USDC, DRB, AA, Uptime Service, Cross-Trade)
 
 **언제 사용하나요?**
 
