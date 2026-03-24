@@ -326,8 +326,23 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		scriptsDir := filepath.Join(contractsDir, "scripts")
 		forgeCacheDir := filepath.Join(t.deploymentPath, ".forge-cache")
 
-		// Restore cached forge artifacts if available (survives re-clones)
-		restoreForgeCache(t.logger, forgeCacheDir, contractsDir)
+		// Try downloading pre-built artifacts from npm to skip forge build (~5min → ~10s)
+		if dlErr := downloadPrebuiltArtifacts(ctx, t.logger, contractsDir); dlErr != nil {
+			t.logger.Warn("Pre-built artifacts unavailable, will build from source", "err", dlErr)
+			// Restore cached forge artifacts if available (survives re-clones)
+			restoreForgeCache(t.logger, forgeCacheDir, contractsDir)
+		} else {
+			t.logger.Info("✅ Pre-built artifacts downloaded, forge build will be skipped")
+			os.Setenv("SKIP_FORGE_BUILD", "true")
+			defer os.Unsetenv("SKIP_FORGE_BUILD")
+
+			// Invalidate cache for patched files so forge recompiles only those contracts
+			if deployContractsConfig.EnableFaultProof {
+				if cacheErr := invalidateCacheEntry(contractsDir, "src/dispute/AnchorStateRegistry.sol"); cacheErr != nil {
+					t.logger.Warn("Failed to invalidate cache for patched contract", "err", cacheErr)
+				}
+			}
+		}
 
 		t.logger.Info("Building smart contracts...")
 		err = utils.ExecuteCommandStreamInDir(ctx, t.logger, scriptsDir, "bash", "./start-deploy.sh", "build")
@@ -585,7 +600,9 @@ func patchStartDeployScript(tokamakThanosDir string) error {
     return 1
   fi`
 	forgeBuildBlockNew := `  # Incremental build with memory-based parallelism (patched by trh-sdk)
-  if [ -d "forge-artifacts" ] && [ -n "$(ls -A forge-artifacts 2>/dev/null)" ]; then
+  if [ "${SKIP_FORGE_BUILD:-false}" = "true" ] && [ -d "forge-artifacts" ] && [ -n "$(ls -A forge-artifacts 2>/dev/null)" ]; then
+    echo "Pre-built artifacts found, skipping forge build"
+  elif [ -d "forge-artifacts" ] && [ -n "$(ls -A forge-artifacts 2>/dev/null)" ]; then
     echo "Incremental build (reusing cached artifacts)..."
     if ! retryCommand "forge build --jobs ` + jobsStr + `" "Building contracts (incremental)"; then
       echo "❌ Error: Failed to build contracts after $MAX_RETRIES attempts"
