@@ -204,6 +204,8 @@ func downloadAndExtractArtifacts(ctx context.Context, tarballURL, contractsDir s
 
 // invalidateCacheEntry removes a specific file entry from the forge solidity-files-cache.json.
 // This forces forge to recompile only the specified file while keeping other artifacts intact.
+// Uses map[string]json.RawMessage to preserve all top-level fields (paths, builds, profiles, etc.)
+// that the npm-downloaded cache contains, preventing forge from triggering a full recompilation.
 func invalidateCacheEntry(contractsDir, solFilePath string) error {
 	cachePath := filepath.Join(contractsDir, "cache", "solidity-files-cache.json")
 
@@ -215,19 +217,31 @@ func invalidateCacheEntry(contractsDir, solFilePath string) error {
 		return fmt.Errorf("failed to read cache file: %w", err)
 	}
 
-	var cacheData struct {
-		Format string                     `json:"_format"`
-		Files  map[string]json.RawMessage `json:"files"`
-	}
+	// Use generic map to preserve ALL top-level fields (paths, builds, profiles, etc.)
+	var cacheData map[string]json.RawMessage
 	if err := json.Unmarshal(data, &cacheData); err != nil {
 		return fmt.Errorf("failed to parse cache structure: %w", err)
 	}
 
-	if cacheData.Files != nil {
-		delete(cacheData.Files, solFilePath)
+	filesRaw, ok := cacheData["files"]
+	if !ok {
+		return nil // No files field, nothing to invalidate
 	}
 
-	updatedData, err := json.MarshalIndent(cacheData, "", "  ")
+	var files map[string]json.RawMessage
+	if err := json.Unmarshal(filesRaw, &files); err != nil {
+		return fmt.Errorf("failed to parse files field: %w", err)
+	}
+
+	delete(files, solFilePath)
+
+	updatedFiles, err := json.Marshal(files)
+	if err != nil {
+		return fmt.Errorf("failed to marshal files: %w", err)
+	}
+	cacheData["files"] = updatedFiles
+
+	updatedData, err := json.Marshal(cacheData)
 	if err != nil {
 		return fmt.Errorf("failed to marshal updated cache: %w", err)
 	}
