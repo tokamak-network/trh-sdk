@@ -90,7 +90,8 @@ func injectDRBIntoGenesis(ctx context.Context, logger interface{ Info(args ...in
 	}
 
 	// Step 4: Execute constructor in simulated EVM to get runtime bytecode with immutables
-	runtimeBytecode, err := deployDRBSimulated(creationCode)
+	// CommitReveal2 constructor requires msg.value >= activationThreshold
+	runtimeBytecode, err := deployDRBSimulated(creationCode, config.ActivationThreshold)
 	if err != nil {
 		return fmt.Errorf("failed to deploy DRB in simulated EVM: %w", err)
 	}
@@ -150,7 +151,9 @@ func buildDRBCreationCode(artifact *drbArtifact, config *DRBGenesisConfig) ([]by
 // deployDRBSimulated executes the creation code in go-ethereum's simulated EVM
 // and returns the deployed runtime bytecode (with immutable values filled in).
 // Uses Cancun-enabled EVM to support PUSH0 (Solidity ≥ 0.8.20).
-func deployDRBSimulated(creationCode []byte) ([]byte, error) {
+// The value parameter is sent as msg.value to satisfy the constructor's
+// require(msg.value >= activationThreshold) check.
+func deployDRBSimulated(creationCode []byte, value *big.Int) ([]byte, error) {
 	cancunTime := uint64(0)
 	shanghaiTime := uint64(0)
 	cfg := &runtime.Config{
@@ -173,6 +176,7 @@ func deployDRBSimulated(creationCode []byte) ([]byte, error) {
 			CancunTime:              &cancunTime,
 		},
 		GasLimit: drbDeployGasLimit,
+		Value:    value,
 	}
 
 	runtimeBytecode, _, _, err := runtime.Create(creationCode, cfg)

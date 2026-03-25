@@ -174,7 +174,7 @@ func TestDeployDRBSimulated(t *testing.T) {
 	// = 60 42 60 00 52 60 20 60 00 f3
 	simpleCreation := []byte{0x60, 0x42, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
 
-	result, err := deployDRBSimulated(simpleCreation)
+	result, err := deployDRBSimulated(simpleCreation, big.NewInt(0))
 	if err != nil {
 		t.Fatalf("deployDRBSimulated failed: %v", err)
 	}
