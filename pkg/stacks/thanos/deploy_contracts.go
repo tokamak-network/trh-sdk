@@ -432,6 +432,11 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 	if t.deployConfig.Preset == constants.PresetGaming || t.deployConfig.Preset == constants.PresetFull {
 		t.logger.Info("Injecting DRB (CommitReveal2L2) predeploy into genesis...")
 		drbConfig := DefaultDRBGenesisConfig()
+		// Lower activation threshold for testnet/local deployments where only 1 DRB node runs
+		if t.network == constants.Testnet || t.network == constants.LocalDevnet {
+			drbConfig.ActivationThreshold = big.NewInt(1)
+			t.logger.Info("Using DRB ActivationThreshold=1 for testnet/local deployment")
+		}
 		if err := injectDRBIntoGenesis(ctx, t.logger, genesisPath, drbConfig); err != nil {
 			t.logger.Error("❌ Failed to inject DRB into genesis!", "err", err)
 			return err
@@ -639,9 +644,11 @@ func patchStartDeployScript(tokamakThanosDir string) error {
 	waitNew := []byte(`  # filesystem sync skipped (not needed between sequential builds)`)
 	content = bytes.Replace(content, waitOld, waitNew, 2)
 
-	// Patch 6: shallow submodule update instead of full history clone.
+	// Patch 6: shallow, non-recursive submodule update instead of full history clone.
+	// Only first-level submodules are needed; nested ones (e.g. automate→forge-std→ds-test)
+	// are test-only dependencies of third-party libraries.
 	submoduleOld := `make submodules`
-	submoduleNew := `git submodule update --init --recursive --depth 1`
+	submoduleNew := `git submodule update --init --depth 1`
 	if bytes.Contains(content, []byte(submoduleOld)) {
 		content = bytes.Replace(content, []byte(submoduleOld), []byte(submoduleNew), 1)
 	}
