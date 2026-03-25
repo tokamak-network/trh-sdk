@@ -424,8 +424,19 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		return err
 	}
 	t.logger.Info("✅ Successfully generated rollup and genesis files!")
-	t.logger.Infof("Genesis file path: %s/tokamak-thanos/build/genesis.json", t.deploymentPath)
+	genesisPath := filepath.Join(t.deploymentPath, "tokamak-thanos", "build", "genesis.json")
+	t.logger.Infof("Genesis file path: %s", genesisPath)
 	t.logger.Infof("Rollup file path: %s/tokamak-thanos/build/rollup.json", t.deploymentPath)
+
+	// STEP 5.1: Inject DRB predeploy into genesis for Gaming/Full presets
+	if t.deployConfig.Preset == constants.PresetGaming || t.deployConfig.Preset == constants.PresetFull {
+		t.logger.Info("Injecting DRB (CommitReveal2L2) predeploy into genesis...")
+		drbConfig := DefaultDRBGenesisConfig()
+		if err := injectDRBIntoGenesis(ctx, t.logger, genesisPath, drbConfig); err != nil {
+			t.logger.Error("❌ Failed to inject DRB into genesis!", "err", err)
+			return err
+		}
+	}
 
 	t.logger.Infof("✅ Configuration successfully saved to: %s/settings.json", t.deploymentPath)
 
