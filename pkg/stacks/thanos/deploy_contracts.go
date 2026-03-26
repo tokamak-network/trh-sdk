@@ -3,6 +3,7 @@ package thanos
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -14,7 +15,9 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"go.uber.org/zap"
 	"github.com/shirou/gopsutil/mem"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/dependencies"
@@ -460,6 +463,13 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			t.logger.Error("❌ Failed to inject DRB into genesis!", "err", err)
 			return err
 		}
+
+		// Update rollup.json L2 genesis hash to match the modified genesis
+		rollupPath := filepath.Join(t.deploymentPath, "tokamak-thanos", "build", "rollup.json")
+		if err := updateRollupGenesisHash(t.logger, genesisPath, rollupPath); err != nil {
+			t.logger.Errorf("❌ Failed to update rollup.json genesis hash: %v", err)
+			return err
+		}
 	}
 
 	t.logger.Infof("✅ Configuration successfully saved to: %s/settings.json", t.deploymentPath)
@@ -674,6 +684,15 @@ func patchStartDeployScript(tokamakThanosDir string) error {
 	if bytes.Contains(content, []byte(l2GenesisOld)) {
 		content = bytes.Replace(content, []byte(l2GenesisOld), []byte(l2GenesisNew), 1)
 	}
+
+	// Patch 9: add --fork-retries and --fork-retry-backoff to forge Deploy script.
+	// Free-tier Alchemy endpoints return HTTP 429 under sustained forge RPC load.
+	// Exponential backoff (starting at 3s, up to 10 retries) lets transient rate
+	// limits resolve without failing the entire deployment.
+	deployOld := `forge script scripts/Deploy.s.sol:Deploy --private-key $GS_ADMIN_PRIVATE_KEY --broadcast --rpc-url $L1_RPC_URL --slow --legacy --non-interactive`
+	deployNew := `forge script scripts/Deploy.s.sol:Deploy --private-key $GS_ADMIN_PRIVATE_KEY --broadcast --rpc-url $L1_RPC_URL --slow --legacy --non-interactive --fork-retries 10 --fork-retry-backoff 3000`
+	// Replace all occurrences (deploy, resume with --resume, and gas-price variants)
+	content = bytes.ReplaceAll(content, []byte(deployOld), []byte(deployNew))
 
 	return os.WriteFile(scriptPath, content, 0755)
 }
@@ -908,4 +927,61 @@ func copyDir(src, dst string) error {
 		}
 		return os.WriteFile(dstPath, data, info.Mode())
 	})
+}
+
+// updateRollupGenesisHash recomputes the L2 genesis block hash from genesis.json
+// and updates rollup.json to match. This must be called after any post-generation
+// modification to genesis.json (e.g., DRB injection) to prevent hash mismatches
+// between op-node's rollup config and op-geth's actual genesis block.
+func updateRollupGenesisHash(logger *zap.SugaredLogger, genesisPath, rollupPath string) error {
+	// Parse genesis.json using go-ethereum's Genesis type
+	genesisData, err := os.ReadFile(genesisPath)
+	if err != nil {
+		return fmt.Errorf("failed to read genesis.json: %w", err)
+	}
+
+	var genesis core.Genesis
+	if err := json.Unmarshal(genesisData, &genesis); err != nil {
+		return fmt.Errorf("failed to parse genesis.json: %w", err)
+	}
+
+	// Compute the genesis block hash
+	genesisBlock := genesis.ToBlock()
+	newHash := genesisBlock.Hash().Hex()
+
+	// Read and update rollup.json
+	rollupData, err := os.ReadFile(rollupPath)
+	if err != nil {
+		return fmt.Errorf("failed to read rollup.json: %w", err)
+	}
+
+	var rollup map[string]interface{}
+	if err := json.Unmarshal(rollupData, &rollup); err != nil {
+		return fmt.Errorf("failed to parse rollup.json: %w", err)
+	}
+
+	genesisSection, ok := rollup["genesis"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("rollup.json missing 'genesis' section")
+	}
+	l2Section, ok := genesisSection["l2"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("rollup.json missing 'genesis.l2' section")
+	}
+
+	oldHash, _ := l2Section["hash"].(string)
+	if oldHash == newHash {
+		logger.Info("rollup.json L2 genesis hash already matches, no update needed")
+		return nil
+	}
+
+	l2Section["hash"] = newHash
+	logger.Infof("Updated rollup.json L2 genesis hash: %s → %s", oldHash, newHash)
+
+	updatedData, err := json.MarshalIndent(rollup, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal rollup.json: %w", err)
+	}
+
+	return os.WriteFile(rollupPath, updatedData, 0644)
 }

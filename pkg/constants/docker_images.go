@@ -5,6 +5,6 @@ var DockerImageTag = map[string]struct {
 	ThanosStackImageTag string
 	DRBNodeImageTag     string
 }{
-	Testnet: {OpGethImageTag: "nightly", ThanosStackImageTag: "nightly-b684fda0", DRBNodeImageTag: "latest"},
-	Mainnet: {OpGethImageTag: "nightly", ThanosStackImageTag: "nightly-b684fda0", DRBNodeImageTag: "latest"},
+	Testnet: {OpGethImageTag: "nightly", ThanosStackImageTag: "nightly-b684fda0", DRBNodeImageTag: "sha-8c37f63"},
+	Mainnet: {OpGethImageTag: "nightly", ThanosStackImageTag: "nightly-b684fda0", DRBNodeImageTag: "sha-8c37f63"},
 }
