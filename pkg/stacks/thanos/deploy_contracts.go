@@ -601,33 +601,22 @@ func patchStartDeployScript(tokamakThanosDir string) error {
 		content = bytes.Replace(content, []byte(opNodeOld), []byte(opNodeNew), 1)
 	}
 
-	// Patch 3: forge artifacts symlinks — newer forge versions name artifacts with solidity version
-	// suffix (e.g. L1UsdcBridge.0.8.15.json) but the TypeScript SDK imports the unversioned name
-	// (e.g. L1UsdcBridge.json). Create symlinks before the SDK TypeScript build.
-	sdkBuildOld := `  # Build SDK with retry logic
-  if ! retryCommand "pnpm build" "Building SDK"; then`
-	sdkBuildNew := `  # Create non-versioned symlinks for versioned forge artifacts (needed for TypeScript resolution)
-  # Skip if symlinks were already created by Go (pre-built artifact path)
-  if [ -L "$projectRoot/packages/tokamak/contracts-bedrock/forge-artifacts/L1UsdcBridge.sol/L1UsdcBridge.json" ] 2>/dev/null; then
-    echo "Artifact symlinks already exist, skipping"
-  else
-    echo "Creating artifact symlinks for TypeScript resolution..."
-    find $projectRoot/packages/tokamak/contracts-bedrock/forge-artifacts -name "*.json" | while read f; do
-      dir=$(dirname "$f")
-      base=$(basename "$f")
-      nonversioned=$(echo "$base" | sed 's/\(\.[0-9][0-9]*\)\+\.json$/.json/')
-      if [ "$base" != "$nonversioned" ] && [ ! -f "$dir/$nonversioned" ]; then
-        ln -sf "$base" "$dir/$nonversioned"
-      fi
-    done
-    echo "✅ Artifact symlinks created"
-  fi
+	// Patch 3: skip core-utils and SDK TypeScript builds entirely.
+	// These packages are not used by the contract deployment pipeline (Deploy.s.sol,
+	// L2Genesis.s.sol, op-node genesis). Removing them saves ~8s (core-utils 4.1s +
+	// SDK reinstall 1.8s + SDK build 2.3s).
+	coreUtilsBlockOld := `  # Build TypeScript packages in dependency order
+  echo "Building core-utils..."`
+	coreUtilsBlockNew := `  # TypeScript builds (core-utils, SDK) skipped — not needed for contract deployment
+  echo "Skipping core-utils and SDK builds (not required for deployment pipeline)"
+  cd $currentPWD
+  echo "✅ All source code built successfully!"
+  return 0
 
-  # Build SDK with retry logic
-  if ! retryCommand "pnpm build" "Building SDK"; then`
-
-	if bytes.Contains(content, []byte(sdkBuildOld)) {
-		content = bytes.Replace(content, []byte(sdkBuildOld), []byte(sdkBuildNew), 1)
+  # --- Below is unreachable (kept for reference) ---
+  echo "Building core-utils..."`
+	if bytes.Contains(content, []byte(coreUtilsBlockOld)) {
+		content = bytes.Replace(content, []byte(coreUtilsBlockOld), []byte(coreUtilsBlockNew), 1)
 	}
 
 	// Patch 4: incremental builds + memory-based parallelism.
@@ -662,14 +651,7 @@ func patchStartDeployScript(tokamakThanosDir string) error {
 		content = bytes.Replace(content, []byte(forgeBuildBlockOld), []byte(forgeBuildBlockNew), 1)
 	}
 
-	// Patch 5: remove redundant waitForFileSystem between TypeScript builds.
-	// Modern filesystems (ext4, overlay2) don't need sleep+sync between sequential builds.
-	// Keep only the one after forge build for artifact verification.
-	// There are exactly 2 occurrences (before core-utils and before SDK builds).
-	waitOld := []byte(`  # Additional wait to ensure modules are properly synced
-  waitForFileSystem`)
-	waitNew := []byte(`  # filesystem sync skipped (not needed between sequential builds)`)
-	content = bytes.Replace(content, waitOld, waitNew, 2)
+	// Patch 5: (removed — core-utils/SDK builds skipped by Patch 3)
 
 	// Patch 6: shallow, non-recursive submodule update instead of full history clone.
 	// Only first-level submodules are needed; nested ones (e.g. automate→forge-std→ds-test)
@@ -680,14 +662,7 @@ func patchStartDeployScript(tokamakThanosDir string) error {
 		content = bytes.Replace(content, []byte(submoduleOld), []byte(submoduleNew), 1)
 	}
 
-	// Patch 7: skip TypeScript builds if already built (enables fast re-deploys).
-	coreUtilsBuildOld := `  if ! retryCommand "pnpm build" "Building core-utils"; then`
-	coreUtilsBuildNew := `  if [ -f "dist/index.js" ]; then
-    echo "core-utils already built, skipping"
-  elif ! retryCommand "pnpm build" "Building core-utils"; then`
-	if bytes.Contains(content, []byte(coreUtilsBuildOld)) {
-		content = bytes.Replace(content, []byte(coreUtilsBuildOld), []byte(coreUtilsBuildNew), 1)
-	}
+	// Patch 7: (removed — core-utils/SDK builds skipped by Patch 3)
 
 	// Patch 8: remove --rpc-url from L2Genesis forge script.
 	// L2Genesis generates L2 state locally and only reads L1 addresses from a JSON file
