@@ -689,6 +689,17 @@ func patchStartDeployScript(tokamakThanosDir string) error {
 		content = bytes.Replace(content, []byte(coreUtilsBuildOld), []byte(coreUtilsBuildNew), 1)
 	}
 
+	// Patch 8: remove --rpc-url from L2Genesis forge script.
+	// L2Genesis generates L2 state locally and only reads L1 addresses from a JSON file
+	// (CONTRACT_ADDRESSES_PATH). Using --rpc-url causes forge to fork L1, making 256+
+	// RPC calls for vm.deal() on precompile addresses, which triggers Alchemy rate limits.
+	l2GenesisOld := `    forge script scripts/L2Genesis.s.sol:L2Genesis \
+    --rpc-url $L1_RPC_URL; then`
+	l2GenesisNew := `    forge script scripts/L2Genesis.s.sol:L2Genesis; then`
+	if bytes.Contains(content, []byte(l2GenesisOld)) {
+		content = bytes.Replace(content, []byte(l2GenesisOld), []byte(l2GenesisNew), 1)
+	}
+
 	return os.WriteFile(scriptPath, content, 0755)
 }
 
