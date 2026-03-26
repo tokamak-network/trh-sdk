@@ -232,7 +232,26 @@ func patchGenesisWithDRB(genesisPath string, runtimeBytecode []byte) error {
 	// See: Predeploys.sol predeployToCodeNamespace()
 	proxyAddr := common.HexToAddress(drbPredeployAddress)
 	codeAddr := predeployToCodeNamespace(proxyAddr)
-	codeAddrHex := strings.ToLower(codeAddr.Hex())
+
+	// Detect alloc key format (with or without 0x prefix) from existing entries
+	has0xPrefix := false
+	for key := range alloc {
+		if strings.HasPrefix(key, "0x") || strings.HasPrefix(key, "0X") {
+			has0xPrefix = true
+		}
+		break
+	}
+
+	formatAddr := func(addr common.Address) string {
+		hex := strings.ToLower(addr.Hex())
+		if !has0xPrefix {
+			return strings.TrimPrefix(hex, "0x")
+		}
+		return hex
+	}
+
+	codeAddrHex := formatAddr(codeAddr)
+	proxyAddrHex := formatAddr(proxyAddr)
 
 	// Add implementation bytecode at code-namespace address
 	implJSON, err := json.Marshal(map[string]interface{}{
@@ -243,9 +262,6 @@ func patchGenesisWithDRB(genesisPath string, runtimeBytecode []byte) error {
 		return err
 	}
 	alloc[codeAddrHex] = implJSON
-
-	// Update proxy's implementation slot using json.RawMessage to preserve existing fields
-	proxyAddrHex := strings.ToLower(proxyAddr.Hex())
 	if err := patchProxyImplementationSlot(alloc, proxyAddrHex, codeAddr); err != nil {
 		return err
 	}
