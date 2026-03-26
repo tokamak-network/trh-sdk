@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -132,6 +133,29 @@ func (t *ThanosStack) generateLocalComposeFile(composePath string) error {
 	prestatePath := filepath.Join(t.deploymentPath, "tokamak-thanos/op-program/bin/prestate.json")
 	jwtPath := filepath.Join(t.deploymentPath, "jwt.txt")
 
+	// Verify required mount files exist as regular files (not directories).
+	// Docker creates a directory when mounting a non-existent path, which causes
+	// "is a directory" errors in containers that expect a file.
+	for _, f := range []string{genesisPath, rollupPath} {
+		info, err := os.Stat(f)
+		if err != nil {
+			return fmt.Errorf("required file missing: %s (run deploy-contracts first)", f)
+		}
+		if info.IsDir() {
+			// A previous failed Docker mount left a directory; remove it so the
+			// user can regenerate the file without manual cleanup.
+			if rmErr := os.Remove(f); rmErr != nil {
+				return fmt.Errorf("%s is a directory (stale Docker mount); remove it manually: %w", f, rmErr)
+			}
+			return fmt.Errorf("%s was a stale directory (removed); re-run deploy-contracts to regenerate it", f)
+		}
+	}
+	if t.deployConfig.EnableFraudProof {
+		if info, err := os.Stat(prestatePath); err != nil || info.IsDir() {
+			return fmt.Errorf("prestate.json missing or invalid: %s (run deploy-contracts with fault proof enabled)", prestatePath)
+		}
+	}
+
 	data := localComposeData{
 		OpGethImage:               fmt.Sprintf("tokamaknetwork/thanos-op-geth:%s", imageTags.OpGethImageTag),
 		OpNodeImage:               fmt.Sprintf("tokamaknetwork/thanos-op-node:%s", imageTags.ThanosStackImageTag),
@@ -191,21 +215,76 @@ func (t *ThanosStack) initLocalOpGeth(ctx context.Context, composePath string) e
 		}
 	}
 
-	// Check if genesis already initialized (data directory has chaindata)
+	genesisPath := filepath.Join(t.deploymentPath, "tokamak-thanos/build/genesis.json")
+	genesisHashFile := filepath.Join(t.deploymentPath, "op-geth-data", ".genesis-hash")
 	chainDataPath := filepath.Join(t.deploymentPath, "op-geth-data", "chaindata")
+
+	// Compute current genesis hash
+	currentHash, err := hashFile(genesisPath)
+	if err != nil {
+		return fmt.Errorf("failed to hash genesis.json: %w", err)
+	}
+
+	// Check if chaindata exists and genesis hash matches
 	if _, err := os.Stat(chainDataPath); err == nil {
-		t.logger.Info("op-geth data directory already exists, skipping genesis init")
-		return nil
+		prevHash, readErr := os.ReadFile(genesisHashFile)
+		if readErr == nil && string(prevHash) == currentHash {
+			t.logger.Info("op-geth data directory already exists with matching genesis, skipping init")
+			return nil
+		}
+
+		// Genesis changed — wipe stale chaindata to prevent hash mismatch
+		t.logger.Warn("genesis.json changed since last init, reinitializing op-geth data...")
+		if err := t.resetOpGethVolume(ctx, composePath); err != nil {
+			return fmt.Errorf("failed to reset op-geth volume: %w", err)
+		}
 	}
 
 	t.logger.Info("Initializing op-geth genesis...")
-	genesisPath := filepath.Join(t.deploymentPath, "tokamak-thanos/build/genesis.json")
-	return utils.ExecuteCommandStream(ctx, t.logger, "docker", "compose",
+	if err := utils.ExecuteCommandStream(ctx, t.logger, "docker", "compose",
 		"-f", composePath,
 		"run", "--rm",
 		"-v", genesisPath+":/config/genesis.json:ro",
 		"op-geth",
-		"--datadir=/data", "init", "/config/genesis.json")
+		"--datadir=/data", "init", "/config/genesis.json"); err != nil {
+		return err
+	}
+
+	// Persist genesis hash for future change detection
+	hashDir := filepath.Dir(genesisHashFile)
+	if err := os.MkdirAll(hashDir, 0755); err != nil {
+		t.logger.Warnf("Failed to create directory for genesis hash: %v", err)
+	}
+	if err := os.WriteFile(genesisHashFile, []byte(currentHash), 0644); err != nil {
+		t.logger.Warnf("Failed to save genesis hash (init will repeat next run): %v", err)
+	}
+	return nil
+}
+
+// resetOpGethVolume stops op-geth and removes its data volume so it can be reinitialized.
+func (t *ThanosStack) resetOpGethVolume(ctx context.Context, composePath string) error {
+	// Stop op-geth and dependent services
+	_ = utils.ExecuteCommandStream(ctx, t.logger, "docker", "compose",
+		"-f", composePath, "stop", "op-geth", "op-node", "op-batcher")
+
+	// Remove the op-geth container to release the volume
+	_ = utils.ExecuteCommandStream(ctx, t.logger, "docker", "compose",
+		"-f", composePath, "rm", "-f", "op-geth")
+
+	// Remove the named volume
+	projectName := filepath.Base(t.deploymentPath)
+	return utils.ExecuteCommandStream(ctx, t.logger, "docker", "volume", "rm", "-f",
+		projectName+"_op-geth-data")
+}
+
+// hashFile returns the hex-encoded SHA-256 hash of a file's contents.
+func hashFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func (t *ThanosStack) startLocalCoreServices(ctx context.Context, composePath string) error {

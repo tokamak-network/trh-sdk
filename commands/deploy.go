@@ -71,7 +71,7 @@ func ActionDeploy() cli.ActionFunc {
 			if network == constants.LocalDevnet {
 				infraOpt = "localhost"
 			} else {
-				fmt.Print("Please select your infrastructure provider [AWS] (default: AWS): ")
+				fmt.Print("Please select your infrastructure provider [AWS/local] (default: AWS): ")
 				input, err := scanner.ScanString()
 				if err != nil {
 					fmt.Printf("Error reading infrastructure selection: %s", err)

@@ -256,7 +256,7 @@ services:
       LEADER_PRIVATE_KEY: {{.DRBLeaderPrivateKey}}
       LEADER_EOA: {{.DRBLeaderEOA}}
       LEADER_PORT: "9600"
-      ETH_RPC_URLS: http://op-geth:8545
+      ETH_RPC_URLS: ws://op-geth:8546
       CONTRACT_ADDRESS: "0x4200000000000000000000000000000000000060"
       CHAIN_ID: "{{.L2ChainID}}"
       STATUS: dev

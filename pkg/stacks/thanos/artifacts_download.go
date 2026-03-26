@@ -199,11 +199,111 @@ func downloadAndExtractArtifacts(ctx context.Context, tarballURL, contractsDir s
 		return fmt.Errorf("extraction completed but forge-artifacts directory not found")
 	}
 
+	// Fix absolute paths in cache so forge profile matching works.
+	// The npm package was built at a different path; if the libraries field contains
+	// absolute paths that don't match the local contractsDir, forge detects a profile
+	// mismatch and triggers full recompilation of all files.
+	if fixErr := fixCacheAbsolutePaths(contractsDir); fixErr != nil {
+		// Non-critical: forge will still work but may trigger full recompilation
+		_ = fixErr
+	}
+
 	return nil
+}
+
+// fixCacheAbsolutePaths fixes absolute paths in the forge cache's profiles.default.solc.libraries.
+// The npm package is built at a different absolute path (e.g. /ci/path/.../src/USDC/...),
+// but foundry.toml references the local path (e.g. /Users/.../testnet-0325/.../src/USDC/...).
+// If these don't match, forge detects a profile mismatch and triggers full recompilation.
+func fixCacheAbsolutePaths(contractsDir string) error {
+	cachePath := filepath.Join(contractsDir, "cache", "solidity-files-cache.json")
+
+	data, err := os.ReadFile(cachePath)
+	if err != nil {
+		return err
+	}
+
+	var cache map[string]json.RawMessage
+	if err := json.Unmarshal(data, &cache); err != nil {
+		return err
+	}
+
+	profilesRaw, ok := cache["profiles"]
+	if !ok {
+		return nil
+	}
+
+	// profiles → default → solc → libraries: { "/abs/path/src/File.sol": { "Lib": "0x..." } }
+	var profiles map[string]map[string]map[string]json.RawMessage
+	if err := json.Unmarshal(profilesRaw, &profiles); err != nil {
+		return nil // Non-critical, skip silently
+	}
+
+	defaultProfile, ok := profiles["default"]
+	if !ok {
+		return nil
+	}
+	solc, ok := defaultProfile["solc"]
+	if !ok {
+		return nil
+	}
+	libsRaw, ok := solc["libraries"]
+	if !ok {
+		return nil
+	}
+
+	var libs map[string]json.RawMessage
+	if err := json.Unmarshal(libsRaw, &libs); err != nil {
+		return nil
+	}
+
+	// Rebuild libraries map with corrected absolute paths
+	changed := false
+	newLibs := make(map[string]json.RawMessage, len(libs))
+	for absPath, value := range libs {
+		// Find the relative part (e.g. "src/USDC/L2/...")
+		relPath := absPath
+		if idx := strings.Index(absPath, "/src/"); idx >= 0 {
+			relPath = absPath[idx+1:] // strip leading "/"
+		} else if idx := strings.Index(absPath, "/lib/"); idx >= 0 {
+			relPath = absPath[idx+1:]
+		}
+		localPath := filepath.Join(contractsDir, relPath)
+		if localPath != absPath {
+			changed = true
+		}
+		newLibs[localPath] = value
+	}
+
+	if !changed {
+		return nil
+	}
+
+	updatedLibs, err := json.Marshal(newLibs)
+	if err != nil {
+		return err
+	}
+	solc["libraries"] = updatedLibs
+	defaultProfile["solc"] = solc
+	profiles["default"] = defaultProfile
+
+	updatedProfiles, err := json.Marshal(profiles)
+	if err != nil {
+		return err
+	}
+	cache["profiles"] = updatedProfiles
+
+	updatedData, err := json.Marshal(cache)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(cachePath, updatedData, 0644)
 }
 
 // invalidateCacheEntry removes a specific file entry from the forge solidity-files-cache.json.
 // This forces forge to recompile only the specified file while keeping other artifacts intact.
+// Uses map[string]json.RawMessage to preserve all top-level fields (paths, builds, profiles, etc.)
+// that the npm-downloaded cache contains, preventing forge from triggering a full recompilation.
 func invalidateCacheEntry(contractsDir, solFilePath string) error {
 	cachePath := filepath.Join(contractsDir, "cache", "solidity-files-cache.json")
 
@@ -215,19 +315,31 @@ func invalidateCacheEntry(contractsDir, solFilePath string) error {
 		return fmt.Errorf("failed to read cache file: %w", err)
 	}
 
-	var cacheData struct {
-		Format string                     `json:"_format"`
-		Files  map[string]json.RawMessage `json:"files"`
-	}
+	// Use generic map to preserve ALL top-level fields (paths, builds, profiles, etc.)
+	var cacheData map[string]json.RawMessage
 	if err := json.Unmarshal(data, &cacheData); err != nil {
 		return fmt.Errorf("failed to parse cache structure: %w", err)
 	}
 
-	if cacheData.Files != nil {
-		delete(cacheData.Files, solFilePath)
+	filesRaw, ok := cacheData["files"]
+	if !ok {
+		return nil // No files field, nothing to invalidate
 	}
 
-	updatedData, err := json.MarshalIndent(cacheData, "", "  ")
+	var files map[string]json.RawMessage
+	if err := json.Unmarshal(filesRaw, &files); err != nil {
+		return fmt.Errorf("failed to parse files field: %w", err)
+	}
+
+	delete(files, solFilePath)
+
+	updatedFiles, err := json.Marshal(files)
+	if err != nil {
+		return fmt.Errorf("failed to marshal files: %w", err)
+	}
+	cacheData["files"] = updatedFiles
+
+	updatedData, err := json.Marshal(cacheData)
 	if err != nil {
 		return fmt.Errorf("failed to marshal updated cache: %w", err)
 	}

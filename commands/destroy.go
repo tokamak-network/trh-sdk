@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/logging"
+	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -41,11 +43,26 @@ func ActionDestroyInfra() cli.ActionFunc {
 			awsConfig = config.AWS
 		}
 
-		if awsConfig == nil {
-			awsConfig, err = thanos.InputAWSLogin()
+		if network != constants.LocalDevnet && awsConfig == nil {
+			fmt.Print("Please select your infrastructure provider [AWS/local] (default: AWS): ")
+			input, err := scanner.ScanString()
 			if err != nil {
-				fmt.Printf("Failed to login AWS: %s \n", err)
+				fmt.Printf("Error reading infrastructure selection: %s\n", err)
 				return err
+			}
+			infraOpt := strings.ToLower(input)
+			if infraOpt == "" {
+				infraOpt = constants.AWS
+			}
+			if !constants.SupportedInfra[infraOpt] {
+				return fmt.Errorf("unsupported infrastructure provider: %s (supported: aws, local)", infraOpt)
+			}
+			if infraOpt == constants.AWS {
+				awsConfig, err = thanos.InputAWSLogin()
+				if err != nil {
+					fmt.Printf("Failed to login AWS: %s \n", err)
+					return err
+				}
 			}
 		}
 
