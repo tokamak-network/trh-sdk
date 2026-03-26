@@ -12,8 +12,11 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/vm/runtime"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/holiman/uint256"
 )
 
 const (
@@ -156,6 +159,21 @@ func buildDRBCreationCode(artifact *drbArtifact, config *DRBGenesisConfig) ([]by
 func deployDRBSimulated(creationCode []byte, value *big.Int) ([]byte, error) {
 	cancunTime := uint64(0)
 	shanghaiTime := uint64(0)
+
+	// Create in-memory state DB with sender balance to cover msg.value transfer
+	sender := common.HexToAddress("0x1000000000000000000000000000000000000000")
+	stateDB, err := state.New(common.Hash{}, state.NewDatabaseForTesting())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create state DB: %w", err)
+	}
+	// Give sender enough balance for the value transfer
+	senderBalance := new(big.Int).Mul(value, big.NewInt(10))
+	if senderBalance.Sign() == 0 {
+		senderBalance = big.NewInt(1_000_000_000_000_000_000) // 1 ETH default
+	}
+	senderBalanceU256, _ := uint256.FromBig(senderBalance)
+	stateDB.AddBalance(sender, senderBalanceU256, tracing.BalanceChangeUnspecified)
+
 	cfg := &runtime.Config{
 		ChainConfig: &params.ChainConfig{
 			ChainID:                 big.NewInt(1),
@@ -175,8 +193,10 @@ func deployDRBSimulated(creationCode []byte, value *big.Int) ([]byte, error) {
 			ShanghaiTime:            &shanghaiTime,
 			CancunTime:              &cancunTime,
 		},
+		Origin:   sender,
 		GasLimit: drbDeployGasLimit,
 		Value:    value,
+		State:    stateDB,
 	}
 
 	runtimeBytecode, _, _, err := runtime.Create(creationCode, cfg)

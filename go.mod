@@ -15,6 +15,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.6
 	github.com/creack/pty v1.1.24
 	github.com/ethereum/go-ethereum v1.15.2
+	github.com/holiman/uint256 v1.3.2
 	github.com/maldikhan/go.socket.io v0.1.1
 	github.com/shirou/gopsutil v3.21.11+incompatible
 	github.com/stretchr/testify v1.10.0
@@ -66,7 +67,6 @@ require (
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/hashicorp/go-bexpr v0.1.11 // indirect
 	github.com/holiman/bloomfilter/v2 v2.0.3 // indirect
-	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/mattn/go-runewidth v0.0.14 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
