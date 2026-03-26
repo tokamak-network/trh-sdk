@@ -349,6 +349,7 @@ func (t *ThanosStack) UninstallBlockExplorer(ctx context.Context) error {
 		// Delete local PostgreSQL
 		t.kubectl(ctx, "delete", "deployment", "blockscout-postgres", "-n", namespace, "--ignore-not-found=true")
 		t.kubectl(ctx, "delete", "service", "blockscout-postgres", "-n", namespace, "--ignore-not-found=true")
+		t.kubectl(ctx, "delete", "secret", "blockscout-postgres-creds", "-n", namespace, "--ignore-not-found=true")
 	} else {
 		if err := t.destroyTerraform(ctx, fmt.Sprintf("%s/tokamak-thanos-stack/terraform/block-explorer", t.deploymentPath)); err != nil {
 			t.logger.Error("❌ Error running block-explorer terraform destroy", "err", err)
@@ -364,7 +365,17 @@ func (t *ThanosStack) UninstallBlockExplorer(ctx context.Context) error {
 func (t *ThanosStack) deployLocalPostgres(ctx context.Context, namespace, username, password string) (string, error) {
 	t.logger.Info("Deploying local PostgreSQL for block explorer...")
 
-	manifest := fmt.Sprintf(`apiVersion: apps/v1
+	manifest := fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: blockscout-postgres-creds
+  namespace: %s
+type: Opaque
+stringData:
+  POSTGRES_USER: %q
+  POSTGRES_PASSWORD: %q
+---
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: blockscout-postgres
@@ -386,9 +397,15 @@ spec:
         - containerPort: 5432
         env:
         - name: POSTGRES_USER
-          value: "%s"
+          valueFrom:
+            secretKeyRef:
+              name: blockscout-postgres-creds
+              key: POSTGRES_USER
         - name: POSTGRES_PASSWORD
-          value: "%s"
+          valueFrom:
+            secretKeyRef:
+              name: blockscout-postgres-creds
+              key: POSTGRES_PASSWORD
         - name: POSTGRES_DB
           value: "blockscout"
         volumeMounts:
@@ -409,7 +426,7 @@ spec:
   ports:
   - port: 5432
     targetPort: 5432
-`, namespace, username, password, namespace)
+`, namespace, username, password, namespace, namespace)
 
 	if err := t.kubectlApplyManifest(ctx, manifest); err != nil {
 		return "", fmt.Errorf("apply postgres manifest: %w", err)
@@ -437,9 +454,11 @@ func (t *ThanosStack) GetBlockExplorerURL(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
 	}
 
-	var (
-		namespace = t.deployConfig.K8s.Namespace
-	)
+	if t.isLocal() {
+		return "http://localhost:4000", nil
+	}
+
+	namespace := t.deployConfig.K8s.Namespace
 
 	k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, "block-explorer")
 	if err != nil {

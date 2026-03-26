@@ -612,7 +612,24 @@ stringData:
 		t.deployConfig.BatcherPrivateKey,
 		t.deployConfig.ProposerPrivateKey,
 	)
-	return t.kubectlApplyManifest(ctx, manifest)
+	// Use stdin pipe to avoid writing private keys to a temp file on disk.
+	return t.kubectlApplyStdin(ctx, manifest)
+}
+
+// kubectlApplyStdin pipes a manifest to kubectl apply via stdin,
+// avoiding temp files that could leak secrets on crash.
+func (t *ThanosStack) kubectlApplyStdin(ctx context.Context, manifest string) error {
+	args := []string{"apply", "-f", "-"}
+	if t.kubeconfigPath != "" {
+		args = append([]string{"--kubeconfig", t.kubeconfigPath}, args...)
+	}
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	cmd.Stdin = strings.NewReader(manifest)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("kubectl apply stdin: %s: %w", string(out), err)
+	}
+	return nil
 }
 
 // kubectlApplyManifest writes a manifest to a temp file and runs kubectl apply
