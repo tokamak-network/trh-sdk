@@ -128,8 +128,8 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *types.Monit
 		return nil, fmt.Errorf("failed to create dashboard configmaps: %w", err)
 	}
 
-	// Install AWS CLI sidecar for log collection if logging is enabled
-	if config.LoggingEnabled {
+	// Install AWS CLI sidecar for log collection if logging is enabled (cloud only)
+	if config.LoggingEnabled && !t.isLocal() {
 		logger.Info("Installing AWS CLI sidecar for log collection")
 		ns := strings.TrimSpace(t.deployConfig.K8s.Namespace)
 		if ns == "" {
@@ -162,12 +162,25 @@ func (t *ThanosStack) InstallMonitoring(ctx context.Context, config *types.Monit
 
 	monitoringInfo := t.createMonitoringInfo(ctx, config)
 	if monitoringInfo == nil {
-		logger.Error("ALB Ingress is not ready after installation")
-		return nil, fmt.Errorf("ALB Ingress is not ready after installation")
+		if t.isLocal() {
+			monitoringInfo = &types.MonitoringInfo{
+				GrafanaURL:   "http://localhost:3001",
+				Username:     "admin",
+				Password:     config.AdminPassword,
+				Namespace:    config.Namespace,
+				ReleaseName:  config.HelmReleaseName,
+				ChainName:    config.ChainName,
+				AlertManager: config.AlertManager,
+			}
+			logger.Infof("Local monitoring ready. Access Grafana via: kubectl port-forward -n %s svc/%s-grafana 3001:80", config.Namespace, config.HelmReleaseName)
+		} else {
+			logger.Error("ALB Ingress is not ready after installation")
+			return nil, fmt.Errorf("ALB Ingress is not ready after installation")
+		}
 	}
 
-	// Check CloudWatch Log Groups status if logging is enabled
-	if config.LoggingEnabled {
+	// Check CloudWatch Log Groups status if logging is enabled (cloud only)
+	if config.LoggingEnabled && !t.isLocal() {
 		logger.Info("Checking CloudWatch Log Groups status")
 		ns := strings.TrimSpace(t.deployConfig.K8s.Namespace)
 		if ns == "" {
@@ -208,9 +221,16 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 		return nil, fmt.Errorf("error getting service names: %w", err)
 	}
 
-	efsFileSystemId, err := t.getEFSFileSystemId(ctx, chainName)
-	if err != nil {
-		return nil, fmt.Errorf("error getting EFS filesystem ID: %w", err)
+	var efsFileSystemId string
+	enablePersistence := true
+	if t.isLocal() {
+		enablePersistence = false
+		loggingEnabled = false
+	} else {
+		efsFileSystemId, err = t.getEFSFileSystemId(ctx, chainName)
+		if err != nil {
+			return nil, fmt.Errorf("error getting EFS filesystem ID: %w", err)
+		}
 	}
 
 	config := &types.MonitoringConfig{
@@ -219,7 +239,7 @@ func (t *ThanosStack) GetMonitoringConfig(ctx context.Context, adminPassword str
 		AdminPassword:     adminPassword,
 		L1RpcUrl:          t.deployConfig.L1RPCURL,
 		ServiceNames:      serviceNames,
-		EnablePersistence: true,
+		EnablePersistence: enablePersistence,
 		EFSFileSystemId:   efsFileSystemId,
 		ChartsPath:        chartsPath,
 		ValuesFilePath:    "",
@@ -554,22 +574,28 @@ func (t *ThanosStack) checkALBIngressStatus(ctx context.Context, config *types.M
 
 // generateValuesFile creates the values.yaml file
 func (t *ThanosStack) generateValuesFile(config *types.MonitoringConfig) error {
-	if t.deployConfig == nil || t.deployConfig.AWS == nil {
+	if t.deployConfig == nil {
 		return fmt.Errorf("deploy configuration is not properly initialized")
 	}
-
+	if !t.isLocal() && t.deployConfig.AWS == nil {
+		return fmt.Errorf("AWS configuration is required for cloud monitoring")
+	}
 	if t.deployConfig.K8s == nil {
-		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
+		return fmt.Errorf("K8s configuration is not set")
+	}
+
+	storageConfig := map[string]interface{}{
+		"enabled": config.EnablePersistence,
+	}
+	if !t.isLocal() {
+		storageConfig["efsFileSystemId"] = config.EFSFileSystemId
+		storageConfig["awsRegion"] = t.deployConfig.AWS.Region
 	}
 
 	valuesConfig := map[string]interface{}{
 		"global": map[string]interface{}{
 			"l1RpcUrl": config.L1RpcUrl,
-			"storage": map[string]interface{}{
-				"enabled":         config.EnablePersistence,
-				"efsFileSystemId": config.EFSFileSystemId,
-				"awsRegion":       t.deployConfig.AWS.Region,
-			},
+			"storage":  storageConfig,
 		},
 		"thanosStack": map[string]interface{}{
 			"chainName":   config.ChainName,
@@ -597,8 +623,8 @@ func (t *ThanosStack) generateValuesFile(config *types.MonitoringConfig) error {
 		},
 	}
 
-	// Add CloudWatch Logs configuration when logging is enabled
-	if config.LoggingEnabled {
+	// Add CloudWatch Logs configuration when logging is enabled (cloud only)
+	if config.LoggingEnabled && !t.isLocal() {
 		// Use namespace from deploy config
 		ns := strings.TrimSpace(t.deployConfig.K8s.Namespace)
 		if ns == "" {

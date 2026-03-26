@@ -60,7 +60,8 @@ func TestInitDeployConfigTemplate_FeeTokenMapping(t *testing.T) {
 }
 
 // TestInitDeployConfigTemplate_PresetGeneral verifies that DeFi-specific fields
-// are cleared for the General preset.
+// are cleared for the General preset, while L1UsdcAddr is preserved because the
+// forge deploy script always deploys L1UsdcBridge and reverts on a zero address.
 func TestInitDeployConfigTemplate_PresetGeneral(t *testing.T) {
 	input := makeTestInput(constants.PresetGeneral, constants.FeeTokenTON)
 	tpl := initDeployConfigTemplate(input, constants.EthereumSepoliaChainID, 5678, "")
