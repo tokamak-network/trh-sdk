@@ -20,6 +20,7 @@ import (
 )
 
 const localConfigVolume = "trh-local-config"
+const localMonitoringVolume = "trh-local-monitoring"
 
 //go:embed templates/local-compose.yml.tmpl
 var localComposeTmpl string
@@ -75,6 +76,8 @@ type localComposeData struct {
 	BridgeL2BlockTime                   uint64
 	BridgeOutputRootFrequency           uint64
 	BridgeChallengePeriod               uint64
+	// Monitoring
+	MonitoringConfigVolume string
 }
 
 func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
@@ -254,6 +257,7 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		BridgeL2BlockTime:                   t.deployConfig.ChainConfiguration.L2BlockTime,
 		BridgeOutputRootFrequency:           t.deployConfig.ChainConfiguration.OutputRootFrequency,
 		BridgeChallengePeriod:               t.deployConfig.ChainConfiguration.ChallengePeriod,
+		MonitoringConfigVolume:              localMonitoringVolume,
 	}
 
 	// Derive DRB leader EOA from admin private key for gaming/full presets
@@ -276,7 +280,84 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		return fmt.Errorf("failed to render compose template: %w", err)
 	}
 
-	return os.WriteFile(composePath, buf.Bytes(), 0644)
+	if err := os.WriteFile(composePath, buf.Bytes(), 0644); err != nil {
+		return err
+	}
+
+	// Generate prometheus.yml and copy into the monitoring volume
+	if err := t.generatePrometheusConfig(ctx); err != nil {
+		t.logger.Warnf("Failed to generate prometheus config (monitoring may not scrape L2 metrics): %v", err)
+	}
+
+	return nil
+}
+
+func (t *ThanosStack) generatePrometheusConfig(ctx context.Context) error {
+	const promConfig = `global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: op-node
+    static_configs:
+      - targets: ['op-node:7300']
+        labels:
+          service: op-node
+
+  - job_name: op-geth
+    metrics_path: /debug/metrics/prometheus
+    static_configs:
+      - targets: ['op-geth:6060']
+        labels:
+          service: op-geth
+
+  - job_name: op-batcher
+    static_configs:
+      - targets: ['op-batcher:7302']
+        labels:
+          service: op-batcher
+`
+
+	promPath := filepath.Join(t.deploymentPath, "monitoring", "prometheus.yml")
+	if err := os.MkdirAll(filepath.Dir(promPath), 0755); err != nil {
+		return fmt.Errorf("failed to create monitoring dir: %w", err)
+	}
+	if err := os.WriteFile(promPath, []byte(promConfig), 0644); err != nil {
+		return fmt.Errorf("failed to write prometheus.yml: %w", err)
+	}
+
+	monitoringFiles := map[string]string{
+		"prometheus.yml": promPath,
+	}
+	return t.copyFilesToMonitoringVolume(ctx, monitoringFiles)
+}
+
+func (t *ThanosStack) copyFilesToMonitoringVolume(ctx context.Context, files map[string]string) error {
+	const helperName = "trh-monitoring-init"
+
+	_, _ = utils.ExecuteCommand(ctx, "docker", "rm", "-f", helperName)
+
+	containerID, err := utils.ExecuteCommand(ctx, "docker", "run", "-d",
+		"--name", helperName,
+		"-v", localMonitoringVolume+":/monitoring",
+		"alpine", "sleep", "infinity")
+	if err != nil {
+		return fmt.Errorf("failed to start monitoring helper container: %w", err)
+	}
+	containerID = strings.TrimSpace(containerID)
+	defer utils.ExecuteCommand(ctx, "docker", "rm", "-f", containerID)
+
+	for destName, srcPath := range files {
+		if err := utils.ExecuteCommandStream(ctx, t.logger, "docker", "cp",
+			srcPath, containerID+":/monitoring/"+destName); err != nil {
+			return fmt.Errorf("failed to copy %s into monitoring volume: %w", destName, err)
+		}
+	}
+	return nil
 }
 
 func (t *ThanosStack) initLocalOpGeth(ctx context.Context, composePath string) error {
