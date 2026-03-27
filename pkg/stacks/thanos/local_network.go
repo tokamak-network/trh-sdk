@@ -152,6 +152,14 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		}
 	}
 
+	// Generate JWT secret if it doesn't exist yet (initLocalOpGeth also does this,
+	// but we need jwt.txt present before copying files into the config volume).
+	if _, err := os.Stat(jwtPath); os.IsNotExist(err) {
+		if err := generateJWTSecret(jwtPath); err != nil {
+			return fmt.Errorf("failed to generate JWT secret: %w", err)
+		}
+	}
+
 	// Copy config files into a named Docker volume so services can mount them
 	// without bind-mount restrictions (required in DinD environments).
 	configFiles := map[string]string{
