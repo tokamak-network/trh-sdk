@@ -215,7 +215,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "OP Proposer component status",
+      "description": "OP Challenger component status (replaces Proposer in fraud-proof deployments)",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -287,14 +287,14 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "up{job=\"op-proposer\"}",
+          "expr": "up{job=\"op-proposer\"} or up{job=\"op-challenger\"}",
           "instant": true,
-          "legendFormat": "OP Proposer",
+          "legendFormat": "{{job}}",
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "OP Proposer Status",
+      "title": "OP Proposer / Challenger Status",
       "type": "stat"
     },
     {
@@ -389,7 +389,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "L1 RPC synchronization status from blackbox monitoring",
+      "description": "L1 block progression status - checks if L1 head block number is increasing",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -401,7 +401,7 @@
                 "0": {
                   "color": "red",
                   "index": 1,
-                  "text": "Not Synced"
+                  "text": "Stalled"
                 },
                 "1": {
                   "color": "green",
@@ -461,14 +461,14 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "probe_success{job=\"blackbox-eth-node-synced\"}",
+          "expr": "increase(op_node_default_refs_number{layer=\"l1\",type=\"l1_head\"}[2m]) > bool 0",
           "instant": true,
-          "legendFormat": "L1 RPC Sync",
+          "legendFormat": "L1 Sync",
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "L1 RPC Sync Status",
+      "title": "L1 Sync Status",
       "type": "stat"
     },
     {
