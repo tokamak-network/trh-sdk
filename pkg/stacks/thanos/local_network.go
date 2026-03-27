@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/template"
 
 	_ "embed"
@@ -17,6 +18,8 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
+
+const localConfigVolume = "trh-local-config"
 
 //go:embed templates/local-compose.yml.tmpl
 var localComposeTmpl string
@@ -33,10 +36,7 @@ type localComposeData struct {
 	BatcherKey                string
 	ProposerKey               string
 	ChallengerKey             string
-	GenesisPath               string
-	RollupPath                string
-	PrestatePath              string
-	JWTPath                   string
+	ConfigVolume              string
 	L2ChainID                 uint64
 	MaxChannelDuration        uint64
 	L2OutputOracleAddress     string
@@ -65,7 +65,7 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 
 	// Generate compose file
 	composePath := filepath.Join(t.deploymentPath, "docker-compose.local.yml")
-	if err := t.generateLocalComposeFile(composePath); err != nil {
+	if err := t.generateLocalComposeFile(ctx, composePath); err != nil {
 		return fmt.Errorf("failed to generate docker compose file: %w", err)
 	}
 
@@ -117,7 +117,7 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 	return nil
 }
 
-func (t *ThanosStack) generateLocalComposeFile(composePath string) error {
+func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath string) error {
 	imageTags := constants.DockerImageTag[t.network]
 
 	contracts, err := t.readDeploymentContracts()
@@ -133,17 +133,13 @@ func (t *ThanosStack) generateLocalComposeFile(composePath string) error {
 	prestatePath := filepath.Join(t.deploymentPath, "tokamak-thanos/op-program/bin/prestate.json")
 	jwtPath := filepath.Join(t.deploymentPath, "jwt.txt")
 
-	// Verify required mount files exist as regular files (not directories).
-	// Docker creates a directory when mounting a non-existent path, which causes
-	// "is a directory" errors in containers that expect a file.
+	// Verify required files exist before populating the config volume.
 	for _, f := range []string{genesisPath, rollupPath} {
 		info, err := os.Stat(f)
 		if err != nil {
 			return fmt.Errorf("required file missing: %s (run deploy-contracts first)", f)
 		}
 		if info.IsDir() {
-			// A previous failed Docker mount left a directory; remove it so the
-			// user can regenerate the file without manual cleanup.
 			if rmErr := os.Remove(f); rmErr != nil {
 				return fmt.Errorf("%s is a directory (stale Docker mount); remove it manually: %w", f, rmErr)
 			}
@@ -154,6 +150,20 @@ func (t *ThanosStack) generateLocalComposeFile(composePath string) error {
 		if info, err := os.Stat(prestatePath); err != nil || info.IsDir() {
 			return fmt.Errorf("prestate.json missing or invalid: %s (run deploy-contracts with fault proof enabled)", prestatePath)
 		}
+	}
+
+	// Copy config files into a named Docker volume so services can mount them
+	// without bind-mount restrictions (required in DinD environments).
+	configFiles := map[string]string{
+		"genesis.json": genesisPath,
+		"rollup.json":  rollupPath,
+		"jwt.txt":      jwtPath,
+	}
+	if t.deployConfig.EnableFraudProof {
+		configFiles["prestate.json"] = prestatePath
+	}
+	if err := t.copyFilesToVolume(ctx, configFiles); err != nil {
+		return fmt.Errorf("failed to populate config volume: %w", err)
 	}
 
 	data := localComposeData{
@@ -168,10 +178,7 @@ func (t *ThanosStack) generateLocalComposeFile(composePath string) error {
 		BatcherKey:                t.deployConfig.BatcherPrivateKey,
 		ProposerKey:               t.deployConfig.ProposerPrivateKey,
 		ChallengerKey:             t.deployConfig.ChallengerPrivateKey,
-		GenesisPath:               genesisPath,
-		RollupPath:                rollupPath,
-		PrestatePath:              prestatePath,
-		JWTPath:                   jwtPath,
+		ConfigVolume:              localConfigVolume,
 		L2ChainID:                 t.deployConfig.L2ChainID,
 		MaxChannelDuration:        l1ChainConfig.MaxChannelDuration,
 		L2OutputOracleAddress:     contracts.L2OutputOracleProxy,
@@ -241,10 +248,10 @@ func (t *ThanosStack) initLocalOpGeth(ctx context.Context, composePath string) e
 	}
 
 	t.logger.Info("Initializing op-geth genesis...")
+	// Run genesis init using the config volume (avoids bind-mount path issues in DinD).
 	if err := utils.ExecuteCommandStream(ctx, t.logger, "docker", "compose",
 		"-f", composePath,
-		"run", "--rm",
-		"-v", genesisPath+":/config/genesis.json:ro",
+		"run", "--rm", "--no-deps",
 		"op-geth",
 		"--datadir=/data", "init", "/config/genesis.json"); err != nil {
 		return err
@@ -257,6 +264,34 @@ func (t *ThanosStack) initLocalOpGeth(ctx context.Context, composePath string) e
 	}
 	if err := os.WriteFile(genesisHashFile, []byte(currentHash), 0644); err != nil {
 		t.logger.Warnf("Failed to save genesis hash (init will repeat next run): %v", err)
+	}
+	return nil
+}
+
+// copyFilesToVolume copies files from the container filesystem into a named Docker volume
+// using a temporary Alpine container. This avoids bind-mount restrictions in DinD environments
+// where container-internal paths are not accessible to the host Docker daemon.
+func (t *ThanosStack) copyFilesToVolume(ctx context.Context, files map[string]string) error {
+	const helperName = "trh-config-init"
+
+	// Remove any stale helper container from a previous run.
+	_, _ = utils.ExecuteCommand(ctx, "docker", "rm", "-f", helperName)
+
+	containerID, err := utils.ExecuteCommand(ctx, "docker", "run", "-d",
+		"--name", helperName,
+		"-v", localConfigVolume+":/config",
+		"alpine", "sleep", "infinity")
+	if err != nil {
+		return fmt.Errorf("failed to start config helper container: %w", err)
+	}
+	containerID = strings.TrimSpace(containerID)
+	defer utils.ExecuteCommand(ctx, "docker", "rm", "-f", containerID)
+
+	for destName, srcPath := range files {
+		if err := utils.ExecuteCommandStream(ctx, t.logger, "docker", "cp",
+			srcPath, containerID+":/config/"+destName); err != nil {
+			return fmt.Errorf("failed to copy %s into config volume: %w", destName, err)
+		}
 	}
 	return nil
 }

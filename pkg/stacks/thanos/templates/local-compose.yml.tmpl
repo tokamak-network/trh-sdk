@@ -7,7 +7,7 @@ services:
       - "8551:8551"
     volumes:
       - op-geth-data:/data
-      - {{.JWTPath}}:/config/jwt.txt:ro
+      - {{.ConfigVolume}}:/config:ro
     command:
       - --datadir=/data
       - --http
@@ -44,8 +44,7 @@ services:
       - "9545:9545"
       - "7300:7300"
     volumes:
-      - {{.JWTPath}}:/config/jwt.txt:ro
-      - {{.RollupPath}}:/config/rollup.json:ro
+      - {{.ConfigVolume}}:/config:ro
     environment:
       - OP_NODE_L1_ETH_RPC={{.L1RpcUrl}}
       - OP_NODE_L1_BEACON={{.L1BeaconUrl}}
@@ -118,9 +117,7 @@ services:
     image: {{.OpChallengerImage}}
     volumes:
       - op-challenger-data:/data
-      - {{.GenesisPath}}:/config/genesis.json:ro
-      - {{.RollupPath}}:/config/rollup.json:ro
-      - {{.PrestatePath}}:/config/prestate.json:ro
+      - {{.ConfigVolume}}:/config:ro
     environment:
       - OP_CHALLENGER_L1_ETH_RPC={{.L1RpcUrl}}
       - OP_CHALLENGER_L1_BEACON={{.L1BeaconUrl}}
@@ -273,6 +270,8 @@ services:
 volumes:
   op-geth-data:
   op-challenger-data:
+  {{.ConfigVolume}}:
+    external: true
   blockscout-db-data:
   grafana-data:
   uptime-kuma-data:
