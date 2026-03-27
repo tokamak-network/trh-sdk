@@ -141,6 +141,35 @@ services:
     platform: linux/amd64
     ports:
       - "3001:3000"
+    environment:
+      - NEXT_PUBLIC_L1_CHAIN_NAME={{.BridgeL1ChainName}}
+      - NEXT_PUBLIC_L1_CHAIN_ID={{.BridgeL1ChainID}}
+      - NEXT_PUBLIC_L1_RPC={{.BridgeL1RPC}}
+      - NEXT_PUBLIC_L1_NATIVE_CURRENCY_NAME={{.BridgeL1NativeCurrencyName}}
+      - NEXT_PUBLIC_L1_NATIVE_CURRENCY_SYMBOL={{.BridgeL1NativeCurrencySymbol}}
+      - NEXT_PUBLIC_L1_NATIVE_CURRENCY_DECIMALS={{.BridgeL1NativeCurrencyDecimals}}
+      - NEXT_PUBLIC_L1_BLOCK_EXPLORER={{.BridgeL1BlockExplorer}}
+      - NEXT_PUBLIC_L1_USDC_ADDRESS={{.BridgeL1USDCAddress}}
+      - NEXT_PUBLIC_L1_USDT_ADDRESS={{.BridgeL1USDTAddress}}
+      - NEXT_PUBLIC_L2_CHAIN_NAME={{.BridgeL2ChainName}}
+      - NEXT_PUBLIC_L2_CHAIN_ID={{.BridgeL2ChainID}}
+      - NEXT_PUBLIC_L2_RPC={{.BridgeL2RPC}}
+      - NEXT_PUBLIC_L2_NATIVE_CURRENCY_NAME={{.BridgeL2NativeCurrencyName}}
+      - NEXT_PUBLIC_L2_NATIVE_CURRENCY_SYMBOL={{.BridgeL2NativeCurrencySymbol}}
+      - NEXT_PUBLIC_L2_NATIVE_CURRENCY_DECIMALS=18
+      - NEXT_PUBLIC_NATIVE_TOKEN_L1_ADDRESS={{.BridgeNativeTokenL1Address}}
+      - NEXT_PUBLIC_STANDARD_BRIDGE_ADDRESS={{.BridgeStandardBridgeAddress}}
+      - NEXT_PUBLIC_ADDRESS_MANAGER_ADDRESS={{.BridgeAddressManagerAddress}}
+      - NEXT_PUBLIC_L1_CROSS_DOMAIN_MESSENGER_ADDRESS={{.BridgeL1CrossDomainMessengerAddress}}
+      - NEXT_PUBLIC_OPTIMISM_PORTAL_ADDRESS={{.BridgeOptimismPortalAddress}}
+      - NEXT_PUBLIC_L2_OUTPUT_ORACLE_ADDRESS={{.BridgeL2OutputOracleAddress}}
+      - NEXT_PUBLIC_L1_USDC_BRIDGE_ADDRESS={{.BridgeL1USDCBridgeAddress}}
+      - NEXT_PUBLIC_DISPUTE_GAME_FACTORY_ADDRESS={{.BridgeDisputeGameFactoryAddress}}
+      - NEXT_PUBLIC_BATCH_SUBMISSION_FREQUENCY={{.BridgeBatchSubmissionFrequency}}
+      - NEXT_PUBLIC_L1_BLOCK_TIME={{.BridgeL1BlockTime}}
+      - NEXT_PUBLIC_L2_BLOCK_TIME={{.BridgeL2BlockTime}}
+      - NEXT_PUBLIC_OUTPUT_ROOT_FREQUENCY={{.BridgeOutputRootFrequency}}
+      - NEXT_PUBLIC_CHALLENGE_PERIOD={{.BridgeChallengePeriod}}
     profiles: ["bridge"]
     restart: unless-stopped
 

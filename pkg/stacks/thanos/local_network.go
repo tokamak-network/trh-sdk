@@ -47,6 +47,34 @@ type localComposeData struct {
 	DRBNodeImage              string
 	DRBLeaderPrivateKey       string
 	DRBLeaderEOA              string
+	// Bridge environment variables
+	BridgeL1ChainName                   string
+	BridgeL1ChainID                     string
+	BridgeL1RPC                         string
+	BridgeL1NativeCurrencyName          string
+	BridgeL1NativeCurrencySymbol        string
+	BridgeL1NativeCurrencyDecimals      int
+	BridgeL1BlockExplorer               string
+	BridgeL1USDCAddress                 string
+	BridgeL1USDTAddress                 string
+	BridgeL2ChainName                   string
+	BridgeL2ChainID                     string
+	BridgeL2RPC                         string
+	BridgeL2NativeCurrencyName          string
+	BridgeL2NativeCurrencySymbol        string
+	BridgeNativeTokenL1Address          string
+	BridgeStandardBridgeAddress         string
+	BridgeAddressManagerAddress         string
+	BridgeL1CrossDomainMessengerAddress string
+	BridgeOptimismPortalAddress         string
+	BridgeL2OutputOracleAddress         string
+	BridgeL1USDCBridgeAddress           string
+	BridgeDisputeGameFactoryAddress     string
+	BridgeBatchSubmissionFrequency      uint64
+	BridgeL1BlockTime                   uint64
+	BridgeL2BlockTime                   uint64
+	BridgeOutputRootFrequency           uint64
+	BridgeChallengePeriod               uint64
 }
 
 func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
@@ -174,6 +202,8 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		return fmt.Errorf("failed to populate config volume: %w", err)
 	}
 
+	feeTokenConfig := constants.GetFeeTokenConfig(t.deployConfig.FeeToken, t.deployConfig.L1ChainID)
+
 	data := localComposeData{
 		OpGethImage:               fmt.Sprintf("tokamaknetwork/thanos-op-geth:%s", imageTags.OpGethImageTag),
 		OpNodeImage:               fmt.Sprintf("tokamaknetwork/thanos-op-node:%s", imageTags.ThanosStackImageTag),
@@ -196,6 +226,34 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		Preset:                    t.deployConfig.Preset,
 		DRBNodeImage:              fmt.Sprintf("tokamaknetwork/drb-node:%s", imageTags.DRBNodeImageTag),
 		DRBLeaderPrivateKey:       t.deployConfig.AdminPrivateKey,
+		// Bridge environment variables
+		BridgeL1ChainName:                   l1ChainConfig.ChainName,
+		BridgeL1ChainID:                     fmt.Sprintf("%d", t.deployConfig.L1ChainID),
+		BridgeL1RPC:                         t.deployConfig.L1RPCURL,
+		BridgeL1NativeCurrencyName:          l1ChainConfig.NativeTokenName,
+		BridgeL1NativeCurrencySymbol:        l1ChainConfig.NativeTokenSymbol,
+		BridgeL1NativeCurrencyDecimals:      l1ChainConfig.NativeTokenDecimals,
+		BridgeL1BlockExplorer:               l1ChainConfig.BlockExplorer,
+		BridgeL1USDCAddress:                 l1ChainConfig.USDCAddress,
+		BridgeL1USDTAddress:                 l1ChainConfig.USDTAddress,
+		BridgeL2ChainName:                   t.deployConfig.ChainName,
+		BridgeL2ChainID:                     fmt.Sprintf("%d", t.deployConfig.L2ChainID),
+		BridgeL2RPC:                         "http://localhost:8545",
+		BridgeL2NativeCurrencyName:          feeTokenConfig.Name,
+		BridgeL2NativeCurrencySymbol:        feeTokenConfig.Symbol,
+		BridgeNativeTokenL1Address:          feeTokenConfig.L1Address,
+		BridgeStandardBridgeAddress:         contracts.L1StandardBridgeProxy,
+		BridgeAddressManagerAddress:         contracts.AddressManager,
+		BridgeL1CrossDomainMessengerAddress: contracts.L1CrossDomainMessengerProxy,
+		BridgeOptimismPortalAddress:         contracts.OptimismPortalProxy,
+		BridgeL2OutputOracleAddress:         contracts.L2OutputOracleProxy,
+		BridgeL1USDCBridgeAddress:           contracts.L1UsdcBridgeProxy,
+		BridgeDisputeGameFactoryAddress:     contracts.DisputeGameFactoryProxy,
+		BridgeBatchSubmissionFrequency:      t.deployConfig.ChainConfiguration.BatchSubmissionFrequency,
+		BridgeL1BlockTime:                   t.deployConfig.ChainConfiguration.L1BlockTime,
+		BridgeL2BlockTime:                   t.deployConfig.ChainConfiguration.L2BlockTime,
+		BridgeOutputRootFrequency:           t.deployConfig.ChainConfiguration.OutputRootFrequency,
+		BridgeChallengePeriod:               t.deployConfig.ChainConfiguration.ChallengePeriod,
 	}
 
 	// Derive DRB leader EOA from admin private key for gaming/full presets
