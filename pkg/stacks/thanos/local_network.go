@@ -25,6 +25,9 @@ const localMonitoringVolume = "trh-local-monitoring"
 //go:embed templates/local-compose.yml.tmpl
 var localComposeTmpl string
 
+//go:embed templates/grafana-dashboard-application.json
+var grafanaDashboardApplication string
+
 type localComposeData struct {
 	OpGethImage               string
 	OpNodeImage               string
@@ -322,16 +325,58 @@ scrape_configs:
           service: op-batcher
 `
 
-	promPath := filepath.Join(t.deploymentPath, "monitoring", "prometheus.yml")
-	if err := os.MkdirAll(filepath.Dir(promPath), 0755); err != nil {
-		return fmt.Errorf("failed to create monitoring dir: %w", err)
+	const datasourceConfig = `apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    url: http://prometheus:9090
+    access: proxy
+    isDefault: true
+    editable: false
+`
+
+	const dashboardProviderConfig = `apiVersion: 1
+providers:
+  - name: default
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    options:
+      path: /monitoring/dashboards
+`
+
+	monitoringDir := filepath.Join(t.deploymentPath, "monitoring")
+	dirs := []string{
+		monitoringDir,
+		filepath.Join(monitoringDir, "provisioning", "datasources"),
+		filepath.Join(monitoringDir, "provisioning", "dashboards"),
+		filepath.Join(monitoringDir, "dashboards"),
 	}
-	if err := os.WriteFile(promPath, []byte(promConfig), 0644); err != nil {
-		return fmt.Errorf("failed to write prometheus.yml: %w", err)
+	for _, d := range dirs {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			return fmt.Errorf("failed to create dir %s: %w", d, err)
+		}
 	}
 
+	filesToWrite := map[string]string{
+		filepath.Join(monitoringDir, "prometheus.yml"):                               promConfig,
+		filepath.Join(monitoringDir, "provisioning", "datasources", "prometheus.yaml"): datasourceConfig,
+		filepath.Join(monitoringDir, "provisioning", "dashboards", "default.yaml"):     dashboardProviderConfig,
+		filepath.Join(monitoringDir, "dashboards", "thanos-stack-application.json"):    grafanaDashboardApplication,
+	}
+	for path, content := range filesToWrite {
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			return fmt.Errorf("failed to write %s: %w", filepath.Base(path), err)
+		}
+	}
+
+	// Map host paths → destination names inside the monitoring volume
 	monitoringFiles := map[string]string{
-		"prometheus.yml": promPath,
+		"prometheus.yml":                                          filepath.Join(monitoringDir, "prometheus.yml"),
+		"provisioning/datasources/prometheus.yaml":               filepath.Join(monitoringDir, "provisioning", "datasources", "prometheus.yaml"),
+		"provisioning/dashboards/default.yaml":                   filepath.Join(monitoringDir, "provisioning", "dashboards", "default.yaml"),
+		"dashboards/thanos-stack-application.json":               filepath.Join(monitoringDir, "dashboards", "thanos-stack-application.json"),
 	}
 	return t.copyFilesToMonitoringVolume(ctx, monitoringFiles)
 }
@@ -350,6 +395,20 @@ func (t *ThanosStack) copyFilesToMonitoringVolume(ctx context.Context, files map
 	}
 	containerID = strings.TrimSpace(containerID)
 	defer utils.ExecuteCommand(ctx, "docker", "rm", "-f", containerID)
+
+	// Collect unique parent directories and create them first.
+	dirs := map[string]struct{}{}
+	for destName := range files {
+		if d := filepath.Dir(destName); d != "." {
+			dirs[d] = struct{}{}
+		}
+	}
+	for d := range dirs {
+		if _, err := utils.ExecuteCommand(ctx, "docker", "exec", containerID,
+			"mkdir", "-p", "/monitoring/"+d); err != nil {
+			return fmt.Errorf("failed to create dir /monitoring/%s in volume: %w", d, err)
+		}
+	}
 
 	for destName, srcPath := range files {
 		if err := utils.ExecuteCommandStream(ctx, t.logger, "docker", "cp",

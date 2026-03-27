@@ -253,8 +253,10 @@ services:
       - "3002:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_PATHS_PROVISIONING=/monitoring/provisioning
     volumes:
       - grafana-data:/var/lib/grafana
+      - {{.MonitoringConfigVolume}}:/monitoring:ro
     profiles: ["monitoring"]
     restart: unless-stopped
 
