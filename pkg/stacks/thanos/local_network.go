@@ -323,6 +323,12 @@ scrape_configs:
       - targets: ['op-batcher:7302']
         labels:
           service: op-batcher
+
+  - job_name: op-challenger
+    static_configs:
+      - targets: ['op-challenger:7304']
+        labels:
+          service: op-challenger
 `
 
 	const datasourceConfig = `apiVersion: 1

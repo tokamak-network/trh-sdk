@@ -136,6 +136,9 @@ services:
       - OP_CHALLENGER_CANNON_ROLLUP_CONFIG=/config/rollup.json
       - OP_CHALLENGER_CANNON_PRESTATES_URL=file:///config
       - OP_CHALLENGER_DATADIR=/data
+      - OP_CHALLENGER_METRICS_ENABLED=true
+      - OP_CHALLENGER_METRICS_ADDR=0.0.0.0
+      - OP_CHALLENGER_METRICS_PORT=7304
     depends_on:
       op-geth:
         condition: service_healthy
