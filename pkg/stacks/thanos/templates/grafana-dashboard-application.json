@@ -215,7 +215,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "OP Challenger component status (replaces Proposer in fraud-proof deployments)",
+      "description": "OP Proposer component status (active in standard deployments without fault proof)",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -236,6 +236,17 @@
                 }
               },
               "type": "value"
+            },
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "text",
+                  "index": 2,
+                  "text": "N/A"
+                }
+              },
+              "type": "special"
             }
           ],
           "thresholds": {
@@ -256,7 +267,7 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
+        "h": 2,
         "w": 6,
         "x": 12,
         "y": 1
@@ -287,14 +298,112 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "up{job=\"op-proposer\"} or up{job=\"op-challenger\"}",
+          "expr": "up{job=\"op-proposer\"}",
           "instant": true,
-          "legendFormat": "{{job}}",
+          "legendFormat": "OP Proposer",
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "OP Proposer / Challenger Status",
+      "title": "OP Proposer Status",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "OP Challenger component status (active in fault-proof deployments)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "index": 1,
+                  "text": "DOWN"
+                },
+                "1": {
+                  "color": "green",
+                  "index": 0,
+                  "text": "UP"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "text",
+                  "index": 2,
+                  "text": "N/A"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 2,
+        "w": 6,
+        "x": 12,
+        "y": 3
+      },
+      "id": 200,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.2.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "up{job=\"op-challenger\"}",
+          "instant": true,
+          "legendFormat": "OP Challenger",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "OP Challenger Status",
       "type": "stat"
     },
     {
