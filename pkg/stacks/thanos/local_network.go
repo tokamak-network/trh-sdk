@@ -660,6 +660,18 @@ func (t *ThanosStack) printLocalServiceURLs(modules map[string]bool) {
 	t.logger.Info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 }
 
+// UninstallDRB stops and removes DRB Docker Compose services for local deployments.
+func (t *ThanosStack) UninstallDRB(ctx context.Context) error {
+	composePath := filepath.Join(t.deploymentPath, "docker-compose.local.yml")
+	t.logger.Info("Stopping and removing DRB containers...")
+	if err := utils.ExecuteCommandStream(ctx, t.logger, "docker", "compose",
+		"-f", composePath, "rm", "-f", "-s", "drb-leader", "drb-postgres"); err != nil {
+		return fmt.Errorf("failed to remove DRB containers: %w", err)
+	}
+	t.logger.Info("✅ DRB containers removed successfully")
+	return nil
+}
+
 func generateJWTSecret(path string) error {
 	secret := make([]byte, 32)
 	if _, err := rand.Read(secret); err != nil {
