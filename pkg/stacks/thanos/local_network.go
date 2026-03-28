@@ -399,7 +399,7 @@ func (t *ThanosStack) copyFilesToMonitoringVolume(ctx context.Context, files map
 	if err != nil {
 		return fmt.Errorf("failed to start monitoring helper container: %w", err)
 	}
-	containerID = strings.TrimSpace(containerID)
+	containerID = lastNonEmptyLine(containerID)
 	defer utils.ExecuteCommand(ctx, "docker", "rm", "-f", containerID)
 
 	// Collect unique parent directories and create them first.
@@ -496,7 +496,7 @@ func (t *ThanosStack) copyFilesToVolume(ctx context.Context, files map[string]st
 	if err != nil {
 		return fmt.Errorf("failed to start config helper container: %w", err)
 	}
-	containerID = strings.TrimSpace(containerID)
+	containerID = lastNonEmptyLine(containerID)
 	defer utils.ExecuteCommand(ctx, "docker", "rm", "-f", containerID)
 
 	for destName, srcPath := range files {
@@ -506,6 +506,19 @@ func (t *ThanosStack) copyFilesToVolume(ctx context.Context, files map[string]st
 		}
 	}
 	return nil
+}
+
+// lastNonEmptyLine extracts the last non-empty line from a string.
+// This is used to parse the container ID from `docker run -d` output, which may
+// include image pull progress lines before the actual 64-char container ID.
+func lastNonEmptyLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			return line
+		}
+	}
+	return strings.TrimSpace(s)
 }
 
 // resetOpGethVolume stops op-geth and removes its data volume so it can be reinitialized.
