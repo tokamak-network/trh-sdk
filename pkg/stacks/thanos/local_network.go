@@ -565,7 +565,7 @@ func hashFile(path string) (string, error) {
 func (t *ThanosStack) startLocalCoreServices(ctx context.Context, composePath string) error {
 	args := []string{"compose", "-f", composePath}
 	if t.deployConfig.EnableFraudProof {
-		args = append(args, "--profile", "challenger")
+		args = append(args, "--profile", "challenger", "--profile", "proposer")
 	} else {
 		args = append(args, "--profile", "proposer")
 	}
@@ -610,7 +610,7 @@ func (t *ThanosStack) startLocalModules(ctx context.Context, composePath string,
 	// Re-up with all profiles (already running services are skipped)
 	args := []string{"compose", "-f", composePath}
 	if t.deployConfig.EnableFraudProof {
-		args = append(args, "--profile", "challenger")
+		args = append(args, "--profile", "challenger", "--profile", "proposer")
 	} else {
 		args = append(args, "--profile", "proposer")
 	}
