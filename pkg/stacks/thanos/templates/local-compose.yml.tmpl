@@ -194,7 +194,7 @@ services:
     restart: unless-stopped
 
   blockscout:
-    image: blockscout/blockscout:6.10.1
+    image: blockscout/blockscout-optimism:6.10.1
     command: ["bin/blockscout", "start"]
     ports:
       - "4000:4000"
@@ -212,6 +212,11 @@ services:
       - MIX_ENV=prod
       - PORT=4000
       - POOL_SIZE=10
+      - CHAIN_TYPE=optimism
+      - INDEXER_OPTIMISM_L1_RPC={{.L1RpcUrl}}
+      - INDEXER_OPTIMISM_L1_SYSTEM_CONFIG_CONTRACT={{.BlockExplorerSystemConfigAddress}}
+      - INDEXER_OPTIMISM_L2_WITHDRAWALS_START_BLOCK=1
+      - INDEXER_OPTIMISM_L2_BATCH_GENESIS_BLOCK_NUMBER=0
     depends_on:
       - blockscout-db
     profiles: ["blockExplorer"]
@@ -235,6 +240,9 @@ services:
       - NEXT_PUBLIC_ROLLUP_TYPE=optimistic
       - NEXT_PUBLIC_ROLLUP_L1_BASE_URL={{.BlockExplorerL1BaseURL}}
       - NEXT_PUBLIC_ROLLUP_L2_WITHDRAWAL_URL=http://localhost:3001
+{{- if .EnableFraudProof}}
+      - NEXT_PUBLIC_FAULT_PROOF_ENABLED=true
+{{- end}}
     depends_on:
       - blockscout
     profiles: ["blockExplorer"]

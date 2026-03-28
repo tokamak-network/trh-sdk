@@ -91,7 +91,9 @@ type localComposeData struct {
 	BridgeOutputRootFrequency           uint64
 	BridgeChallengePeriod               uint64
 	// Block Explorer environment variables
-	BlockExplorerNetworkName string
+	BlockExplorerNetworkName        string
+	BlockExplorerL1BaseURL          string
+	BlockExplorerSystemConfigAddress string
 	// Monitoring
 	MonitoringConfigVolume string
 }
@@ -274,8 +276,10 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		BridgeOutputRootFrequency:           t.deployConfig.ChainConfiguration.OutputRootFrequency,
 		BridgeChallengePeriod:               t.deployConfig.ChainConfiguration.ChallengePeriod,
 		// Block Explorer
-		BlockExplorerNetworkName:            t.deployConfig.ChainName,
-		MonitoringConfigVolume:              localMonitoringVolume,
+		BlockExplorerNetworkName:             t.deployConfig.ChainName,
+		BlockExplorerL1BaseURL:               l1ChainConfig.BlockExplorer,
+		BlockExplorerSystemConfigAddress:     contracts.SystemConfigProxy,
+		MonitoringConfigVolume:               localMonitoringVolume,
 	}
 
 	// Derive DRB leader EOA from admin private key for gaming/full presets
