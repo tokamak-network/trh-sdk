@@ -90,6 +90,8 @@ type localComposeData struct {
 	BridgeL2BlockTime                   uint64
 	BridgeOutputRootFrequency           uint64
 	BridgeChallengePeriod               uint64
+	// Block Explorer environment variables
+	BlockExplorerNetworkName string
 	// Monitoring
 	MonitoringConfigVolume string
 }
@@ -271,6 +273,8 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		BridgeL2BlockTime:                   t.deployConfig.ChainConfiguration.L2BlockTime,
 		BridgeOutputRootFrequency:           t.deployConfig.ChainConfiguration.OutputRootFrequency,
 		BridgeChallengePeriod:               t.deployConfig.ChainConfiguration.ChallengePeriod,
+		// Block Explorer
+		BlockExplorerNetworkName:            t.deployConfig.ChainName,
 		MonitoringConfigVolume:              localMonitoringVolume,
 	}
 

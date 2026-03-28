@@ -68,7 +68,11 @@ func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string, inputs *Deplo
 			}
 			return nil
 		case constants.Local:
+			t.deployConfig.ChainName = inputs.ChainName
 			t.deployConfig.L1BeaconURL = inputs.L1BeaconURL
+			if err := t.deployConfig.WriteToJSONFile(t.deploymentPath); err != nil {
+				return fmt.Errorf("failed to write settings file: %w", err)
+			}
 			return t.deployLocalNetwork(ctx)
 		default:
 			t.logger.Error("infrastructure provider %s is not supported", infraOpt)
