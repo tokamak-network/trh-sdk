@@ -22,6 +22,17 @@ import (
 const localConfigVolume = "trh-local-config"
 const localMonitoringVolume = "trh-local-monitoring"
 
+// localL2RPCURL returns the L2 RPC URL reachable from the current process.
+// When running inside a Docker container (trh-backend), localhost refers to
+// the container itself, not the host where op-geth's port is mapped.
+// In that case we use host.docker.internal which resolves to the Docker host.
+func localL2RPCURL() string {
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return "http://host.docker.internal:8545"
+	}
+	return "http://localhost:8545"
+}
+
 //go:embed templates/local-compose.yml.tmpl
 var localComposeTmpl string
 
@@ -125,7 +136,7 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 				ctx,
 				t.logger,
 				t.deployConfig.L1RPCURL,
-				"http://localhost:8545",
+				localL2RPCURL(),
 				t.deployConfig.AdminPrivateKey,
 				deployedContracts.AnchorStateRegistryProxy,
 				t.deployConfig.L1ChainID,
