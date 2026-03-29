@@ -323,6 +323,20 @@ services:
       - drb-leader-keys:/app/static-key
     restart: unless-stopped
 {{- end }}
+{{- if .AAOperatorEnabled }}
+
+  aa-operator:
+    image: {{.AAOperatorImage}}
+    environment:
+      - L2_RPC_URL=http://op-geth:8545
+      - ADMIN_PRIVATE_KEY={{.AAAdminPrivateKey}}
+      - FEE_TOKEN={{.AAFeeToken}}
+      - COINGECKO_API_KEY={{.CoinGeckoAPIKey}}
+    depends_on:
+      op-geth:
+        condition: service_healthy
+    restart: unless-stopped
+{{- end }}
 
 volumes:
   op-geth-data:

@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -29,14 +30,25 @@ const (
 	// SimplePriceOracle from going stale (STALE_THRESHOLD = 24h).
 	priceForceUpdateInterval = 23 * time.Hour
 
-	// coingeckoEndpoint is the CoinGecko free-tier price endpoint for TON.
-	// No API key required. Returns TON/USD and TON/ETH.
-	// TON CoinGecko ID: "tokamak-network"
-	coingeckoEndpoint = "https://api.coingecko.com/api/v3/simple/price?ids=tokamak-network&vs_currencies=usd,eth"
+	// coingeckoFreeEndpoint is the CoinGecko free-tier price endpoint (no key required).
+	coingeckoFreeEndpoint = "https://api.coingecko.com/api/v3/simple/price?ids=tokamak-network&vs_currencies=usd,eth"
+
+	// coingeckoProEndpoint is the CoinGecko Pro API endpoint (requires COINGECKO_API_KEY).
+	coingeckoProEndpoint = "https://pro-api.coingecko.com/api/v3/simple/price?ids=tokamak-network&vs_currencies=usd,eth"
 
 	// httpTimeout for external price fetch calls.
 	httpTimeout = 10 * time.Second
 )
+
+// coingeckoURL returns the appropriate CoinGecko endpoint.
+// If COINGECKO_API_KEY is set, it uses the Pro API endpoint with the key appended;
+// otherwise it uses the free-tier endpoint (no key, ~30 req/min limit).
+func coingeckoURL() string {
+	if key := os.Getenv("COINGECKO_API_KEY"); key != "" {
+		return coingeckoProEndpoint + "&x_cg_pro_api_key=" + key
+	}
+	return coingeckoFreeEndpoint
+}
 
 // coingeckoResponse is the JSON structure returned by the CoinGecko price endpoint.
 type coingeckoResponse struct {
@@ -224,7 +236,7 @@ func (t *ThanosStack) pushOraclePrice(ctx context.Context, price *big.Int) error
 // No API key required. Rate limit: ~10-50 req/min on free tier.
 func fetchCoinGeckoPrice() (*coingeckoResponse, error) {
 	client := &http.Client{Timeout: httpTimeout}
-	resp, err := client.Get(coingeckoEndpoint)
+	resp, err := client.Get(coingeckoURL())
 	if err != nil {
 		return nil, fmt.Errorf("HTTP GET: %w", err)
 	}

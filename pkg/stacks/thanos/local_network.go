@@ -27,6 +27,9 @@ const localMonitoringVolume = "trh-local-monitoring"
 // the container itself, not the host where op-geth's port is mapped.
 // In that case we use host.docker.internal which resolves to the Docker host.
 func localL2RPCURL() string {
+	if url := os.Getenv("L2_RPC_URL"); url != "" {
+		return url
+	}
 	if _, err := os.Stat("/.dockerenv"); err == nil {
 		return "http://host.docker.internal:8545"
 	}
@@ -96,6 +99,12 @@ type localComposeData struct {
 	BlockExplorerSystemConfigAddress string
 	// Monitoring
 	MonitoringConfigVolume string
+	// AA operator — deployed as a Docker service for non-TON fee tokens on Gaming/Full presets
+	AAOperatorEnabled   bool
+	AAOperatorImage     string
+	AAAdminPrivateKey   string
+	AAFeeToken          string
+	CoinGeckoAPIKey     string
 }
 
 func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
@@ -304,6 +313,16 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 				data.DRBLeaderEOA = addr.Hex()
 			}
 		}
+	}
+
+	// Populate AA operator fields — the service runs only for Gaming/Full presets with non-TON fee tokens.
+	// It keeps SimplePriceOracle fresh and auto-refills the EntryPoint deposit.
+	if constants.NeedsAASetup(t.deployConfig.Preset, t.deployConfig.FeeToken) {
+		data.AAOperatorEnabled = true
+		data.AAOperatorImage = fmt.Sprintf("tokamaknetwork/aa-operator:%s", imageTags.ThanosStackImageTag)
+		data.AAAdminPrivateKey = t.deployConfig.AdminPrivateKey
+		data.AAFeeToken = t.deployConfig.FeeToken
+		data.CoinGeckoAPIKey = os.Getenv("COINGECKO_API_KEY")
 	}
 
 	tmpl, err := template.New("local-compose").Parse(localComposeTmpl)

@@ -186,13 +186,10 @@ func (t *ThanosStack) setupAAPaymaster(ctx context.Context) error {
 	}
 	t.logger.Infof("✅ MultiTokenPaymaster.addToken(%s, markup=%d%%, decimals=%d)", feeToken, markupPct, decimals)
 
-	// Step 4: Start background price updater that keeps SimplePriceOracle fresh by fetching
-	// TON market price from CoinGecko every 10 minutes. This is simpler and more accurate
-	// than a Uniswap V3 pool on a fresh L2 with no trading activity.
-	t.startPriceUpdater(ctx)
-
-	// Step 5: Start background EntryPoint refill monitor (auto-tops-up from admin wallet).
-	t.startEntryPointRefillMonitor(ctx)
+	// Steps 4 & 5 (price updater and EntryPoint refill monitor) are handled by the
+	// aa-operator Docker service, which runs as part of the compose stack when a non-TON
+	// fee token is selected. Running them here would tie their lifecycle to the trh-sdk
+	// CLI process, which exits after setup.
 
 	return nil
 }
