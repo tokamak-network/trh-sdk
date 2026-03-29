@@ -22,6 +22,7 @@ import (
 //  1. EntryPoint.depositTo(MultiTokenPaymaster) — deposit fee token for gas sponsorship
 //  2. SimplePriceOracle.updatePrice(initialPrice) — set initial TON/token exchange rate
 //  3. MultiTokenPaymaster.addToken(tokenAddr, oracle, markupPct, decimals) — register fee token
+//  4. Phase 2: create Uniswap V3 WTON/feeToken pool, deploy UniswapV3TwapOracle, switch paymaster
 //
 // For USDT (no L2 predeploy): OptimismMintableERC20Factory.createOptimismMintableERC20WithDecimals
 // is called first to deploy a bridged USDT token on L2. The CREATE2 address is predicted before
@@ -183,6 +184,12 @@ func (t *ThanosStack) setupAAPaymaster(ctx context.Context) error {
 		return fmt.Errorf("MultiTokenPaymaster.addToken failed: %w", err)
 	}
 	t.logger.Infof("✅ MultiTokenPaymaster.addToken(%s, markup=%d%%, decimals=%d)", feeToken, markupPct, decimals)
+
+	// Step 4 (Phase 2): Create Uniswap V3 WTON/feeToken pool, deploy UniswapV3TwapOracle,
+	// and switch MultiTokenPaymaster from SimplePriceOracle to the live pool oracle.
+	if err := t.setupUniswapV3Oracle(ctx, l2Client, l2ChainID, adminAddr, tokenAddr, markupPct, decimals, initialPrice, sendTxAndWait); err != nil {
+		return fmt.Errorf("Phase 2 Uniswap V3 oracle setup failed: %w", err)
+	}
 
 	return nil
 }

@@ -13,4 +13,14 @@ const (
 
 	// DRB predeploy (Gaming/Full preset) — Commit2RevealDRB replaces VRFCoordinator + VRFPredeploy
 	Commit2RevealDRB = "0x4200000000000000000000000000000000000060"
+
+	// Uniswap V3 predeploys (Gaming/Full preset)
+	// Verified in tokamak-thanos Predeploys.sol lines 81-93.
+	UniswapV3FactoryPredeploy        = "0x4200000000000000000000000000000000000502"
+	UniswapV3PositionManagerPredeploy = "0x4200000000000000000000000000000000000504"
+
+	// WTONPredeploy is the wrapped native token (TON) on L2, used as one side
+	// of the Uniswap V3 pool for the AA oracle.
+	// Verified in tokamak-thanos Predeploys.sol line 27 (WETH = wrapped native).
+	WTONPredeploy = "0x4200000000000000000000000000000000000006"
 )
