@@ -22,7 +22,8 @@ import (
 //  1. EntryPoint.depositTo(MultiTokenPaymaster) — deposit fee token for gas sponsorship
 //  2. SimplePriceOracle.updatePrice(initialPrice) — set initial TON/token exchange rate
 //  3. MultiTokenPaymaster.addToken(tokenAddr, oracle, markupPct, decimals) — register fee token
-//  4. Phase 2: create Uniswap V3 WTON/feeToken pool, deploy UniswapV3TwapOracle, switch paymaster
+//  4. Start background price updater: fetches TON/feeToken from CoinGecko, keeps SimplePriceOracle fresh
+//  5. Start background EntryPoint refill monitor: tops up deposit when balance falls below 0.5 TON
 //
 // For USDT (no L2 predeploy): OptimismMintableERC20Factory.createOptimismMintableERC20WithDecimals
 // is called first to deploy a bridged USDT token on L2. The CREATE2 address is predicted before
@@ -185,14 +186,12 @@ func (t *ThanosStack) setupAAPaymaster(ctx context.Context) error {
 	}
 	t.logger.Infof("✅ MultiTokenPaymaster.addToken(%s, markup=%d%%, decimals=%d)", feeToken, markupPct, decimals)
 
-	// Step 4 (Phase 2): Create Uniswap V3 WTON/feeToken pool, deploy UniswapV3TwapOracle,
-	// and switch MultiTokenPaymaster from SimplePriceOracle to the live pool oracle.
-	if err := t.setupUniswapV3Oracle(ctx, l2Client, l2ChainID, adminAddr, tokenAddr, markupPct, decimals, initialPrice, sendTxAndWait); err != nil {
-		return fmt.Errorf("Phase 2 Uniswap V3 oracle setup failed: %w", err)
-	}
+	// Step 4: Start background price updater that keeps SimplePriceOracle fresh by fetching
+	// TON market price from CoinGecko every 10 minutes. This is simpler and more accurate
+	// than a Uniswap V3 pool on a fresh L2 with no trading activity.
+	t.startPriceUpdater(ctx)
 
-	// Start background monitor that auto-refills EntryPoint deposit when it falls below 0.5 TON.
-	// The monitor runs until ctx is cancelled (stack shutdown). Errors are logged but non-fatal.
+	// Step 5: Start background EntryPoint refill monitor (auto-tops-up from admin wallet).
 	t.startEntryPointRefillMonitor(ctx)
 
 	return nil
