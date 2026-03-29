@@ -306,6 +306,13 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		return err
 	}
 
+	// Write .env file alongside docker-compose.local.yml so that Docker Compose
+	// automatically applies the correct profiles on any `docker compose up` invocation,
+	// including manual restarts that don't go through startLocalCoreServices.
+	if err := t.writeComposeEnvFile(composePath); err != nil {
+		t.logger.Warnf("Failed to write .env for COMPOSE_PROFILES (profiles may not persist on restart): %v", err)
+	}
+
 	// Generate prometheus.yml and copy into the monitoring volume
 	if err := t.generatePrometheusConfig(ctx); err != nil {
 		t.logger.Warnf("Failed to generate prometheus config (monitoring may not scrape L2 metrics): %v", err)
@@ -674,6 +681,34 @@ func (t *ThanosStack) UninstallDRB(ctx context.Context) error {
 	}
 	t.logger.Info("✅ DRB containers removed successfully")
 	return nil
+}
+
+// writeComposeEnvFile writes a .env file next to the docker-compose.local.yml
+// with COMPOSE_PROFILES set based on the deployment configuration.
+// Docker Compose reads .env from the same directory as the compose file,
+// ensuring profiles (proposer, challenger, etc.) are automatically applied
+// on any restart without needing explicit --profile flags.
+func (t *ThanosStack) writeComposeEnvFile(composePath string) error {
+	envDir := filepath.Dir(composePath)
+	envPath := filepath.Join(envDir, ".env")
+
+	// Determine required profiles
+	profiles := []string{"proposer"}
+	if t.deployConfig.EnableFraudProof {
+		profiles = append(profiles, "challenger")
+	}
+
+	// Collect module profiles from preset
+	modules := constants.PresetModules[t.deployConfig.Preset]
+	for module, enabled := range modules {
+		if !enabled || module == "crossTrade" || module == "drb" {
+			continue
+		}
+		profiles = append(profiles, module)
+	}
+
+	content := fmt.Sprintf("COMPOSE_PROFILES=%s\n", strings.Join(profiles, ","))
+	return os.WriteFile(envPath, []byte(content), 0644)
 }
 
 func generateJWTSecret(path string) error {
