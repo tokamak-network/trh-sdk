@@ -10,23 +10,25 @@ import "math/big"
 // 1 token unit (18 decimals) = 1e18 wei.
 var DefaultEntryPointDeposit = new(big.Int).Mul(big.NewInt(1), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
 
-// Paymaster markup in basis points (1 BPS = 0.01%).
+// Paymaster markup as a plain percentage (e.g. 5 = 5%).
+// MultiTokenPaymaster.addToken() takes markupPercent directly, not basis points.
+// Maximum allowed by the contract is 50 (50%).
 const (
-	ETHPaymasterMarkupBPS  = uint64(500) // 5%
-	USDTPaymasterMarkupBPS = uint64(300) // 3%
-	USDCPaymasterMarkupBPS = uint64(300) // 3%
+	ETHPaymasterMarkupPct  = uint64(5) // 5%
+	USDCPaymasterMarkupPct = uint64(3) // 3%
 )
 
 // Initial price values for SimplePriceOracle.
 // Price is expressed as "amount of fee token per 1 TON, scaled to 18 decimals".
-// These are conservative placeholder values — operator should update via setPrice.
+// SimplePriceOracle stores a single price value (no per-token mapping);
+// one oracle instance serves one token.
+// These are conservative placeholder values — operator must call updatePrice()
+// post-deployment to set accurate market rates before stale threshold (24h) triggers.
 //
 // ETH:  1 TON ≈ 0.0005 ETH  → price = 5e14
-// USDT: 1 TON ≈ 1.5 USDT    → price = 1.5e18 (18 decimal representation even for 6-decimal USDT)
-// USDC: 1 TON ≈ 1.5 USDC    → price = 1.5e18
+// USDC: 1 TON ≈ 1.5 USDC    → price = 1.5e18 (MultiTokenPaymaster scales to 6 dec internally)
 var (
 	DefaultETHInitialPrice  = new(big.Int).Mul(big.NewInt(5), new(big.Int).Exp(big.NewInt(10), big.NewInt(14), nil)) // 5e14
-	DefaultUSDTInitialPrice = new(big.Int).Mul(big.NewInt(15), new(big.Int).Exp(big.NewInt(10), big.NewInt(17), nil)) // 1.5e18
 	DefaultUSDCInitialPrice = new(big.Int).Mul(big.NewInt(15), new(big.Int).Exp(big.NewInt(10), big.NewInt(17), nil)) // 1.5e18
 )
 
