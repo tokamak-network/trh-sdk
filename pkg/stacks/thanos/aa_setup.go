@@ -22,8 +22,8 @@ import (
 //  2. SimplePriceOracle.updatePrice(initialPrice) — set initial TON/token exchange rate
 //  3. MultiTokenPaymaster.addToken(tokenAddr, oracle, markupPct, decimals) — register fee token
 //
-// Note on USDT: USDT has no L2 predeploy address in the current tokamak-thanos release.
-// AA setup is skipped for USDT with a warning. Manual configuration is required.
+// For USDT (no L2 predeploy): OptimismMintableERC20Factory.createOptimismMintableERC20 is called
+// first to deploy a bridged USDT token on L2, then steps 1–3 follow using the deployed address.
 func (t *ThanosStack) setupAAPaymaster(ctx context.Context) error {
 	if !constants.NeedsAASetup(t.deployConfig.Preset, t.deployConfig.FeeToken) {
 		return nil
@@ -31,22 +31,7 @@ func (t *ThanosStack) setupAAPaymaster(ctx context.Context) error {
 
 	feeToken := t.deployConfig.FeeToken
 
-	// USDT has no L2 predeploy — cannot be registered automatically.
-	if feeToken == constants.FeeTokenUSDT {
-		t.logger.Warn("⚠️  USDT has no L2 predeploy address in this release.")
-		t.logger.Warn("   AA Paymaster setup skipped for USDT.")
-		t.logger.Warn("   To enable USDT as a paymaster fee token, deploy an OptimismMintableERC20")
-		t.logger.Warn("   for USDT via the standard bridge, then call MultiTokenPaymaster.addToken() manually.")
-		return nil
-	}
-
 	t.logger.Infof("🔧 Setting up AA Paymaster for fee token: %s", feeToken)
-
-	// Resolve verified L2 predeploy address and paymaster parameters.
-	tokenL2Addr, markupPct, decimals, initialPrice, err := resolveAATokenConfig(feeToken)
-	if err != nil {
-		return fmt.Errorf("unsupported fee token for AA setup: %w", err)
-	}
 
 	// Connect to L2.
 	l2Client, err := ethclient.DialContext(ctx, localL2RPCURL())
@@ -75,30 +60,82 @@ func (t *ThanosStack) setupAAPaymaster(ctx context.Context) error {
 	}
 	adminAddr := crypto.PubkeyToAddress(privKey.PublicKey)
 
-	// Helper: build, sign, and send a raw transaction on L2.
-	sendTx := func(toAddr common.Address, value *big.Int, calldata []byte) error {
+	// sendTxAndWait builds, signs, sends a transaction, and waits for its receipt.
+	sendTxAndWait := func(toAddr common.Address, value *big.Int, calldata []byte) (*types.Receipt, error) {
 		nonce, err := l2Client.PendingNonceAt(ctx, adminAddr)
 		if err != nil {
-			return fmt.Errorf("failed to get nonce: %w", err)
+			return nil, fmt.Errorf("failed to get nonce: %w", err)
 		}
 		gasPrice, err := l2Client.SuggestGasPrice(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to get gas price: %w", err)
+			return nil, fmt.Errorf("failed to get gas price: %w", err)
 		}
 		gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(2)) // 2× for reliable inclusion
 
 		tx := types.NewTransaction(nonce, toAddr, value, 300_000, gasPrice, calldata)
 		signedTx, err := types.SignTx(tx, types.NewEIP155Signer(l2ChainID), privKey)
 		if err != nil {
-			return fmt.Errorf("failed to sign tx: %w", err)
+			return nil, fmt.Errorf("failed to sign tx: %w", err)
 		}
-		return l2Client.SendTransaction(ctx, signedTx)
+		if err := l2Client.SendTransaction(ctx, signedTx); err != nil {
+			return nil, err
+		}
+		txHash := signedTx.Hash()
+		for attempt := 1; attempt <= 30; attempt++ {
+			receipt, err := l2Client.TransactionReceipt(ctx, txHash)
+			if err == nil {
+				return receipt, nil
+			}
+			time.Sleep(2 * time.Second)
+		}
+		return nil, fmt.Errorf("tx %s not mined after 60s", txHash.Hex())
+	}
+
+	// sendTx sends a transaction without waiting for receipt (fire-and-forget).
+	sendTx := func(toAddr common.Address, value *big.Int, calldata []byte) error {
+		_, err := sendTxAndWait(toAddr, value, calldata)
+		return err
+	}
+
+	// Resolve L2 token address and paymaster parameters.
+	var tokenAddr common.Address
+	var markupPct uint64
+	var decimals uint8
+	var initialPrice *big.Int
+
+	if feeToken == constants.FeeTokenUSDT {
+		// USDT has no L2 predeploy — deploy a bridged token via the Standard Bridge factory.
+		l1USDTCfg := constants.GetFeeTokenConfig(constants.FeeTokenUSDT, t.deployConfig.L1ChainID)
+		if l1USDTCfg.L1Address == "" || l1USDTCfg.L1Address == "0x0000000000000000000000000000000000000000" {
+			return fmt.Errorf("L1 USDT address not configured for chain %d", t.deployConfig.L1ChainID)
+		}
+		l1USDTAddr := common.HexToAddress(l1USDTCfg.L1Address)
+
+		t.logger.Infof("🏭 Deploying bridged USDT on L2 via OptimismMintableERC20Factory (L1: %s)...", l1USDTCfg.L1Address)
+		deployedAddr, err := deployBridgedUSDT(l1USDTAddr, sendTxAndWait)
+		if err != nil {
+			return fmt.Errorf("failed to deploy bridged USDT on L2: %w", err)
+		}
+		t.logger.Infof("✅ Bridged USDT deployed at L2: %s", deployedAddr.Hex())
+
+		tokenAddr = deployedAddr
+		markupPct = constants.USDTPaymasterMarkupPct
+		decimals = 6
+		initialPrice = constants.DefaultUSDTInitialPrice
+	} else {
+		l2Addr, mp, d, ip, err := resolveAATokenConfig(feeToken)
+		if err != nil {
+			return fmt.Errorf("unsupported fee token for AA setup: %w", err)
+		}
+		tokenAddr = common.HexToAddress(l2Addr)
+		markupPct = mp
+		decimals = d
+		initialPrice = ip
 	}
 
 	entryPoint := common.HexToAddress(constants.AAEntryPoint)
 	oracle := common.HexToAddress(constants.SimplePriceOraclePredeploy)
 	paymaster := common.HexToAddress(constants.MultiTokenPaymasterPredeploy)
-	tokenAddr := common.HexToAddress(tokenL2Addr)
 
 	// Step 1: EntryPoint.depositTo(MultiTokenPaymaster)
 	// ABI: depositTo(address account) payable
@@ -150,6 +187,92 @@ func (t *ThanosStack) setupAAPaymaster(ctx context.Context) error {
 	return nil
 }
 
+// deployBridgedUSDT calls OptimismMintableERC20Factory.createOptimismMintableERC20 on L2
+// to deploy a bridged USDT token, waits for the transaction receipt, and returns the
+// deployed L2 token address parsed from the OptimismMintableERC20Created event.
+func deployBridgedUSDT(
+	l1USDTAddr common.Address,
+	sendTxAndWait func(common.Address, *big.Int, []byte) (*types.Receipt, error),
+) (common.Address, error) {
+	factory := common.HexToAddress(constants.OptimismMintableERC20FactoryPredeploy)
+
+	// ABI-encode: createOptimismMintableERC20(address _remoteToken, string _name, string _symbol)
+	// Dynamic-type ABI layout:
+	//   [0:4]    selector
+	//   [4:36]   address (right-aligned)
+	//   [36:68]  offset to _name from start of args = 96 (3×32)
+	//   [68:100] offset to _symbol from start of args = 160 (96 + 32 len + 32 data)
+	//   [100:132] len("Tether USD") = 10
+	//   [132:164] "Tether USD" zero-padded to 32 bytes
+	//   [164:196] len("USDT") = 4
+	//   [196:228] "USDT" zero-padded to 32 bytes
+	selector := crypto.Keccak256([]byte("createOptimismMintableERC20(address,string,string)"))[:4]
+
+	name := []byte("Tether USD") // 10 bytes → pads to 32
+	symbol := []byte("USDT")     // 4 bytes  → pads to 32
+
+	padTo32 := func(b []byte) []byte {
+		n := (len(b) + 31) / 32 * 32
+		if n == 0 {
+			n = 32
+		}
+		p := make([]byte, n)
+		copy(p, b)
+		return p
+	}
+	paddedName := padTo32(name)   // 32 bytes
+	paddedSym := padTo32(symbol)  // 32 bytes
+
+	nameOffset := uint64(3 * 32)                                        // 96
+	symOffset := nameOffset + 32 + uint64(len(paddedName))              // 160
+
+	totalLen := 4 + 3*32 + 32 + len(paddedName) + 32 + len(paddedSym) // 228
+	calldata := make([]byte, totalLen)
+
+	copy(calldata[:4], selector)
+
+	// address right-aligned in [4:36]
+	copy(calldata[16:36], l1USDTAddr.Bytes())
+
+	// nameOffset right-aligned in [36:68]
+	nameOffBytes := new(big.Int).SetUint64(nameOffset).Bytes()
+	copy(calldata[68-len(nameOffBytes):68], nameOffBytes)
+
+	// symOffset right-aligned in [68:100]
+	symOffBytes := new(big.Int).SetUint64(symOffset).Bytes()
+	copy(calldata[100-len(symOffBytes):100], symOffBytes)
+
+	// name length right-aligned in [100:132]
+	nameLenBytes := new(big.Int).SetUint64(uint64(len(name))).Bytes()
+	copy(calldata[132-len(nameLenBytes):132], nameLenBytes)
+
+	// name data
+	copy(calldata[132:132+len(paddedName)], paddedName)
+
+	// symbol length right-aligned in [164:196]
+	symLenOff := 132 + len(paddedName) // 164
+	symLenBytes := new(big.Int).SetUint64(uint64(len(symbol))).Bytes()
+	copy(calldata[symLenOff+32-len(symLenBytes):symLenOff+32], symLenBytes)
+
+	// symbol data
+	copy(calldata[symLenOff+32:symLenOff+32+len(paddedSym)], paddedSym)
+
+	receipt, err := sendTxAndWait(factory, big.NewInt(0), calldata)
+	if err != nil {
+		return common.Address{}, fmt.Errorf("createOptimismMintableERC20 tx failed: %w", err)
+	}
+
+	// Parse OptimismMintableERC20Created(address indexed localToken, address indexed remoteToken, address deployer)
+	// Topics[0] = event sig, Topics[1] = localToken (L2 address, indexed)
+	eventSigHash := common.BytesToHash(crypto.Keccak256([]byte("OptimismMintableERC20Created(address,address,address)")))
+	for _, log := range receipt.Logs {
+		if log.Address == factory && len(log.Topics) >= 2 && log.Topics[0] == eventSigHash {
+			return common.BytesToAddress(log.Topics[1].Bytes()), nil
+		}
+	}
+	return common.Address{}, fmt.Errorf("OptimismMintableERC20Created event not found in receipt (tx: %s)", receipt.TxHash.Hex())
+}
+
 // aaMarkupForToken returns the markup percent for the given fee token (used for log messages).
 func aaMarkupForToken(feeToken string) uint64 {
 	switch feeToken {
@@ -157,19 +280,19 @@ func aaMarkupForToken(feeToken string) uint64 {
 		return constants.ETHPaymasterMarkupPct
 	case constants.FeeTokenUSDC:
 		return constants.USDCPaymasterMarkupPct
+	case constants.FeeTokenUSDT:
+		return constants.USDTPaymasterMarkupPct
 	default:
 		return 0
 	}
 }
 
 // resolveAATokenConfig returns the verified L2 predeploy address and paymaster parameters
-// for a given fee token.
+// for ETH and USDC fee tokens. USDT is handled separately via deployBridgedUSDT.
 //
 // Verified predeploy addresses (from tokamak-thanos Predeploys.sol):
 //   - ETH (WETH):  0x4200000000000000000000000000000000000486
 //   - USDC:        0x4200000000000000000000000000000000000778
-//
-// USDT is intentionally absent — it has no L2 predeploy in the current release.
 func resolveAATokenConfig(feeToken string) (l2Addr string, markupPct uint64, decimals uint8, initialPrice *big.Int, err error) {
 	switch feeToken {
 	case constants.FeeTokenETH:
@@ -188,6 +311,6 @@ func resolveAATokenConfig(feeToken string) (l2Addr string, markupPct uint64, dec
 			constants.DefaultUSDCInitialPrice,
 			nil
 	default:
-		return "", 0, 0, nil, fmt.Errorf("fee token %q has no L2 predeploy address — manual MultiTokenPaymaster.addToken() required", feeToken)
+		return "", 0, 0, nil, fmt.Errorf("fee token %q: use deployBridgedUSDT for USDT or check token configuration", feeToken)
 	}
 }
