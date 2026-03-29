@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -22,8 +23,9 @@ import (
 //  2. SimplePriceOracle.updatePrice(initialPrice) — set initial TON/token exchange rate
 //  3. MultiTokenPaymaster.addToken(tokenAddr, oracle, markupPct, decimals) — register fee token
 //
-// For USDT (no L2 predeploy): OptimismMintableERC20Factory.createOptimismMintableERC20 is called
-// first to deploy a bridged USDT token on L2, then steps 1–3 follow using the deployed address.
+// For USDT (no L2 predeploy): OptimismMintableERC20Factory.createOptimismMintableERC20WithDecimals
+// is called first to deploy a bridged USDT token on L2. The CREATE2 address is predicted before
+// deployment via eth_call simulation. If already deployed, the existing address is used.
 func (t *ThanosStack) setupAAPaymaster(ctx context.Context) error {
 	if !constants.NeedsAASetup(t.deployConfig.Preset, t.deployConfig.FeeToken) {
 		return nil
@@ -111,12 +113,10 @@ func (t *ThanosStack) setupAAPaymaster(ctx context.Context) error {
 		}
 		l1USDTAddr := common.HexToAddress(l1USDTCfg.L1Address)
 
-		t.logger.Infof("🏭 Deploying bridged USDT on L2 via OptimismMintableERC20Factory (L1: %s)...", l1USDTCfg.L1Address)
-		deployedAddr, err := deployBridgedUSDT(l1USDTAddr, sendTxAndWait)
+		deployedAddr, err := deployBridgedUSDT(ctx, l2Client, l1USDTAddr, t.logger.Infof, sendTxAndWait)
 		if err != nil {
 			return fmt.Errorf("failed to deploy bridged USDT on L2: %w", err)
 		}
-		t.logger.Infof("✅ Bridged USDT deployed at L2: %s", deployedAddr.Hex())
 
 		tokenAddr = deployedAddr
 		markupPct = constants.USDTPaymasterMarkupPct
@@ -187,29 +187,46 @@ func (t *ThanosStack) setupAAPaymaster(ctx context.Context) error {
 	return nil
 }
 
-// deployBridgedUSDT calls OptimismMintableERC20Factory.createOptimismMintableERC20 on L2
-// to deploy a bridged USDT token, waits for the transaction receipt, and returns the
-// deployed L2 token address parsed from the OptimismMintableERC20Created event.
+// deployBridgedUSDT deploys a bridged USDT token on L2 via OptimismMintableERC20Factory
+// using createOptimismMintableERC20WithDecimals (USDT has 6 decimals, not the default 18).
+//
+// CREATE2 address prediction:
+//   - eth_call simulates the factory call before sending a real transaction.
+//   - The factory computes: CREATE2(factory, salt, keccak256(initcode)) where
+//     salt = keccak256(abi.encode(remoteToken, name, symbol, decimals)).
+//   - eth_call returns this address without modifying state, giving us the deterministic
+//     L2 token address before any gas is spent.
+//
+// Idempotency:
+//   - If eth_call fails (target address already has code from a prior deployment),
+//     the function queries OptimismMintableERC20Created events filtered by remoteToken
+//     to recover the previously deployed L2 address.
 func deployBridgedUSDT(
+	ctx context.Context,
+	l2Client *ethclient.Client,
 	l1USDTAddr common.Address,
+	logf func(format string, args ...interface{}),
 	sendTxAndWait func(common.Address, *big.Int, []byte) (*types.Receipt, error),
 ) (common.Address, error) {
 	factory := common.HexToAddress(constants.OptimismMintableERC20FactoryPredeploy)
 
-	// ABI-encode: createOptimismMintableERC20(address _remoteToken, string _name, string _symbol)
-	// Dynamic-type ABI layout:
-	//   [0:4]    selector
-	//   [4:36]   address (right-aligned)
-	//   [36:68]  offset to _name from start of args = 96 (3×32)
-	//   [68:100] offset to _symbol from start of args = 160 (96 + 32 len + 32 data)
-	//   [100:132] len("Tether USD") = 10
-	//   [132:164] "Tether USD" zero-padded to 32 bytes
-	//   [164:196] len("USDT") = 4
-	//   [196:228] "USDT" zero-padded to 32 bytes
-	selector := crypto.Keccak256([]byte("createOptimismMintableERC20(address,string,string)"))[:4]
+	// ABI-encode: createOptimismMintableERC20WithDecimals(address,string,string,uint8)
+	// ABI layout for (address, string, string, uint8) — mixed static and dynamic types:
+	//   Head section (4 × 32 = 128 bytes after selector):
+	//     [4:36]   address _remoteToken (right-aligned)
+	//     [36:68]  offset to _name from args start = 128 (0x80)
+	//     [68:100] offset to _symbol from args start = 192 (0xC0)
+	//     [100:132] uint8 _decimals = 6 (right-aligned)
+	//   Data section:
+	//     [132:164] len("Tether USD") = 10
+	//     [164:196] "Tether USD" zero-padded to 32 bytes
+	//     [196:228] len("USDT") = 4
+	//     [228:260] "USDT" zero-padded to 32 bytes
+	selector := crypto.Keccak256([]byte("createOptimismMintableERC20WithDecimals(address,string,string,uint8)"))[:4]
+	const usdtDecimals = uint8(6)
 
-	name := []byte("Tether USD") // 10 bytes → pads to 32
-	symbol := []byte("USDT")     // 4 bytes  → pads to 32
+	name := []byte("Tether USD") // 10 bytes
+	symbol := []byte("USDT")     // 4 bytes
 
 	padTo32 := func(b []byte) []byte {
 		n := (len(b) + 31) / 32 * 32
@@ -223,10 +240,12 @@ func deployBridgedUSDT(
 	paddedName := padTo32(name)   // 32 bytes
 	paddedSym := padTo32(symbol)  // 32 bytes
 
-	nameOffset := uint64(3 * 32)                                        // 96
-	symOffset := nameOffset + 32 + uint64(len(paddedName))              // 160
+	// Offsets are measured from start of args (position 4 in calldata).
+	// Head section = 4 × 32 = 128 bytes, so dynamic data starts at offset 128.
+	nameOffset := uint64(4 * 32)                              // 128
+	symOffset := nameOffset + 32 + uint64(len(paddedName))   // 192
 
-	totalLen := 4 + 3*32 + 32 + len(paddedName) + 32 + len(paddedSym) // 228
+	totalLen := 4 + 4*32 + 32 + len(paddedName) + 32 + len(paddedSym) // 260
 	calldata := make([]byte, totalLen)
 
 	copy(calldata[:4], selector)
@@ -242,35 +261,84 @@ func deployBridgedUSDT(
 	symOffBytes := new(big.Int).SetUint64(symOffset).Bytes()
 	copy(calldata[100-len(symOffBytes):100], symOffBytes)
 
-	// name length right-aligned in [100:132]
+	// decimals right-aligned in [100:132]
+	calldata[131] = usdtDecimals
+
+	// name length right-aligned in [132:164]
 	nameLenBytes := new(big.Int).SetUint64(uint64(len(name))).Bytes()
-	copy(calldata[132-len(nameLenBytes):132], nameLenBytes)
+	copy(calldata[164-len(nameLenBytes):164], nameLenBytes)
 
-	// name data
-	copy(calldata[132:132+len(paddedName)], paddedName)
+	// name data [164:196]
+	copy(calldata[164:164+len(paddedName)], paddedName)
 
-	// symbol length right-aligned in [164:196]
-	symLenOff := 132 + len(paddedName) // 164
+	// symbol length right-aligned in [196:228]
 	symLenBytes := new(big.Int).SetUint64(uint64(len(symbol))).Bytes()
-	copy(calldata[symLenOff+32-len(symLenBytes):symLenOff+32], symLenBytes)
+	copy(calldata[228-len(symLenBytes):228], symLenBytes)
 
-	// symbol data
-	copy(calldata[symLenOff+32:symLenOff+32+len(paddedSym)], paddedSym)
+	// symbol data [228:260]
+	copy(calldata[228:228+len(paddedSym)], paddedSym)
 
-	receipt, err := sendTxAndWait(factory, big.NewInt(0), calldata)
-	if err != nil {
-		return common.Address{}, fmt.Errorf("createOptimismMintableERC20 tx failed: %w", err)
-	}
+	// Predict the CREATE2 address via eth_call simulation.
+	// The factory computes CREATE2 internally and returns the address without deploying.
+	// If eth_call fails, the target address likely already has code (prior deployment).
+	simResult, simErr := l2Client.CallContract(ctx, ethereum.CallMsg{
+		To:   &factory,
+		Data: calldata,
+	}, nil)
 
-	// Parse OptimismMintableERC20Created(address indexed localToken, address indexed remoteToken, address deployer)
-	// Topics[0] = event sig, Topics[1] = localToken (L2 address, indexed)
-	eventSigHash := common.BytesToHash(crypto.Keccak256([]byte("OptimismMintableERC20Created(address,address,address)")))
-	for _, log := range receipt.Logs {
-		if log.Address == factory && len(log.Topics) >= 2 && log.Topics[0] == eventSigHash {
-			return common.BytesToAddress(log.Topics[1].Bytes()), nil
+	if simErr == nil {
+		// Not yet deployed — predicted address is the factory's CREATE2 output.
+		if len(simResult) < 32 {
+			return common.Address{}, fmt.Errorf("eth_call returned unexpected length %d", len(simResult))
 		}
+		predictedAddr := common.BytesToAddress(simResult[12:32])
+		logf("🏭 Deploying bridged USDT at predicted address %s (L1: %s)...", predictedAddr.Hex(), l1USDTAddr.Hex())
+
+		receipt, err := sendTxAndWait(factory, big.NewInt(0), calldata)
+		if err != nil {
+			return common.Address{}, fmt.Errorf("createOptimismMintableERC20WithDecimals tx failed: %w", err)
+		}
+
+		// Confirm from emitted event.
+		eventSigHash := common.BytesToHash(crypto.Keccak256([]byte("OptimismMintableERC20Created(address,address,address)")))
+		for _, log := range receipt.Logs {
+			if log.Address == factory && len(log.Topics) >= 2 && log.Topics[0] == eventSigHash {
+				deployedAddr := common.BytesToAddress(log.Topics[1].Bytes())
+				logf("✅ Bridged USDT deployed at L2: %s", deployedAddr.Hex())
+				return deployedAddr, nil
+			}
+		}
+		// Event not found — trust the predicted address (factory return value).
+		logf("✅ Bridged USDT deployed at L2 (from prediction): %s", predictedAddr.Hex())
+		return predictedAddr, nil
 	}
-	return common.Address{}, fmt.Errorf("OptimismMintableERC20Created event not found in receipt (tx: %s)", receipt.TxHash.Hex())
+
+	// eth_call failed — token was likely already deployed in a prior run (idempotency).
+	// Recover the L2 address by querying OptimismMintableERC20Created events filtered
+	// by remoteToken (indexed topic[2] = L1 USDT address).
+	logf("ℹ️  eth_call simulation failed (%v); checking for prior USDT deployment...", simErr)
+
+	eventSigHash := common.BytesToHash(crypto.Keccak256([]byte("OptimismMintableERC20Created(address,address,address)")))
+	query := ethereum.FilterQuery{
+		Addresses: []common.Address{factory},
+		Topics: [][]common.Hash{
+			{eventSigHash},
+			{},                                                  // any localToken
+			{common.BytesToHash(l1USDTAddr.Bytes())},            // remoteToken = L1 USDT (indexed)
+		},
+		FromBlock: big.NewInt(0),
+	}
+	logs, err := l2Client.FilterLogs(ctx, query)
+	if err != nil {
+		return common.Address{}, fmt.Errorf("eth_call failed: %v; event query also failed: %w", simErr, err)
+	}
+	if len(logs) == 0 {
+		return common.Address{}, fmt.Errorf("eth_call failed: %v; no prior USDT deployment found in factory events", simErr)
+	}
+	// topics[1] = localToken (L2 address, indexed)
+	existingAddr := common.BytesToAddress(logs[0].Topics[1].Bytes())
+	logf("ℹ️  Bridged USDT already deployed at L2: %s (reusing)", existingAddr.Hex())
+	return existingAddr, nil
 }
 
 // aaMarkupForToken returns the markup percent for the given fee token (used for log messages).
