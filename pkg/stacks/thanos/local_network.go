@@ -100,11 +100,11 @@ type localComposeData struct {
 	// Monitoring
 	MonitoringConfigVolume string
 	// AA operator — deployed as a Docker service for non-TON fee tokens on Gaming/Full presets
-	AAOperatorEnabled   bool
-	AAOperatorImage     string
-	AAAdminPrivateKey   string
-	AAFeeToken          string
-	CoinGeckoAPIKey     string
+	AAOperatorEnabled bool
+	TRHSDKImage       string
+	AAAdminPrivateKey string
+	AAFeeToken        string
+	CoinGeckoAPIKey   string
 }
 
 func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
@@ -319,7 +319,7 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 	// It keeps SimplePriceOracle fresh and auto-refills the EntryPoint deposit.
 	if constants.NeedsAASetup(t.deployConfig.Preset, t.deployConfig.FeeToken) {
 		data.AAOperatorEnabled = true
-		data.AAOperatorImage = fmt.Sprintf("tokamaknetwork/aa-operator:%s", imageTags.ThanosStackImageTag)
+		data.TRHSDKImage = fmt.Sprintf("tokamaknetwork/trh-sdk:latest")
 		data.AAAdminPrivateKey = t.deployConfig.AdminPrivateKey
 		data.AAFeeToken = t.deployConfig.FeeToken
 		data.CoinGeckoAPIKey = os.Getenv("COINGECKO_API_KEY")

@@ -326,7 +326,9 @@ services:
 {{- if .AAOperatorEnabled }}
 
   aa-operator:
-    image: {{.AAOperatorImage}}
+    image: {{.TRHSDKImage}}
+    command: ["go", "run", "./cmd/aa-operator"]
+    working_dir: /app
     environment:
       - L2_RPC_URL=http://op-geth:8545
       - ADMIN_PRIVATE_KEY={{.AAAdminPrivateKey}}
