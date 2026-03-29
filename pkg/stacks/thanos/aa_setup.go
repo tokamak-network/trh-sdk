@@ -191,6 +191,10 @@ func (t *ThanosStack) setupAAPaymaster(ctx context.Context) error {
 		return fmt.Errorf("Phase 2 Uniswap V3 oracle setup failed: %w", err)
 	}
 
+	// Start background monitor that auto-refills EntryPoint deposit when it falls below 0.5 TON.
+	// The monitor runs until ctx is cancelled (stack shutdown). Errors are logged but non-fatal.
+	t.startEntryPointRefillMonitor(ctx)
+
 	return nil
 }
 
