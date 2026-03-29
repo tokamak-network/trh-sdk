@@ -411,6 +411,15 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			t.logger.Info("✅ The admin account has sufficient balance to proceed with deployment.")
 		}
 
+		// Inform the operator about automatic AA Paymaster setup that will run after L2 starts.
+		if constants.NeedsAASetup(deployContractsConfig.Preset, deployContractsConfig.FeeToken) {
+			t.logger.Infof("ℹ️  Fee token: %s (non-TON)", deployContractsConfig.FeeToken)
+			t.logger.Infof("ℹ️  AA Paymaster will be configured automatically after L2 network starts:")
+			t.logger.Infof("    • %s native token deposited to EntryPoint for gas sponsorship", constants.DefaultEntryPointDeposit.String())
+			t.logger.Infof("    • %s registered with MultiTokenPaymaster (markup: %d BPS)", deployContractsConfig.FeeToken, aaMarkupForToken(deployContractsConfig.FeeToken))
+			t.logger.Infof("    • SimplePriceOracle price set with initial placeholder value (update post-deployment)")
+		}
+
 		t.deployConfig.DeployContractState = &types.DeployContractState{
 			Status: types.DeployContractStatusInProgress,
 		}

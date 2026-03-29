@@ -155,6 +155,20 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 		}
 	}
 
+	// Setup AA Paymaster for non-TON fee tokens (Gaming/Full presets only).
+	// Runs after core services are healthy. Non-blocking: failure logs a warning
+	// but does not prevent the L2 network from starting.
+	if constants.NeedsAASetup(t.deployConfig.Preset, t.deployConfig.FeeToken) {
+		t.logger.Infof("🔧 Configuring AA Paymaster for fee token: %s", t.deployConfig.FeeToken)
+		if aaErr := t.setupAAPaymaster(ctx); aaErr != nil {
+			t.logger.Warnf("⚠️  AA Paymaster setup failed: %v", aaErr)
+			t.logger.Warn("   AA fee payment features may not work until paymaster is configured manually.")
+			t.logger.Warn("   Re-run `trh-sdk setup-aa` or call setupAAPaymaster via the admin API.")
+		} else {
+			t.logger.Infof("✅ AA Paymaster configured for %s", t.deployConfig.FeeToken)
+		}
+	}
+
 	// Start preset module services
 	modules := constants.PresetModules[t.deployConfig.Preset]
 	if err := t.startLocalModules(ctx, composePath, modules); err != nil {
