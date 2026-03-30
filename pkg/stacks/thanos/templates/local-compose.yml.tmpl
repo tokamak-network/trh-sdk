@@ -190,12 +190,17 @@ services:
       - POSTGRES_USER=postgres
     volumes:
       - blockscout-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d blockscout"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     profiles: ["blockExplorer"]
     restart: unless-stopped
 
   blockscout:
     image: blockscout/blockscout-optimism:6.10.1
-    command: ["bin/blockscout", "start"]
+    command: ["/bin/sh", "-c", "/app/bin/blockscout eval 'Explorer.ReleaseTasks.create_and_migrate()' && /app/bin/blockscout start"]
     ports:
       - "4000:4000"
     environment:
@@ -218,7 +223,14 @@ services:
       - INDEXER_OPTIMISM_L2_WITHDRAWALS_START_BLOCK=1
       - INDEXER_OPTIMISM_L2_BATCH_GENESIS_BLOCK_NUMBER=0
     depends_on:
-      - blockscout-db
+      blockscout-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/bin/sh", "-c", "curl -sf http://localhost:4000/api/v2/blocks?limit=1 > /dev/null"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
     profiles: ["blockExplorer"]
     restart: unless-stopped
 
@@ -244,7 +256,8 @@ services:
       - NEXT_PUBLIC_FAULT_PROOF_ENABLED=true
 {{- end}}
     depends_on:
-      - blockscout
+      blockscout:
+        condition: service_healthy
     profiles: ["blockExplorer"]
     restart: unless-stopped
 
