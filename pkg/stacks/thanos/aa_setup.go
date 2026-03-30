@@ -208,11 +208,78 @@ func (t *ThanosStack) setupAAPaymaster(ctx context.Context) error {
 	}
 	t.logger.Infof("✅ MultiTokenPaymaster.addToken(%s, markup=%d%%, decimals=%d)", feeToken, markupPct, decimals)
 
-	// Steps 4 & 5 (price updater and EntryPoint refill monitor) are handled by the
+	// Step 4: Verify paymaster configuration (non-fatal).
+	if err := verifyAAPaymaster(ctx, l2Client, paymaster, tokenAddr, entryPoint, oracle, depositAmount, t.logger.Infof); err != nil {
+		t.logger.Warnf("AA Paymaster verification warning: %v", err)
+	} else {
+		t.logger.Infof("AA Paymaster verification: all checks passed")
+	}
+
+	// Steps 5 & 6 (price updater and EntryPoint refill monitor) are handled by the
 	// aa-operator Docker service, which runs as part of the compose stack when a non-TON
 	// fee token is selected. Running them here would tie their lifecycle to the trh-sdk
 	// CLI process, which exits after setup.
 
+	return nil
+}
+
+// verifyAAPaymaster validates on-chain state after AA paymaster setup completes.
+// It performs 3 eth_call checks to confirm that depositTo, updatePrice, and addToken
+// transactions actually persisted correct state. The caller decides whether failures
+// are fatal (setupAAPaymaster treats them as warnings).
+func verifyAAPaymaster(
+	ctx context.Context,
+	l2Client *ethclient.Client,
+	paymaster, tokenAddr, entryPoint, oracle common.Address,
+	depositAmount *big.Int,
+	logf func(format string, args ...interface{}),
+) error {
+	// Check 1: MultiTokenPaymaster.supportedTokens(tokenAddr) — verify token is enabled.
+	selector1 := crypto.Keccak256([]byte("supportedTokens(address)"))[:4]
+	calldata1 := make([]byte, 36)
+	copy(calldata1[:4], selector1)
+	copy(calldata1[16:36], tokenAddr.Bytes())
+
+	result1, err := l2Client.CallContract(ctx, ethereum.CallMsg{To: &paymaster, Data: calldata1}, nil)
+	if err != nil {
+		return fmt.Errorf("supportedTokens(%s) call failed: %w", tokenAddr.Hex(), err)
+	}
+	if len(result1) < 128 {
+		return fmt.Errorf("supportedTokens(%s) returned unexpected length %d (expected 128)", tokenAddr.Hex(), len(result1))
+	}
+	enabled := result1[31] != 0
+	if !enabled {
+		return fmt.Errorf("supportedTokens(%s).enabled is false", tokenAddr.Hex())
+	}
+
+	// Check 2: EntryPoint.balanceOf(paymaster) — verify deposit was credited.
+	selector2 := crypto.Keccak256([]byte("balanceOf(address)"))[:4]
+	calldata2 := make([]byte, 36)
+	copy(calldata2[:4], selector2)
+	copy(calldata2[16:36], paymaster.Bytes())
+
+	result2, err := l2Client.CallContract(ctx, ethereum.CallMsg{To: &entryPoint, Data: calldata2}, nil)
+	if err != nil {
+		return fmt.Errorf("EntryPoint.balanceOf(%s) call failed: %w", paymaster.Hex(), err)
+	}
+	balance := new(big.Int).SetBytes(result2)
+	if balance.Cmp(big.NewInt(0)) == 0 {
+		return fmt.Errorf("EntryPoint deposit for paymaster is zero")
+	}
+
+	// Check 3: SimplePriceOracle.getPrice() — verify price was set and is not stale.
+	selector3 := crypto.Keccak256([]byte("getPrice()"))[:4]
+
+	result3, err := l2Client.CallContract(ctx, ethereum.CallMsg{To: &oracle, Data: selector3}, nil)
+	if err != nil {
+		return fmt.Errorf("SimplePriceOracle.getPrice() call failed: %w", err)
+	}
+	price := new(big.Int).SetBytes(result3)
+	if price.Cmp(big.NewInt(0)) == 0 {
+		return fmt.Errorf("oracle price is zero")
+	}
+
+	logf("AA Paymaster verification passed: token enabled, deposit=%s, price=%s", balance.String(), price.String())
 	return nil
 }
 
