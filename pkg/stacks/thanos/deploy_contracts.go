@@ -491,13 +491,21 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			t.logger.Error("❌ Failed to inject DRB into genesis!", "err", err)
 			return err
 		}
+	}
 
-		// Update rollup.json L2 genesis hash to match the modified genesis
-		rollupPath := filepath.Join(t.deploymentPath, "tokamak-thanos", "build", "rollup.json")
-		if err := updateRollupGenesisHash(t.logger, genesisPath, rollupPath); err != nil {
-			t.logger.Errorf("❌ Failed to update rollup.json genesis hash: %v", err)
-			return err
-		}
+	// STEP 5.2: Inject USDC (FiatTokenV2_2) predeploy into genesis for ALL presets
+	// For DeFi/Full: tokamak-thanos already includes USDC — injectUSDCIntoGenesis skips if present
+	t.logger.Info("Injecting USDC (FiatTokenV2_2) predeploy into genesis...")
+	if err := injectUSDCIntoGenesis(genesisPath, t.deploymentPath); err != nil {
+		t.logger.Error("❌ Failed to inject USDC into genesis!", "err", err)
+		return err
+	}
+
+	// STEP 5.3: Update rollup.json genesis hash after ALL genesis modifications
+	rollupPath := filepath.Join(t.deploymentPath, "tokamak-thanos", "build", "rollup.json")
+	if err := updateRollupGenesisHash(t.logger, genesisPath, rollupPath); err != nil {
+		t.logger.Errorf("❌ Failed to update rollup.json genesis hash: %v", err)
+		return err
 	}
 
 	t.logger.Infof("✅ Configuration successfully saved to: %s/settings.json", t.deploymentPath)
