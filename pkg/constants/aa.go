@@ -3,7 +3,7 @@ package constants
 import "math/big"
 
 // AA paymaster setup constants.
-// These apply only to Gaming/Full presets when fee token is not TON.
+// These apply to all presets when fee token is not TON.
 
 // OptimismMintableERC20FactoryPredeploy is the L2 predeploy address of the factory used to
 // deploy bridged ERC20 tokens (e.g. USDT) via the Standard Bridge.
@@ -40,10 +40,12 @@ var (
 	DefaultUSDTInitialPrice = new(big.Int).Mul(big.NewInt(15), new(big.Int).Exp(big.NewInt(10), big.NewInt(17), nil)) // 1.5e18
 )
 
-// AAPresetsWithPaymaster lists presets that include AA predeploy contracts.
+// AAPresetsWithPaymaster lists presets that include AA predeploy contracts (all presets).
 var AAPresetsWithPaymaster = map[string]bool{
-	PresetGaming: true,
-	PresetFull:   true,
+	PresetGeneral: true,
+	PresetDeFi:    true,
+	PresetGaming:  true,
+	PresetFull:    true,
 }
 
 // IsAAPreset returns true if the given preset includes AA infrastructure.
@@ -52,7 +54,7 @@ func IsAAPreset(preset string) bool {
 }
 
 // NeedsAASetup returns true when AA paymaster configuration is required:
-// the preset includes AA contracts AND the fee token is not TON (which is the L2 native token).
+// All presets include AA contracts; setup is needed when fee token is not TON (the L2 native token).
 func NeedsAASetup(preset, feeToken string) bool {
 	return IsAAPreset(preset) && feeToken != FeeTokenTON
 }
