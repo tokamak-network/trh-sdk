@@ -20,17 +20,10 @@ const (
 	// refillPollInterval is how often the monitor checks the EntryPoint balance.
 	refillPollInterval = 5 * time.Minute
 
-	// refillThresholdWei is the EntryPoint deposit threshold below which a top-up is triggered.
-	// 0.5 TON expressed in wei.
-	refillThresholdWei = uint64(5e17)
-
-	// refillAmountWei is how much TON to deposit per refill call.
-	// 5 TON expressed in wei.
-	refillAmountWei = uint64(5e18)
-
-	// adminWarnThresholdWei is the admin wallet balance below which a warning is logged.
-	// 2 TON expressed in wei.
-	adminWarnThresholdWei = uint64(2e18)
+	// Base thresholds at 18 decimals — scaled at runtime by feeTokenDecimals().
+	refillThresholdBase18   = uint64(5e17) // 0.5 token (18 dec)
+	refillAmountBase18      = uint64(5e18) // 5 tokens (18 dec)
+	adminWarnThresholdBase18 = uint64(2e18) // 2 tokens (18 dec)
 )
 
 // startEntryPointRefillMonitor starts a background goroutine that periodically checks
@@ -61,7 +54,16 @@ func (t *ThanosStack) startEntryPointRefillMonitor(ctx context.Context) {
 			}
 		}
 	}()
-	t.logger.Infof("EntryPoint refill monitor started (poll=%s, threshold=0.5 TON, refill=5 TON)", refillPollInterval)
+	dec := feeTokenDecimals(t.deployConfig.FeeToken)
+	var sf *big.Int
+	if dec < 18 {
+		sf = new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(18-dec)), nil)
+	} else {
+		sf = big.NewInt(1)
+	}
+	logThreshold := new(big.Int).Div(new(big.Int).SetUint64(refillThresholdBase18), sf)
+	logRefill := new(big.Int).Div(new(big.Int).SetUint64(refillAmountBase18), sf)
+	t.logger.Infof("EntryPoint refill monitor started (poll=%s, threshold=%s, refill=%s, token=%s)", refillPollInterval, logThreshold.String(), logRefill.String(), t.deployConfig.FeeToken)
 }
 
 // refillMu guards against concurrent refill transactions from multiple monitor ticks.
@@ -85,14 +87,25 @@ func (t *ThanosStack) checkAndRefillEntryPoint(ctx context.Context) error {
 		return fmt.Errorf("balanceOf query failed: %w", err)
 	}
 
-	threshold := new(big.Int).SetUint64(refillThresholdWei)
+	// Scale thresholds by fee token decimals.
+	dec := feeTokenDecimals(t.deployConfig.FeeToken)
+	var scaleFactor *big.Int
+	if dec < 18 {
+		scaleFactor = new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(18-dec)), nil)
+	} else {
+		scaleFactor = big.NewInt(1)
+	}
+	threshold := new(big.Int).Div(new(big.Int).SetUint64(refillThresholdBase18), scaleFactor)
+	refillValue := new(big.Int).Div(new(big.Int).SetUint64(refillAmountBase18), scaleFactor)
+	warnThreshold := new(big.Int).Div(new(big.Int).SetUint64(adminWarnThresholdBase18), scaleFactor)
+
 	if deposit.Cmp(threshold) >= 0 {
 		// Enough balance — no action needed.
 		t.logger.Infof("EntryPoint deposit OK: %s wei (threshold=%s)", deposit.String(), threshold.String())
 		return nil
 	}
 
-	t.logger.Infof("EntryPoint deposit low: %s wei — triggering refill (5 TON)", deposit.String())
+	t.logger.Infof("EntryPoint deposit low: %s wei — triggering refill (%s wei)", deposit.String(), refillValue.String())
 
 	// Guard against overlapping refill transactions.
 	if !refillMu.TryLock() {
@@ -108,12 +121,11 @@ func (t *ThanosStack) checkAndRefillEntryPoint(ctx context.Context) error {
 	}
 	adminAddr := crypto.PubkeyToAddress(privKey.PublicKey)
 
-	// Warn if admin wallet is running low on TON.
+	// Warn if admin wallet balance is running low.
 	adminBalance, err := l2Client.BalanceAt(ctx, adminAddr, nil)
 	if err == nil {
-		warnThreshold := new(big.Int).SetUint64(adminWarnThresholdWei)
 		if adminBalance.Cmp(warnThreshold) < 0 {
-			t.logger.Warnf("⚠️  Admin wallet TON balance is low: %s wei — refill may fail soon", adminBalance.String())
+			t.logger.Warnf("admin wallet balance is low: %s wei", adminBalance.String())
 		}
 	}
 
@@ -159,12 +171,11 @@ func (t *ThanosStack) checkAndRefillEntryPoint(ctx context.Context) error {
 	copy(calldata[:4], selector)
 	copy(calldata[16:36], paymaster.Bytes())
 
-	refillValue := new(big.Int).SetUint64(refillAmountWei)
 	if _, err := sendTxAndWait(entryPoint, refillValue, calldata); err != nil {
 		return fmt.Errorf("depositTo failed: %w", err)
 	}
 
-	t.logger.Infof("✅ EntryPoint refilled: deposited 5 TON to paymaster %s", paymaster.Hex())
+	t.logger.Infof("✅ EntryPoint refilled: deposited %s wei to paymaster %s", refillValue.String(), paymaster.Hex())
 	return nil
 }
 
