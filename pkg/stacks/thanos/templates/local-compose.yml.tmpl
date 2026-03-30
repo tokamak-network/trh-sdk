@@ -445,6 +445,29 @@ services:
       op-geth:
         condition: service_healthy
     restart: unless-stopped
+
+  alto-bundler:
+    image: ghcr.io/pimlicolabs/alto:v1.2.7
+    command:
+      - run
+      - --entrypoints
+      - "0x4200000000000000000000000000000000000063"
+      - --rpc-url
+      - "http://op-geth:8545"
+      - --executor-private-keys
+      - "{{.AAAdminPrivateKey}}"
+      - --utility-private-key
+      - "{{.AAAdminPrivateKey}}"
+      - --safe-mode
+      - "false"
+      - --chain-type
+      - "op-stack"
+    ports:
+      - "4337:4337"
+    depends_on:
+      op-geth:
+        condition: service_healthy
+    restart: unless-stopped
 {{- end }}
 
 volumes:
