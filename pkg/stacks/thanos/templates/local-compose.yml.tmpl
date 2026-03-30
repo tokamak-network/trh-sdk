@@ -208,7 +208,7 @@ services:
       - ETHEREUM_JSONRPC_HTTP_URL=http://op-geth:8545
       - ETHEREUM_JSONRPC_WS_URL=ws://op-geth:8546
       - ETHEREUM_JSONRPC_VARIANT=geth
-      - COIN=ETH
+      - COIN={{.BlockExplorerCoinSymbol}}
       - NETWORK=L2
       - SUBNETWORK=Optimism
       - CHAIN_ID={{.L2ChainID}}
@@ -259,6 +259,9 @@ services:
       - NEXT_PUBLIC_NETWORK_NAME={{.BlockExplorerNetworkName}}
       - NEXT_PUBLIC_NETWORK_SHORT_NAME={{.BlockExplorerNetworkName}}
       - NEXT_PUBLIC_NETWORK_ID={{.L2ChainID}}
+      - NEXT_PUBLIC_NETWORK_CURRENCY_NAME={{.BlockExplorerCoinName}}
+      - NEXT_PUBLIC_NETWORK_CURRENCY_SYMBOL={{.BlockExplorerCoinSymbol}}
+      - NEXT_PUBLIC_NETWORK_CURRENCY_DECIMALS={{.BlockExplorerCoinDecimals}}
       - NEXT_PUBLIC_ROLLUP_TYPE=optimistic
       - NEXT_PUBLIC_ROLLUP_L1_BASE_URL={{.BlockExplorerL1BaseURL}}
       - NEXT_PUBLIC_ROLLUP_L2_WITHDRAWAL_URL=http://localhost:3001

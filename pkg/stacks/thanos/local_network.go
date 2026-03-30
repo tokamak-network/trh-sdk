@@ -100,6 +100,9 @@ type localComposeData struct {
 	BlockExplorerSystemConfigAddress string
 	BlockExplorerBatchInboxAddress   string
 	BlockExplorerL1StartBlock        uint64
+	BlockExplorerCoinSymbol          string
+	BlockExplorerCoinName            string
+	BlockExplorerCoinDecimals        uint8
 	// Monitoring
 	MonitoringConfigVolume string
 	// AA operator — deployed as a Docker service for non-TON fee tokens on Gaming/Full presets
@@ -305,6 +308,9 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		BlockExplorerSystemConfigAddress: contracts.SystemConfigProxy,
 		BlockExplorerBatchInboxAddress:   utils.GenerateBatchInboxAddress(t.deployConfig.L2ChainID),
 		BlockExplorerL1StartBlock:        readRollupL1GenesisBlock(rollupPath, t.logger),
+		BlockExplorerCoinSymbol:          feeTokenConfig.Symbol,
+		BlockExplorerCoinName:            feeTokenConfig.Name,
+		BlockExplorerCoinDecimals:        feeTokenDecimals(t.deployConfig.FeeToken),
 		MonitoringConfigVolume:           localMonitoringVolume,
 	}
 
