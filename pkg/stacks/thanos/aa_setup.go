@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/holiman/uint256"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 )
 
@@ -215,7 +216,83 @@ func (t *ThanosStack) setupAAPaymaster(ctx context.Context) error {
 		t.logger.Infof("AA Paymaster verification: all checks passed")
 	}
 
-	// Steps 5 & 6 (price updater and EntryPoint refill monitor) are handled by the
+	// Step 5: EIP-7702 delegation — admin EOA → Simple7702Account
+	// Sets admin EOA's code pointer to Simple7702Account predeploy so it can be
+	// used as an ERC-4337 smart account without redeployment.
+	// Requires Isthmus hardfork (SetCode tx type 0x04) to be active on L2.
+	t.logger.Infof("🔧 Delegating admin EOA to Simple7702Account via EIP-7702...")
+
+	simple7702Addr := common.HexToAddress("0x4200000000000000000000000000000000000065")
+
+	delegationNonce, err := l2Client.PendingNonceAt(ctx, adminAddr)
+	if err != nil {
+		return fmt.Errorf("failed to get nonce for EIP-7702 delegation: %w", err)
+	}
+
+	chainIDU256, overflow := uint256.FromBig(l2ChainID)
+	if overflow {
+		return fmt.Errorf("l2ChainID overflows uint256: %s", l2ChainID.String())
+	}
+
+	auth := types.SetCodeAuthorization{
+		ChainID: *chainIDU256,
+		Address: simple7702Addr,
+		Nonce:   delegationNonce,
+	}
+	signedAuth, err := types.SignSetCode(privKey, auth)
+	if err != nil {
+		return fmt.Errorf("failed to sign EIP-7702 authorization: %w", err)
+	}
+
+	gasTipCapBig, err := l2Client.SuggestGasTipCap(ctx)
+	if err != nil {
+		gasTipCapBig = big.NewInt(1_000_000_000) // fallback: 1 Gwei
+	}
+	gasTipCap, _ := uint256.FromBig(new(big.Int).Mul(gasTipCapBig, big.NewInt(2)))
+	gasFeeCapBig := new(big.Int).Add(gasTipCapBig, big.NewInt(2_000_000_000)) // tip + 2 Gwei base
+	gasFeeCap, _ := uint256.FromBig(new(big.Int).Mul(gasFeeCapBig, big.NewInt(2)))
+
+	setCodeTx := types.NewTx(&types.SetCodeTx{
+		ChainID:   chainIDU256,
+		Nonce:     delegationNonce,
+		GasTipCap: gasTipCap,
+		GasFeeCap: gasFeeCap,
+		Gas:       100_000,
+		To:        adminAddr, // self-delegation: admin EOA is both sender and To
+		Value:     uint256.NewInt(0),
+		AuthList:  []types.SetCodeAuthorization{signedAuth},
+	})
+
+	// CRITICAL: SetCodeTx requires LatestSignerForChainID, NOT NewEIP155Signer.
+	// EIP155Signer does not support tx type 0x04 and will return a type error.
+	delegationSigner := types.LatestSignerForChainID(l2ChainID)
+	signedSetCodeTx, err := types.SignTx(setCodeTx, delegationSigner, privKey)
+	if err != nil {
+		return fmt.Errorf("failed to sign SetCode tx: %w", err)
+	}
+
+	if err := l2Client.SendTransaction(ctx, signedSetCodeTx); err != nil {
+		return fmt.Errorf("failed to send EIP-7702 delegation tx: %w", err)
+	}
+
+	// Wait for delegation tx receipt (same polling pattern as sendTxAndWait).
+	delegationHash := signedSetCodeTx.Hash()
+	for attempt := 1; attempt <= 30; attempt++ {
+		receipt, err := l2Client.TransactionReceipt(ctx, delegationHash)
+		if err == nil {
+			if receipt.Status != 1 {
+				return fmt.Errorf("EIP-7702 delegation tx %s reverted (status=%d)", delegationHash.Hex(), receipt.Status)
+			}
+			t.logger.Infof("EIP-7702 delegation complete: admin EOA %s -> Simple7702Account %s (tx: %s)", adminAddr.Hex(), simple7702Addr.Hex(), delegationHash.Hex())
+			break
+		}
+		if attempt == 30 {
+			return fmt.Errorf("EIP-7702 delegation tx %s not mined after 60s", delegationHash.Hex())
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	// Steps 6 & 7 (price updater and EntryPoint refill monitor) are handled by the
 	// aa-operator Docker service, which runs as part of the compose stack when a non-TON
 	// fee token is selected. Running them here would tie their lifecycle to the trh-sdk
 	// CLI process, which exits after setup.
