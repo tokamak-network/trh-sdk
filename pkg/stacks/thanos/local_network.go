@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -94,9 +95,11 @@ type localComposeData struct {
 	BridgeOutputRootFrequency           uint64
 	BridgeChallengePeriod               uint64
 	// Block Explorer environment variables
-	BlockExplorerNetworkName        string
-	BlockExplorerL1BaseURL          string
+	BlockExplorerNetworkName         string
+	BlockExplorerL1BaseURL           string
 	BlockExplorerSystemConfigAddress string
+	BlockExplorerBatchInboxAddress   string
+	BlockExplorerL1StartBlock        uint64
 	// Monitoring
 	MonitoringConfigVolume string
 	// AA operator — deployed as a Docker service for non-TON fee tokens on Gaming/Full presets
@@ -297,10 +300,12 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		BridgeOutputRootFrequency:           t.deployConfig.ChainConfiguration.OutputRootFrequency,
 		BridgeChallengePeriod:               t.deployConfig.ChainConfiguration.ChallengePeriod,
 		// Block Explorer
-		BlockExplorerNetworkName:             t.deployConfig.ChainName,
-		BlockExplorerL1BaseURL:               l1ChainConfig.BlockExplorer,
-		BlockExplorerSystemConfigAddress:     contracts.SystemConfigProxy,
-		MonitoringConfigVolume:               localMonitoringVolume,
+		BlockExplorerNetworkName:         t.deployConfig.ChainName,
+		BlockExplorerL1BaseURL:           l1ChainConfig.BlockExplorer,
+		BlockExplorerSystemConfigAddress: contracts.SystemConfigProxy,
+		BlockExplorerBatchInboxAddress:   utils.GenerateBatchInboxAddress(t.deployConfig.L2ChainID),
+		BlockExplorerL1StartBlock:        readRollupL1GenesisBlock(rollupPath, t.logger),
+		MonitoringConfigVolume:           localMonitoringVolume,
 	}
 
 	// Derive DRB leader EOA from admin private key for gaming/full presets
@@ -740,6 +745,29 @@ func (t *ThanosStack) writeComposeEnvFile(composePath string) error {
 
 	content := fmt.Sprintf("COMPOSE_PROFILES=%s\n", strings.Join(profiles, ","))
 	return os.WriteFile(envPath, []byte(content), 0644)
+}
+
+// readRollupL1GenesisBlock reads genesis.l1.number from rollup.json so Blockscout
+// knows which L1 block to start scanning from for deposits/withdrawals/batches.
+// Returns 0 on any error (Blockscout will scan from genesis, which is slower but safe).
+func readRollupL1GenesisBlock(rollupPath string, logger interface{ Warnf(string, ...any) }) uint64 {
+	data, err := os.ReadFile(rollupPath)
+	if err != nil {
+		logger.Warnf("Could not read rollup.json for L1 start block: %v", err)
+		return 0
+	}
+	var rollup struct {
+		Genesis struct {
+			L1 struct {
+				Number uint64 `json:"number"`
+			} `json:"l1"`
+		} `json:"genesis"`
+	}
+	if err := json.Unmarshal(data, &rollup); err != nil {
+		logger.Warnf("Could not parse rollup.json for L1 start block: %v", err)
+		return 0
+	}
+	return rollup.Genesis.L1.Number
 }
 
 func generateJWTSecret(path string) error {

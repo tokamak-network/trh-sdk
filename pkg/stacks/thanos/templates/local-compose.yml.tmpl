@@ -218,8 +218,17 @@ services:
       - PORT=4000
       - POOL_SIZE=10
       - CHAIN_TYPE=optimism
-      - INDEXER_OPTIMISM_L1_RPC={{.L1RpcUrl}}
+      # Use a public rate-limit-free RPC for L1 indexing (Alchemy free tier blocks 250-block eth_getLogs ranges)
+      - INDEXER_OPTIMISM_L1_RPC=https://ethereum-sepolia-rpc.publicnode.com
+      - INDEXER_BEACON_RPC_URL=https://ethereum-sepolia-beacon-api.publicnode.com
       - INDEXER_OPTIMISM_L1_SYSTEM_CONFIG_CONTRACT={{.BlockExplorerSystemConfigAddress}}
+      - INDEXER_OPTIMISM_L1_PORTAL_CONTRACT={{.BridgeOptimismPortalAddress}}
+      - INDEXER_OPTIMISM_L1_DISPUTE_GAME_FACTORY_CONTRACT={{.DisputeGameFactoryAddress}}
+      - INDEXER_OPTIMISM_L1_BATCH_INBOX={{.BlockExplorerBatchInboxAddress}}
+      - INDEXER_OPTIMISM_L1_BATCH_START_BLOCK={{.BlockExplorerL1StartBlock}}
+      # Blobs API points to this Blockscout instance; INDEXER_BEACON_RPC_URL indexes EIP-4844 blobs,
+      # and the OP batch fetcher reads them via the /api/v2/blobs endpoint on the same host.
+      - INDEXER_OPTIMISM_L1_BATCH_BLOCKSCOUT_BLOBS_API_URL=http://blockscout:4000
       - INDEXER_OPTIMISM_L2_WITHDRAWALS_START_BLOCK=1
       - INDEXER_OPTIMISM_L2_BATCH_GENESIS_BLOCK_NUMBER=0
     depends_on:
