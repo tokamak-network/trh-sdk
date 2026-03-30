@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -853,6 +854,16 @@ func initGenesisAnchorState(
 	if err := l1Client.SendTransaction(ctx, signedTx); err != nil {
 		return fmt.Errorf("failed to send setInitialAnchorState tx: %w", err)
 	}
-	logger.Infof("✅ setInitialAnchorState tx sent: %s", signedTx.Hash().Hex())
+	logger.Infof("setInitialAnchorState tx sent: %s (waiting for receipt...)", signedTx.Hash().Hex())
+
+	receipt, err := bind.WaitMined(ctx, l1Client, signedTx)
+	if err != nil {
+		return fmt.Errorf("failed to wait for setInitialAnchorState tx receipt: %w", err)
+	}
+	if receipt.Status != ethtypes.ReceiptStatusSuccessful {
+		return fmt.Errorf("setInitialAnchorState tx reverted (tx: %s, gas used: %d) — the deployed AnchorStateRegistry may lack the setInitialAnchorState function; check that forge recompiled the patched contract",
+			signedTx.Hash().Hex(), receipt.GasUsed)
+	}
+	logger.Infof("✅ setInitialAnchorState confirmed in block %d (tx: %s)", receipt.BlockNumber.Uint64(), signedTx.Hash().Hex())
 	return nil
 }

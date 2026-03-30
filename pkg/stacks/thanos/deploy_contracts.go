@@ -248,17 +248,21 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		forgeCacheDir := filepath.Join(t.deploymentPath, ".forge-cache")
 
 		var prestateHash string
+
+		// Patch AnchorStateRegistry BEFORE the parallel tracks start.
+		// Track B may build contracts, so the source must already be patched.
+		if deployContractsConfig.EnableFaultProof {
+			if patchErr := patchAnchorStateRegistry(tokamakThanosDir); patchErr != nil {
+				return fmt.Errorf("failed to patch AnchorStateRegistry.sol: %w", patchErr)
+			}
+			t.logger.Info("✅ AnchorStateRegistry.sol patched with setInitialAnchorState")
+		}
+
 		g, gctx := errgroup.WithContext(ctx)
 
 		// Track A: Cannon prestate (only when fault proof is enabled, ~34.5s)
 		if deployContractsConfig.EnableFaultProof {
 			g.Go(func() error {
-				// Patch AnchorStateRegistry.sol to add setInitialAnchorState for bootstrapping
-				if patchErr := patchAnchorStateRegistry(tokamakThanosDir); patchErr != nil {
-					return fmt.Errorf("failed to patch AnchorStateRegistry.sol: %w", patchErr)
-				}
-				t.logger.Info("✅ AnchorStateRegistry.sol patched with setInitialAnchorState")
-
 				// Build cannon prestate to extract FaultGameAbsolutePrestate hash
 				prestatePath := filepath.Join(tokamakThanosDir, "op-program", "bin", "prestate.json")
 				if _, statErr := os.Stat(prestatePath); os.IsNotExist(statErr) {
@@ -303,8 +307,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 				t.logger.Warn("Pre-built artifacts unavailable, will build from source", "err", dlErr)
 				restoreForgeCache(t.logger, forgeCacheDir, contractsDir)
 			} else {
-				t.logger.Info("✅ Pre-built artifacts downloaded, forge build will be skipped")
-				os.Setenv("SKIP_FORGE_BUILD", "true")
+				t.logger.Info("✅ Pre-built artifacts downloaded")
 
 				// Create non-versioned symlinks in Go (replaces slow shell find loop: ~7.5s → <1s)
 				if symlinkErr := createArtifactSymlinks(contractsDir); symlinkErr != nil {
@@ -313,11 +316,19 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 					t.logger.Info("✅ Artifact symlinks created")
 				}
 
-				// Invalidate cache for patched files so forge recompiles only those contracts
 				if deployContractsConfig.EnableFaultProof {
+					// Fault proof enabled: invalidate cache for patched AnchorStateRegistry
+					// and let forge do an incremental build to recompile it. The pre-built
+					// artifacts don't contain setInitialAnchorState which is required for
+					// bootstrapping the genesis anchor state on new chains.
 					if cacheErr := invalidateCacheEntry(contractsDir, "src/dispute/AnchorStateRegistry.sol"); cacheErr != nil {
 						t.logger.Warn("Failed to invalidate cache for patched contract", "err", cacheErr)
 					}
+					t.logger.Info("Forge incremental build will run to compile patched AnchorStateRegistry")
+				} else {
+					// No fault proof: safe to skip forge build entirely
+					os.Setenv("SKIP_FORGE_BUILD", "true")
+					t.logger.Info("Forge build will be skipped (no fault proof patches needed)")
 				}
 			}
 
