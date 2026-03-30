@@ -501,6 +501,14 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		return err
 	}
 
+	// STEP 5.2b: Inject updated MultiTokenPaymaster implementation into genesis code namespace
+	// Fixes paymasterAndData offset: [20:40] Phase 1 → [52:72] ERC-4337 v0.8 standard
+	t.logger.Info("Injecting MultiTokenPaymaster (v0.8 paymasterAndData offset fix) into genesis...")
+	if err := injectMultiTokenPaymasterBytecode(genesisPath, t.deploymentPath); err != nil {
+		t.logger.Error("❌ Failed to inject MultiTokenPaymaster bytecode!", "err", err)
+		return err
+	}
+
 	// STEP 5.3: Update rollup.json genesis hash after ALL genesis modifications
 	rollupPath := filepath.Join(t.deploymentPath, "tokamak-thanos", "build", "rollup.json")
 	if err := updateRollupGenesisHash(t.logger, genesisPath, rollupPath); err != nil {
