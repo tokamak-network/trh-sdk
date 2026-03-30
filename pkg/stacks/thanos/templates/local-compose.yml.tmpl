@@ -209,6 +209,9 @@ services:
       - ETHEREUM_JSONRPC_WS_URL=ws://op-geth:8546
       - ETHEREUM_JSONRPC_VARIANT=geth
       - COIN={{.BlockExplorerCoinSymbol}}
+{{- if .BlockExplorerStableCoin}}
+      - DISABLE_EXCHANGE_RATES=true
+{{- end}}
       - NETWORK=L2
       - SUBNETWORK=Optimism
       - CHAIN_ID={{.L2ChainID}}

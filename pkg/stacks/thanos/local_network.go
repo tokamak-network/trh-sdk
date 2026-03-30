@@ -103,6 +103,7 @@ type localComposeData struct {
 	BlockExplorerCoinSymbol          string
 	BlockExplorerCoinName            string
 	BlockExplorerCoinDecimals        uint8
+	BlockExplorerStableCoin          bool
 	// Monitoring
 	MonitoringConfigVolume string
 	// AA operator — deployed as a Docker service for non-TON fee tokens on Gaming/Full presets
@@ -311,6 +312,7 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		BlockExplorerCoinSymbol:          feeTokenConfig.Symbol,
 		BlockExplorerCoinName:            feeTokenConfig.Name,
 		BlockExplorerCoinDecimals:        feeTokenDecimals(t.deployConfig.FeeToken),
+		BlockExplorerStableCoin:          t.deployConfig.FeeToken == constants.FeeTokenUSDC || t.deployConfig.FeeToken == constants.FeeTokenUSDT,
 		MonitoringConfigVolume:           localMonitoringVolume,
 	}
 
