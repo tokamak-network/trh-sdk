@@ -324,6 +324,14 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 					if cacheErr := invalidateCacheEntry(contractsDir, "src/dispute/AnchorStateRegistry.sol"); cacheErr != nil {
 						t.logger.Warn("Failed to invalidate cache for patched contract", "err", cacheErr)
 					}
+					// Force recompile by removing compiled artifact directory.
+					// invalidateCacheEntry uses a relative path key but the cache JSON may store
+					// absolute path keys — making the cache invalidation a silent no-op.
+					// Deleting the artifact dir guarantees forge must recompile the patched source.
+					artifactDir := filepath.Join(contractsDir, "forge-artifacts", "AnchorStateRegistry.sol")
+					if err := os.RemoveAll(artifactDir); err != nil {
+						t.logger.Warnf("Failed to remove AnchorStateRegistry forge artifact: %v", err)
+					}
 					t.logger.Info("Forge incremental build will run to compile patched AnchorStateRegistry")
 				} else {
 					// No fault proof: safe to skip forge build entirely

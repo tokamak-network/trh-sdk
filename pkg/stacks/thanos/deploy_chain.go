@@ -493,27 +493,25 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	if t.deployConfig.EnableFraudProof {
 		deployedContracts, contractsErr := t.readDeploymentContracts()
 		if contractsErr != nil {
-			t.logger.Warnf("⚠️ Could not read deployed contracts (skipping anchor init): %v", contractsErr)
-		} else if deployedContracts.AnchorStateRegistryProxy == "" {
-			t.logger.Warn("⚠️ AnchorStateRegistryProxy address not found (skipping anchor init)")
-		} else {
-			anchorErr := initGenesisAnchorState(
-				ctx,
-				t.logger,
-				t.deployConfig.L1RPCURL,
-				l2RPCUrl,
-				t.deployConfig.AdminPrivateKey,
-				deployedContracts.AnchorStateRegistryProxy,
-				t.deployConfig.L1ChainID,
-				0, // gameType 0 = CANNON (default respected game type)
-			)
-			if anchorErr != nil {
-				t.logger.Warnf("⚠️ Failed to initialize genesis anchor state: %v", anchorErr)
-				t.logger.Warn("Dispute games may fail with AnchorRootNotFound until anchor state is set manually")
-			} else {
-				t.logger.Info("✅ Genesis anchor state initialized in AnchorStateRegistry")
-			}
+			return fmt.Errorf("failed to read deployed contracts for anchor init: %w", contractsErr)
 		}
+		if deployedContracts.AnchorStateRegistryProxy == "" {
+			return fmt.Errorf("AnchorStateRegistryProxy address not found in deployed contracts — cannot initialize genesis anchor state")
+		}
+		anchorErr := initGenesisAnchorState(
+			ctx,
+			t.logger,
+			t.deployConfig.L1RPCURL,
+			l2RPCUrl,
+			t.deployConfig.AdminPrivateKey,
+			deployedContracts.AnchorStateRegistryProxy,
+			t.deployConfig.L1ChainID,
+			0, // gameType 0 = CANNON (default respected game type)
+		)
+		if anchorErr != nil {
+			return fmt.Errorf("failed to initialize genesis anchor state (op-proposer will fail with AnchorRootNotFound): %w", anchorErr)
+		}
+		t.logger.Info("✅ Genesis anchor state initialized in AnchorStateRegistry")
 	}
 
 	backupEnabled := false
