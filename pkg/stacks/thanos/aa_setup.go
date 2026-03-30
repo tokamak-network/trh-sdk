@@ -64,6 +64,28 @@ func (t *ThanosStack) setupAAPaymaster(ctx context.Context) error {
 	}
 	adminAddr := crypto.PubkeyToAddress(privKey.PublicKey)
 
+	// Scale deposit amount by fee token decimals.
+	// DefaultEntryPointDeposit is 1e18 (1 token unit at 18 decimals).
+	// For 6-decimal tokens (USDC/USDT), scale down by 1e12 to get 1e6 (1 token unit at 6 decimals).
+	depositAmount := new(big.Int).Set(constants.DefaultEntryPointDeposit)
+	if dec := feeTokenDecimals(feeToken); dec < 18 {
+		scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(18-dec)), nil)
+		depositAmount.Div(depositAmount, scale)
+	}
+
+	// Pre-check: verify admin has enough L2 balance for the EntryPoint deposit.
+	adminBalance, err := l2Client.BalanceAt(ctx, adminAddr, nil)
+	if err != nil {
+		return fmt.Errorf("failed to query admin L2 balance: %w", err)
+	}
+	if adminBalance.Cmp(depositAmount) < 0 {
+		return fmt.Errorf("admin L2 balance insufficient for EntryPoint deposit: have %s wei, need %s wei — fund admin address %s on L2 first", adminBalance.String(), depositAmount.String(), adminAddr.Hex())
+	}
+	twoXDeposit := new(big.Int).Mul(depositAmount, big.NewInt(2))
+	if adminBalance.Cmp(twoXDeposit) < 0 {
+		t.logger.Warnf("admin L2 balance is low: %s wei (deposit requires %s wei)", adminBalance.String(), depositAmount.String())
+	}
+
 	// sendTxAndWait builds, signs, sends a transaction, and waits for its receipt.
 	sendTxAndWait := func(toAddr common.Address, value *big.Int, calldata []byte) (*types.Receipt, error) {
 		nonce, err := l2Client.PendingNonceAt(ctx, adminAddr)
@@ -147,10 +169,10 @@ func (t *ThanosStack) setupAAPaymaster(ctx context.Context) error {
 	copy(calldata1[:4], selector1)
 	copy(calldata1[16:36], paymaster.Bytes())
 
-	if err := sendTx(entryPoint, constants.DefaultEntryPointDeposit, calldata1); err != nil {
+	if err := sendTx(entryPoint, depositAmount, calldata1); err != nil {
 		return fmt.Errorf("EntryPoint.depositTo failed: %w", err)
 	}
-	t.logger.Infof("✅ EntryPoint.depositTo(MultiTokenPaymaster): deposited %s wei", constants.DefaultEntryPointDeposit.String())
+	t.logger.Infof("✅ EntryPoint.depositTo(MultiTokenPaymaster): deposited %s wei (%s)", depositAmount.String(), feeToken)
 
 	// Step 2: SimplePriceOracle.updatePrice(newPrice)
 	// ABI: updatePrice(uint256 newPrice)
@@ -346,6 +368,17 @@ func deployBridgedUSDT(
 	existingAddr := common.BytesToAddress(logs[0].Topics[1].Bytes())
 	logf("ℹ️  Bridged USDT already deployed at L2: %s (reusing)", existingAddr.Hex())
 	return existingAddr, nil
+}
+
+// feeTokenDecimals returns the decimal precision for the given fee token.
+// USDC and USDT use 6 decimals; all others (ETH, TON) use 18.
+func feeTokenDecimals(feeToken string) uint8 {
+	switch feeToken {
+	case constants.FeeTokenUSDC, constants.FeeTokenUSDT:
+		return 6
+	default:
+		return 18
+	}
 }
 
 // aaMarkupForToken returns the markup percent for the given fee token (used for log messages).
