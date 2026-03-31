@@ -169,17 +169,25 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 		t.logger.Info("✅ Genesis anchor state initialized in AnchorStateRegistry")
 	}
 
-	// Setup AA Paymaster for non-TON fee tokens (Gaming/Full presets only).
+	// Setup AA Paymaster for non-TON fee tokens.
 	// Runs after core services are healthy. Non-blocking: failure logs a warning
 	// but does not prevent the L2 network from starting.
 	if constants.NeedsAASetup(t.deployConfig.Preset, t.deployConfig.FeeToken) {
 		t.logger.Infof("🔧 Configuring AA Paymaster for fee token: %s", t.deployConfig.FeeToken)
-		if aaErr := t.setupAAPaymaster(ctx); aaErr != nil {
-			t.logger.Warnf("⚠️  AA Paymaster setup failed: %v", aaErr)
-			t.logger.Warn("   AA fee payment features may not work until paymaster is configured manually.")
-			t.logger.Warn("   Re-run `trh-sdk setup-aa` or call setupAAPaymaster via the admin API.")
+		// Auto-bridge admin TON from L1 to L2 if L2 balance is insufficient for the
+		// EntryPoint deposit. On a fresh L2, the admin has zero L2 TON; this step
+		// bridges 10 TON (covering the initial deposit + aa-operator refill cycles).
+		if bridgeErr := t.bridgeAdminTONForAASetup(ctx); bridgeErr != nil {
+			t.logger.Warnf("⚠️  Admin L2 TON bridge failed: %v", bridgeErr)
+			t.logger.Warn("   Fund admin address on L2 manually and re-run `trh-sdk setup-aa`.")
 		} else {
-			t.logger.Infof("✅ AA Paymaster configured for %s", t.deployConfig.FeeToken)
+			if aaErr := t.setupAAPaymaster(ctx); aaErr != nil {
+				t.logger.Warnf("⚠️  AA Paymaster setup failed: %v", aaErr)
+				t.logger.Warn("   AA fee payment features may not work until paymaster is configured manually.")
+				t.logger.Warn("   Re-run `trh-sdk setup-aa` or call setupAAPaymaster via the admin API.")
+			} else {
+				t.logger.Infof("✅ AA Paymaster configured for %s", t.deployConfig.FeeToken)
+			}
 		}
 	}
 

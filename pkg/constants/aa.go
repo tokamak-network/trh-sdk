@@ -15,6 +15,11 @@ const OptimismMintableERC20FactoryPredeploy = "0x4200000000000000000000000000000
 // 1 token unit (18 decimals) = 1e18 wei.
 var DefaultEntryPointDeposit = new(big.Int).Mul(big.NewInt(1), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
 
+// DefaultAABridgeAmount is the amount of TON (18 decimals) bridged from L1 to L2
+// for the admin wallet before AA paymaster setup. Covers the initial EntryPoint deposit
+// (1 TON) plus several aa-operator refill cycles (5 TON each).
+var DefaultAABridgeAmount = new(big.Int).Mul(big.NewInt(10), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)) // 10e18
+
 // Paymaster markup as a plain percentage (e.g. 5 = 5%).
 // MultiTokenPaymaster.addToken() takes markupPercent directly, not basis points.
 // Maximum allowed by the contract is 50 (50%).
