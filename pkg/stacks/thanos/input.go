@@ -1517,6 +1517,8 @@ func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainI
 		L2GenesisDeltaTimeOffset:                 "0x0",
 		L2GenesisEcotoneTimeOffset:               "0x0",
 		L2GenesisFjordTimeOffset:                 "0x0",
+		L2GenesisGraniteTimeOffset:               "0x0",
+		L2GenesisHoloceneTimeOffset:              "0x0",
 		L2GenesisIsthmusTimeOffset:               "0x0",
 		SystemConfigStartBlock:                   0,
 		RequiredProtocolVersion:                  "0x0000000000000000000000000000000000000003000000010000000000000000",
