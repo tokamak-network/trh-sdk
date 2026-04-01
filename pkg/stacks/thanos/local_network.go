@@ -106,12 +106,10 @@ type localComposeData struct {
 	BlockExplorerStableCoin          bool
 	// Monitoring
 	MonitoringConfigVolume string
-	// AA operator — deployed as a Docker service for non-TON fee tokens on Gaming/Full presets
+	// AA operator — controls whether alto-bundler is included in the compose file.
+	// Set to true for non-TON fee tokens; the aa-operator itself runs as a goroutine in trh-backend.
 	AAOperatorEnabled bool
-	TRHSDKImage       string
 	AAAdminPrivateKey string
-	AAFeeToken        string
-	CoinGeckoAPIKey   string
 }
 
 func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
@@ -334,18 +332,15 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		}
 	}
 
-	// Populate AA operator fields — the service runs only for Gaming/Full presets with non-TON fee tokens.
-	// It keeps SimplePriceOracle fresh and auto-refills the EntryPoint deposit.
+	// Populate AA operator fields — alto-bundler is included in the compose file for non-TON fee tokens.
+	// The aa-operator itself runs as a goroutine in trh-backend (not as a Docker container).
 	if constants.NeedsAASetup(t.deployConfig.Preset, t.deployConfig.FeeToken) {
 		data.AAOperatorEnabled = true
-		data.TRHSDKImage = fmt.Sprintf("tokamaknetwork/trh-sdk:latest")
 		adminKey := t.deployConfig.AdminPrivateKey
 		if !strings.HasPrefix(adminKey, "0x") {
 			adminKey = "0x" + adminKey
 		}
 		data.AAAdminPrivateKey = adminKey
-		data.AAFeeToken = t.deployConfig.FeeToken
-		data.CoinGeckoAPIKey = os.Getenv("COINGECKO_API_KEY")
 	}
 
 	tmpl, err := template.New("local-compose").Parse(localComposeTmpl)

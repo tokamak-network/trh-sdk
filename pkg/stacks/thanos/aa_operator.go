@@ -16,6 +16,21 @@ type AAOperatorConfig struct {
 	AdminPrivateKey string
 }
 
+// RunAAOperatorFromConfig starts the AA operator background services using the ThanosStack's
+// already-loaded deployment configuration. It blocks until ctx is cancelled.
+//
+// This is the preferred entrypoint when running aa-operator as a goroutine inside trh-backend,
+// avoiding the need for a separate tokamaknetwork/trh-sdk Docker container.
+func (s *ThanosStack) RunAAOperatorFromConfig(ctx context.Context) {
+	if s.deployConfig == nil {
+		return
+	}
+	RunAAOperator(ctx, AAOperatorConfig{
+		FeeToken:        s.deployConfig.FeeToken,
+		AdminPrivateKey: s.deployConfig.AdminPrivateKey,
+	})
+}
+
 // RunAAOperator starts the AA operator background services and blocks until ctx is cancelled.
 //
 // It is the entrypoint for the aa-operator Docker service which keeps the AA paymaster

@@ -432,20 +432,6 @@ services:
 {{- end }}
 {{- if .AAOperatorEnabled }}
 
-  aa-operator:
-    image: {{.TRHSDKImage}}
-    command: ["go", "run", "./cmd/aa-operator"]
-    working_dir: /app
-    environment:
-      - L2_RPC_URL=http://op-geth:8545
-      - ADMIN_PRIVATE_KEY={{.AAAdminPrivateKey}}
-      - FEE_TOKEN={{.AAFeeToken}}
-      - COINGECKO_API_KEY={{.CoinGeckoAPIKey}}
-    depends_on:
-      op-geth:
-        condition: service_healthy
-    restart: unless-stopped
-
   alto-bundler:
     image: ghcr.io/pimlicolabs/alto:v1.2.7
     command:
