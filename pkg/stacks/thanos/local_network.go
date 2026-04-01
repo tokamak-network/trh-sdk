@@ -185,6 +185,16 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 				t.logger.Warn("   Re-run `trh-sdk setup-aa` or call setupAAPaymaster via the admin API.")
 			} else {
 				t.logger.Infof("✅ AA Paymaster configured for %s", t.deployConfig.FeeToken)
+
+				// Start alto-bundler now that admin has L2 funds and paymaster is configured
+				t.logger.Info("🚀 Starting alto-bundler (AA setup complete, admin funded on L2)...")
+				if bundlerErr := utils.ExecuteCommandStream(ctx, t.logger, "docker", "compose",
+					"-f", composePath, "--profile", "aa", "up", "-d", "alto-bundler"); bundlerErr != nil {
+					t.logger.Warnf("⚠️  Failed to start alto-bundler: %v", bundlerErr)
+					t.logger.Warn("   Run `docker compose --profile aa up -d alto-bundler` manually.")
+				} else {
+					t.logger.Info("✅ alto-bundler started successfully")
+				}
 			}
 		}
 	}
@@ -679,6 +689,10 @@ func (t *ThanosStack) startLocalModules(ctx context.Context, composePath string,
 	for _, p := range profiles {
 		args = append(args, "--profile", p)
 	}
+	// Include aa profile so alto-bundler is managed on restarts
+	if constants.NeedsAASetup(t.deployConfig.Preset, t.deployConfig.FeeToken) {
+		args = append(args, "--profile", "aa")
+	}
 	args = append(args, "up", "-d", "--remove-orphans")
 	return utils.ExecuteCommandStream(ctx, t.logger, "docker", args...)
 }
@@ -690,7 +704,7 @@ func (t *ThanosStack) destroyLocalNetwork(ctx context.Context) error {
 		return nil
 	}
 	t.logger.Info("Stopping local L2 network...")
-	allProfiles := []string{"proposer", "challenger", "bridge", "blockExplorer", "monitoring", "uptimeService"}
+	allProfiles := []string{"proposer", "challenger", "bridge", "blockExplorer", "monitoring", "uptimeService", "aa"}
 	args := []string{"compose", "-f", composePath}
 	for _, p := range allProfiles {
 		args = append(args, "--profile", p)
@@ -756,6 +770,11 @@ func (t *ThanosStack) writeComposeEnvFile(composePath string) error {
 			continue
 		}
 		profiles = append(profiles, module)
+	}
+
+	// Include aa profile for alto-bundler restart persistence
+	if constants.NeedsAASetup(t.deployConfig.Preset, t.deployConfig.FeeToken) {
+		profiles = append(profiles, "aa")
 	}
 
 	content := fmt.Sprintf("COMPOSE_PROFILES=%s\n", strings.Join(profiles, ","))
