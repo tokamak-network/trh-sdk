@@ -460,6 +460,19 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			t.logger.Info("ℹ️ ReuseDeployment: Deploying with existing implementation contracts...")
 		}
 
+		// When fault proof is enabled, remove the cached AnchorStateRegistry implementation
+		// address from the Sepolia address file before running Deploy.s.sol.
+		// The pre-deployed Sepolia implementation (0xd987...) was deployed before
+		// patchAnchorStateRegistry was introduced and lacks setInitialAnchorState.
+		// Clearing the key forces Deploy.s.sol to deploy the freshly compiled (patched)
+		// implementation instead. All other contracts still reuse their cached Sepolia
+		// addresses (reuseDeployment=true remains effective for them).
+		if deployContractsConfig.EnableFaultProof {
+			if cleared := clearAnchorStateRegistryFromAddressFile(contractsDir); cleared {
+				t.logger.Info("✅ Cleared cached AnchorStateRegistry implementation address — will deploy patched version")
+			}
+		}
+
 		// Deploy contracts. If ReuseDeployment is true, deploy-config.json instructs the deploy
 		// script to reuse existing implementation contracts on the network.
 		err = t.deployContracts(ctx, l1Client, false)
@@ -1142,4 +1155,32 @@ func verifyAnchorStateRegistryArtifact(contractsDir string) error {
 	return fmt.Errorf("setInitialAnchorState not found in AnchorStateRegistry ABI — " +
 		"forge did not recompile the patched source; ensure patchAnchorStateRegistry ran " +
 		"or delete forge-artifacts/AnchorStateRegistry.sol/ and retry the build")
+}
+
+// clearAnchorStateRegistryFromAddressFile removes the "AnchorStateRegistry" implementation
+// address from thanos-stack-sepolia/address.json inside contractsDir.
+// This forces Deploy.s.sol to deploy the freshly compiled (patched) implementation when
+// fault proof is enabled, instead of reusing the pre-deployed Sepolia implementation which
+// lacks setInitialAnchorState.
+// Returns true if the key was found and removed, false if the file is absent or the key
+// was not present (both are no-ops — not error conditions).
+func clearAnchorStateRegistryFromAddressFile(contractsDir string) bool {
+	sepoliaAddressFile := filepath.Join(contractsDir, "deployments", "thanos-stack-sepolia", "address.json")
+	rawJSON, readErr := os.ReadFile(sepoliaAddressFile)
+	if readErr != nil {
+		return false
+	}
+	var addresses map[string]json.RawMessage
+	if unmarshalErr := json.Unmarshal(rawJSON, &addresses); unmarshalErr != nil {
+		return false
+	}
+	if _, exists := addresses["AnchorStateRegistry"]; !exists {
+		return false
+	}
+	delete(addresses, "AnchorStateRegistry")
+	updated, marshalErr := json.MarshalIndent(addresses, "", "  ")
+	if marshalErr != nil {
+		return false
+	}
+	return os.WriteFile(sepoliaAddressFile, updated, 0644) == nil
 }
