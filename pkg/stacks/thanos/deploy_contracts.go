@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -558,6 +559,55 @@ func (t *ThanosStack) deployContracts(ctx context.Context,
 
 	t.logger.Info("Deploying the contracts...")
 
+	// Wait for any pending transactions from the admin account to be mined.
+	// Forge captures the nonce during simulation and reuses it during broadcast.
+	// If pending txs from a prior deployment attempt get mined between simulation
+	// and broadcast, the on-chain nonce advances and every broadcast tx fails with
+	// "nonce too low". This guard ensures the nonce is stable before forge starts.
+	adminAddr, err := utils.GetAddressFromPrivateKey(adminPrivateKey)
+	if err != nil {
+		t.logger.Error("Failed to derive admin address", "err", err)
+		return fmt.Errorf("failed to derive admin address: %w", err)
+	}
+
+	const maxNonceWait = 5 * time.Minute
+	const nonceCheckInterval = 10 * time.Second
+	waitDeadline := time.Now().Add(maxNonceWait)
+
+	for {
+		confirmedNonce, err := l1Client.NonceAt(ctx, adminAddr, nil)
+		if err != nil {
+			t.logger.Error("Failed to get confirmed nonce", "err", err)
+			break // proceed anyway; forge will report the error if nonce is stale
+		}
+		pendingNonce, err := l1Client.PendingNonceAt(ctx, adminAddr)
+		if err != nil {
+			t.logger.Error("Failed to get pending nonce", "err", err)
+			break
+		}
+
+		if pendingNonce == confirmedNonce {
+			t.logger.Infof("Admin nonce is stable at %d (no pending transactions)", confirmedNonce)
+			break
+		}
+
+		pendingCount := pendingNonce - confirmedNonce
+		if time.Now().After(waitDeadline) {
+			t.logger.Warnf("⚠️ Timed out waiting for %d pending transaction(s) to clear (confirmed nonce: %d, pending nonce: %d). Proceeding anyway — forge may fail with 'nonce too low'.",
+				pendingCount, confirmedNonce, pendingNonce)
+			break
+		}
+
+		t.logger.Infof("⏳ Waiting for %d pending transaction(s) to be mined (confirmed: %d, pending: %d)...",
+			pendingCount, confirmedNonce, pendingNonce)
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(nonceCheckInterval):
+		}
+	}
+
 	gasPriceWei, err := l1Client.SuggestGasPrice(ctx)
 	if err != nil {
 		t.logger.Error("Failed to get gas price", "err", err)
@@ -580,6 +630,18 @@ func (t *ThanosStack) deployContracts(ctx context.Context,
 		}
 		t.logger.Error("❌ Make .env file failed!")
 		return err
+	}
+
+	// Clean the forge broadcast directory for fresh deployments to prevent
+	// stale nonce data from a prior run interfering with the new deployment.
+	if !isResume {
+		broadcastDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "broadcast", "Deploy.s.sol")
+		if _, statErr := os.Stat(broadcastDir); !os.IsNotExist(statErr) {
+			t.logger.Info("Cleaning stale forge broadcast directory...")
+			if rmErr := os.RemoveAll(broadcastDir); rmErr != nil {
+				t.logger.Warn("Failed to clean broadcast directory", "err", rmErr)
+			}
+		}
 	}
 
 	// STEP 4.3. Deploy contracts
