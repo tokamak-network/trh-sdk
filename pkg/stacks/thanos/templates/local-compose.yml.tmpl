@@ -453,6 +453,8 @@ services:
     depends_on:
       op-geth:
         condition: service_healthy
+    profiles:
+      - aa
     restart: unless-stopped
 {{- end }}
 
