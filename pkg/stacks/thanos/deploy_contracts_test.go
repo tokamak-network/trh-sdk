@@ -41,7 +41,7 @@ func TestClearAnchorStateRegistryFromAddressFile(t *testing.T) {
 		return result
 	}
 
-	t.Run("removes AnchorStateRegistry key and returns true", func(t *testing.T) {
+	t.Run("sets AnchorStateRegistry to zero address and returns true", func(t *testing.T) {
 		dir := t.TempDir()
 		writeAddressFile(t, dir, map[string]string{
 			"AnchorStateRegistry":      "0xd987136472d8B51b98384dcCc17Fe6Cb9264d1C3",
@@ -55,8 +55,13 @@ func TestClearAnchorStateRegistryFromAddressFile(t *testing.T) {
 			t.Fatal("expected true, got false")
 		}
 		addrs := readAddressFile(t, dir)
-		if _, exists := addrs["AnchorStateRegistry"]; exists {
-			t.Error("AnchorStateRegistry key should have been removed")
+		val, exists := addrs["AnchorStateRegistry"]
+		if !exists {
+			t.Error("AnchorStateRegistry key should still be present (set to zero address)")
+		}
+		expected := `"0x0000000000000000000000000000000000000000"`
+		if string(val) != expected {
+			t.Errorf("AnchorStateRegistry should be zero address, got %s", string(val))
 		}
 		if _, exists := addrs["AnchorStateRegistryProxy"]; !exists {
 			t.Error("AnchorStateRegistryProxy should still be present")
@@ -104,7 +109,7 @@ func TestClearAnchorStateRegistryFromAddressFile(t *testing.T) {
 		}
 	})
 
-	t.Run("idempotent: second call returns false (key already removed)", func(t *testing.T) {
+	t.Run("idempotent: second call returns false (already zero address)", func(t *testing.T) {
 		dir := t.TempDir()
 		writeAddressFile(t, dir, map[string]string{
 			"AnchorStateRegistry":      "0xd987136472d8B51b98384dcCc17Fe6Cb9264d1C3",

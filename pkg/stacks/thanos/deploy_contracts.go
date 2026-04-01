@@ -1174,10 +1174,20 @@ func clearAnchorStateRegistryFromAddressFile(contractsDir string) bool {
 	if unmarshalErr := json.Unmarshal(rawJSON, &addresses); unmarshalErr != nil {
 		return false
 	}
-	if _, exists := addresses["AnchorStateRegistry"]; !exists {
+	existing, exists := addresses["AnchorStateRegistry"]
+	if !exists {
 		return false
 	}
-	delete(addresses, "AnchorStateRegistry")
+	// Already cleared (zero address) — idempotent no-op.
+	zeroAddr := `"0x0000000000000000000000000000000000000000"`
+	if string(existing) == zeroAddr {
+		return false
+	}
+	// Set to zero address instead of deleting the key. Deploy.s.sol calls
+	// readAddress(".AnchorStateRegistry") unconditionally when reuseDeployment is
+	// true, so the key must exist in the JSON. A zero address triggers the
+	// "deploy new" branch in Solidity (savedAddress != address(0) check).
+	addresses["AnchorStateRegistry"] = json.RawMessage(zeroAddr)
 	updated, marshalErr := json.MarshalIndent(addresses, "", "  ")
 	if marshalErr != nil {
 		return false
