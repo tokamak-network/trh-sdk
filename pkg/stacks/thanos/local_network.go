@@ -194,6 +194,10 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 					t.logger.Warn("   Run `docker compose --profile aa up -d alto-bundler` manually.")
 				} else {
 					t.logger.Info("✅ alto-bundler started successfully")
+					// Persist aa profile in .env now that setup is confirmed
+					if err := t.persistAAProfile(composePath); err != nil {
+						t.logger.Warnf("Failed to persist aa profile in .env: %v", err)
+					}
 				}
 			}
 		}
@@ -689,10 +693,6 @@ func (t *ThanosStack) startLocalModules(ctx context.Context, composePath string,
 	for _, p := range profiles {
 		args = append(args, "--profile", p)
 	}
-	// Include aa profile so alto-bundler is managed on restarts
-	if constants.NeedsAASetup(t.deployConfig.Preset, t.deployConfig.FeeToken) {
-		args = append(args, "--profile", "aa")
-	}
 	args = append(args, "up", "-d", "--remove-orphans")
 	return utils.ExecuteCommandStream(ctx, t.logger, "docker", args...)
 }
@@ -772,13 +772,34 @@ func (t *ThanosStack) writeComposeEnvFile(composePath string) error {
 		profiles = append(profiles, module)
 	}
 
-	// Include aa profile for alto-bundler restart persistence
-	if constants.NeedsAASetup(t.deployConfig.Preset, t.deployConfig.FeeToken) {
-		profiles = append(profiles, "aa")
-	}
-
 	content := fmt.Sprintf("COMPOSE_PROFILES=%s\n", strings.Join(profiles, ","))
 	return os.WriteFile(envPath, []byte(content), 0644)
+}
+
+// persistAAProfile appends the "aa" profile to the COMPOSE_PROFILES in the .env
+// file next to the compose file. Called only after AA setup + alto-bundler start
+// succeeds, so that restarts (docker compose up) include alto-bundler only when
+// the admin wallet is already funded and paymaster is configured.
+func (t *ThanosStack) persistAAProfile(composePath string) error {
+	envPath := filepath.Join(filepath.Dir(composePath), ".env")
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		return fmt.Errorf("read .env: %w", err)
+	}
+	content := string(data)
+	// Check if aa is already present (idempotent)
+	if strings.Contains(content, ",aa") || strings.Contains(content, "aa,") {
+		return nil
+	}
+	// Find the COMPOSE_PROFILES line and append ,aa to its value
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "COMPOSE_PROFILES=") {
+			lines[i] = strings.TrimRight(line, "\r") + ",aa"
+			break
+		}
+	}
+	return os.WriteFile(envPath, []byte(strings.Join(lines, "\n")), 0644)
 }
 
 // readRollupL1GenesisBlock reads genesis.l1.number from rollup.json so Blockscout
