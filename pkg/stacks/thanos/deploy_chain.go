@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
@@ -831,6 +832,36 @@ func initGenesisAnchorState(
 	}
 	adminAddr := crypto.PubkeyToAddress(privKey.PublicKey)
 	chainID := big.NewInt(int64(l1ChainID))
+	anchorAddr := common.HexToAddress(anchorStateRegistryAddr)
+
+	// Guard A: Idempotency — skip if anchor state already set.
+	// Handles re-runs after a partial success or after fix-anchor-state-registry.mjs was applied.
+	anchorsSelector := crypto.Keccak256([]byte("anchors(uint32)"))[:4]
+	anchorsCalldata := make([]byte, 36)
+	copy(anchorsCalldata[0:4], anchorsSelector)
+	binary.BigEndian.PutUint32(anchorsCalldata[32:36], gameType)
+	if existingResult, callErr := l1Client.CallContract(ctx, ethereum.CallMsg{To: &anchorAddr, Data: anchorsCalldata}, nil); callErr == nil && len(existingResult) >= 32 {
+		existingRoot := common.BytesToHash(existingResult[:32])
+		if existingRoot != (common.Hash{}) {
+			logger.Infof("✅ Anchor state already set for gameType %d (root=%s), skipping", gameType, existingRoot.Hex())
+			return nil
+		}
+	}
+
+	// Guard B: Pre-flight eth_call simulation — detect missing function before wasting L1 gas.
+	// Simulates the call as the admin address (= guardian) so authorization passes when the
+	// function exists. If the simulation reverts, the deployed AnchorStateRegistry likely lacks
+	// setInitialAnchorState (deployed without patchAnchorStateRegistry patch).
+	if _, simErr := l1Client.CallContract(ctx, ethereum.CallMsg{From: adminAddr, To: &anchorAddr, Data: calldata}, nil); simErr != nil {
+		return fmt.Errorf("setInitialAnchorState pre-flight simulation failed — "+
+			"AnchorStateRegistry at %s likely lacks the setInitialAnchorState function "+
+			"(deploy-l1-contracts was run with an older backend that did not patch the contract). "+
+			"Fix options:\n"+
+			"  (1) Delete this deployment and redeploy from scratch with the current backend.\n"+
+			"  (2) Run scripts/fix-anchor-state-registry.mjs to write anchor state directly to storage,\n"+
+			"      then retry deploy-aws-infra (the idempotency check will skip the tx).\n"+
+			"Simulation error: %w", anchorStateRegistryAddr, simErr)
+	}
 
 	nonce, err := l1Client.PendingNonceAt(ctx, adminAddr)
 	if err != nil {
@@ -843,7 +874,6 @@ func initGenesisAnchorState(
 	// Double gas price for reliable inclusion.
 	gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(2))
 
-	anchorAddr := common.HexToAddress(anchorStateRegistryAddr)
 	tx := ethtypes.NewTransaction(nonce, anchorAddr, big.NewInt(0), 200_000, gasPrice, calldata)
 	signedTx, err := ethtypes.SignTx(tx, ethtypes.NewEIP155Signer(chainID), privKey)
 	if err != nil {
@@ -859,7 +889,9 @@ func initGenesisAnchorState(
 		return fmt.Errorf("failed to wait for setInitialAnchorState tx receipt: %w", err)
 	}
 	if receipt.Status != ethtypes.ReceiptStatusSuccessful {
-		return fmt.Errorf("setInitialAnchorState tx reverted (tx: %s, gas used: %d) — the deployed AnchorStateRegistry may lack the setInitialAnchorState function; check that forge recompiled the patched contract",
+		return fmt.Errorf("setInitialAnchorState tx reverted (tx: %s, gas used: %d) — "+
+			"the deployed AnchorStateRegistry may lack the setInitialAnchorState function; "+
+			"check that forge recompiled the patched contract",
 			signedTx.Hash().Hex(), receipt.GasUsed)
 	}
 	logger.Infof("✅ setInitialAnchorState confirmed in block %d (tx: %s)", receipt.BlockNumber.Uint64(), signedTx.Hash().Hex())

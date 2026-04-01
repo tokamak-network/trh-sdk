@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"golang.org/x/sync/errgroup"
 
@@ -352,6 +353,12 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 				return buildErr
 			}
 			t.logger.Info("✅ Build the contracts completed!")
+			if deployContractsConfig.EnableFaultProof {
+				if verifyErr := verifyAnchorStateRegistryArtifact(contractsDir); verifyErr != nil {
+					return fmt.Errorf("AnchorStateRegistry artifact verification failed — forge did not recompile the patched source: %w", verifyErr)
+				}
+				t.logger.Info("✅ AnchorStateRegistry artifact verified: setInitialAnchorState present")
+			}
 			return nil
 		})
 
@@ -1028,4 +1035,47 @@ func updateRollupGenesisHash(logger *zap.SugaredLogger, genesisPath, rollupPath 
 	}
 
 	return os.WriteFile(rollupPath, updatedData, 0644)
+}
+
+// verifyAnchorStateRegistryArtifact checks that the compiled AnchorStateRegistry artifact
+// contains setInitialAnchorState in its ABI. Called after forge build when fault proof is
+// enabled to detect early if patchAnchorStateRegistry did not take effect.
+func verifyAnchorStateRegistryArtifact(contractsDir string) error {
+	artifactDir := filepath.Join(contractsDir, "forge-artifacts", "AnchorStateRegistry.sol")
+	entries, err := os.ReadDir(artifactDir)
+	if err != nil {
+		return fmt.Errorf("forge-artifacts/AnchorStateRegistry.sol not found: %w", err)
+	}
+	var artifactPath string
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() && strings.HasSuffix(name, ".json") && !strings.HasSuffix(name, ".dbg.json") {
+			artifactPath = filepath.Join(artifactDir, name)
+			break
+		}
+	}
+	if artifactPath == "" {
+		return fmt.Errorf("no JSON artifact found in forge-artifacts/AnchorStateRegistry.sol/")
+	}
+	data, err := os.ReadFile(artifactPath)
+	if err != nil {
+		return fmt.Errorf("failed to read artifact: %w", err)
+	}
+	var artifact struct {
+		ABI []struct {
+			Name string `json:"name"`
+			Type string `json:"type"`
+		} `json:"abi"`
+	}
+	if err := json.Unmarshal(data, &artifact); err != nil {
+		return fmt.Errorf("failed to parse artifact JSON: %w", err)
+	}
+	for _, entry := range artifact.ABI {
+		if entry.Type == "function" && entry.Name == "setInitialAnchorState" {
+			return nil
+		}
+	}
+	return fmt.Errorf("setInitialAnchorState not found in AnchorStateRegistry ABI — " +
+		"forge did not recompile the patched source; ensure patchAnchorStateRegistry ran " +
+		"or delete forge-artifacts/AnchorStateRegistry.sol/ and retry the build")
 }
