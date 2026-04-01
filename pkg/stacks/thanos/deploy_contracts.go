@@ -653,10 +653,12 @@ func patchStartDeployScript(tokamakThanosDir string) error {
 	// Patch 2: op-node build — replace deprecated `make op-node` with direct go build.
 	// The tokamak-thanos repo migrated from Makefile to justfiles; `make op-node` now errors.
 	// Skip build entirely if a cached binary was restored by restoreOpNodeBinary().
+	// Run from $projectRoot (where go.mod lives) with GOWORK=off to avoid workspace mode issues
+	// in container environments where go.work + no per-package go.mod causes "go.mod not found".
 	opNodeOld := `  if ! retryCommand "make op-node" "Building op-node"; then`
 	opNodeNew := `  if [ -f "$projectRoot/op-node/bin/op-node" ]; then
     echo "op-node binary found, skipping build"
-  elif ! retryCommand "(cd $projectRoot/op-node && env GO111MODULE=on CGO_ENABLED=0 go build -v -o ./bin/op-node ./cmd)" "Building op-node"; then`
+  elif ! retryCommand "mkdir -p $projectRoot/op-node/bin && (cd $projectRoot && env GOWORK=off GO111MODULE=on CGO_ENABLED=0 go build -v -o ./op-node/bin/op-node ./op-node/cmd)" "Building op-node"; then`
 
 	if bytes.Contains(content, []byte(opNodeOld)) {
 		content = bytes.Replace(content, []byte(opNodeOld), []byte(opNodeNew), 1)

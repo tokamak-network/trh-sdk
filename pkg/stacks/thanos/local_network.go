@@ -339,7 +339,11 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 	if constants.NeedsAASetup(t.deployConfig.Preset, t.deployConfig.FeeToken) {
 		data.AAOperatorEnabled = true
 		data.TRHSDKImage = fmt.Sprintf("tokamaknetwork/trh-sdk:latest")
-		data.AAAdminPrivateKey = t.deployConfig.AdminPrivateKey
+		adminKey := t.deployConfig.AdminPrivateKey
+		if !strings.HasPrefix(adminKey, "0x") {
+			adminKey = "0x" + adminKey
+		}
+		data.AAAdminPrivateKey = adminKey
 		data.AAFeeToken = t.deployConfig.FeeToken
 		data.CoinGeckoAPIKey = os.Getenv("COINGECKO_API_KEY")
 	}
