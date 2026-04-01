@@ -101,8 +101,12 @@ func (t *ThanosStack) bridgeAdminTONForAASetup(ctx context.Context) error {
 	}
 	t.logger.Infof("Approving L1 TON bridge transfer (%s wei) to %s...",
 		constants.DefaultAABridgeAmount.String(), bridgeProxy.Hex())
-	approveTx, err := tonContract.Approve(auth, bridgeProxy, constants.DefaultAABridgeAmount)
-	if err != nil {
+	var approveTx *types.Transaction
+	if err := rpcCallWithRetry(ctx, func() error {
+		var txErr error
+		approveTx, txErr = tonContract.Approve(auth, bridgeProxy, constants.DefaultAABridgeAmount)
+		return txErr
+	}); err != nil {
 		return fmt.Errorf("TON.approve failed: %w", err)
 	}
 	if _, err := bind.WaitMined(ctx, l1Client, approveTx); err != nil {
@@ -151,7 +155,7 @@ func (t *ThanosStack) bridgeAdminTONForAASetup(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to sign bridge tx: %w", err)
 	}
-	if err := l1Client.SendTransaction(ctx, signedBridgeTx); err != nil {
+	if err := sendTxWithRetry(ctx, l1Client, signedBridgeTx); err != nil {
 		return fmt.Errorf("bridgeNativeTokenTo tx failed: %w", err)
 	}
 	bridgeTxHash := signedBridgeTx.Hash()
