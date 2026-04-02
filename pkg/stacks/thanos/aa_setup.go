@@ -65,14 +65,10 @@ func (t *ThanosStack) setupAAPaymaster(ctx context.Context) error {
 	}
 	adminAddr := crypto.PubkeyToAddress(privKey.PublicKey)
 
-	// Scale deposit amount by fee token decimals.
-	// DefaultEntryPointDeposit is 1e18 (1 token unit at 18 decimals).
-	// For 6-decimal tokens (USDC/USDT), scale down by 1e12 to get 1e6 (1 token unit at 6 decimals).
+	// EntryPoint deposit is always in L2 native token (TON @ 18 decimals).
+	// Fee token (USDT/ETH) is handled by AA Paymaster internally (after EntryPoint transfers gas).
+	// Do NOT scale by feeToken decimals — EntryPoint only understands native token.
 	depositAmount := new(big.Int).Set(constants.DefaultEntryPointDeposit)
-	if dec := feeTokenDecimals(feeToken); dec < 18 {
-		scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(18-dec)), nil)
-		depositAmount.Div(depositAmount, scale)
-	}
 
 	// Pre-check: verify admin has enough L2 balance for the EntryPoint deposit.
 	adminBalance, err := l2Client.BalanceAt(ctx, adminAddr, nil)
