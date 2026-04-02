@@ -186,7 +186,22 @@ func (t *ThanosStack) bridgeAdminTONForAASetup(ctx context.Context) error {
 	}
 	gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(2)) // 2× for reliable inclusion
 
-	bridgeTx := types.NewTransaction(nonce, bridgeProxy, big.NewInt(0), 300_000, gasPrice, calldata)
+	// Estimate gas dynamically. The bridge call chains through
+	// L1StandardBridge -> L1CrossDomainMessenger -> OptimismPortal,
+	// which requires ~770k+ gas (far more than a simple ERC20 transfer).
+	estimatedGas, err := l1Client.EstimateGas(ctx, ethereum.CallMsg{
+		From:  adminAddr,
+		To:    &bridgeProxy,
+		Value: big.NewInt(0),
+		Data:  calldata,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to estimate gas for bridgeNativeTokenTo: %w", err)
+	}
+	gasLimit := estimatedGas * 120 / 100 // 20% safety margin
+	t.logger.Infof("Bridge tx estimated gas: %d, using limit: %d", estimatedGas, gasLimit)
+
+	bridgeTx := types.NewTransaction(nonce, bridgeProxy, big.NewInt(0), gasLimit, gasPrice, calldata)
 	signedBridgeTx, err := types.SignTx(bridgeTx, types.NewEIP155Signer(l1ChainID), privKey)
 	if err != nil {
 		return fmt.Errorf("failed to sign bridge tx: %w", err)
