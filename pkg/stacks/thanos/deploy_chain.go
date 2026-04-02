@@ -234,7 +234,9 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	t.logger.Info("Cannon prestate hash loaded", "hash", prestateHash)
 
 	namespace := utils.ConvertChainNameToNamespace(inputs.ChainName)
-	feeTokenConfig := constants.GetFeeTokenConfig(t.deployConfig.FeeToken, t.deployConfig.L1ChainID)
+	// L2 native token is always TON regardless of fee token.
+	// Non-TON fee tokens are handled by the AA paymaster layer.
+	tonConfig := constants.GetFeeTokenConfig(constants.FeeTokenTON, t.deployConfig.L1ChainID)
 	err = makeTerraformEnvFile(fmt.Sprintf("%s/tokamak-thanos-stack/terraform", t.deploymentPath), types.TerraformEnvConfig{
 		Namespace:           namespace,
 		AwsRegion:           awsLoginInputs.Region,
@@ -255,9 +257,9 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		PrestateHash:        prestateHash,
 		EnableFaultProof:    t.deployConfig.EnableFraudProof,
 		Preset:              t.deployConfig.Preset,
-		NativeTokenName:     feeTokenConfig.Name,
-		NativeTokenSymbol:   feeTokenConfig.Symbol,
-		NativeTokenAddress:  feeTokenConfig.L1Address,
+		NativeTokenName:     tonConfig.Name,
+		NativeTokenSymbol:   tonConfig.Symbol,
+		NativeTokenAddress:  tonConfig.L1Address,
 	})
 	if err != nil {
 		t.logger.Error("Error generating Terraform environment configuration", "err", err)

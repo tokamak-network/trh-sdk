@@ -175,29 +175,37 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 		// Auto-bridge admin TON from L1 to L2 if L2 balance is insufficient for the
 		// EntryPoint deposit. On a fresh L2, the admin has zero L2 TON; this step
 		// bridges 10 TON (covering the initial deposit + aa-operator refill cycles).
+		bridgeOk := true
 		if bridgeErr := t.bridgeAdminTONForAASetup(ctx); bridgeErr != nil {
+			bridgeOk = false
 			t.logger.Warnf("⚠️  Admin L2 TON bridge failed: %v", bridgeErr)
 			t.logger.Warn("   Fund admin address on L2 manually and re-run `trh-sdk setup-aa`.")
-		} else {
+		}
+
+		if bridgeOk {
 			if aaErr := t.setupAAPaymaster(ctx); aaErr != nil {
 				t.logger.Warnf("⚠️  AA Paymaster setup failed: %v", aaErr)
 				t.logger.Warn("   AA fee payment features may not work until paymaster is configured manually.")
 				t.logger.Warn("   Re-run `trh-sdk setup-aa` or call setupAAPaymaster via the admin API.")
 			} else {
 				t.logger.Infof("✅ AA Paymaster configured for %s", t.deployConfig.FeeToken)
+			}
+		}
 
-				// Start alto-bundler now that admin has L2 funds and paymaster is configured
-				t.logger.Info("🚀 Starting alto-bundler (AA setup complete, admin funded on L2)...")
-				if bundlerErr := utils.ExecuteCommandStream(ctx, t.logger, "docker", "compose",
-					"-f", composePath, "--profile", "aa", "up", "-d", "alto-bundler"); bundlerErr != nil {
-					t.logger.Warnf("⚠️  Failed to start alto-bundler: %v", bundlerErr)
-					t.logger.Warn("   Run `docker compose --profile aa up -d alto-bundler` manually.")
-				} else {
-					t.logger.Info("✅ alto-bundler started successfully")
-					// Persist aa profile in .env now that setup is confirmed
-					if err := t.persistAAProfile(composePath); err != nil {
-						t.logger.Warnf("Failed to persist aa profile in .env: %v", err)
-					}
+		// Start alto-bundler if admin has L2 funds (bridge succeeded).
+		// Bundler is decoupled from paymaster setup: it processes UserOperations
+		// independently and only needs gas funds (TON) in the executor account.
+		if bridgeOk {
+			t.logger.Info("🚀 Starting alto-bundler (admin funded on L2)...")
+			if bundlerErr := utils.ExecuteCommandStream(ctx, t.logger, "docker", "compose",
+				"-f", composePath, "--profile", "aa", "up", "-d", "alto-bundler"); bundlerErr != nil {
+				t.logger.Warnf("⚠️  Failed to start alto-bundler: %v", bundlerErr)
+				t.logger.Warn("   Run `docker compose --profile aa up -d alto-bundler` manually.")
+			} else {
+				t.logger.Info("✅ alto-bundler started successfully")
+				// Persist aa profile in .env so bundler is included on restarts
+				if err := t.persistAAProfile(composePath); err != nil {
+					t.logger.Warnf("Failed to persist aa profile in .env: %v", err)
 				}
 			}
 		}
@@ -272,6 +280,9 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 	}
 
 	feeTokenConfig := constants.GetFeeTokenConfig(t.deployConfig.FeeToken, t.deployConfig.L1ChainID)
+	// L2 native token is always TON regardless of fee token.
+	// Non-TON fee tokens are handled by the AA paymaster layer.
+	tonConfig := constants.GetFeeTokenConfig(constants.FeeTokenTON, t.deployConfig.L1ChainID)
 
 	data := localComposeData{
 		OpGethImage:               fmt.Sprintf("tokamaknetwork/thanos-op-geth:%s", imageTags.OpGethImageTag),
@@ -308,9 +319,9 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		BridgeL2ChainName:                   t.deployConfig.ChainName,
 		BridgeL2ChainID:                     fmt.Sprintf("%d", t.deployConfig.L2ChainID),
 		BridgeL2RPC:                         "http://localhost:8545",
-		BridgeL2NativeCurrencyName:          feeTokenConfig.Name,
-		BridgeL2NativeCurrencySymbol:        feeTokenConfig.Symbol,
-		BridgeNativeTokenL1Address:          feeTokenConfig.L1Address,
+		BridgeL2NativeCurrencyName:          tonConfig.Name,
+		BridgeL2NativeCurrencySymbol:        tonConfig.Symbol,
+		BridgeNativeTokenL1Address:          tonConfig.L1Address,
 		BridgeStandardBridgeAddress:         contracts.L1StandardBridgeProxy,
 		BridgeAddressManagerAddress:         contracts.AddressManager,
 		BridgeL1CrossDomainMessengerAddress: contracts.L1CrossDomainMessengerProxy,

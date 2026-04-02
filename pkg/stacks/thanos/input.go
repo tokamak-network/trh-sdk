@@ -1482,11 +1482,14 @@ func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainI
 		feeToken = constants.FeeTokenTON
 	}
 	feeTokenConfig := constants.GetFeeTokenConfig(feeToken, l1ChainId)
+	// L2 native token is always TON regardless of fee token.
+	// Non-TON fee tokens are handled by the AA paymaster layer.
+	tonConfig := constants.GetFeeTokenConfig(constants.FeeTokenTON, l1ChainId)
 
 	defaultTemplate := &types.DeployConfigTemplate{
-		NativeTokenName:                          feeTokenConfig.Name,
-		NativeTokenSymbol:                        feeTokenConfig.Symbol,
-		NativeTokenAddress:                       feeTokenConfig.L1Address,
+		NativeTokenName:                          tonConfig.Name,
+		NativeTokenSymbol:                        tonConfig.Symbol,
+		NativeTokenAddress:                       tonConfig.L1Address,
 		L1ChainID:                                l1ChainId,
 		L2ChainID:                                l2ChainId,
 		L2BlockTime:                              l2BlockTime,
