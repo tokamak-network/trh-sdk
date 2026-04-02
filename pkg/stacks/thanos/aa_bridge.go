@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -17,15 +18,20 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 )
 
-// bridgeAdminTONForAASetup bridges TON from L1 to the admin address on L2
+// bridgeAdminTONForAASetup bridges the L2 native token from L1 to the admin address on L2
 // if the admin's L2 balance is below the EntryPoint deposit requirement.
+//
+// The native token is read from SystemConfig.nativeTokenAddress() on-chain, which may
+// differ from TON for deployments created before the "L2 native = always TON" fix
+// (e.g. feeToken=USDT deployments have USDT as the on-chain native token).
 //
 // Steps:
 //  1. Check admin L2 balance — skip if already >= DefaultEntryPointDeposit
-//  2. Check admin L1 TON balance — error if < DefaultAABridgeAmount
-//  3. TON.approve(L1StandardBridgeProxy, DefaultAABridgeAmount) on L1
-//  4. L1StandardBridge.bridgeNativeTokenTo(admin, DefaultAABridgeAmount, 200_000, "") on L1
-//  5. Poll L2 admin balance until >= DefaultEntryPointDeposit (5-min timeout, 3s interval)
+//  2. Read on-chain native token from SystemConfig
+//  3. Check admin L1 native-token balance — error if < DefaultAABridgeAmount
+//  4. NativeToken.approve(L1StandardBridgeProxy, DefaultAABridgeAmount) on L1
+//  5. L1StandardBridge.bridgeNativeTokenTo(admin, DefaultAABridgeAmount, 200_000, "") on L1
+//  6. Poll L2 admin balance until >= DefaultEntryPointDeposit (5-min timeout, 3s interval)
 func (t *ThanosStack) bridgeAdminTONForAASetup(ctx context.Context) error {
 	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(t.deployConfig.AdminPrivateKey, "0x"))
 	if err != nil {
@@ -51,7 +57,7 @@ func (t *ThanosStack) bridgeAdminTONForAASetup(ctx context.Context) error {
 	t.logger.Infof("Admin L2 balance %s wei < required %s wei; bridging TON from L1...",
 		l2Balance.String(), constants.DefaultEntryPointDeposit.String())
 
-	// Step 2: Connect to L1 and verify L1 TON balance.
+	// Step 2: Connect to L1 and read deployment contracts.
 	l1Client, err := ethclient.DialContext(ctx, t.deployConfig.L1RPCURL)
 	if err != nil {
 		return fmt.Errorf("failed to connect to L1 RPC: %w", err)
@@ -63,28 +69,7 @@ func (t *ThanosStack) bridgeAdminTONForAASetup(ctx context.Context) error {
 		return fmt.Errorf("failed to get L1 chain ID: %w", err)
 	}
 
-	chainConfig := constants.L1ChainConfigurations[l1ChainID.Uint64()]
-	if chainConfig.TON == "" || chainConfig.TON == "0x0000000000000000000000000000000000000000" {
-		return fmt.Errorf("L1 TON address not configured for chain %d; fund admin L2 address %s manually",
-			l1ChainID.Uint64(), adminAddr.Hex())
-	}
-
-	tonAddr := common.HexToAddress(chainConfig.TON)
-	tonContract, err := abis.NewTON(tonAddr, l1Client)
-	if err != nil {
-		return fmt.Errorf("failed to instantiate L1 TON contract: %w", err)
-	}
-
-	l1Balance, err := tonContract.BalanceOf(&bind.CallOpts{Context: ctx}, adminAddr)
-	if err != nil {
-		return fmt.Errorf("failed to query admin L1 TON balance: %w", err)
-	}
-	if l1Balance.Cmp(constants.DefaultAABridgeAmount) < 0 {
-		return fmt.Errorf("insufficient L1 TON balance: have %s wei, need %s wei — top up admin %s on L1 first",
-			l1Balance.String(), constants.DefaultAABridgeAmount.String(), adminAddr.Hex())
-	}
-
-	// Read L1StandardBridgeProxy from deployment JSON.
+	// Read L1StandardBridgeProxy and SystemConfigProxy from deployment JSON.
 	contracts, err := t.readDeploymentContracts()
 	if err != nil {
 		return fmt.Errorf("failed to read deployment contracts: %w", err)
@@ -92,29 +77,80 @@ func (t *ThanosStack) bridgeAdminTONForAASetup(ctx context.Context) error {
 	if contracts.L1StandardBridgeProxy == "" {
 		return fmt.Errorf("L1StandardBridgeProxy address not found in deployment contracts")
 	}
+	if contracts.SystemConfigProxy == "" {
+		return fmt.Errorf("SystemConfigProxy address not found in deployment contracts")
+	}
 	bridgeProxy := common.HexToAddress(contracts.L1StandardBridgeProxy)
 
-	// Step 3: TON.approve(L1StandardBridgeProxy, DefaultAABridgeAmount) on L1.
+	// Read the actual native token from SystemConfig on-chain.
+	// This is critical: for deployments created before the "L2 native = always TON" fix,
+	// SystemConfig.nativeTokenAddress may return a non-TON token (e.g. USDT).
+	// The L1StandardBridge.bridgeNativeTokenTo() does transferFrom on this token.
+	sysConfigAddr := common.HexToAddress(contracts.SystemConfigProxy)
+	// nativeTokenAddress() selector = keccak256("nativeTokenAddress()")[:4]
+	nativeTokenSelector := crypto.Keccak256([]byte("nativeTokenAddress()"))[:4]
+	nativeTokenResult, err := l1Client.CallContract(ctx, ethereum.CallMsg{
+		To:   &sysConfigAddr,
+		Data: nativeTokenSelector,
+	}, nil)
+	if err != nil {
+		return fmt.Errorf("failed to read nativeTokenAddress from SystemConfig(%s): %w",
+			sysConfigAddr.Hex(), err)
+	}
+	if len(nativeTokenResult) < 32 {
+		return fmt.Errorf("unexpected response length from SystemConfig.nativeTokenAddress(): %d bytes", len(nativeTokenResult))
+	}
+	nativeTokenAddr := common.BytesToAddress(nativeTokenResult[12:32])
+	if nativeTokenAddr == (common.Address{}) {
+		return fmt.Errorf("SystemConfig.nativeTokenAddress() returned zero address; fund admin L2 address %s manually",
+			adminAddr.Hex())
+	}
+
+	// Log whether the on-chain native token matches the expected TON address.
+	chainConfig := constants.L1ChainConfigurations[l1ChainID.Uint64()]
+	expectedTON := common.HexToAddress(chainConfig.TON)
+	if nativeTokenAddr != expectedTON {
+		t.logger.Warnf("On-chain native token (%s) differs from expected TON (%s); bridging the on-chain native token",
+			nativeTokenAddr.Hex(), expectedTON.Hex())
+	}
+
+	// Step 3: Check admin L1 native-token balance.
+	// We use the TON ABI binding since it's a standard ERC20 interface (approve, balanceOf).
+	nativeContract, err := abis.NewTON(nativeTokenAddr, l1Client)
+	if err != nil {
+		return fmt.Errorf("failed to instantiate L1 native token contract (%s): %w", nativeTokenAddr.Hex(), err)
+	}
+
+	l1Balance, err := nativeContract.BalanceOf(&bind.CallOpts{Context: ctx}, adminAddr)
+	if err != nil {
+		return fmt.Errorf("failed to query admin L1 native token balance: %w", err)
+	}
+	if l1Balance.Cmp(constants.DefaultAABridgeAmount) < 0 {
+		return fmt.Errorf("insufficient L1 native token (%s) balance: have %s wei, need %s wei — top up admin %s on L1 first",
+			nativeTokenAddr.Hex(), l1Balance.String(), constants.DefaultAABridgeAmount.String(), adminAddr.Hex())
+	}
+
+	// Step 4: NativeToken.approve(L1StandardBridgeProxy, DefaultAABridgeAmount) on L1.
 	auth, err := bind.NewKeyedTransactorWithChainID(privKey, l1ChainID)
 	if err != nil {
 		return fmt.Errorf("failed to create L1 transaction auth: %w", err)
 	}
-	t.logger.Infof("Approving L1 TON bridge transfer (%s wei) to %s...",
-		constants.DefaultAABridgeAmount.String(), bridgeProxy.Hex())
+	t.logger.Infof("Approving L1 native token (%s) bridge transfer (%s wei) to %s...",
+		nativeTokenAddr.Hex(), constants.DefaultAABridgeAmount.String(), bridgeProxy.Hex())
 	var approveTx *types.Transaction
 	if err := rpcCallWithRetry(ctx, func() error {
 		var txErr error
-		approveTx, txErr = tonContract.Approve(auth, bridgeProxy, constants.DefaultAABridgeAmount)
+		approveTx, txErr = nativeContract.Approve(auth, bridgeProxy, constants.DefaultAABridgeAmount)
 		return txErr
 	}); err != nil {
-		return fmt.Errorf("TON.approve failed: %w", err)
+		return fmt.Errorf("native token approve failed: %w", err)
 	}
 	if _, err := bind.WaitMined(ctx, l1Client, approveTx); err != nil {
-		return fmt.Errorf("waiting for TON.approve receipt failed: %w", err)
+		return fmt.Errorf("waiting for native token approve receipt failed: %w", err)
 	}
-	t.logger.Infof("✅ TON.approve confirmed (tx: %s)", approveTx.Hash().Hex())
+	t.logger.Infof("Approve confirmed (tx: %s)", approveTx.Hash().Hex())
 
-	// Step 4: L1StandardBridge.bridgeNativeTokenTo(admin, amount, minGasLimit, "").
+	// Step 5: L1StandardBridge.bridgeNativeTokenTo(admin, amount, minGasLimit, "").
 	// ABI: bridgeNativeTokenTo(address _to, uint256 _amount, uint32 _minGasLimit, bytes _extraData)
 	// ABI encoding (mixed static + dynamic):
 	//   Head:  [4 selector][32 _to][32 _amount][32 _minGasLimit][32 offset=128]
@@ -177,7 +213,7 @@ func (t *ThanosStack) bridgeAdminTONForAASetup(ctx context.Context) error {
 		time.Sleep(2 * time.Second)
 	}
 
-	// Step 5: Poll L2 for admin balance >= DefaultEntryPointDeposit (5-min timeout, 3s interval).
+	// Step 6: Poll L2 for admin balance >= DefaultEntryPointDeposit (5-min timeout, 3s interval).
 	t.logger.Infof("⏳ Waiting for TON deposit to arrive on L2 (admin: %s)...", adminAddr.Hex())
 	deadline := time.Now().Add(5 * time.Minute)
 	for time.Now().Before(deadline) {
