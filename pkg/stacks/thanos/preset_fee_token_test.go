@@ -23,22 +23,25 @@ func makeTestInput(preset, feeToken string) *DeployContractsInput {
 	}
 }
 
-// TestInitDeployConfigTemplate_FeeTokenMapping verifies that each fee token
-// correctly populates NativeToken* fields in the deploy config template.
+// TestInitDeployConfigTemplate_FeeTokenMapping verifies that NativeToken* fields
+// always reflect TON regardless of fee token. Non-TON fee tokens (ETH, USDT, USDC)
+// are handled by the AA paymaster layer and do not replace TON as the L2 native gas token.
 func TestInitDeployConfigTemplate_FeeTokenMapping(t *testing.T) {
 	l1ChainID := constants.EthereumSepoliaChainID
 	l2ChainID := uint64(1234)
 
+	// L2 native token is always TON; fee token only affects AA paymaster configuration.
+	const wantName       = "Tokamak Network Token"
+	const wantSymbol     = "TON"
+	const wantAddrPrefix = "0xa30fe40" // Sepolia TON address
+
 	tests := []struct {
-		feeToken       string
-		wantName       string
-		wantSymbol     string
-		wantAddrPrefix string // just check it's non-zero or zero
+		feeToken string
 	}{
-		{constants.FeeTokenTON, "Tokamak Network Token", "TON", "0xa30fe40"},
-		{constants.FeeTokenETH, "Ether", "ETH", "0x000000000000000000000000000000000000000"},
-		{constants.FeeTokenUSDT, "Tether USD", "USDT", "0xaa8e23"},
-		{constants.FeeTokenUSDC, "USD Coin", "USDC", "0x1c7d4b"},
+		{constants.FeeTokenTON},
+		{constants.FeeTokenETH},
+		{constants.FeeTokenUSDT},
+		{constants.FeeTokenUSDC},
 	}
 
 	for _, tc := range tests {
@@ -46,14 +49,14 @@ func TestInitDeployConfigTemplate_FeeTokenMapping(t *testing.T) {
 			input := makeTestInput(constants.PresetDeFi, tc.feeToken)
 			tpl := initDeployConfigTemplate(input, l1ChainID, l2ChainID, "")
 
-			if tpl.NativeTokenName != tc.wantName {
-				t.Errorf("NativeTokenName: got %q, want %q", tpl.NativeTokenName, tc.wantName)
+			if tpl.NativeTokenName != wantName {
+				t.Errorf("NativeTokenName: got %q, want %q", tpl.NativeTokenName, wantName)
 			}
-			if tpl.NativeTokenSymbol != tc.wantSymbol {
-				t.Errorf("NativeTokenSymbol: got %q, want %q", tpl.NativeTokenSymbol, tc.wantSymbol)
+			if tpl.NativeTokenSymbol != wantSymbol {
+				t.Errorf("NativeTokenSymbol: got %q, want %q", tpl.NativeTokenSymbol, wantSymbol)
 			}
-			if !strings.HasPrefix(strings.ToLower(tpl.NativeTokenAddress), strings.ToLower(tc.wantAddrPrefix)) {
-				t.Errorf("NativeTokenAddress: got %q, want prefix %q", tpl.NativeTokenAddress, tc.wantAddrPrefix)
+			if !strings.HasPrefix(strings.ToLower(tpl.NativeTokenAddress), strings.ToLower(wantAddrPrefix)) {
+				t.Errorf("NativeTokenAddress: got %q, want prefix %q", tpl.NativeTokenAddress, wantAddrPrefix)
 			}
 		})
 	}
