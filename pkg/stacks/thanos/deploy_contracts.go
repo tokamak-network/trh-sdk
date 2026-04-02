@@ -318,8 +318,20 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 					t.logger.Info("✅ Artifact symlinks created")
 				}
 
+				// Always force recompile L1Block.sol: the pre-built npm artifact does not
+				// include setL1BlockValuesIsthmus() which is required when isthmus_time is
+				// activated at genesis. Deleting the artifact dir guarantees forge recompiles it.
+				l1BlockArtifactDir := filepath.Join(contractsDir, "forge-artifacts", "L1Block.sol")
+				if err := os.RemoveAll(l1BlockArtifactDir); err != nil {
+					t.logger.Warnf("Failed to remove L1Block forge artifact: %v", err)
+				}
+				if cacheErr := invalidateCacheEntry(contractsDir, "src/L2/L1Block.sol"); cacheErr != nil {
+					t.logger.Warn("Failed to invalidate cache for L1Block", "err", cacheErr)
+				}
+				t.logger.Info("Forge incremental build will run to compile L1Block (Isthmus support)")
+
 				if deployContractsConfig.EnableFaultProof {
-					// Fault proof enabled: invalidate cache for patched AnchorStateRegistry
+					// Fault proof enabled: also invalidate cache for patched AnchorStateRegistry
 					// and let forge do an incremental build to recompile it. The pre-built
 					// artifacts don't contain setInitialAnchorState which is required for
 					// bootstrapping the genesis anchor state on new chains.
@@ -336,9 +348,8 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 					}
 					t.logger.Info("Forge incremental build will run to compile patched AnchorStateRegistry")
 				} else {
-					// No fault proof: safe to skip forge build entirely
-					os.Setenv("SKIP_FORGE_BUILD", "true")
-					t.logger.Info("Forge build will be skipped (no fault proof patches needed)")
+					// No fault proof: skip full forge build but still run incremental for L1Block
+					t.logger.Info("Forge incremental build will run for L1Block only (no fault proof)")
 				}
 			}
 
@@ -354,6 +365,11 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 				return buildErr
 			}
 			t.logger.Info("✅ Build the contracts completed!")
+			// Always verify L1Block artifact has Isthmus support
+			if verifyErr := verifyL1BlockArtifact(contractsDir); verifyErr != nil {
+				return fmt.Errorf("L1Block artifact verification failed — forge did not recompile with Isthmus support: %w", verifyErr)
+			}
+			t.logger.Info("✅ L1Block artifact verified: setL1BlockValuesIsthmus present")
 			if deployContractsConfig.EnableFaultProof {
 				if verifyErr := verifyAnchorStateRegistryArtifact(contractsDir); verifyErr != nil {
 					return fmt.Errorf("AnchorStateRegistry artifact verification failed — forge did not recompile the patched source: %w", verifyErr)
@@ -1155,6 +1171,48 @@ func verifyAnchorStateRegistryArtifact(contractsDir string) error {
 	return fmt.Errorf("setInitialAnchorState not found in AnchorStateRegistry ABI — " +
 		"forge did not recompile the patched source; ensure patchAnchorStateRegistry ran " +
 		"or delete forge-artifacts/AnchorStateRegistry.sol/ and retry the build")
+}
+
+// verifyL1BlockArtifact checks that the compiled L1Block artifact includes
+// setL1BlockValuesIsthmus(), confirming the source was recompiled with Isthmus support.
+func verifyL1BlockArtifact(contractsDir string) error {
+	artifactDir := filepath.Join(contractsDir, "forge-artifacts", "L1Block.sol")
+	entries, err := os.ReadDir(artifactDir)
+	if err != nil {
+		return fmt.Errorf("forge-artifacts/L1Block.sol not found: %w", err)
+	}
+	var artifactPath string
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() && strings.HasSuffix(name, ".json") && !strings.HasSuffix(name, ".dbg.json") {
+			artifactPath = filepath.Join(artifactDir, name)
+			break
+		}
+	}
+	if artifactPath == "" {
+		return fmt.Errorf("no JSON artifact found in forge-artifacts/L1Block.sol/")
+	}
+	data, err := os.ReadFile(artifactPath)
+	if err != nil {
+		return fmt.Errorf("failed to read artifact: %w", err)
+	}
+	var artifact struct {
+		ABI []struct {
+			Name string `json:"name"`
+			Type string `json:"type"`
+		} `json:"abi"`
+	}
+	if err := json.Unmarshal(data, &artifact); err != nil {
+		return fmt.Errorf("failed to parse artifact JSON: %w", err)
+	}
+	for _, entry := range artifact.ABI {
+		if entry.Type == "function" && entry.Name == "setL1BlockValuesIsthmus" {
+			return nil
+		}
+	}
+	return fmt.Errorf("setL1BlockValuesIsthmus not found in L1Block ABI — " +
+		"forge did not recompile the patched source; ensure tokamak-thanos L1Block.sol has Isthmus support " +
+		"or delete forge-artifacts/L1Block.sol/ and retry the build")
 }
 
 // clearAnchorStateRegistryFromAddressFile removes the "AnchorStateRegistry" implementation
