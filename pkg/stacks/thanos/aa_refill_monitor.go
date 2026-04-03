@@ -20,10 +20,12 @@ const (
 	// refillPollInterval is how often the monitor checks the EntryPoint balance.
 	refillPollInterval = 5 * time.Minute
 
-	// Base thresholds at 18 decimals — scaled at runtime by feeTokenDecimals().
-	refillThresholdBase18   = uint64(5e17) // 0.5 token (18 dec)
-	refillAmountBase18      = uint64(5e18) // 5 tokens (18 dec)
-	adminWarnThresholdBase18 = uint64(2e18) // 2 tokens (18 dec)
+	// EntryPoint deposit is always in L2 native token (TON @ 18 decimals) regardless of
+	// which fee token the paymaster uses. Do NOT scale by feeToken decimals.
+	// See aa_setup.go setupAAPaymaster() for the same principle.
+	refillThresholdWei   = uint64(5e17) // 0.5 TON
+	refillAmountWei      = uint64(5e18) // 5 TON
+	adminWarnThresholdWei = uint64(2e18) // 2 TON
 )
 
 // startEntryPointRefillMonitor starts a background goroutine that periodically checks
@@ -54,16 +56,8 @@ func (t *ThanosStack) startEntryPointRefillMonitor(ctx context.Context) {
 			}
 		}
 	}()
-	dec := feeTokenDecimals(t.deployConfig.FeeToken)
-	var sf *big.Int
-	if dec < 18 {
-		sf = new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(18-dec)), nil)
-	} else {
-		sf = big.NewInt(1)
-	}
-	logThreshold := new(big.Int).Div(new(big.Int).SetUint64(refillThresholdBase18), sf)
-	logRefill := new(big.Int).Div(new(big.Int).SetUint64(refillAmountBase18), sf)
-	t.logger.Infof("EntryPoint refill monitor started (poll=%s, threshold=%s, refill=%s, token=%s)", refillPollInterval, logThreshold.String(), logRefill.String(), t.deployConfig.FeeToken)
+	t.logger.Infof("EntryPoint refill monitor started (poll=%s, threshold=%d wei, refill=%d wei, feeToken=%s)",
+		refillPollInterval, refillThresholdWei, refillAmountWei, t.deployConfig.FeeToken)
 }
 
 // refillMu guards against concurrent refill transactions from multiple monitor ticks.
@@ -87,17 +81,11 @@ func (t *ThanosStack) checkAndRefillEntryPoint(ctx context.Context) error {
 		return fmt.Errorf("balanceOf query failed: %w", err)
 	}
 
-	// Scale thresholds by fee token decimals.
-	dec := feeTokenDecimals(t.deployConfig.FeeToken)
-	var scaleFactor *big.Int
-	if dec < 18 {
-		scaleFactor = new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(18-dec)), nil)
-	} else {
-		scaleFactor = big.NewInt(1)
-	}
-	threshold := new(big.Int).Div(new(big.Int).SetUint64(refillThresholdBase18), scaleFactor)
-	refillValue := new(big.Int).Div(new(big.Int).SetUint64(refillAmountBase18), scaleFactor)
-	warnThreshold := new(big.Int).Div(new(big.Int).SetUint64(adminWarnThresholdBase18), scaleFactor)
+	// EntryPoint deposit is always in L2 native token (TON @ 18 decimals).
+	// Do NOT scale by feeToken decimals — EntryPoint only understands native token.
+	threshold := new(big.Int).SetUint64(refillThresholdWei)
+	refillValue := new(big.Int).SetUint64(refillAmountWei)
+	warnThreshold := new(big.Int).SetUint64(adminWarnThresholdWei)
 
 	if deposit.Cmp(threshold) >= 0 {
 		// Enough balance — no action needed.
