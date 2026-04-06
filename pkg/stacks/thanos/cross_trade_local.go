@@ -3,9 +3,15 @@ package thanos
 import (
 	"context"
 	"fmt"
+	"math/big"
+	"time"
 
+	ethereum "github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/tokamak-network/trh-sdk/abis"
 	"go.uber.org/zap"
 )
 
@@ -52,7 +58,7 @@ func (t *ThanosStack) DeployCrossTradeLocal(
 	ctx context.Context,
 	input *DeployCrossTradeLocalInput,
 ) (*DeployCrossTradeLocalOutput, error) {
-	// Plan 02에서 구현
+	// Plan 03에서 구현
 	return nil, fmt.Errorf("not yet implemented")
 }
 
@@ -60,12 +66,109 @@ func (t *ThanosStack) DeployCrossTradeLocal(
 // Returns nil when the contract is deployed (code length > 0) or error on timeout.
 // Per D-04: used for creation deposit tx verification.
 func waitForContractCode(ctx context.Context, l2Client *ethclient.Client, addr common.Address, logger *zap.SugaredLogger) error {
-	return fmt.Errorf("not yet implemented")
+	for attempt := 1; attempt <= 60; attempt++ {
+		if attempt%10 == 0 {
+			logger.Infof("waiting for contract at %s (attempt %d/60)", addr.Hex(), attempt)
+		}
+
+		code, err := l2Client.CodeAt(ctx, addr, nil)
+		if err != nil {
+			return fmt.Errorf("failed to call CodeAt for %s: %w", addr.Hex(), err)
+		}
+		if len(code) > 0 {
+			logger.Infof("contract deployed at %s (attempt %d/60)", addr.Hex(), attempt)
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+	return fmt.Errorf("contract at %s not deployed after 120s", addr.Hex())
 }
 
 // verifyDepositCallEffect checks that a function-call deposit tx actually executed on L2
 // by calling a view function on the target contract to verify state change.
 // Per D-04: used for non-creation deposit tx verification.
 func verifyDepositCallEffect(ctx context.Context, l2Client *ethclient.Client, contractAddr common.Address, checkCalldata []byte, logger *zap.SugaredLogger) error {
-	return fmt.Errorf("not yet implemented")
+	for attempt := 1; attempt <= 60; attempt++ {
+		if attempt%10 == 0 {
+			logger.Infof("verifying deposit call effect at %s (attempt %d/60)", contractAddr.Hex(), attempt)
+		}
+
+		result, err := l2Client.CallContract(ctx, ethereum.CallMsg{
+			To:   &contractAddr,
+			Data: checkCalldata,
+		}, nil)
+		if err == nil && len(result) > 0 {
+			logger.Infof("deposit call effect verified at %s (attempt %d/60)", contractAddr.Hex(), attempt)
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+	return fmt.Errorf("deposit call effect not verified at %s after 120s", contractAddr.Hex())
+}
+
+// sendDepositCreation sends an L1 OptimismPortal.depositTransaction for contract creation.
+// The _to field is address(0) and _isCreation is true. Waits for L1 receipt.
+// Per D-09: fails fast if the L1 tx reverts.
+func sendDepositCreation(
+	ctx context.Context,
+	portal *abis.OptimismPortalTransactor,
+	opts *bind.TransactOpts,
+	l1Client *ethclient.Client,
+	bytecode []byte,
+	gasLimit uint64,
+	logger *zap.SugaredLogger,
+) (*types.Receipt, error) {
+	tx, err := portal.DepositTransaction(opts, common.Address{}, big.NewInt(0), big.NewInt(0), gasLimit, true, bytecode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send deposit creation tx: %w", err)
+	}
+	logger.Infof("L1 deposit creation tx sent: %s", tx.Hash().Hex())
+
+	receipt, err := bind.WaitMined(ctx, l1Client, tx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to wait for deposit creation tx receipt: %w", err)
+	}
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		return nil, fmt.Errorf("deposit creation tx reverted (tx: %s, gas used: %d)", tx.Hash().Hex(), receipt.GasUsed)
+	}
+	return receipt, nil
+}
+
+// sendDepositCall sends an L1 OptimismPortal.depositTransaction for a function call.
+// The _isCreation flag is false. Waits for L1 receipt.
+// Per D-09: fails fast if the L1 tx reverts.
+func sendDepositCall(
+	ctx context.Context,
+	portal *abis.OptimismPortalTransactor,
+	opts *bind.TransactOpts,
+	l1Client *ethclient.Client,
+	to common.Address,
+	calldata []byte,
+	gasLimit uint64,
+	logger *zap.SugaredLogger,
+) (*types.Receipt, error) {
+	tx, err := portal.DepositTransaction(opts, to, big.NewInt(0), big.NewInt(0), gasLimit, false, calldata)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send deposit call tx to %s: %w", to.Hex(), err)
+	}
+	logger.Infof("L1 deposit call tx sent to %s: %s", to.Hex(), tx.Hash().Hex())
+
+	receipt, err := bind.WaitMined(ctx, l1Client, tx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to wait for deposit call tx receipt (to: %s): %w", to.Hex(), err)
+	}
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		return nil, fmt.Errorf("deposit call tx reverted (to: %s, tx: %s, gas used: %d)", to.Hex(), tx.Hash().Hex(), receipt.GasUsed)
+	}
+	return receipt, nil
 }
