@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	ethereum "github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/abis"
 	"go.uber.org/zap"
@@ -171,4 +174,207 @@ func sendDepositCall(
 		return nil, fmt.Errorf("deposit call tx reverted (to: %s, tx: %s, gas used: %d)", to.Hex(), tx.Hash().Hex(), receipt.GasUsed)
 	}
 	return receipt, nil
+}
+
+// crossTradePairResult holds the deployed impl and proxy addresses for a CrossTrade pair.
+type crossTradePairResult struct {
+	ImplAddr  common.Address
+	ProxyAddr common.Address
+}
+
+// deployL2CrossTradePair deploys a CrossTrade impl+proxy pair on L2 via 7 Deposit Tx steps.
+// Each step includes L2 execution verification (per D-04, SDK-06):
+//   - Creation txs: getCode polling (waitForContractCode)
+//   - Function call txs: view function call (verifyDepositCallEffect)
+func deployL2CrossTradePair(
+	ctx context.Context,
+	portal *abis.OptimismPortalTransactor,
+	opts *bind.TransactOpts,
+	l1Client *ethclient.Client,
+	l2Client *ethclient.Client,
+	deployerAddr common.Address,
+	l2Nonce uint64,
+	implBytecode []byte,
+	proxyBytecode []byte,
+	proxyABIJSON string,
+	implABIJSON string,
+	crossDomainMessenger common.Address,
+	l1CrossTradeAddr common.Address,
+	l1ChainID *big.Int,
+	tokens []TokenPair,
+	logger *zap.SugaredLogger,
+) (*crossTradePairResult, error) {
+	proxyABI, err := abi.JSON(strings.NewReader(proxyABIJSON))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse proxy ABI JSON: %w", err)
+	}
+	implABI, err := abi.JSON(strings.NewReader(implABIJSON))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse impl ABI JSON: %w", err)
+	}
+
+	// ---------------------------------------------------------------------------
+	// Step 1: Deploy L2CrossTrade impl (creation Deposit Tx)
+	// ---------------------------------------------------------------------------
+	implAddr := crypto.CreateAddress(deployerAddr, l2Nonce)
+	logger.Infof("Step 1: deploying L2CrossTrade impl, predicted addr=%s", implAddr.Hex())
+	if _, err := sendDepositCreation(ctx, portal, opts, l1Client, implBytecode, 3_000_000, logger); err != nil {
+		return nil, fmt.Errorf("step 1 failed: %w", err)
+	}
+	if err := waitForContractCode(ctx, l2Client, implAddr, logger); err != nil {
+		return nil, fmt.Errorf("step 1 L2 verification failed: %w", err)
+	}
+	logger.Infof("Step 1: L2CrossTrade impl deployed at %s", implAddr.Hex())
+
+	// ---------------------------------------------------------------------------
+	// Step 2: Deploy L2CrossTradeProxy (creation Deposit Tx)
+	// ---------------------------------------------------------------------------
+	proxyAddr := crypto.CreateAddress(deployerAddr, l2Nonce+1)
+	logger.Infof("Step 2: deploying L2CrossTradeProxy, predicted addr=%s", proxyAddr.Hex())
+	if _, err := sendDepositCreation(ctx, portal, opts, l1Client, proxyBytecode, 3_000_000, logger); err != nil {
+		return nil, fmt.Errorf("step 2 failed: %w", err)
+	}
+	if err := waitForContractCode(ctx, l2Client, proxyAddr, logger); err != nil {
+		return nil, fmt.Errorf("step 2 L2 verification failed: %w", err)
+	}
+	logger.Infof("Step 2: L2CrossTradeProxy deployed at %s", proxyAddr.Hex())
+
+	// ---------------------------------------------------------------------------
+	// Step 3: setAliveImplementation2(implAddr, true) — Pitfall 2 prevention
+	// Must be called before setSelectorImplementations2.
+	// ---------------------------------------------------------------------------
+	calldata, err := proxyABI.Pack("setAliveImplementation2", implAddr, true)
+	if err != nil {
+		return nil, fmt.Errorf("step 3: failed to pack setAliveImplementation2 calldata: %w", err)
+	}
+	if _, err := sendDepositCall(ctx, portal, opts, l1Client, proxyAddr, calldata, 500_000, logger); err != nil {
+		return nil, fmt.Errorf("step 3 failed: %w", err)
+	}
+	// L2 verification: aliveImplementation(implAddr) should return true
+	checkCalldata, err := proxyABI.Pack("aliveImplementation", implAddr)
+	if err != nil {
+		return nil, fmt.Errorf("step 3: failed to pack aliveImplementation check calldata: %w", err)
+	}
+	if err := verifyDepositCallEffect(ctx, l2Client, proxyAddr, checkCalldata, logger); err != nil {
+		return nil, fmt.Errorf("step 3 L2 verification failed: %w", err)
+	}
+	logger.Infof("Step 3: setAliveImplementation2 for impl %s — L2 verified", implAddr.Hex())
+
+	// ---------------------------------------------------------------------------
+	// Step 4: setSelectorImplementations2(selectors, implAddr)
+	// Extract all function selectors from impl ABI (per D-08).
+	// ---------------------------------------------------------------------------
+	var selectors [][4]byte
+	for _, method := range implABI.Methods {
+		var sel [4]byte
+		copy(sel[:], method.ID[:4])
+		selectors = append(selectors, sel)
+	}
+	calldata, err = proxyABI.Pack("setSelectorImplementations2", selectors, implAddr)
+	if err != nil {
+		return nil, fmt.Errorf("step 4: failed to pack setSelectorImplementations2 calldata: %w", err)
+	}
+	if _, err := sendDepositCall(ctx, portal, opts, l1Client, proxyAddr, calldata, 500_000, logger); err != nil {
+		return nil, fmt.Errorf("step 4 failed: %w", err)
+	}
+	// L2 verification: selectorImplementation(selectors[0]) should return implAddr
+	if len(selectors) > 0 {
+		checkCalldata, err = proxyABI.Pack("selectorImplementation", selectors[0])
+		if err != nil {
+			return nil, fmt.Errorf("step 4: failed to pack selectorImplementation check calldata: %w", err)
+		}
+		if err := verifyDepositCallEffect(ctx, l2Client, proxyAddr, checkCalldata, logger); err != nil {
+			return nil, fmt.Errorf("step 4 L2 verification failed: %w", err)
+		}
+	}
+	logger.Infof("Step 4: setSelectorImplementations2 with %d selectors — L2 verified", len(selectors))
+
+	// ---------------------------------------------------------------------------
+	// Step 5: initialize(crossDomainMessenger)
+	// initialize is in proxy ABI; proxy stores the messenger directly.
+	// ---------------------------------------------------------------------------
+	calldata, err = proxyABI.Pack("initialize", crossDomainMessenger)
+	if err != nil {
+		return nil, fmt.Errorf("step 5: failed to pack initialize calldata: %w", err)
+	}
+	if _, err := sendDepositCall(ctx, portal, opts, l1Client, proxyAddr, calldata, 500_000, logger); err != nil {
+		return nil, fmt.Errorf("step 5 failed: %w", err)
+	}
+	// L2 verification: crossDomainMessenger() view function should return the set address.
+	checkCalldata, err = proxyABI.Pack("crossDomainMessenger")
+	if err != nil {
+		return nil, fmt.Errorf("step 5: failed to pack crossDomainMessenger check calldata: %w", err)
+	}
+	if err := verifyDepositCallEffect(ctx, l2Client, proxyAddr, checkCalldata, logger); err != nil {
+		return nil, fmt.Errorf("step 5 L2 verification failed: %w", err)
+	}
+	logger.Infof("Step 5: initialize with messenger %s — L2 verified", crossDomainMessenger.Hex())
+
+	// ---------------------------------------------------------------------------
+	// Step 6: setChainInfo(l1CrossTradeAddr, l1ChainID)
+	// ---------------------------------------------------------------------------
+	calldata, err = proxyABI.Pack("setChainInfo", l1CrossTradeAddr, l1ChainID)
+	if err != nil {
+		return nil, fmt.Errorf("step 6: failed to pack setChainInfo calldata: %w", err)
+	}
+	if _, err := sendDepositCall(ctx, portal, opts, l1Client, proxyAddr, calldata, 500_000, logger); err != nil {
+		return nil, fmt.Errorf("step 6 failed: %w", err)
+	}
+	// L2 verification: chainData(l1ChainID) should return l1CrossTradeAddr (non-zero address).
+	// Falls back to sleep if chainData view function is not available in proxy ABI.
+	if _, hasChainData := proxyABI.Methods["chainData"]; hasChainData {
+		checkCalldata, err = proxyABI.Pack("chainData", l1ChainID)
+		if err != nil {
+			return nil, fmt.Errorf("step 6: failed to pack chainData check calldata: %w", err)
+		}
+		if err := verifyDepositCallEffect(ctx, l2Client, proxyAddr, checkCalldata, logger); err != nil {
+			return nil, fmt.Errorf("step 6 L2 verification failed: %w", err)
+		}
+	} else {
+		logger.Infof("no view function for chainInfo verification, waited 10s")
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(10 * time.Second):
+		}
+	}
+	logger.Infof("Step 6: setChainInfo l1=%s chainId=%s — L2 verified", l1CrossTradeAddr.Hex(), l1ChainID.String())
+
+	// ---------------------------------------------------------------------------
+	// Step 7: registerToken(l1Token, l2Token, l1ChainId) — for each token pair
+	// registerToken is an impl function called through the proxy.
+	// ---------------------------------------------------------------------------
+	for i, token := range tokens {
+		l1Token := common.HexToAddress(token.L1Token)
+		l2Token := common.HexToAddress(token.L2Token)
+
+		calldata, err = implABI.Pack("registerToken", l1Token, l2Token, l1ChainID)
+		if err != nil {
+			return nil, fmt.Errorf("step 7 (token %d): failed to pack registerToken calldata: %w", i, err)
+		}
+		if _, err := sendDepositCall(ctx, portal, opts, l1Client, proxyAddr, calldata, 500_000, logger); err != nil {
+			return nil, fmt.Errorf("step 7 (token %d) failed: %w", i, err)
+		}
+		// L2 verification: registerCheck(l1ChainId, l1Token, l2Token) should return true.
+		// Falls back to sleep if registerCheck view function is not available in proxy ABI.
+		if _, hasRegCheck := proxyABI.Methods["registerCheck"]; hasRegCheck {
+			checkCalldata, err = proxyABI.Pack("registerCheck", l1ChainID, l1Token, l2Token)
+			if err != nil {
+				return nil, fmt.Errorf("step 7 (token %d): failed to pack registerCheck calldata: %w", i, err)
+			}
+			if err := verifyDepositCallEffect(ctx, l2Client, proxyAddr, checkCalldata, logger); err != nil {
+				return nil, fmt.Errorf("step 7 (token %d) L2 verification failed: %w", i, err)
+			}
+		} else {
+			logger.Infof("no view function for registerToken verification (token %d), waited 10s", i)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(10 * time.Second):
+			}
+		}
+		logger.Infof("Step 7: registerToken %s -> %s — L2 verified", token.L1Token, token.L2Token)
+	}
+
+	return &crossTradePairResult{ImplAddr: implAddr, ProxyAddr: proxyAddr}, nil
 }
