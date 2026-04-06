@@ -182,6 +182,11 @@ type crossTradePairResult struct {
 	ProxyAddr common.Address
 }
 
+// registerTokenFunc is a callback that produces the ABI-encoded calldata for registerToken.
+// Allows deployL2CrossTradePair to be reused for both L2CrossTrade (3-param) and
+// L2toL2CrossTradeL2 (6-param) contracts without hardcoding the parameter list.
+type registerTokenFunc func(proxyAddr common.Address, token TokenPair) ([]byte, error)
+
 // deployL2CrossTradePair deploys a CrossTrade impl+proxy pair on L2 via 7 Deposit Tx steps.
 // Each step includes L2 execution verification (per D-04, SDK-06):
 //   - Creation txs: getCode polling (waitForContractCode)
@@ -202,6 +207,7 @@ func deployL2CrossTradePair(
 	l1CrossTradeAddr common.Address,
 	l1ChainID *big.Int,
 	tokens []TokenPair,
+	registerTokenFn registerTokenFunc,
 	logger *zap.SugaredLogger,
 ) (*crossTradePairResult, error) {
 	proxyABI, err := abi.JSON(strings.NewReader(proxyABIJSON))
@@ -341,16 +347,18 @@ func deployL2CrossTradePair(
 	logger.Infof("Step 6: setChainInfo l1=%s chainId=%s — L2 verified", l1CrossTradeAddr.Hex(), l1ChainID.String())
 
 	// ---------------------------------------------------------------------------
-	// Step 7: registerToken(l1Token, l2Token, l1ChainId) — for each token pair
+	// Step 7: registerToken — for each token pair.
 	// registerToken is an impl function called through the proxy.
+	// The calldata is produced by registerTokenFn to support both 3-param (L2CrossTrade)
+	// and 6-param (L2toL2CrossTradeL2) variants.
 	// ---------------------------------------------------------------------------
 	for i, token := range tokens {
 		l1Token := common.HexToAddress(token.L1Token)
 		l2Token := common.HexToAddress(token.L2Token)
 
-		calldata, err = implABI.Pack("registerToken", l1Token, l2Token, l1ChainID)
+		calldata, err = registerTokenFn(proxyAddr, token)
 		if err != nil {
-			return nil, fmt.Errorf("step 7 (token %d): failed to pack registerToken calldata: %w", i, err)
+			return nil, fmt.Errorf("step 7 (token %d): failed to build registerToken calldata: %w", i, err)
 		}
 		if _, err := sendDepositCall(ctx, portal, opts, l1Client, proxyAddr, calldata, 500_000, logger); err != nil {
 			return nil, fmt.Errorf("step 7 (token %d) failed: %w", i, err)
