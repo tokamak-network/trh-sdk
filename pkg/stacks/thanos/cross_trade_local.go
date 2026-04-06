@@ -53,16 +53,175 @@ type DeployCrossTradeLocalOutput struct {
 }
 
 // DeployCrossTradeLocal deploys the CrossTrade L2 contracts via L1 OptimismPortal
-// depositTransaction calls, then registers chain info and tokens on L1.
+// depositTransaction calls. Two pairs are deployed sequentially:
+//   - L2CrossTrade impl+proxy (L2→L1 trades)
+//   - L2toL2CrossTradeL2 impl+proxy (L2→L2 trades)
+//
+// Bytecode is loaded from package-level constants in cross_trade_local_bytecodes.go.
 // This is the local (Docker Compose) deployment path, distinct from the AWS/Foundry path
 // in cross_trade.go.
-// Implements PRD v2.1 12-step sequence (L2→L1 6 steps + L2→L2 6 steps).
 func (t *ThanosStack) DeployCrossTradeLocal(
 	ctx context.Context,
 	input *DeployCrossTradeLocalInput,
 ) (*DeployCrossTradeLocalOutput, error) {
-	// Plan 03에서 구현
-	return nil, fmt.Errorf("not yet implemented")
+	// ---------------------------------------------------------------------------
+	// 1. Client initialization
+	// ---------------------------------------------------------------------------
+	l1Client, err := ethclient.Dial(input.L1RPCUrl)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to L1 RPC %s: %w", input.L1RPCUrl, err)
+	}
+	defer l1Client.Close()
+
+	l2Client, err := ethclient.Dial(input.L2RPCUrl)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to L2 RPC %s: %w", input.L2RPCUrl, err)
+	}
+	defer l2Client.Close()
+
+	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(input.DeployerPrivateKey, "0x"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse deployer private key: %w", err)
+	}
+	deployerAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	l1ChainID := new(big.Int).SetUint64(input.L1ChainID)
+	l2ChainID := new(big.Int).SetUint64(input.L2ChainID)
+
+	t.logger.Infof("DeployCrossTradeLocal: deployer=%s l1ChainID=%s l2ChainID=%s",
+		deployerAddr.Hex(), l1ChainID.String(), l2ChainID.String())
+
+	// ---------------------------------------------------------------------------
+	// 2. OptimismPortal binding instance
+	// ---------------------------------------------------------------------------
+	portal, err := abis.NewOptimismPortal(common.HexToAddress(input.OptimismPortalProxy), l1Client)
+	if err != nil {
+		return nil, fmt.Errorf("failed to bind OptimismPortal at %s: %w", input.OptimismPortalProxy, err)
+	}
+
+	// ---------------------------------------------------------------------------
+	// 3. bind.TransactOpts (EIP-155 signer, per deploy_chain.go pattern)
+	// ---------------------------------------------------------------------------
+	opts := &bind.TransactOpts{
+		From: deployerAddr,
+		Signer: func(addr common.Address, tx *types.Transaction) (*types.Transaction, error) {
+			return types.SignTx(tx, types.NewEIP155Signer(l1ChainID), privKey)
+		},
+		GasLimit: 200_000,
+		Context:  ctx,
+	}
+
+	// ---------------------------------------------------------------------------
+	// 4. Obtain L2 deployer nonce at deployment start (creation txs consume nonces)
+	// ---------------------------------------------------------------------------
+	l2Nonce, err := l2Client.PendingNonceAt(ctx, deployerAddr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get L2 pending nonce for %s: %w", deployerAddr.Hex(), err)
+	}
+	t.logger.Infof("L2 deployer nonce at start: %d", l2Nonce)
+
+	// ---------------------------------------------------------------------------
+	// 5. ABI JSON strings from abis package constants
+	// ---------------------------------------------------------------------------
+	l2CrossTradeImplABI := abis.L2CrossTradeABI
+	l2CrossTradeProxyABI := abis.L2CrossTradeProxyABI
+	l2toL2CrossTradeL2ImplABI := abis.L2toL2CrossTradeL2ABI
+	l2toL2CrossTradeProxyABI := abis.L2toL2CrossTradeProxyABI
+
+	// Parse ABI objects for building registerToken callbacks
+	parsedL2CrossTradeImplABI, err := abi.JSON(strings.NewReader(l2CrossTradeImplABI))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse L2CrossTrade ABI: %w", err)
+	}
+	parsedL2toL2ImplABI, err := abi.JSON(strings.NewReader(l2toL2CrossTradeL2ImplABI))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse L2toL2CrossTradeL2 ABI: %w", err)
+	}
+
+	// ---------------------------------------------------------------------------
+	// 6. registerToken callbacks — L2CrossTrade uses 3-param, L2toL2 uses 6-param
+	// ---------------------------------------------------------------------------
+	// L2CrossTrade: registerToken(address l1token, address l2token, uint256 l1chainId)
+	l2CrossTradeRegisterTokenFn := func(_ common.Address, token TokenPair) ([]byte, error) {
+		return parsedL2CrossTradeImplABI.Pack("registerToken",
+			common.HexToAddress(token.L1Token),
+			common.HexToAddress(token.L2Token),
+			l1ChainID,
+		)
+	}
+
+	// L2toL2CrossTradeL2: registerToken(address l1token, address l2SourceToken, address l2DestinationToken,
+	//   uint256 l1ChainId, uint256 l2SourceChainId, uint256 l2DestinationChainId)
+	// Phase 1: single L2 — source and destination chain IDs are both l2ChainID.
+	l2toL2RegisterTokenFn := func(_ common.Address, token TokenPair) ([]byte, error) {
+		return parsedL2toL2ImplABI.Pack("registerToken",
+			common.HexToAddress(token.L1Token),
+			common.HexToAddress(token.L2Token),
+			common.HexToAddress(token.L2Token),
+			l1ChainID,
+			l2ChainID,
+			l2ChainID,
+		)
+	}
+
+	// ---------------------------------------------------------------------------
+	// Phase 1/2: Deploy L2CrossTrade impl+proxy (L2→L1 pair)
+	// Bytecode from cross_trade_local_bytecodes.go package constants.
+	// ---------------------------------------------------------------------------
+	t.logger.Infof("=== Phase 1/2: Deploying L2CrossTrade pair ===")
+	l2CrossTradeResult, err := deployL2CrossTradePair(
+		ctx, &portal.OptimismPortalTransactor, opts, l1Client, l2Client,
+		deployerAddr, l2Nonce,
+		L2CrossTradeBytecode, L2CrossTradeProxyBytecode,
+		l2CrossTradeProxyABI, l2CrossTradeImplABI,
+		common.HexToAddress(input.CrossDomainMessenger),
+		common.HexToAddress(input.L1CrossTradeProxy),
+		l1ChainID,
+		input.SupportedTokens,
+		l2CrossTradeRegisterTokenFn,
+		t.logger,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("L2CrossTrade pair deployment failed: %w", err)
+	}
+	t.logger.Infof("L2CrossTrade pair deployed: impl=%s proxy=%s",
+		l2CrossTradeResult.ImplAddr.Hex(), l2CrossTradeResult.ProxyAddr.Hex())
+
+	// ---------------------------------------------------------------------------
+	// Phase 2/2: Deploy L2toL2CrossTradeL2 impl+proxy (L2→L2 pair)
+	// L2 nonce: L2CrossTrade pair consumed 2 creation txs (nonce+0, nonce+1).
+	// Function calls do not consume L2 deployer nonce.
+	// ---------------------------------------------------------------------------
+	l2toL2Nonce := l2Nonce + 2
+	t.logger.Infof("=== Phase 2/2: Deploying L2toL2CrossTradeL2 pair (l2Nonce=%d) ===", l2toL2Nonce)
+	l2toL2Result, err := deployL2CrossTradePair(
+		ctx, &portal.OptimismPortalTransactor, opts, l1Client, l2Client,
+		deployerAddr, l2toL2Nonce,
+		L2toL2CrossTradeL2Bytecode, L2toL2CrossTradeProxyBytecode,
+		l2toL2CrossTradeProxyABI, l2toL2CrossTradeL2ImplABI,
+		common.HexToAddress(input.CrossDomainMessenger),
+		common.HexToAddress(input.L2toL2CrossTradeL1),
+		l1ChainID,
+		input.SupportedTokens,
+		l2toL2RegisterTokenFn,
+		t.logger,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("L2toL2CrossTradeL2 pair deployment failed: %w", err)
+	}
+	t.logger.Infof("L2toL2CrossTradeL2 pair deployed: impl=%s proxy=%s",
+		l2toL2Result.ImplAddr.Hex(), l2toL2Result.ProxyAddr.Hex())
+
+	// ---------------------------------------------------------------------------
+	// Return all 4 deployed contract addresses
+	// ---------------------------------------------------------------------------
+	output := &DeployCrossTradeLocalOutput{
+		L2CrossTrade:          l2CrossTradeResult.ImplAddr.Hex(),
+		L2CrossTradeProxy:     l2CrossTradeResult.ProxyAddr.Hex(),
+		L2toL2CrossTradeL2:    l2toL2Result.ImplAddr.Hex(),
+		L2toL2CrossTradeProxy: l2toL2Result.ProxyAddr.Hex(),
+	}
+	t.logger.Infof("CrossTrade local deployment complete. Addresses: %+v", output)
+	return output, nil
 }
 
 // waitForContractCode polls L2 for contract deployment confirmation via eth_getCode.
