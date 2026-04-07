@@ -187,10 +187,16 @@ func (t *ThanosStack) DeployCrossTradeLocal(
 
 	// ---------------------------------------------------------------------------
 	// Phase 2/2: Deploy L2toL2CrossTradeL2 impl+proxy (L2→L2 pair)
-	// L2 nonce: L2CrossTrade pair consumed 2 creation txs (nonce+0, nonce+1).
-	// Function calls do not consume L2 deployer nonce.
+	// Re-read L2 nonce after Phase 1: deposit txs (creation AND call) both increment the
+	// L2 sender nonce. Phase 1 sent 2 creation + 4 call + len(tokens) call deposit txs,
+	// so the nonce advanced by 6+len(tokens), not just 2.
+	// After Phase 1's Step 6 verifyDepositCallEffect confirms, all Phase 1 deposit txs are
+	// executed on L2 and PendingNonceAt returns the correct next nonce.
 	// ---------------------------------------------------------------------------
-	l2toL2Nonce := l2Nonce + 2
+	l2toL2Nonce, err := l2Client.PendingNonceAt(ctx, deployerAddr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get L2 nonce for Phase 2: %w", err)
+	}
 	t.logger.Infof("=== Phase 2/2: Deploying L2toL2CrossTradeL2 pair (l2Nonce=%d) ===", l2toL2Nonce)
 	l2toL2Result, err := deployL2CrossTradePair(
 		ctx, &portal.OptimismPortalTransactor, opts, l1Client, l2Client,
@@ -264,8 +270,20 @@ func verifyDepositCallEffect(ctx context.Context, l2Client *ethclient.Client, co
 			Data: checkCalldata,
 		}, nil)
 		if err == nil && len(result) > 0 {
-			logger.Infof("deposit call effect verified at %s (attempt %d/60)", contractAddr.Hex(), attempt)
-			return nil
+			// Check that at least one byte is non-zero. A result of all zeros indicates
+			// default state (false / address(0)) — the deposit tx hasn't executed yet.
+			// We must wait for the actual state change (true / non-zero address).
+			hasNonZero := false
+			for _, b := range result {
+				if b != 0 {
+					hasNonZero = true
+					break
+				}
+			}
+			if hasNonZero {
+				logger.Infof("deposit call effect verified at %s (attempt %d/60)", contractAddr.Hex(), attempt)
+				return nil
+			}
 		}
 
 		select {
@@ -450,7 +468,7 @@ func deployL2CrossTradePair(
 	if err != nil {
 		return nil, fmt.Errorf("step 4: failed to pack setSelectorImplementations2 calldata: %w", err)
 	}
-	if _, err := sendDepositCall(ctx, portal, opts, l1Client, proxyAddr, calldata, 500_000, logger); err != nil {
+	if _, err := sendDepositCall(ctx, portal, opts, l1Client, proxyAddr, calldata, 3_000_000, logger); err != nil {
 		return nil, fmt.Errorf("step 4 failed: %w", err)
 	}
 	// L2 verification: selectorImplementation(selectors[0]) should return implAddr
@@ -473,7 +491,7 @@ func deployL2CrossTradePair(
 	if err != nil {
 		return nil, fmt.Errorf("step 5: failed to pack initialize calldata: %w", err)
 	}
-	if _, err := sendDepositCall(ctx, portal, opts, l1Client, proxyAddr, calldata, 500_000, logger); err != nil {
+	if _, err := sendDepositCall(ctx, portal, opts, l1Client, proxyAddr, calldata, 1_000_000, logger); err != nil {
 		return nil, fmt.Errorf("step 5 failed: %w", err)
 	}
 	// L2 verification: crossDomainMessenger() view function should return the set address.
@@ -493,7 +511,7 @@ func deployL2CrossTradePair(
 	if err != nil {
 		return nil, fmt.Errorf("step 6: failed to pack setChainInfo calldata: %w", err)
 	}
-	if _, err := sendDepositCall(ctx, portal, opts, l1Client, proxyAddr, calldata, 500_000, logger); err != nil {
+	if _, err := sendDepositCall(ctx, portal, opts, l1Client, proxyAddr, calldata, 1_000_000, logger); err != nil {
 		return nil, fmt.Errorf("step 6 failed: %w", err)
 	}
 	// L2 verification: chainData(l1ChainID) should return l1CrossTradeAddr (non-zero address).
@@ -530,7 +548,7 @@ func deployL2CrossTradePair(
 		if err != nil {
 			return nil, fmt.Errorf("step 7 (token %d): failed to build registerToken calldata: %w", i, err)
 		}
-		if _, err := sendDepositCall(ctx, portal, opts, l1Client, proxyAddr, calldata, 500_000, logger); err != nil {
+		if _, err := sendDepositCall(ctx, portal, opts, l1Client, proxyAddr, calldata, 1_000_000, logger); err != nil {
 			return nil, fmt.Errorf("step 7 (token %d) failed: %w", i, err)
 		}
 		// L2 verification: registerCheck(l1ChainId, l1Token, l2Token) should return true.
