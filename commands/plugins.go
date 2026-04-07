@@ -102,7 +102,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 						}
 
 						var displayNamespace string
-						if pluginName == constants.PluginMonitoring {
+						if pluginName == constants.PluginMonitoring || pluginName == constants.PluginMonitoringThanosLogs {
 							displayNamespace = constants.MonitoringNamespace
 						} else {
 							displayNamespace = config.K8s.Namespace
@@ -178,6 +178,27 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							thanosStack.DisplayMonitoringInfo(monitoringInfo)
 
 							return nil
+						case constants.PluginMonitoringThanosLogs:
+							// Get Grafana password from user
+							grafanaPassword, err := thanos.InputGrafanaPassword()
+							if err != nil {
+								fmt.Println("Error getting Grafana password:", err)
+								return err
+							}
+
+							// Get Thanos logs configuration
+							thanosLogsConfig, err := thanosStack.GetMonitoringThanosLogsConfig(ctx, grafanaPassword)
+							if err != nil {
+								return fmt.Errorf("failed to get Thanos logs configuration: %w", err)
+							}
+
+							_, err = thanosStack.InstallMonitoringThanosLogsStack(ctx, thanosLogsConfig)
+							if err != nil {
+								fmt.Println("Error installing Thanos logs:", err)
+								return err
+							}
+
+							return nil
 						case constants.PluginCrossTrade:
 							// Get the cross-trade type from command flags
 							crossTradeType := strings.TrimSpace(strings.ToLower(cmd.String("type")))
@@ -230,6 +251,14 @@ func ActionInstallationPlugins() cli.ActionFunc {
 						switch pluginName {
 						case constants.PluginUptimeService:
 							return thanosStack.UninstallUptimeService(ctx)
+						case constants.PluginMonitoringThanosLogs:
+							// Get Grafana password from user
+							grafanaPassword, err := thanos.InputGrafanaPassword()
+							if err != nil {
+								fmt.Println("Error getting Grafana password:", err)
+								return err
+							}
+							return thanosStack.UninstallMonitoringThanosLogsStack(ctx, grafanaPassword)
 						case constants.PluginBridge:
 							return thanosStack.UninstallBridge(ctx)
 						case constants.PluginBlockExplorer:
