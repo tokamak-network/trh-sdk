@@ -105,7 +105,8 @@ func (t *ThanosStack) DeployCrossTradeLocal(
 	if err != nil {
 		return nil, fmt.Errorf("failed to create transactor: %w", err)
 	}
-	opts.GasLimit = 200_000
+	// GasLimit = 0 tells bind to auto-estimate L1 gas per call (needed for large bytecode calldata).
+	opts.GasLimit = 0
 	opts.Context = ctx
 
 	// ---------------------------------------------------------------------------
