@@ -105,8 +105,8 @@ func (t *ThanosStack) DeployCrossTradeLocal(
 	if err != nil {
 		return nil, fmt.Errorf("failed to create transactor: %w", err)
 	}
-	// GasLimit = 0 tells bind to auto-estimate L1 gas per call (needed for large bytecode calldata).
-	opts.GasLimit = 0
+	// GasLimit is set per-call in sendDepositCreation/sendDepositCall to account for
+	// worst-case ResourceMetering gas burn (see those functions for details).
 	opts.Context = ctx
 
 	// ---------------------------------------------------------------------------
@@ -280,6 +280,13 @@ func verifyDepositCallEffect(ctx context.Context, l2Client *ethclient.Client, co
 // sendDepositCreation sends an L1 OptimismPortal.depositTransaction for contract creation.
 // The _to field is address(0) and _isCreation is true. Waits for L1 receipt.
 // Per D-09: fails fast if the L1 tx reverts.
+//
+// L1 gas limit: ResourceMetering in OptimismPortal burns L1 gas proportional to:
+//   gasCost = gasLimit * prevBaseFee / max(block.basefee, 1 gwei)
+// When block.basefee == prevBaseFee == 1 gwei (Sepolia minimum), gasCost == gasLimit.
+// Using eth_estimateGas (opts.GasLimit=0) is unsafe because the estimate is computed at
+// the current basefee, but the tx may land in a block with much lower basefee, causing
+// Burn.gas() to exceed the gas limit. We set a fixed L1 gas limit = L2 gas + overhead.
 func sendDepositCreation(
 	ctx context.Context,
 	portal *abis.OptimismPortalTransactor,
@@ -289,6 +296,9 @@ func sendDepositCreation(
 	gasLimit uint64,
 	logger *zap.SugaredLogger,
 ) (*types.Receipt, error) {
+	// Set L1 gas limit to cover worst-case ResourceMetering burn (1 gwei basefee).
+	// 300_000 overhead covers depositTransaction execution + SSTORE + event emit.
+	opts.GasLimit = gasLimit + 300_000
 	tx, err := portal.DepositTransaction(opts, common.Address{}, big.NewInt(0), big.NewInt(0), gasLimit, true, bytecode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send deposit creation tx: %w", err)
@@ -318,6 +328,8 @@ func sendDepositCall(
 	gasLimit uint64,
 	logger *zap.SugaredLogger,
 ) (*types.Receipt, error) {
+	// Set L1 gas limit to cover worst-case ResourceMetering burn (see sendDepositCreation).
+	opts.GasLimit = gasLimit + 300_000
 	tx, err := portal.DepositTransaction(opts, to, big.NewInt(0), big.NewInt(0), gasLimit, false, calldata)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send deposit call tx to %s: %w", to.Hex(), err)
