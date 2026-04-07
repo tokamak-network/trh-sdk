@@ -99,16 +99,14 @@ func (t *ThanosStack) DeployCrossTradeLocal(
 	}
 
 	// ---------------------------------------------------------------------------
-	// 3. bind.TransactOpts (EIP-155 signer, per deploy_chain.go pattern)
+	// 3. bind.TransactOpts (EIP-1559-compatible signer via NewKeyedTransactorWithChainID)
 	// ---------------------------------------------------------------------------
-	opts := &bind.TransactOpts{
-		From: deployerAddr,
-		Signer: func(addr common.Address, tx *types.Transaction) (*types.Transaction, error) {
-			return types.SignTx(tx, types.NewEIP155Signer(l1ChainID), privKey)
-		},
-		GasLimit: 200_000,
-		Context:  ctx,
+	opts, err := bind.NewKeyedTransactorWithChainID(privKey, l1ChainID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create transactor: %w", err)
 	}
+	opts.GasLimit = 200_000
+	opts.Context = ctx
 
 	// ---------------------------------------------------------------------------
 	// 4. Obtain L2 deployer nonce at deployment start (creation txs consume nonces)
