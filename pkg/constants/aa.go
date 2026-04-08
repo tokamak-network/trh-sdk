@@ -45,10 +45,10 @@ var (
 	DefaultUSDTInitialPrice = new(big.Int).Mul(big.NewInt(15), new(big.Int).Exp(big.NewInt(10), big.NewInt(17), nil)) // 1.5e18
 )
 
-// AAPresetsWithPaymaster lists presets that include AA predeploy contracts (Gaming and Full only).
+// AAPresetsWithPaymaster lists presets that include AA predeploy contracts (all presets).
 var AAPresetsWithPaymaster = map[string]bool{
-	PresetGeneral: false,
-	PresetDeFi:    false,
+	PresetGeneral: true,
+	PresetDeFi:    true,
 	PresetGaming:  true,
 	PresetFull:    true,
 }
@@ -59,7 +59,7 @@ func IsAAPreset(preset string) bool {
 }
 
 // NeedsAASetup returns true when AA paymaster configuration is required:
-// Gaming and Full presets include AA contracts; setup is needed when fee token is not TON (the L2 native token).
+// All presets include AA contracts; setup is needed when fee token is not TON (the L2 native token).
 func NeedsAASetup(preset, feeToken string) bool {
 	return IsAAPreset(preset) && feeToken != FeeTokenTON
 }
