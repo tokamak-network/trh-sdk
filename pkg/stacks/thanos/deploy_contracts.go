@@ -546,6 +546,17 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		return err
 	}
 
+	// STEP 5.2c: Patch L1Block implementation in genesis with Isthmus-capable bytecode.
+	// When isthmus_time == genesis timestamp, IsIsthmusActivationBlock is never true for
+	// op-node (activation is block 0 which op-node doesn't process), so the Isthmus upgrade
+	// transactions are never injected. Without this patch, the genesis has the old Ecotone-only
+	// L1Block implementation and every L1 attributes deposit transaction reverts (status=0x0).
+	t.logger.Info("Patching L1Block implementation in genesis with Isthmus-capable bytecode...")
+	if err := injectL1BlockBytecode(genesisPath, t.deploymentPath); err != nil {
+		t.logger.Error("❌ Failed to patch L1Block bytecode in genesis!", "err", err)
+		return err
+	}
+
 	// STEP 5.3: Update rollup.json genesis hash after ALL genesis modifications
 	rollupPath := filepath.Join(t.deploymentPath, "tokamak-thanos", "build", "rollup.json")
 	if err := updateRollupGenesisHash(t.logger, genesisPath, rollupPath); err != nil {
