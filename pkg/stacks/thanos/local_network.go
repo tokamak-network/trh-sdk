@@ -110,6 +110,10 @@ type localComposeData struct {
 	// Set to true for non-TON fee tokens; the aa-operator itself runs as a goroutine in trh-backend.
 	AAOperatorEnabled bool
 	AAAdminPrivateKey string
+	// CrossTrade dApp — populated after DeployCrossTradeLocal succeeds.
+	CrossTradeEnabled     bool
+	CrossTradeProjectID   string
+	CrossTradeChainConfig string
 }
 
 func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
@@ -353,6 +357,22 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 			addr, err := utils.GetAddressFromPrivateKey(t.deployConfig.AdminPrivateKey)
 			if err == nil {
 				data.DRBLeaderEOA = addr.Hex()
+			}
+		}
+	}
+
+	// Populate CrossTrade dApp fields — only when local contracts have been deployed AND the preset
+	// supports crossTrade (defi, full). Defense-in-depth: even if CrossTradeContracts were manually
+	// set on a general/gaming config, we do not render the service.
+	if constants.PresetModules[t.deployConfig.Preset]["crossTrade"] {
+		if ct := t.deployConfig.CrossTradeContracts; ct != nil && ct.L1CrossTradeProxy != "" && ct.L2CrossTradeProxy != "" {
+			chainConfigJSON, err := t.buildCrossTradeChainConfigJSON(ct)
+			if err != nil {
+				t.logger.Warnf("Failed to build CrossTrade chain config, skipping crossTrade service: %v", err)
+			} else {
+				data.CrossTradeEnabled = true
+				data.CrossTradeProjectID = "568b8d3d0528e743b0e2c6c92f54d721"
+				data.CrossTradeChainConfig = chainConfigJSON
 			}
 		}
 	}
@@ -715,7 +735,7 @@ func (t *ThanosStack) destroyLocalNetwork(ctx context.Context) error {
 		return nil
 	}
 	t.logger.Info("Stopping local L2 network...")
-	allProfiles := []string{"proposer", "challenger", "bridge", "blockExplorer", "monitoring", "uptimeService", "aa"}
+	allProfiles := []string{"proposer", "challenger", "bridge", "blockExplorer", "monitoring", "uptimeService", "aa", "crossTrade"}
 	args := []string{"compose", "-f", composePath}
 	for _, p := range allProfiles {
 		args = append(args, "--profile", p)
@@ -743,6 +763,9 @@ func (t *ThanosStack) printLocalServiceURLs(modules map[string]bool) {
 	}
 	if modules["uptimeService"] {
 		t.logger.Infof("  Uptime Kuma:   http://localhost:3003")
+	}
+	if t.deployConfig.CrossTradeContracts != nil {
+		t.logger.Infof("  CrossTrade UI: http://localhost:3004")
 	}
 	t.logger.Info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 }
@@ -842,4 +865,50 @@ func generateJWTSecret(path string) error {
 		return err
 	}
 	return os.WriteFile(path, []byte(hex.EncodeToString(secret)), 0600)
+}
+
+// buildCrossTradeChainConfigJSON constructs the NEXT_PUBLIC_CHAIN_CONFIG JSON value
+// required by the CrossTrade dApp. It mirrors the chain config built in the K8s path
+// (DeployCrossTradeApplication) but uses local addresses and localhost RPC endpoints.
+func (t *ThanosStack) buildCrossTradeChainConfigJSON(ct *types.CrossTradeLocalContracts) (string, error) {
+	l1ChainID := t.deployConfig.L1ChainID
+	l2ChainID := t.deployConfig.L2ChainID
+	l1Config := constants.L1ChainConfigurations[l1ChainID]
+
+	chainConfig := map[string]types.CrossTradeChainConfig{
+		fmt.Sprintf("%d", l1ChainID): {
+			Name:        l1Config.ChainName,
+			DisplayName: l1Config.ChainName,
+			Contracts: types.CrossTradeContracts{
+				L1CrossTrade: &ct.L1CrossTradeProxy,
+			},
+			RPCURL: t.deployConfig.L1RPCURL,
+			Tokens: types.CrossTradeTokens{
+				ETH:  "0x0000000000000000000000000000000000000000",
+				USDC: l1Config.USDCAddress,
+				USDT: l1Config.USDTAddress,
+				TON:  l1Config.TON,
+			},
+		},
+		fmt.Sprintf("%d", l2ChainID): {
+			Name:        fmt.Sprintf("%d", l2ChainID),
+			DisplayName: t.deployConfig.ChainName,
+			Contracts: types.CrossTradeContracts{
+				L2CrossTrade: &ct.L2CrossTradeProxy,
+			},
+			RPCURL: "http://localhost:8545",
+			Tokens: types.CrossTradeTokens{
+				ETH:  constants.ETH,
+				USDC: constants.USDCAddress,
+				USDT: "",
+				TON:  constants.TON,
+			},
+		},
+	}
+
+	b, err := json.Marshal(chainConfig)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }

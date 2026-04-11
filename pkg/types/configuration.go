@@ -160,6 +160,16 @@ type Config struct {
 	Preset   string `json:"preset,omitempty"`
 	FeeToken string `json:"fee_token,omitempty"` // "TON", "ETH", "USDT", "USDC"
 
+	// CrossTrade local deployment contracts (set after DeployCrossTradeLocal succeeds)
+	CrossTradeContracts *CrossTradeLocalContracts `json:"cross_trade_contracts,omitempty"`
+}
+
+// CrossTradeLocalContracts holds deployed contract addresses for the local CrossTrade stack.
+// L1CrossTradeProxy is sourced from user input; L2 addresses come from DeployCrossTradeLocal output.
+type CrossTradeLocalContracts struct {
+	L1CrossTradeProxy     string `json:"l1_cross_trade_proxy"`
+	L2CrossTradeProxy     string `json:"l2_cross_trade_proxy"`
+	L2toL2CrossTradeProxy string `json:"l2_to_l2_cross_trade_proxy"`
 }
 
 type BackupConfiguration struct {

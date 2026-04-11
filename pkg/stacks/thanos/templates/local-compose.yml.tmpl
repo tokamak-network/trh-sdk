@@ -459,6 +459,20 @@ services:
     restart: unless-stopped
 {{- end }}
 
+{{- if .CrossTradeEnabled}}
+
+  cross-trade-dapp:
+    image: tokamaknetwork/cross-trade-app:latest
+    platform: linux/amd64
+    ports:
+      - "3004:3000"
+    environment:
+      - NEXT_PUBLIC_PROJECT_ID={{.CrossTradeProjectID}}
+      - NEXT_PUBLIC_CHAIN_CONFIG={{.CrossTradeChainConfig}}
+    profiles: ["crossTrade"]
+    restart: unless-stopped
+{{- end}}
+
 volumes:
   op-geth-data:
   op-challenger-data:
