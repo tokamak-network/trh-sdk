@@ -104,6 +104,7 @@ services:
 {{- if .EnableFraudProof}}
       - OP_PROPOSER_GAME_FACTORY_ADDRESS={{.DisputeGameFactoryAddress}}
       - OP_PROPOSER_PROPOSAL_INTERVAL=120s
+      - OP_PROPOSER_ALLOW_NON_FINALIZED=true
 {{- else}}
       - OP_PROPOSER_L2OO_ADDRESS={{.L2OutputOracleAddress}}
 {{- end}}
