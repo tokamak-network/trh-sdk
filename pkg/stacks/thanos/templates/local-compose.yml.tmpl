@@ -63,6 +63,7 @@ services:
       - OP_NODE_METRICS_ADDR=0.0.0.0
       - OP_NODE_METRICS_PORT=7300
       - OP_NODE_IGNORE_MISSING_PECTRA_BLOB_SCHEDULE=true
+      - OP_NODE_L1_RPC_RATE_LIMIT=5
     depends_on:
       op-geth:
         condition: service_healthy
@@ -87,6 +88,7 @@ services:
       - OP_BATCHER_METRICS_PORT=7302
       - OP_BATCHER_TXMGR_RECEIPT_QUERY_INTERVAL=30s
       - OP_BATCHER_RESUBMISSION_TIMEOUT=120s
+      - OP_BATCHER_POLL_INTERVAL=30s
 {{- if .UseBlobs}}
       - OP_BATCHER_DATA_AVAILABILITY_TYPE=blobs
 {{- end}}
