@@ -61,6 +61,8 @@ type localComposeData struct {
 	L2OutputOracleAddress     string
 	DisputeGameFactoryAddress string
 	UseBlobs                  bool
+	DataAvailabilityType      string // "auto", "blobs", or "calldata"
+	MaxL1BlobBaseFee          string // in gwei (e.g., "100")
 	EnableFraudProof          bool
 	Preset                    string
 	DRBNodeImage              string
@@ -303,6 +305,8 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		L2OutputOracleAddress:     contracts.L2OutputOracleProxy,
 		DisputeGameFactoryAddress: contracts.DisputeGameFactoryProxy,
 		UseBlobs:                  t.network != constants.LocalDevnet,
+		DataAvailabilityType:      "auto", // auto-switch between blobs and calldata based on gas price
+		MaxL1BlobBaseFee:          "100",  // gwei; prevents blob submission when blob base fee exceeds this
 		EnableFraudProof:          t.deployConfig.EnableFraudProof,
 		Preset:                    t.deployConfig.Preset,
 		DRBNodeImage:              fmt.Sprintf("tokamaknetwork/drb-node:%s", imageTags.DRBNodeImageTag),
@@ -767,17 +771,6 @@ func (t *ThanosStack) printLocalServiceURLs(modules map[string]bool) {
 	t.logger.Info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 }
 
-// UninstallDRB stops and removes DRB Docker Compose services for local deployments.
-func (t *ThanosStack) UninstallDRB(ctx context.Context) error {
-	composePath := filepath.Join(t.deploymentPath, "docker-compose.local.yml")
-	t.logger.Info("Stopping and removing DRB containers...")
-	if err := utils.ExecuteCommandStream(ctx, t.logger, "docker", "compose",
-		"-f", composePath, "rm", "-f", "-s", "drb-leader", "drb-postgres"); err != nil {
-		return fmt.Errorf("failed to remove DRB containers: %w", err)
-	}
-	t.logger.Info("✅ DRB containers removed successfully")
-	return nil
-}
 
 // writeComposeEnvFile writes a .env file next to the docker-compose.local.yml
 // with COMPOSE_PROFILES set based on the deployment configuration.

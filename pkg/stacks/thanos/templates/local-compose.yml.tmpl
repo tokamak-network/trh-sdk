@@ -91,7 +91,8 @@ services:
       - OP_BATCHER_RESUBMISSION_TIMEOUT=120s
       - OP_BATCHER_POLL_INTERVAL=30s
 {{- if .UseBlobs}}
-      - OP_BATCHER_DATA_AVAILABILITY_TYPE=blobs
+      - OP_BATCHER_DATA_AVAILABILITY_TYPE={{.DataAvailabilityType}}
+      - OP_BATCHER_MAX_L1_BLOB_BASE_FEE={{.MaxL1BlobBaseFee}}
 {{- end}}
     depends_on:
       op-geth:
