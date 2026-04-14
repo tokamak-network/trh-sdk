@@ -75,6 +75,7 @@ services:
       - "8548:8548"
     environment:
       - OP_BATCHER_L1_ETH_RPC={{.L1RpcUrl}}
+      - OP_BATCHER_RPC_RATE_LIMIT=5
       - OP_BATCHER_L2_ETH_RPC=http://op-geth:8545
       - OP_BATCHER_ROLLUP_RPC=http://op-node:9545
       - OP_BATCHER_PRIVATE_KEY={{.BatcherKey}}
@@ -103,6 +104,7 @@ services:
       - "8560:8560"
     environment:
       - OP_PROPOSER_L1_ETH_RPC={{.L1RpcUrl}}
+      - OP_PROPOSER_RPC_RATE_LIMIT=5
       - OP_PROPOSER_ROLLUP_RPC=http://op-node:9545
       - OP_PROPOSER_PRIVATE_KEY={{.ProposerKey}}
 {{- if .EnableFraudProof}}
@@ -131,6 +133,7 @@ services:
       - {{.ConfigVolume}}:/config:ro
     environment:
       - OP_CHALLENGER_L1_ETH_RPC={{.L1RpcUrl}}
+      - OP_CHALLENGER_RPC_RATE_LIMIT=5
       - OP_CHALLENGER_L1_BEACON={{.L1BeaconUrl}}
       - OP_CHALLENGER_ROLLUP_RPC=http://op-node:9545
       - OP_CHALLENGER_L2_ETH_RPC=http://op-geth:8545
