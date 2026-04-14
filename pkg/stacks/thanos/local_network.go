@@ -284,9 +284,6 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 	}
 
 	feeTokenConfig := constants.GetFeeTokenConfig(t.deployConfig.FeeToken, t.deployConfig.L1ChainID)
-	// L2 native token is always TON regardless of fee token.
-	// Non-TON fee tokens are handled by the AA paymaster layer.
-	tonConfig := constants.GetFeeTokenConfig(constants.FeeTokenTON, t.deployConfig.L1ChainID)
 
 	data := localComposeData{
 		OpGethImage:               fmt.Sprintf("tokamaknetwork/thanos-op-geth:%s", imageTags.OpGethImageTag),
@@ -323,9 +320,9 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		BridgeL2ChainName:                   t.deployConfig.ChainName,
 		BridgeL2ChainID:                     fmt.Sprintf("%d", t.deployConfig.L2ChainID),
 		BridgeL2RPC:                         "http://localhost:8545",
-		BridgeL2NativeCurrencyName:          tonConfig.Name,
-		BridgeL2NativeCurrencySymbol:        tonConfig.Symbol,
-		BridgeNativeTokenL1Address:          tonConfig.L1Address,
+		BridgeL2NativeCurrencyName:          feeTokenConfig.Name,
+		BridgeL2NativeCurrencySymbol:        feeTokenConfig.Symbol,
+		BridgeNativeTokenL1Address:          feeTokenConfig.L1Address,
 		BridgeStandardBridgeAddress:         contracts.L1StandardBridgeProxy,
 		BridgeAddressManagerAddress:         contracts.AddressManager,
 		BridgeL1CrossDomainMessengerAddress: contracts.L1CrossDomainMessengerProxy,
