@@ -741,8 +741,10 @@ func (t *ThanosStack) startLocalModules(ctx context.Context, composePath string,
 func (t *ThanosStack) destroyLocalNetwork(ctx context.Context) error {
 	composePath := filepath.Join(t.deploymentPath, "docker-compose.local.yml")
 	if _, err := os.Stat(composePath); os.IsNotExist(err) {
-		t.logger.Warn("Local compose file not found, nothing to destroy")
-		return nil
+		// Compose file is missing (e.g. backend container was restarted after deployment).
+		// Fall back to removing known volumes directly so they don't block re-deployment.
+		t.logger.Warn("Local compose file not found; removing volumes directly")
+		return t.cleanLocalVolumesWithoutCompose(ctx)
 	}
 	t.logger.Info("Stopping local L2 network...")
 	allProfiles := []string{"proposer", "challenger", "bridge", "blockExplorer", "monitoring", "uptimeService", "aa", "crossTrade"}
@@ -752,6 +754,24 @@ func (t *ThanosStack) destroyLocalNetwork(ctx context.Context) error {
 	}
 	args = append(args, "down", "-v", "--remove-orphans")
 	return utils.ExecuteCommandStream(ctx, t.logger, "docker", args...)
+}
+
+// cleanLocalVolumesWithoutCompose removes the well-known local L2 Docker volumes
+// when the compose file is unavailable. Errors are logged but ignored because
+// the volumes may already be absent.
+func (t *ThanosStack) cleanLocalVolumesWithoutCompose(ctx context.Context) error {
+	projectName := filepath.Base(t.deploymentPath)
+	volumes := []string{
+		localConfigVolume,
+		localMonitoringVolume,
+		projectName + "_op-geth-data",
+	}
+	t.logger.Infof("Removing orphaned local L2 volumes: %v", volumes)
+	args := append([]string{"volume", "rm", "-f"}, volumes...)
+	if err := utils.ExecuteCommandStream(ctx, t.logger, "docker", args...); err != nil {
+		t.logger.Warnf("Volume removal encountered errors (volumes may already be absent): %v", err)
+	}
+	return nil
 }
 
 func (t *ThanosStack) printLocalServiceURLs(modules map[string]bool) {
