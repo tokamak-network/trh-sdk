@@ -91,6 +91,8 @@ services:
       - OP_BATCHER_RESUBMISSION_TIMEOUT=120s
       - OP_BATCHER_POLL_INTERVAL=30s
       - OP_BATCHER_DATA_AVAILABILITY_TYPE={{.DataAvailabilityType}}
+      - OP_BATCHER_TXMGR_BLOB_FEE_CAP_MULTIPLIER={{.BlobFeeCapMultiplier}}
+      - OP_BATCHER_TXMGR_MAX_L1_BLOB_BASE_FEE={{.MaxBlobBaseFeeGwei}}
     depends_on:
       op-geth:
         condition: service_healthy

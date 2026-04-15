@@ -61,7 +61,9 @@ type localComposeData struct {
 	L2OutputOracleAddress     string
 	DisputeGameFactoryAddress string
 	UseBlobs                  bool
-	DataAvailabilityType string // "blobs" or "calldata"
+	DataAvailabilityType      string // "blobs" or "calldata"
+	BlobFeeCapMultiplier      uint64 // txmgr blob fee cap multiplier (default 4)
+	MaxBlobBaseFeeGwei        string // txmgr max blob base fee threshold in gwei ("0" = disabled)
 	EnableFraudProof          bool
 	Preset                    string
 	DRBNodeImage              string
@@ -303,8 +305,10 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		MaxChannelDuration:        l1ChainConfig.MaxChannelDuration,
 		L2OutputOracleAddress:     contracts.L2OutputOracleProxy,
 		DisputeGameFactoryAddress: contracts.DisputeGameFactoryProxy,
-		UseBlobs:                  t.network != constants.LocalDevnet,
-		DataAvailabilityType: "calldata", // calldata avoids blob gas fee spikes on Sepolia
+		UseBlobs:             t.network != constants.LocalDevnet,
+		DataAvailabilityType: "blobs",
+		BlobFeeCapMultiplier: 4,
+		MaxBlobBaseFeeGwei:   "50", // 50 gwei threshold: pause submission during Sepolia spike
 		EnableFraudProof:          t.deployConfig.EnableFraudProof,
 		Preset:                    t.deployConfig.Preset,
 		DRBNodeImage:              fmt.Sprintf("tokamaknetwork/drb-node:%s", imageTags.DRBNodeImageTag),
