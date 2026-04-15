@@ -45,3 +45,4 @@ stack-info.json
 crossTrade
 
 k8s-efs-backup.worktrees
+.worktrees/
