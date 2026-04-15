@@ -433,6 +433,31 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	chartFile := fmt.Sprintf("%s/tokamak-thanos-stack/charts/thanos-stack", t.deploymentPath)
 	valueFile := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/thanos-stack-values.yaml", t.deploymentPath)
 
+	// Apply testnet resource optimizations to reduce Fargate costs.
+	// Testnet runs on the same public infrastructure as mainnet, so it cannot
+	// be torn down on-demand — explicit smaller requests are the correct lever.
+	if t.network == constants.Testnet {
+		testnetResources := map[string]string{
+			"op_geth.resources.cpu":      "500m",
+			"op_geth.resources.memory":   "1Gi",
+			"op_node.resources.cpu":      "500m",
+			"op_node.resources.memory":   "1Gi",
+			"op_batcher.resources.cpu":   "250m",
+			"op_batcher.resources.memory": "512Mi",
+			"op_proposer.resources.cpu":  "250m",
+			"op_proposer.resources.memory": "512Mi",
+			"redis.resources.cpu":        "250m",
+			"redis.resources.memory":     "512Mi",
+		}
+		for field, value := range testnetResources {
+			if err = utils.UpdateYAMLField(valueFile, field, value); err != nil {
+				t.logger.Error("Error setting testnet resource", "field", field, "err", err)
+				return err
+			}
+		}
+		t.logger.Info("✅ Testnet resource optimizations applied")
+	}
+
 	// Install the PVC first
 	err = utils.UpdateYAMLField(valueFile, "enable_vpc", true)
 	if err != nil {
