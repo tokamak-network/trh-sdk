@@ -179,44 +179,47 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 	// Runs after core services are healthy. Non-blocking: failure logs a warning
 	// but does not prevent the L2 network from starting.
 	if constants.NeedsAASetup(t.deployConfig.Preset, t.deployConfig.FeeToken) {
-		t.logger.Infof("🔧 Configuring AA Paymaster for fee token: %s", t.deployConfig.FeeToken)
-		// Auto-bridge admin TON from L1 to L2 if L2 balance is insufficient for the
-		// EntryPoint deposit. On a fresh L2, the admin has zero L2 TON; this step
-		// bridges 10 TON (covering the initial deposit + aa-operator refill cycles).
-		bridgeOk := true
-		if bridgeErr := t.bridgeAdminTONForAASetup(ctx); bridgeErr != nil {
-			bridgeOk = false
-			t.logger.Warnf("⚠️  Admin L2 TON bridge failed: %v", bridgeErr)
-			t.logger.Warn("   Fund admin address on L2 manually and re-run `trh-sdk setup-aa`.")
-		}
-
-		if bridgeOk {
-			if aaErr := t.setupAAPaymaster(ctx); aaErr != nil {
-				t.logger.Warnf("⚠️  AA Paymaster setup failed: %v", aaErr)
-				t.logger.Warn("   AA fee payment features may not work until paymaster is configured manually.")
-				t.logger.Warn("   Re-run `trh-sdk setup-aa` or call setupAAPaymaster via the admin API.")
-			} else {
-				t.logger.Infof("✅ AA Paymaster configured for %s", t.deployConfig.FeeToken)
+		t.logger.Infof("🔧 AA Paymaster setup starting in background for fee token: %s", t.deployConfig.FeeToken)
+		go func() {
+			bgCtx := context.Background()
+			// Auto-bridge admin TON from L1 to L2 if L2 balance is insufficient for the
+			// EntryPoint deposit. On a fresh L2, the admin has zero L2 TON; this step
+			// bridges 10 TON (covering the initial deposit + aa-operator refill cycles).
+			bridgeOk := true
+			if bridgeErr := t.bridgeAdminTONForAASetup(bgCtx); bridgeErr != nil {
+				bridgeOk = false
+				t.logger.Warnf("⚠️  Admin L2 TON bridge failed: %v", bridgeErr)
+				t.logger.Warn("   Fund admin address on L2 manually and re-run `trh-sdk setup-aa`.")
 			}
-		}
 
-		// Start alto-bundler if admin has L2 funds (bridge succeeded).
-		// Bundler is decoupled from paymaster setup: it processes UserOperations
-		// independently and only needs gas funds (TON) in the executor account.
-		if bridgeOk {
-			t.logger.Info("🚀 Starting alto-bundler (admin funded on L2)...")
-			if bundlerErr := utils.ExecuteCommandStream(ctx, t.logger, "docker", "compose",
-				"-f", composePath, "--profile", "aa", "up", "-d", "alto-bundler"); bundlerErr != nil {
-				t.logger.Warnf("⚠️  Failed to start alto-bundler: %v", bundlerErr)
-				t.logger.Warn("   Run `docker compose --profile aa up -d alto-bundler` manually.")
-			} else {
-				t.logger.Info("✅ alto-bundler started successfully")
-				// Persist aa profile in .env so bundler is included on restarts
-				if err := t.persistAAProfile(composePath); err != nil {
-					t.logger.Warnf("Failed to persist aa profile in .env: %v", err)
+			if bridgeOk {
+				if aaErr := t.setupAAPaymaster(bgCtx); aaErr != nil {
+					t.logger.Warnf("⚠️  AA Paymaster setup failed: %v", aaErr)
+					t.logger.Warn("   AA fee payment features may not work until paymaster is configured manually.")
+					t.logger.Warn("   Re-run `trh-sdk setup-aa` or call setupAAPaymaster via the admin API.")
+				} else {
+					t.logger.Infof("✅ AA Paymaster configured for %s", t.deployConfig.FeeToken)
 				}
 			}
-		}
+
+			// Start alto-bundler if admin has L2 funds (bridge succeeded).
+			// Bundler is decoupled from paymaster setup: it processes UserOperations
+			// independently and only needs gas funds (TON) in the executor account.
+			if bridgeOk {
+				t.logger.Info("🚀 Starting alto-bundler (admin funded on L2)...")
+				if bundlerErr := utils.ExecuteCommandStream(bgCtx, t.logger, "docker", "compose",
+					"-f", composePath, "--profile", "aa", "up", "-d", "alto-bundler"); bundlerErr != nil {
+					t.logger.Warnf("⚠️  Failed to start alto-bundler: %v", bundlerErr)
+					t.logger.Warn("   Run `docker compose --profile aa up -d alto-bundler` manually.")
+				} else {
+					t.logger.Info("✅ alto-bundler started successfully")
+					// Persist aa profile in .env so bundler is included on restarts
+					if err := t.persistAAProfile(composePath); err != nil {
+						t.logger.Warnf("Failed to persist aa profile in .env: %v", err)
+					}
+				}
+			}
+		}()
 	}
 
 	// Start preset module services

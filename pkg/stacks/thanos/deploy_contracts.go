@@ -1,28 +1,18 @@
 package thanos
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"math/big"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
-	"strings"
-	"time"
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"go.uber.org/zap"
-	"github.com/shirou/gopsutil/mem"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
-	"github.com/tokamak-network/trh-sdk/pkg/dependencies"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -140,16 +130,25 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 
 	registerCandidate := deployContractsConfig.RegisterCandidate
 
-	if isResume {
-		// Clone is always required so the source and submodules are available
-		err = t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
-		if err != nil {
-			t.logger.Error("failed to clone the repository", "err", err)
-			return err
-		}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+	cacheDir := filepath.Join(homeDir, ".trh", "bin")
+	binaryPath, err := ensureTokamakDeployer(cacheDir)
+	if err != nil {
+		return fmt.Errorf("tokamak-deployer binary unavailable: %w", err)
+	}
+	deployOutputPath := filepath.Join(t.deploymentPath, "deploy-output.json")
+	deployConfigFilePath := filepath.Join(t.deploymentPath, "deploy-config.json")
 
-		err = t.deployContracts(ctx, l1Client, true)
-		if err != nil {
+	if isResume {
+		if err = runDeployContracts(ctx, binaryPath, deployContractsOpts{
+			L1RPCURL:   t.deployConfig.L1RPCURL,
+			PrivateKey: t.deployConfig.AdminPrivateKey,
+			L2ChainID:  t.deployConfig.L2ChainID,
+			OutPath:    deployOutputPath,
+		}); err != nil {
 			t.logger.Error("❌ Resume the contracts deployment failed!", "err", err)
 			return err
 		}
@@ -158,7 +157,6 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 				t.logger.Error("register candidate is required")
 				return fmt.Errorf("register candidate is required")
 			}
-
 			adminAddress, err := utils.GetAddressFromPrivateKey(t.deployConfig.AdminPrivateKey)
 			if err != nil {
 				t.logger.Error("failed to get admin address from private key", "err", err)
@@ -220,52 +218,23 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			}
 		}
 
-		shellConfigFile := utils.GetShellConfigDefault()
-
-		// Check dependencies
-		if !dependencies.CheckPnpmInstallation(ctx) {
-			t.logger.Warn("pnpm is not installed, try running `source %s` to set up your environment", shellConfigFile)
-			return nil
-		}
-
-		if !dependencies.CheckFoundryInstallation(ctx) {
-			t.logger.Warn("foundry is not installed, try running `source %s` to set up your environment", shellConfigFile)
-			return nil
-		}
-
-		// STEP 2. Clone the repository (always required regardless of ReuseDeployment)
-		err = t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
-		if err != nil {
-			t.logger.Error("failed to clone the repository", "err", err)
-			return err
-		}
-
-		// STEP 2.1–3: Parallelize cannon prestate build with source build pipeline.
-		// Track A: Patch AnchorStateRegistry + build cannon prestate (fault proof only)
-		// Track B: Patch scripts + download artifacts + build source code
-		// Both tracks run after clone completes; prestateHash is used after both finish.
-		tokamakThanosDir := filepath.Join(t.deploymentPath, "tokamak-thanos")
-		contractsDir := filepath.Join(tokamakThanosDir, "packages", "tokamak", "contracts-bedrock")
-		scriptsDir := filepath.Join(contractsDir, "scripts")
-		forgeCacheDir := filepath.Join(t.deploymentPath, ".forge-cache")
-
 		var prestateHash string
 
-		// Patch AnchorStateRegistry BEFORE the parallel tracks start.
-		// Track B may build contracts, so the source must already be patched.
+		// Fault proof requires tokamak-thanos clone for cannon prestate build
 		if deployContractsConfig.EnableFaultProof {
+			err = t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
+			if err != nil {
+				t.logger.Error("failed to clone the repository", "err", err)
+				return err
+			}
+			tokamakThanosDir := filepath.Join(t.deploymentPath, "tokamak-thanos")
 			if patchErr := patchAnchorStateRegistry(tokamakThanosDir); patchErr != nil {
 				return fmt.Errorf("failed to patch AnchorStateRegistry.sol: %w", patchErr)
 			}
 			t.logger.Info("✅ AnchorStateRegistry.sol patched with setInitialAnchorState")
-		}
 
-		g, gctx := errgroup.WithContext(ctx)
-
-		// Track A: Cannon prestate (only when fault proof is enabled, ~34.5s)
-		if deployContractsConfig.EnableFaultProof {
+			g, gctx := errgroup.WithContext(ctx)
 			g.Go(func() error {
-				// Build cannon prestate to extract FaultGameAbsolutePrestate hash
 				prestatePath := filepath.Join(tokamakThanosDir, "op-program", "bin", "prestate.json")
 				if _, statErr := os.Stat(prestatePath); os.IsNotExist(statErr) {
 					t.logger.Info("Building cannon prestate before contract deployment...")
@@ -276,122 +245,18 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 				} else {
 					t.logger.Info("Cannon prestate already exists, reading hash", "path", prestatePath)
 				}
-
 				hash, hashErr := readPrestateHash(prestatePath)
 				if hashErr != nil {
 					return hashErr
 				}
-				prestateHash = hash // Safe: only read after g.Wait()
+				prestateHash = hash
 				t.logger.Info("Cannon prestate hash loaded", "hash", prestateHash)
 				return nil
 			})
+			if err = g.Wait(); err != nil {
+				return err
+			}
 		}
-
-		// Track B: Source build pipeline (~27s with caching, ~51s without)
-		g.Go(func() error {
-			// Patch start-deploy.sh for known build issues
-			if patchErr := patchStartDeployScript(tokamakThanosDir); patchErr != nil {
-				t.logger.Warn("Failed to patch start-deploy.sh, build may fail", "err", patchErr)
-			} else {
-				t.logger.Info("✅ start-deploy.sh patched: cannon prestate and op-node build fixed")
-			}
-
-			// Patch workspace dependency
-			if patchErr := patchContractsPkgJSON(tokamakThanosDir); patchErr != nil {
-				t.logger.Warn("Failed to patch package.json workspace dep", "err", patchErr)
-			}
-
-			// Remove broken test files that prevent forge build
-			removeBrokenTestFiles(t.logger, contractsDir)
-
-			// Try downloading pre-built artifacts from npm to skip forge build
-			if dlErr := downloadPrebuiltArtifacts(gctx, t.logger, contractsDir); dlErr != nil {
-				t.logger.Warn("Pre-built artifacts unavailable, will build from source", "err", dlErr)
-				restoreForgeCache(t.logger, forgeCacheDir, contractsDir)
-			} else {
-				t.logger.Info("✅ Pre-built artifacts downloaded")
-
-				// Create non-versioned symlinks in Go (replaces slow shell find loop: ~7.5s → <1s)
-				if symlinkErr := createArtifactSymlinks(contractsDir); symlinkErr != nil {
-					t.logger.Warn("Failed to create artifact symlinks in Go, shell fallback will run", "err", symlinkErr)
-				} else {
-					t.logger.Info("✅ Artifact symlinks created")
-				}
-
-				// Always force recompile L1Block.sol: the pre-built npm artifact does not
-				// include setL1BlockValuesIsthmus() which is required when isthmus_time is
-				// activated at genesis. Deleting the artifact dir guarantees forge recompiles it.
-				l1BlockArtifactDir := filepath.Join(contractsDir, "forge-artifacts", "L1Block.sol")
-				if err := os.RemoveAll(l1BlockArtifactDir); err != nil {
-					t.logger.Warnf("Failed to remove L1Block forge artifact: %v", err)
-				}
-				if cacheErr := invalidateCacheEntry(contractsDir, "src/L2/L1Block.sol"); cacheErr != nil {
-					t.logger.Warn("Failed to invalidate cache for L1Block", "err", cacheErr)
-				}
-				t.logger.Info("Forge incremental build will run to compile L1Block (Isthmus support)")
-
-				if deployContractsConfig.EnableFaultProof {
-					// Fault proof enabled: also invalidate cache for patched AnchorStateRegistry
-					// and let forge do an incremental build to recompile it. The pre-built
-					// artifacts don't contain setInitialAnchorState which is required for
-					// bootstrapping the genesis anchor state on new chains.
-					if cacheErr := invalidateCacheEntry(contractsDir, "src/dispute/AnchorStateRegistry.sol"); cacheErr != nil {
-						t.logger.Warn("Failed to invalidate cache for patched contract", "err", cacheErr)
-					}
-					// Force recompile by removing compiled artifact directory.
-					// invalidateCacheEntry uses a relative path key but the cache JSON may store
-					// absolute path keys — making the cache invalidation a silent no-op.
-					// Deleting the artifact dir guarantees forge must recompile the patched source.
-					artifactDir := filepath.Join(contractsDir, "forge-artifacts", "AnchorStateRegistry.sol")
-					if err := os.RemoveAll(artifactDir); err != nil {
-						t.logger.Warnf("Failed to remove AnchorStateRegistry forge artifact: %v", err)
-					}
-					t.logger.Info("Forge incremental build will run to compile patched AnchorStateRegistry")
-				} else {
-					// No fault proof: skip full forge build but still run incremental for L1Block
-					t.logger.Info("Forge incremental build will run for L1Block only (no fault proof)")
-				}
-			}
-
-			// Restore cached op-node binary to skip go build (~5.5s on re-deploys)
-			restoreOpNodeBinary(t.logger, forgeCacheDir, tokamakThanosDir)
-
-			t.logger.Info("Building smart contracts...")
-			if buildErr := utils.ExecuteCommandStreamInDir(gctx, t.logger, scriptsDir, "bash", "./start-deploy.sh", "build"); buildErr != nil {
-				if errors.Is(buildErr, context.Canceled) {
-					return buildErr
-				}
-				t.logger.Error("❌ Build the contracts failed!")
-				return buildErr
-			}
-			t.logger.Info("✅ Build the contracts completed!")
-			// Always verify L1Block artifact has Isthmus support
-			if verifyErr := verifyL1BlockArtifact(contractsDir); verifyErr != nil {
-				return fmt.Errorf("L1Block artifact verification failed — forge did not recompile with Isthmus support: %w", verifyErr)
-			}
-			t.logger.Info("✅ L1Block artifact verified: setL1BlockValuesIsthmus present")
-			if deployContractsConfig.EnableFaultProof {
-				if verifyErr := verifyAnchorStateRegistryArtifact(contractsDir); verifyErr != nil {
-					return fmt.Errorf("AnchorStateRegistry artifact verification failed — forge did not recompile the patched source: %w", verifyErr)
-				}
-				t.logger.Info("✅ AnchorStateRegistry artifact verified: setInitialAnchorState present")
-			}
-			return nil
-		})
-
-		// Wait for both tracks to complete
-		if err = g.Wait(); err != nil {
-			os.Unsetenv("SKIP_FORGE_BUILD")
-			if errors.Is(err, context.Canceled) {
-				t.logger.Warn("Deployment canceled")
-			}
-			return err
-		}
-		os.Unsetenv("SKIP_FORGE_BUILD")
-
-		// Cache forge artifacts and op-node binary for future builds
-		saveForgeCache(t.logger, forgeCacheDir, contractsDir)
-		saveOpNodeBinary(t.logger, forgeCacheDir, tokamakThanosDir)
 
 		// Generate deploy config (needs prestateHash from Track A)
 		deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig, l1ChainId.Uint64(), l2ChainID, prestateHash)
@@ -406,7 +271,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			}
 			t.deployConfig.ChallengerPrivateKey = operators.ChallengerPrivateKey
 		}
-		t.deployConfig.DeploymentFilePath = fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", t.deploymentPath, deployContractsTemplate.L1ChainID)
+		t.deployConfig.DeploymentFilePath = deployOutputPath
 		t.deployConfig.L1RPCProvider = utils.DetectRPCKind(deployContractsConfig.L1RPCurl)
 		t.deployConfig.L1ChainID = deployContractsTemplate.L1ChainID
 		t.deployConfig.L2ChainID = l2ChainID
@@ -415,8 +280,6 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		t.deployConfig.ChainConfiguration = deployContractsConfig.ChainConfiguration
 		t.deployConfig.Preset = deployContractsConfig.Preset
 		t.deployConfig.FeeToken = deployContractsConfig.FeeToken
-
-		deployConfigFilePath := fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts/deploy-config.json", t.deploymentPath)
 
 		err = makeDeployContractConfigJsonFile(ctx, l1Client, operators, deployContractsTemplate, deployConfigFilePath)
 		if err != nil {
@@ -478,31 +341,36 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 
 		// When fault proof is enabled, remove the cached AnchorStateRegistry implementation
 		// address from the Sepolia address file before running Deploy.s.sol.
-		// The pre-deployed Sepolia implementation (0xd987...) was deployed before
-		// patchAnchorStateRegistry was introduced and lacks setInitialAnchorState.
-		// Clearing the key forces Deploy.s.sol to deploy the freshly compiled (patched)
-		// implementation instead. All other contracts still reuse their cached Sepolia
-		// addresses (reuseDeployment=true remains effective for them).
 		if deployContractsConfig.EnableFaultProof {
+			tokamakThanosDir := filepath.Join(t.deploymentPath, "tokamak-thanos")
+			contractsDir := filepath.Join(tokamakThanosDir, "packages", "tokamak", "contracts-bedrock")
 			if cleared := clearAnchorStateRegistryFromAddressFile(contractsDir); cleared {
 				t.logger.Info("✅ Cleared cached AnchorStateRegistry implementation address — will deploy patched version")
 			}
 		}
 
-		// Deploy contracts. If ReuseDeployment is true, deploy-config.json instructs the deploy
-		// script to reuse existing implementation contracts on the network.
-		err = t.deployContracts(ctx, l1Client, false)
-		if err != nil {
+		// Deploy contracts via tokamak-deployer binary
+		if err = runDeployContracts(ctx, binaryPath, deployContractsOpts{
+			L1RPCURL:   deployContractsConfig.L1RPCurl,
+			PrivateKey: operators.AdminPrivateKey,
+			L2ChainID:  uint64(l2ChainID),
+			OutPath:    deployOutputPath,
+		}); err != nil {
 			t.logger.Error("failed to deploy contracts", "err", err)
 			return err
 		}
 	}
 
-	// STEP 5: Generate the genesis and rollup files
-	scriptsDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "scripts")
-	err = utils.ExecuteCommandStreamInDir(ctx, t.logger, scriptsDir, "bash", "./start-deploy.sh", "generate", "-e", ".env", "-c", "deploy-config.json")
+	// STEP 5: Generate genesis and rollup files via tokamak-deployer binary
+	// Binary handles all post-processing: DRB inject, USDC inject, MultiTokenPaymaster inject,
+	// L1Block Isthmus bytecode patch, rollup hash update.
+	genesisPath := filepath.Join(t.deploymentPath, "genesis.json")
 	t.logger.Info("Generating the rollup and genesis files...")
-	if err != nil {
+	if err = runGenerateGenesis(ctx, binaryPath, genesisOpts{
+		DeployOutputPath: deployOutputPath,
+		ConfigPath:       deployConfigFilePath,
+		OutPath:          genesisPath,
+	}); err != nil {
 		if errors.Is(err, context.Canceled) {
 			t.logger.Warn("Deployment canceled")
 			return err
@@ -511,58 +379,8 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		return err
 	}
 	t.logger.Info("✅ Successfully generated rollup and genesis files!")
-	genesisPath := filepath.Join(t.deploymentPath, "tokamak-thanos", "build", "genesis.json")
 	t.logger.Infof("Genesis file path: %s", genesisPath)
-	t.logger.Infof("Rollup file path: %s/tokamak-thanos/build/rollup.json", t.deploymentPath)
-
-	// STEP 5.1: Inject DRB predeploy into genesis for Gaming/Full presets
-	if t.deployConfig.Preset == constants.PresetGaming || t.deployConfig.Preset == constants.PresetFull {
-		t.logger.Info("Injecting DRB (CommitReveal2L2) predeploy into genesis...")
-		drbConfig := DefaultDRBGenesisConfig()
-		// Lower activation threshold for testnet/local deployments where only 1 DRB node runs
-		if t.network == constants.Testnet || t.network == constants.LocalDevnet {
-			drbConfig.ActivationThreshold = big.NewInt(1)
-			t.logger.Info("Using DRB ActivationThreshold=1 for testnet/local deployment")
-		}
-		if err := injectDRBIntoGenesis(ctx, t.logger, genesisPath, drbConfig); err != nil {
-			t.logger.Error("❌ Failed to inject DRB into genesis!", "err", err)
-			return err
-		}
-	}
-
-	// STEP 5.2: Inject USDC (FiatTokenV2_2) predeploy into genesis for ALL presets
-	// For DeFi/Full: tokamak-thanos already includes USDC — injectUSDCIntoGenesis skips if present
-	t.logger.Info("Injecting USDC (FiatTokenV2_2) predeploy into genesis...")
-	if err := injectUSDCIntoGenesis(genesisPath, t.deploymentPath); err != nil {
-		t.logger.Error("❌ Failed to inject USDC into genesis!", "err", err)
-		return err
-	}
-
-	// STEP 5.2b: Inject updated MultiTokenPaymaster implementation into genesis code namespace
-	// Fixes paymasterAndData offset: [20:40] Phase 1 → [52:72] ERC-4337 v0.8 standard
-	t.logger.Info("Injecting MultiTokenPaymaster (v0.8 paymasterAndData offset fix) into genesis...")
-	if err := injectMultiTokenPaymasterBytecode(genesisPath, t.deploymentPath); err != nil {
-		t.logger.Error("❌ Failed to inject MultiTokenPaymaster bytecode!", "err", err)
-		return err
-	}
-
-	// STEP 5.2c: Patch L1Block implementation in genesis with Isthmus-capable bytecode.
-	// When isthmus_time == genesis timestamp, IsIsthmusActivationBlock is never true for
-	// op-node (activation is block 0 which op-node doesn't process), so the Isthmus upgrade
-	// transactions are never injected. Without this patch, the genesis has the old Ecotone-only
-	// L1Block implementation and every L1 attributes deposit transaction reverts (status=0x0).
-	t.logger.Info("Patching L1Block implementation in genesis with Isthmus-capable bytecode...")
-	if err := injectL1BlockBytecode(genesisPath, t.deploymentPath); err != nil {
-		t.logger.Error("❌ Failed to patch L1Block bytecode in genesis!", "err", err)
-		return err
-	}
-
-	// STEP 5.3: Update rollup.json genesis hash after ALL genesis modifications
-	rollupPath := filepath.Join(t.deploymentPath, "tokamak-thanos", "build", "rollup.json")
-	if err := updateRollupGenesisHash(t.logger, genesisPath, rollupPath); err != nil {
-		t.logger.Errorf("❌ Failed to update rollup.json genesis hash: %v", err)
-		return err
-	}
+	t.logger.Infof("Rollup file path: %s/rollup.json", t.deploymentPath)
 
 	t.logger.Infof("✅ Configuration successfully saved to: %s/settings.json", t.deploymentPath)
 
@@ -588,643 +406,6 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 	return nil
 }
 
-func (t *ThanosStack) deployContracts(ctx context.Context,
-	l1Client *ethclient.Client,
-	isResume bool,
-) error {
-	var (
-		adminPrivateKey = t.deployConfig.AdminPrivateKey
-		l1RPC           = t.deployConfig.L1RPCURL
-	)
-
-	t.logger.Info("Deploying the contracts...")
-
-	// Wait for any pending transactions from the admin account to be mined.
-	// Forge captures the nonce during simulation and reuses it during broadcast.
-	// If pending txs from a prior deployment attempt get mined between simulation
-	// and broadcast, the on-chain nonce advances and every broadcast tx fails with
-	// "nonce too low". This guard ensures the nonce is stable before forge starts.
-	adminAddr, err := utils.GetAddressFromPrivateKey(adminPrivateKey)
-	if err != nil {
-		t.logger.Error("Failed to derive admin address", "err", err)
-		return fmt.Errorf("failed to derive admin address: %w", err)
-	}
-
-	const maxNonceWait = 5 * time.Minute
-	const nonceCheckInterval = 10 * time.Second
-	waitDeadline := time.Now().Add(maxNonceWait)
-
-	for {
-		confirmedNonce, err := l1Client.NonceAt(ctx, adminAddr, nil)
-		if err != nil {
-			t.logger.Error("Failed to get confirmed nonce", "err", err)
-			break // proceed anyway; forge will report the error if nonce is stale
-		}
-		pendingNonce, err := l1Client.PendingNonceAt(ctx, adminAddr)
-		if err != nil {
-			t.logger.Error("Failed to get pending nonce", "err", err)
-			break
-		}
-
-		if pendingNonce == confirmedNonce {
-			t.logger.Infof("Admin nonce is stable at %d (no pending transactions)", confirmedNonce)
-			break
-		}
-
-		pendingCount := pendingNonce - confirmedNonce
-		if time.Now().After(waitDeadline) {
-			t.logger.Warnf("⚠️ Timed out waiting for %d pending transaction(s) to clear (confirmed nonce: %d, pending nonce: %d). Proceeding anyway — forge may fail with 'nonce too low'.",
-				pendingCount, confirmedNonce, pendingNonce)
-			break
-		}
-
-		t.logger.Infof("⏳ Waiting for %d pending transaction(s) to be mined (confirmed: %d, pending: %d)...",
-			pendingCount, confirmedNonce, pendingNonce)
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(nonceCheckInterval):
-		}
-	}
-
-	gasPriceWei, err := l1Client.SuggestGasPrice(ctx)
-	if err != nil {
-		t.logger.Error("Failed to get gas price", "err", err)
-	}
-
-	envValues := fmt.Sprintf("export GS_ADMIN_PRIVATE_KEY=%s\nexport L1_RPC_URL=%s\n", adminPrivateKey, l1RPC)
-	if gasPriceWei != nil && gasPriceWei.Uint64() > 0 {
-		// double gas price
-		envValues += fmt.Sprintf("export GAS_PRICE=%d\n", gasPriceWei.Uint64()*2)
-	}
-
-	// STEP 4.1. Generate the .env file using native Go file write (avoids shell injection)
-	scriptsDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "scripts")
-	envFilePath := filepath.Join(scriptsDir, ".env")
-	err = os.WriteFile(envFilePath, []byte(envValues), 0600)
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			t.logger.Warn("Deployment canceled")
-			return err
-		}
-		t.logger.Error("❌ Make .env file failed!")
-		return err
-	}
-
-	// Clean the forge broadcast directory for fresh deployments to prevent
-	// stale nonce data from a prior run interfering with the new deployment.
-	if !isResume {
-		broadcastDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "broadcast", "Deploy.s.sol")
-		if _, statErr := os.Stat(broadcastDir); !os.IsNotExist(statErr) {
-			t.logger.Info("Cleaning stale forge broadcast directory...")
-			if rmErr := os.RemoveAll(broadcastDir); rmErr != nil {
-				t.logger.Warn("Failed to clean broadcast directory", "err", rmErr)
-			}
-		}
-	}
-
-	// STEP 4.3. Deploy contracts
-	if isResume {
-		err = utils.ExecuteCommandStreamInDir(ctx, t.logger, scriptsDir, "bash", "./start-deploy.sh", "redeploy", "-e", ".env", "-c", "deploy-config.json")
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				t.logger.Warn("Deployment canceled")
-				return err
-			}
-			t.logger.Error("❌ Contract deployment failed!")
-			return err
-		}
-	} else {
-		err = utils.ExecuteCommandStreamInDir(ctx, t.logger, scriptsDir, "bash", "./start-deploy.sh", "deploy", "-e", ".env", "-c", "deploy-config.json")
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				t.logger.Warn("Deployment canceled")
-				return err
-			}
-			t.logger.Error("❌ Contract deployment failed!")
-			return err
-		}
-	}
-	t.logger.Info("✅ Contract deployment completed successfully!")
-
-	t.deployConfig.DeployContractState.Status = types.DeployContractStatusCompleted
-	err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
-	if err != nil {
-		t.logger.Error("Failed to write settings file", "err", err)
-		return err
-	}
-	return nil
-}
-
-// patchStartDeployScript patches the start-deploy.sh script in the cloned tokamak-thanos
-// repository to fix known build issues:
-//  1. Cannon prestate: skip when fault proof is disabled (cannon CLI changed to require --type).
-//  2. op-node: replace deprecated `make op-node` with direct go build (Makefile migrated to justfiles).
-func patchStartDeployScript(tokamakThanosDir string) error {
-	scriptPath := filepath.Join(tokamakThanosDir, "packages", "tokamak", "contracts-bedrock", "scripts", "start-deploy.sh")
-
-	content, err := os.ReadFile(scriptPath)
-	if err != nil {
-		return fmt.Errorf("failed to read start-deploy.sh: %w", err)
-	}
-
-	// Patch 1: cannon prestate — skip when fault proof is disabled.
-	cannonOld := `  # Build cannon prestate
-  echo "Building cannon prestate..."
-  if ! retryCommand "make cannon-prestate" "Building cannon prestate"; then
-    echo "❌ Error: Failed to build cannon prestate after $MAX_RETRIES attempts"
-    return 1
-  fi`
-
-	cannonNew := `  # Build cannon prestate (only when fault proof is enabled)
-  if [ "${ENABLE_FAULT_PROOF:-false}" = "true" ]; then
-    echo "Building cannon prestate..."
-    if ! retryCommand "make cannon-prestate" "Building cannon prestate"; then
-      echo "❌ Error: Failed to build cannon prestate after $MAX_RETRIES attempts"
-      return 1
-    fi
-  else
-    echo "ℹ️ Skipping cannon prestate build (ENABLE_FAULT_PROOF not set)"
-  fi`
-
-	if bytes.Contains(content, []byte(cannonOld)) {
-		content = bytes.Replace(content, []byte(cannonOld), []byte(cannonNew), 1)
-	}
-
-	// Patch 2: op-node build — replace deprecated `make op-node` with direct go build.
-	// The tokamak-thanos repo migrated from Makefile to justfiles; `make op-node` now errors.
-	// Skip build entirely if a cached binary was restored by restoreOpNodeBinary().
-	// Run from $projectRoot (where go.mod lives) with GOWORK=off to avoid workspace mode issues
-	// in container environments where go.work + no per-package go.mod causes "go.mod not found".
-	opNodeOld := `  if ! retryCommand "make op-node" "Building op-node"; then`
-	opNodeNew := `  if [ -f "$projectRoot/op-node/bin/op-node" ]; then
-    echo "op-node binary found, skipping build"
-  elif ! retryCommand "mkdir -p $projectRoot/op-node/bin && (cd $projectRoot && env GOWORK=off GO111MODULE=on CGO_ENABLED=0 go build -v -o ./op-node/bin/op-node ./op-node/cmd)" "Building op-node"; then`
-
-	if bytes.Contains(content, []byte(opNodeOld)) {
-		content = bytes.Replace(content, []byte(opNodeOld), []byte(opNodeNew), 1)
-	}
-
-	// Patch 3: skip core-utils and SDK TypeScript builds entirely.
-	// These packages are not used by the contract deployment pipeline (Deploy.s.sol,
-	// L2Genesis.s.sol, op-node genesis). Removing them saves ~8s (core-utils 4.1s +
-	// SDK reinstall 1.8s + SDK build 2.3s).
-	coreUtilsBlockOld := `  # Build TypeScript packages in dependency order
-  echo "Building core-utils..."`
-	coreUtilsBlockNew := `  # TypeScript builds (core-utils, SDK) skipped — not needed for contract deployment
-  echo "Skipping core-utils and SDK builds (not required for deployment pipeline)"
-  cd $currentPWD
-  echo "✅ All source code built successfully!"
-  return 0
-
-  # --- Below is unreachable (kept for reference) ---
-  echo "Building core-utils..."`
-	if bytes.Contains(content, []byte(coreUtilsBlockOld)) {
-		content = bytes.Replace(content, []byte(coreUtilsBlockOld), []byte(coreUtilsBlockNew), 1)
-	}
-
-	// Patch 4: incremental builds + memory-based parallelism.
-	// - Skip `forge clean` when forge-artifacts already exist to enable incremental builds
-	//   (Forge uses solidity-files-cache.json to recompile only changed files).
-	// - Dynamically set --jobs based on available system memory to balance speed vs OOM risk.
-	//   Docker Desktop defaults to 7.75GB which only supports --jobs 1.
-	// Replace the entire retryCommand block (3 lines) to avoid nested-quote shell issues.
-	jobs := getForgeJobs()
-	jobsStr := strconv.Itoa(jobs)
-	forgeBuildBlockOld := `  if ! retryCommand "forge clean && forge build" "Building contracts"; then
-    echo "❌ Error: Failed to build contracts after $MAX_RETRIES attempts"
-    return 1
-  fi`
-	forgeBuildBlockNew := `  # Incremental build with memory-based parallelism (patched by trh-sdk)
-  if [ "${SKIP_FORGE_BUILD:-false}" = "true" ] && [ -d "forge-artifacts" ] && [ -n "$(ls -A forge-artifacts 2>/dev/null)" ]; then
-    echo "Pre-built artifacts found, skipping forge build"
-  elif [ -d "forge-artifacts" ] && [ -n "$(ls -A forge-artifacts 2>/dev/null)" ]; then
-    echo "Incremental build (reusing cached artifacts)..."
-    if ! retryCommand "forge build --jobs ` + jobsStr + `" "Building contracts (incremental)"; then
-      echo "❌ Error: Failed to build contracts after $MAX_RETRIES attempts"
-      return 1
-    fi
-  else
-    echo "Clean build (no cached artifacts found)..."
-    if ! retryCommand "forge clean && forge build --jobs ` + jobsStr + `" "Building contracts (clean)"; then
-      echo "❌ Error: Failed to build contracts after $MAX_RETRIES attempts"
-      return 1
-    fi
-  fi`
-	if bytes.Contains(content, []byte(forgeBuildBlockOld)) {
-		content = bytes.Replace(content, []byte(forgeBuildBlockOld), []byte(forgeBuildBlockNew), 1)
-	}
-
-	// Patch 5: (removed — core-utils/SDK builds skipped by Patch 3)
-
-	// Patch 6: shallow, non-recursive submodule update instead of full history clone.
-	// Only first-level submodules are needed; nested ones (e.g. automate→forge-std→ds-test)
-	// are test-only dependencies of third-party libraries.
-	submoduleOld := `make submodules`
-	submoduleNew := `git submodule update --init --depth 1`
-	if bytes.Contains(content, []byte(submoduleOld)) {
-		content = bytes.Replace(content, []byte(submoduleOld), []byte(submoduleNew), 1)
-	}
-
-	// Patch 7: (removed — core-utils/SDK builds skipped by Patch 3)
-
-	// Patch 8: remove --rpc-url from L2Genesis forge script.
-	// L2Genesis generates L2 state locally and only reads L1 addresses from a JSON file
-	// (CONTRACT_ADDRESSES_PATH). Using --rpc-url causes forge to fork L1, making 256+
-	// RPC calls for vm.deal() on precompile addresses, which triggers Alchemy rate limits.
-	l2GenesisOld := `    forge script scripts/L2Genesis.s.sol:L2Genesis \
-    --rpc-url $L1_RPC_URL; then`
-	l2GenesisNew := `    forge script scripts/L2Genesis.s.sol:L2Genesis; then`
-	if bytes.Contains(content, []byte(l2GenesisOld)) {
-		content = bytes.Replace(content, []byte(l2GenesisOld), []byte(l2GenesisNew), 1)
-	}
-
-	// Patch 9: add --fork-retries and --fork-retry-backoff to forge Deploy script.
-	// Free-tier Alchemy endpoints return HTTP 429 under sustained forge RPC load.
-	// Exponential backoff (starting at 3s, up to 10 retries) lets transient rate
-	// limits resolve without failing the entire deployment.
-	deployOld := `forge script scripts/Deploy.s.sol:Deploy --private-key $GS_ADMIN_PRIVATE_KEY --broadcast --rpc-url $L1_RPC_URL --slow --legacy --non-interactive`
-	deployNew := `forge script scripts/Deploy.s.sol:Deploy --private-key $GS_ADMIN_PRIVATE_KEY --broadcast --rpc-url $L1_RPC_URL --slow --legacy --non-interactive --fork-retries 10 --fork-retry-backoff 3000`
-	// Replace all occurrences (deploy, resume with --resume, and gas-price variants)
-	content = bytes.ReplaceAll(content, []byte(deployOld), []byte(deployNew))
-
-	return os.WriteFile(scriptPath, content, 0755)
-}
-
-// removeBrokenTestFiles deletes test files that have compilation errors (e.g. constructor
-// argument mismatches) so they don't block `forge build`. These are test-only files that
-// are not needed for contract deployment.
-func removeBrokenTestFiles(logger interface{ Info(args ...interface{}) }, contractsDir string) {
-	brokenTests := []string{
-		"test/AA/MultiTokenPaymaster.t.sol",
-		"test/AA/SimplePriceOracle.t.sol",
-	}
-	for _, f := range brokenTests {
-		path := filepath.Join(contractsDir, f)
-		if _, err := os.Stat(path); err == nil {
-			if err := os.Remove(path); err == nil {
-				logger.Info("Removed broken test file: " + f)
-			}
-		}
-	}
-}
-
-// patchContractsPkgJSON fixes the workspace self-reference in contracts-bedrock/package.json.
-// The package declares "@eth-optimism/contracts-bedrock": "workspace:*" in devDependencies,
-// but pnpm overrides don't resolve workspace: protocol references. Replace with the actual
-// tokamak package name so pnpm can resolve it within the workspace.
-func patchContractsPkgJSON(tokamakThanosDir string) error {
-	pkgPath := filepath.Join(tokamakThanosDir, "packages", "tokamak", "contracts-bedrock", "package.json")
-	content, err := os.ReadFile(pkgPath)
-	if err != nil {
-		return fmt.Errorf("failed to read package.json: %w", err)
-	}
-
-	old := []byte(`"@eth-optimism/contracts-bedrock": "workspace:*"`)
-	replacement := []byte(`"@tokamak-network/thanos-contracts": "workspace:*"`)
-	if bytes.Contains(content, old) {
-		content = bytes.Replace(content, old, replacement, 1)
-		return os.WriteFile(pkgPath, content, 0644)
-	}
-	return nil
-}
-
-// versionedArtifactRe matches forge artifact filenames with Solidity version suffixes
-// e.g. "L1UsdcBridge.0.8.15.json" → captures ".0.8.15"
-var versionedArtifactRe = regexp.MustCompile(`(\.\d+)+\.json$`)
-
-// createArtifactSymlinks creates non-versioned symlinks for versioned forge artifacts.
-// Newer forge versions name artifacts with solidity version suffix (e.g. L1UsdcBridge.0.8.15.json)
-// but the TypeScript SDK imports the unversioned name (L1UsdcBridge.json).
-// This Go implementation replaces the slow shell find|while|sed loop (~7.5s → <1s).
-func createArtifactSymlinks(contractsDir string) error {
-	forgeDir := filepath.Join(contractsDir, "forge-artifacts")
-	return filepath.WalkDir(forgeDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		base := d.Name()
-		nonversioned := versionedArtifactRe.ReplaceAllString(base, ".json")
-		if nonversioned != base {
-			target := filepath.Join(filepath.Dir(path), nonversioned)
-			if _, statErr := os.Lstat(target); os.IsNotExist(statErr) {
-				if linkErr := os.Symlink(base, target); linkErr != nil {
-					return linkErr
-				}
-			}
-		}
-		return nil
-	})
-}
-
-// getForgeJobs returns the number of parallel Solc compilation jobs based on available memory.
-// Forge compiles up to 6 Solc versions in parallel by default, which can exhaust memory
-// on resource-constrained hosts like Docker Desktop (7.75GB default).
-func getForgeJobs() int {
-	v, err := mem.VirtualMemory()
-	if err != nil {
-		return 1
-	}
-	totalGB := v.Total / (1024 * 1024 * 1024)
-	switch {
-	case totalGB >= 16:
-		return 4
-	case totalGB >= 10:
-		return 2
-	default:
-		return 1
-	}
-}
-
-// restoreForgeCache restores cached forge build artifacts from the deployment-level cache
-// directory into the contracts-bedrock directory. This enables incremental builds even after
-// re-cloning the tokamak-thanos repository, since the cache lives outside the repo directory.
-// Cache errors are logged but never fail the build — caching is best-effort.
-func restoreForgeCache(logger interface{ Info(args ...interface{}) }, cacheDir, contractsDir string) {
-	forgeArtifactsCache := filepath.Join(cacheDir, "forge-artifacts")
-	forgeSolcCache := filepath.Join(cacheDir, "cache")
-
-	if _, err := os.Stat(forgeArtifactsCache); os.IsNotExist(err) {
-		return
-	}
-
-	destArtifacts := filepath.Join(contractsDir, "forge-artifacts")
-	destCache := filepath.Join(contractsDir, "cache")
-
-	// Only restore if the destination doesn't already have artifacts
-	if _, err := os.Stat(destArtifacts); !os.IsNotExist(err) {
-		return
-	}
-
-	logger.Info("Restoring cached forge artifacts for incremental build...")
-
-	// Always copy (not rename) to preserve the cache for future use
-	if err := copyDir(forgeArtifactsCache, destArtifacts); err != nil {
-		logger.Info("Failed to restore forge artifacts cache, will do clean build", err)
-		os.RemoveAll(destArtifacts) // Clean up partial copy
-		return
-	}
-	if _, err := os.Stat(forgeSolcCache); !os.IsNotExist(err) {
-		if err := copyDir(forgeSolcCache, destCache); err != nil {
-			logger.Info("Failed to restore forge solc cache", err)
-			os.RemoveAll(destCache)
-		}
-	}
-}
-
-// saveForgeCache saves forge build artifacts to the deployment-level cache directory.
-// Cache errors are logged but never fail the build — caching is best-effort.
-func saveForgeCache(logger interface{ Info(args ...interface{}) }, cacheDir, contractsDir string) {
-	srcArtifacts := filepath.Join(contractsDir, "forge-artifacts")
-	srcCache := filepath.Join(contractsDir, "cache")
-
-	if _, err := os.Stat(srcArtifacts); os.IsNotExist(err) {
-		return
-	}
-
-	logger.Info("Caching forge artifacts for future builds...")
-
-	// Clean old cache and replace
-	os.RemoveAll(filepath.Join(cacheDir, "forge-artifacts"))
-	os.RemoveAll(filepath.Join(cacheDir, "cache"))
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
-		logger.Info("Failed to create forge cache directory", err)
-		return
-	}
-
-	if err := copyDir(srcArtifacts, filepath.Join(cacheDir, "forge-artifacts")); err != nil {
-		logger.Info("Failed to save forge artifacts cache", err)
-		os.RemoveAll(filepath.Join(cacheDir, "forge-artifacts")) // Clean up partial copy
-		return
-	}
-	if _, err := os.Stat(srcCache); !os.IsNotExist(err) {
-		if err := copyDir(srcCache, filepath.Join(cacheDir, "cache")); err != nil {
-			logger.Info("Failed to save forge solc cache", err)
-			os.RemoveAll(filepath.Join(cacheDir, "cache"))
-		}
-	}
-}
-
-// restoreOpNodeBinary copies a cached op-node binary into the cloned repo to skip go build (~5.5s).
-func restoreOpNodeBinary(logger interface{ Info(args ...interface{}) }, cacheDir, tokamakThanosDir string) {
-	src := filepath.Join(cacheDir, "op-node")
-	dst := filepath.Join(tokamakThanosDir, "op-node", "bin", "op-node")
-	if _, err := os.Stat(src); os.IsNotExist(err) {
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-		return
-	}
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return
-	}
-	if err := os.WriteFile(dst, data, 0755); err != nil {
-		logger.Info("Failed to restore cached op-node binary", err)
-		return
-	}
-	logger.Info("✅ Restored cached op-node binary")
-}
-
-// saveOpNodeBinary saves the built op-node binary to the deployment-level cache.
-func saveOpNodeBinary(logger interface{ Info(args ...interface{}) }, cacheDir, tokamakThanosDir string) {
-	src := filepath.Join(tokamakThanosDir, "op-node", "bin", "op-node")
-	if _, err := os.Stat(src); os.IsNotExist(err) {
-		return
-	}
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
-		return
-	}
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return
-	}
-	if err := os.WriteFile(filepath.Join(cacheDir, "op-node"), data, 0755); err != nil {
-		logger.Info("Failed to cache op-node binary", err)
-	}
-}
-
-// copyDir recursively copies a directory tree, preserving symlinks as symlinks.
-func copyDir(src, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		relPath, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		dstPath := filepath.Join(dst, relPath)
-
-		// Check if the original entry is a symlink (filepath.Walk follows symlinks,
-		// so we need to Lstat the original path to detect them)
-		linfo, lstatErr := os.Lstat(path)
-		if lstatErr != nil {
-			return lstatErr
-		}
-		if linfo.Mode()&os.ModeSymlink != 0 {
-			target, readErr := os.Readlink(path)
-			if readErr != nil {
-				return readErr
-			}
-			return os.Symlink(target, dstPath)
-		}
-
-		if info.IsDir() {
-			return os.MkdirAll(dstPath, info.Mode())
-		}
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(dstPath, data, info.Mode())
-	})
-}
-
-// updateRollupGenesisHash recomputes the L2 genesis block hash from genesis.json
-// and updates rollup.json to match. This must be called after any post-generation
-// modification to genesis.json (e.g., DRB injection) to prevent hash mismatches
-// between op-node's rollup config and op-geth's actual genesis block.
-func updateRollupGenesisHash(logger *zap.SugaredLogger, genesisPath, rollupPath string) error {
-	// Parse genesis.json using go-ethereum's Genesis type
-	genesisData, err := os.ReadFile(genesisPath)
-	if err != nil {
-		return fmt.Errorf("failed to read genesis.json: %w", err)
-	}
-
-	var genesis core.Genesis
-	if err := json.Unmarshal(genesisData, &genesis); err != nil {
-		return fmt.Errorf("failed to parse genesis.json: %w", err)
-	}
-
-	// Compute the genesis block hash
-	genesisBlock := genesis.ToBlock()
-	newHash := genesisBlock.Hash().Hex()
-
-	// Read and update rollup.json
-	rollupData, err := os.ReadFile(rollupPath)
-	if err != nil {
-		return fmt.Errorf("failed to read rollup.json: %w", err)
-	}
-
-	var rollup map[string]interface{}
-	if err := json.Unmarshal(rollupData, &rollup); err != nil {
-		return fmt.Errorf("failed to parse rollup.json: %w", err)
-	}
-
-	genesisSection, ok := rollup["genesis"].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("rollup.json missing 'genesis' section")
-	}
-	l2Section, ok := genesisSection["l2"].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("rollup.json missing 'genesis.l2' section")
-	}
-
-	oldHash, _ := l2Section["hash"].(string)
-	if oldHash == newHash {
-		logger.Info("rollup.json L2 genesis hash already matches, no update needed")
-		return nil
-	}
-
-	l2Section["hash"] = newHash
-	logger.Infof("Updated rollup.json L2 genesis hash: %s → %s", oldHash, newHash)
-
-	updatedData, err := json.MarshalIndent(rollup, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal rollup.json: %w", err)
-	}
-
-	return os.WriteFile(rollupPath, updatedData, 0644)
-}
-
-// verifyAnchorStateRegistryArtifact checks that the compiled AnchorStateRegistry artifact
-// contains setInitialAnchorState in its ABI. Called after forge build when fault proof is
-// enabled to detect early if patchAnchorStateRegistry did not take effect.
-func verifyAnchorStateRegistryArtifact(contractsDir string) error {
-	artifactDir := filepath.Join(contractsDir, "forge-artifacts", "AnchorStateRegistry.sol")
-	entries, err := os.ReadDir(artifactDir)
-	if err != nil {
-		return fmt.Errorf("forge-artifacts/AnchorStateRegistry.sol not found: %w", err)
-	}
-	var artifactPath string
-	for _, e := range entries {
-		name := e.Name()
-		if !e.IsDir() && strings.HasSuffix(name, ".json") && !strings.HasSuffix(name, ".dbg.json") {
-			artifactPath = filepath.Join(artifactDir, name)
-			break
-		}
-	}
-	if artifactPath == "" {
-		return fmt.Errorf("no JSON artifact found in forge-artifacts/AnchorStateRegistry.sol/")
-	}
-	data, err := os.ReadFile(artifactPath)
-	if err != nil {
-		return fmt.Errorf("failed to read artifact: %w", err)
-	}
-	var artifact struct {
-		ABI []struct {
-			Name string `json:"name"`
-			Type string `json:"type"`
-		} `json:"abi"`
-	}
-	if err := json.Unmarshal(data, &artifact); err != nil {
-		return fmt.Errorf("failed to parse artifact JSON: %w", err)
-	}
-	for _, entry := range artifact.ABI {
-		if entry.Type == "function" && entry.Name == "setInitialAnchorState" {
-			return nil
-		}
-	}
-	return fmt.Errorf("setInitialAnchorState not found in AnchorStateRegistry ABI — " +
-		"forge did not recompile the patched source; ensure patchAnchorStateRegistry ran " +
-		"or delete forge-artifacts/AnchorStateRegistry.sol/ and retry the build")
-}
-
-// verifyL1BlockArtifact checks that the compiled L1Block artifact includes
-// setL1BlockValuesIsthmus(), confirming the source was recompiled with Isthmus support.
-func verifyL1BlockArtifact(contractsDir string) error {
-	artifactDir := filepath.Join(contractsDir, "forge-artifacts", "L1Block.sol")
-	entries, err := os.ReadDir(artifactDir)
-	if err != nil {
-		return fmt.Errorf("forge-artifacts/L1Block.sol not found: %w", err)
-	}
-	var artifactPath string
-	for _, e := range entries {
-		name := e.Name()
-		if !e.IsDir() && strings.HasSuffix(name, ".json") && !strings.HasSuffix(name, ".dbg.json") {
-			artifactPath = filepath.Join(artifactDir, name)
-			break
-		}
-	}
-	if artifactPath == "" {
-		return fmt.Errorf("no JSON artifact found in forge-artifacts/L1Block.sol/")
-	}
-	data, err := os.ReadFile(artifactPath)
-	if err != nil {
-		return fmt.Errorf("failed to read artifact: %w", err)
-	}
-	var artifact struct {
-		ABI []struct {
-			Name string `json:"name"`
-			Type string `json:"type"`
-		} `json:"abi"`
-	}
-	if err := json.Unmarshal(data, &artifact); err != nil {
-		return fmt.Errorf("failed to parse artifact JSON: %w", err)
-	}
-	for _, entry := range artifact.ABI {
-		if entry.Type == "function" && entry.Name == "setL1BlockValuesIsthmus" {
-			return nil
-		}
-	}
-	return fmt.Errorf("setL1BlockValuesIsthmus not found in L1Block ABI — " +
-		"forge did not recompile the patched source; ensure tokamak-thanos L1Block.sol has Isthmus support " +
-		"or delete forge-artifacts/L1Block.sol/ and retry the build")
-}
 
 // clearAnchorStateRegistryFromAddressFile removes the "AnchorStateRegistry" implementation
 // address from thanos-stack-sepolia/address.json inside contractsDir.
