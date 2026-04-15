@@ -203,6 +203,12 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							}
 							return nil
 
+						case constants.PluginDRB:
+							if err := thanosStack.InstallDRB(ctx); err != nil {
+								return fmt.Errorf("failed to install DRB VRF node: %w", err)
+							}
+							return nil
+
 						default:
 							return nil
 						}
@@ -238,6 +244,8 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							return thanosStack.UninstallMonitoring(ctx)
 						case constants.PluginCrossTrade:
 							return thanosStack.UninstallCrossTrade(ctx)
+						case constants.PluginDRB:
+							return thanosStack.UninstallDRB(ctx)
 						}
 					}
 				default:

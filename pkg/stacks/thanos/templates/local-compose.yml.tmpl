@@ -477,7 +477,8 @@ services:
       - "3004:3000"
     environment:
       - NEXT_PUBLIC_PROJECT_ID={{.CrossTradeProjectID}}
-      - NEXT_PUBLIC_CHAIN_CONFIG={{.CrossTradeChainConfig}}
+      - NEXT_PUBLIC_CHAIN_CONFIG_L2_L1={{.CrossTradeChainConfigL2L1}}
+      - NEXT_PUBLIC_CHAIN_CONFIG_L2_L2={{.CrossTradeChainConfigL2L2}}
     profiles: ["crossTrade"]
     restart: unless-stopped
 {{- end}}

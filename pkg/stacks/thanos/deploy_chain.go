@@ -558,34 +558,10 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		}
 	}
 
-	// Auto-install preset modules that don't require user configuration
+	// Auto-install preset modules
 	if t.deployConfig.Preset != "" {
-		presetModules := constants.PresetModules[t.deployConfig.Preset]
-
-		if enabled := presetModules["uptimeService"]; enabled {
-			t.logger.Info("🔧 Auto-installing Uptime Service (preset: " + t.deployConfig.Preset + ")")
-			uptimeConfig, err := t.GetUptimeServiceConfig(ctx)
-			if err != nil {
-				t.logger.Error("Failed to get uptime service config for auto-install", "err", err)
-			} else {
-				if _, err := t.InstallUptimeService(ctx, uptimeConfig); err != nil {
-					t.logger.Error("Failed to auto-install uptime service", "err", err)
-				} else {
-					t.logger.Info("✅ Uptime Service installed successfully")
-				}
-			}
-		}
-
-		if enabled := presetModules["monitoring"]; enabled {
-			t.logger.Info("ℹ️  Monitoring is included in your preset. Run 'trh install monitoring' to configure and deploy it.")
-		}
-
-		if enabled := presetModules["blockExplorer"]; enabled {
-			t.logger.Info("ℹ️  Block Explorer is included in your preset. Run 'trh install block-explorer' to configure and deploy it.")
-		}
-
-		if enabled := presetModules["crossTrade"]; enabled {
-			t.logger.Info("ℹ️  Cross-Chain Trade is included in your preset. Run 'trh install cross-trade' to configure and deploy it.")
+		if err := t.installPresetModules(ctx); err != nil {
+			t.logger.Warnw("Some preset modules failed to install — deployment continues", "err", err)
 		}
 	}
 
@@ -898,4 +874,73 @@ func initGenesisAnchorState(
 	}
 	logger.Infof("✅ setInitialAnchorState confirmed in block %d (tx: %s)", receipt.BlockNumber.Uint64(), signedTx.Hash().Hex())
 	return nil
+}
+
+// installPresetModules installs all modules enabled for the configured preset.
+// Modules that require user input (blockExplorer, crossTrade) are skipped with
+// a guidance log; they must be installed manually via 'trh install <plugin>'.
+// Failures are logged but do not abort the deployment — already-installed
+// modules are not rolled back.
+func (t *ThanosStack) installPresetModules(ctx context.Context) error {
+	preset := t.deployConfig.Preset
+	modules := constants.PresetModules[preset]
+	t.logger.Infof("🔧 Installing preset modules for preset=%s", preset)
+
+	var installErr error
+
+	if modules["uptimeService"] {
+		t.logger.Info("  ↳ uptime-service")
+		cfg, err := t.GetUptimeServiceConfig(ctx)
+		if err != nil {
+			t.logger.Errorw("Failed to get uptime-service config", "err", err)
+			installErr = err
+		} else if _, err := t.InstallUptimeService(ctx, cfg); err != nil {
+			t.logger.Errorw("Failed to install uptime-service", "err", err)
+			installErr = err
+		}
+	}
+
+	if modules["monitoring"] {
+		t.logger.Info("  ↳ monitoring (auto-config: random admin password, alerts disabled)")
+		monitoringInput, err := BuildDefaultMonitoringInput()
+		if err != nil {
+			t.logger.Errorw("Failed to build default monitoring config", "err", err)
+			installErr = err
+		} else {
+			monitoringCfg, err := t.GetMonitoringConfig(ctx, monitoringInput.AdminPassword, monitoringInput.AlertManager, monitoringInput.LoggingEnabled)
+			if err != nil {
+				t.logger.Errorw("Failed to get monitoring config", "err", err)
+				installErr = err
+			} else if _, err := t.InstallMonitoring(ctx, monitoringCfg); err != nil {
+				t.logger.Errorw("Failed to install monitoring", "err", err)
+				installErr = err
+			}
+		}
+	}
+
+	if modules["drb"] {
+		t.logger.Info("  ↳ drb-vrf")
+		if err := t.InstallDRB(ctx); err != nil {
+			t.logger.Errorw("Failed to install DRB VRF node", "err", err)
+			installErr = err
+		}
+	}
+
+	if modules["aaPaymaster"] && t.deployConfig.FeeToken != constants.FeeTokenTON {
+		t.logger.Info("  ↳ aa-paymaster")
+		if err := t.setupAAPaymaster(ctx); err != nil {
+			t.logger.Errorw("Failed to set up AA Paymaster", "err", err)
+			installErr = err
+		}
+	}
+
+	// blockExplorer and crossTrade require external API keys — cannot auto-install.
+	if modules["blockExplorer"] {
+		t.logger.Info("ℹ️  Block Explorer is included in your preset. Run 'trh install block-explorer' to configure and deploy it.")
+	}
+	if modules["crossTrade"] {
+		t.logger.Info("ℹ️  Cross-Chain Trade is included in your preset. Run 'trh install cross-trade' to configure and deploy it.")
+	}
+
+	return installErr
 }

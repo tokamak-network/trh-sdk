@@ -38,8 +38,12 @@ func (t *ThanosStack) setupAAPaymaster(ctx context.Context) error {
 
 	t.logger.Infof("🔧 Setting up AA Paymaster for fee token: %s", feeToken)
 
-	// Connect to L2.
-	l2Client, err := ethclient.DialContext(ctx, localL2RPCURL())
+	// Connect to L2. Use the configured L2 RPC URL (AWS path) or fall back to local Docker.
+	l2URL := localL2RPCURL()
+	if t.deployConfig.L2RpcUrl != "" {
+		l2URL = t.deployConfig.L2RpcUrl
+	}
+	l2Client, err := ethclient.DialContext(ctx, l2URL)
 	if err != nil {
 		return fmt.Errorf("failed to connect to L2 RPC: %w", err)
 	}

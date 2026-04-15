@@ -114,9 +114,10 @@ type localComposeData struct {
 	AAOperatorEnabled bool
 	AAAdminPrivateKey string
 	// CrossTrade dApp — populated after DeployCrossTradeLocal succeeds.
-	CrossTradeEnabled     bool
-	CrossTradeProjectID   string
-	CrossTradeChainConfig string
+	CrossTradeEnabled          bool
+	CrossTradeProjectID        string
+	CrossTradeChainConfigL2L1  string // NEXT_PUBLIC_CHAIN_CONFIG_L2_L1 (L2→L1 bridging)
+	CrossTradeChainConfigL2L2  string // NEXT_PUBLIC_CHAIN_CONFIG_L2_L2 (L2→L2 bridging)
 }
 
 func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
@@ -369,13 +370,19 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 	// set on a general/gaming config, we do not render the service.
 	if constants.PresetModules[t.deployConfig.Preset]["crossTrade"] {
 		if ct := t.deployConfig.CrossTradeContracts; ct != nil && ct.L1CrossTradeProxy != "" && ct.L2CrossTradeProxy != "" {
-			chainConfigJSON, err := t.buildCrossTradeChainConfigJSON(ct)
+			l2l1JSON, err := t.buildCrossTradeChainConfigL2L1JSON(ct)
 			if err != nil {
-				t.logger.Warnf("Failed to build CrossTrade chain config, skipping crossTrade service: %v", err)
+				t.logger.Warnf("Failed to build CrossTrade L2_L1 chain config, skipping crossTrade service: %v", err)
 			} else {
-				data.CrossTradeEnabled = true
-				data.CrossTradeProjectID = "568b8d3d0528e743b0e2c6c92f54d721"
-				data.CrossTradeChainConfig = chainConfigJSON
+				l2l2JSON, err := t.buildCrossTradeChainConfigL2L2JSON(ct)
+				if err != nil {
+					t.logger.Warnf("Failed to build CrossTrade L2_L2 chain config, skipping crossTrade service: %v", err)
+				} else {
+					data.CrossTradeEnabled = true
+					data.CrossTradeProjectID = "568b8d3d0528e743b0e2c6c92f54d721"
+					data.CrossTradeChainConfigL2L1 = l2l1JSON
+					data.CrossTradeChainConfigL2L2 = l2l2JSON
+				}
 			}
 		}
 	}
@@ -859,42 +866,133 @@ func generateJWTSecret(path string) error {
 	return os.WriteFile(path, []byte(hex.EncodeToString(secret)), 0600)
 }
 
-// buildCrossTradeChainConfigJSON constructs the NEXT_PUBLIC_CHAIN_CONFIG JSON value
-// required by the CrossTrade dApp. It mirrors the chain config built in the K8s path
-// (DeployCrossTradeApplication) but uses local addresses and localhost RPC endpoints.
-func (t *ThanosStack) buildCrossTradeChainConfigJSON(ct *types.CrossTradeLocalContracts) (string, error) {
+// crossTradeL2TokenEntry is the per-token JSON structure used in L2_L2 config's L2 chain entry.
+// The CrossTrade dApp expects an array of these (not a flat map) for source L2 chains.
+type crossTradeL2TokenEntry struct {
+	Name              string   `json:"name"`
+	Address           string   `json:"address"`
+	DestinationChains []uint64 `json:"destination_chains"`
+}
+
+// Thanos Sepolia fixed partner constants for L2_L2 bridging.
+const (
+	crossTradeThanosSepolia            uint64 = 111551119090
+	crossTradeThanosSepL2CTProxy              = "0x7BbEC445F9BDF6c579e81EAda5df86654184BcE3"
+	crossTradeThanosSepRPCURL                 = "https://rpc.thanos-sepolia.tokamak.network"
+	crossTradeThanosSepExplorerURL            = "https://explorer.thanos-sepolia-test.tokamak.network"
+	// crossTradeSepoliaL2toL2L1 is the L2toL2CrossTradeProxyL1 address on Sepolia deployed by
+	// the Tokamak team. Used as the L1-side contract in NEXT_PUBLIC_CHAIN_CONFIG_L2_L2.
+	crossTradeSepoliaL2toL2L1 = "0xF09Af74810010a0e9A452f71B3921641350c21D0"
+)
+
+// buildCrossTradeChainConfigL2L1JSON constructs the NEXT_PUBLIC_CHAIN_CONFIG_L2_L1 JSON value
+// required by the CrossTrade dApp for L2→L1 bridging. Uses flat-map token format (old format)
+// expected by the L2_L1 dApp path.
+func (t *ThanosStack) buildCrossTradeChainConfigL2L1JSON(ct *types.CrossTradeLocalContracts) (string, error) {
 	l1ChainID := t.deployConfig.L1ChainID
 	l2ChainID := t.deployConfig.L2ChainID
 	l1Config := constants.L1ChainConfigurations[l1ChainID]
 
-	chainConfig := map[string]types.CrossTradeChainConfig{
-		fmt.Sprintf("%d", l1ChainID): {
-			Name:        l1Config.ChainName,
-			DisplayName: l1Config.ChainName,
-			Contracts: types.CrossTradeContracts{
-				L1CrossTrade: &ct.L1CrossTradeProxy,
-			},
-			RPCURL: t.deployConfig.L1RPCURL,
-			Tokens: types.CrossTradeTokens{
-				ETH:  "0x0000000000000000000000000000000000000000",
-				USDC: l1Config.USDCAddress,
-				USDT: l1Config.USDTAddress,
-				TON:  l1Config.TON,
+	l1CTProxy := ct.L1CrossTradeProxy
+	l2CTProxy := ct.L2CrossTradeProxy
+
+	chainConfig := map[string]interface{}{
+		fmt.Sprintf("%d", l1ChainID): map[string]interface{}{
+			"name":                l1Config.ChainName,
+			"display_name":        "Ethereum",
+			"native_token_name":   l1Config.NativeTokenName,
+			"native_token_symbol": l1Config.NativeTokenSymbol,
+			"rpc_url":             "",
+			"contracts":           map[string]string{"l1_cross_trade": l1CTProxy},
+			"tokens": map[string]string{
+				"ETH":  "0x0000000000000000000000000000000000000000",
+				"USDC": l1Config.USDCAddress,
+				"USDT": l1Config.USDTAddress,
+				"TON":  l1Config.TON,
 			},
 		},
-		fmt.Sprintf("%d", l2ChainID): {
-			Name:        fmt.Sprintf("%d", l2ChainID),
-			DisplayName: t.deployConfig.ChainName,
-			Contracts: types.CrossTradeContracts{
-				L2CrossTrade: &ct.L2CrossTradeProxy,
+		fmt.Sprintf("%d", l2ChainID): map[string]interface{}{
+			"name":                fmt.Sprintf("%d", l2ChainID),
+			"display_name":        t.deployConfig.ChainName,
+			"native_token_name":   "Tokamak Network",
+			"native_token_symbol": "TON",
+			"rpc_url":             "http://host.docker.internal:8545",
+			"contracts":           map[string]string{"l2_cross_trade": l2CTProxy},
+			"tokens": map[string]string{
+				"ETH":  "0x0000000000000000000000000000000000000000",
+				"USDC": constants.USDCAddress,
+				"USDT": "",
+				"TON":  "",
 			},
-			RPCURL: "http://localhost:8545",
-			Tokens: types.CrossTradeTokens{
-				ETH:  constants.ETH,
-				USDC: constants.USDCAddress,
-				USDT: "",
-				TON:  constants.TON,
+		},
+	}
+
+	b, err := json.Marshal(chainConfig)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// buildCrossTradeChainConfigL2L2JSON constructs the NEXT_PUBLIC_CHAIN_CONFIG_L2_L2 JSON value
+// required by the CrossTrade dApp for L2→L2 bridging. Uses array-format tokens with
+// destination_chains so the dApp can resolve allowed routing.
+//
+// Thanos Sepolia (111551119090) is always included as a fixed bridge partner.
+// Its destination_chains is intentionally empty: the Thanos Sepolia L2toL2CrossTradeProxy
+// has not registered the newly deployed L2's chainId, so Thanos→newL2 requests would fail
+// at gas estimation (wallet refuses to sign). The reverse direction (newL2→Thanos) still works.
+func (t *ThanosStack) buildCrossTradeChainConfigL2L2JSON(ct *types.CrossTradeLocalContracts) (string, error) {
+	l1ChainID := t.deployConfig.L1ChainID
+	l2ChainID := t.deployConfig.L2ChainID
+	l1Config := constants.L1ChainConfigurations[l1ChainID]
+
+	l2l2CTProxy := ct.L2toL2CrossTradeProxy
+
+	l2l2Tokens := []crossTradeL2TokenEntry{
+		{Name: "ETH", Address: "0x0000000000000000000000000000000000000000", DestinationChains: []uint64{crossTradeThanosSepolia}},
+		{Name: "USDC", Address: "", DestinationChains: []uint64{crossTradeThanosSepolia}},
+	}
+
+	thanosL2L2Tokens := []crossTradeL2TokenEntry{
+		{Name: "ETH", Address: "0x4200000000000000000000000000000000000486", DestinationChains: []uint64{}},
+		{Name: "TON", Address: "0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000", DestinationChains: []uint64{}},
+		{Name: "USDC", Address: "0x4200000000000000000000000000000000000778", DestinationChains: []uint64{}},
+	}
+
+	chainConfig := map[string]interface{}{
+		fmt.Sprintf("%d", l1ChainID): map[string]interface{}{
+			"name":                l1Config.ChainName,
+			"display_name":        "Ethereum",
+			"native_token_name":   l1Config.NativeTokenName,
+			"native_token_symbol": l1Config.NativeTokenSymbol,
+			"rpc_url":             "",
+			"contracts":           map[string]string{"l1_cross_trade": crossTradeSepoliaL2toL2L1},
+			"tokens": map[string]string{
+				"ETH":  "0x0000000000000000000000000000000000000000",
+				"USDC": l1Config.USDCAddress,
+				"USDT": l1Config.USDTAddress,
+				"TON":  l1Config.TON,
 			},
+		},
+		fmt.Sprintf("%d", l2ChainID): map[string]interface{}{
+			"name":                fmt.Sprintf("%d", l2ChainID),
+			"display_name":        t.deployConfig.ChainName,
+			"native_token_name":   "Tokamak Network",
+			"native_token_symbol": "TON",
+			"rpc_url":             "http://host.docker.internal:8545",
+			"contracts":           map[string]string{"l2_cross_trade": l2l2CTProxy},
+			"tokens":              l2l2Tokens,
+		},
+		fmt.Sprintf("%d", crossTradeThanosSepolia): map[string]interface{}{
+			"name":                "Thanos Sepolia",
+			"display_name":        "Thanos Sepolia",
+			"native_token_name":   "Tokamak Network",
+			"native_token_symbol": "TON",
+			"rpc_url":             crossTradeThanosSepRPCURL,
+			"block_explorer_url":  crossTradeThanosSepExplorerURL,
+			"contracts":           map[string]string{"l2_cross_trade": crossTradeThanosSepL2CTProxy},
+			"tokens":              thanosL2L2Tokens,
 		},
 	}
 
