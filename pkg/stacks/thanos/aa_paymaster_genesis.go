@@ -11,6 +11,7 @@ import (
 )
 
 const (
+	//nolint:unused // used by injectMultiTokenPaymasterBytecode
 	multiTokenPaymasterAddress = "0x4200000000000000000000000000000000000067"
 )
 
@@ -29,6 +30,7 @@ type forgeArtifact struct {
 // bytecode compiled with the v0.8 paymasterAndData offset fix ([52:72] instead of [20:40]).
 //
 // Prerequisite: forge build must have been run so that forge-artifacts exists.
+//nolint:unused // called during L2 deployment orchestration
 func injectMultiTokenPaymasterBytecode(genesisPath, deploymentPath string) error {
 	data, err := os.ReadFile(genesisPath)
 	if err != nil {
@@ -105,6 +107,7 @@ func injectMultiTokenPaymasterBytecode(genesisPath, deploymentPath string) error
 }
 
 // loadForgeArtifactBytecode reads a forge build artifact JSON and returns the deployedBytecode.
+//nolint:unused // called by injectMultiTokenPaymasterBytecode
 func loadForgeArtifactBytecode(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

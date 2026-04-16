@@ -20,8 +20,11 @@ import (
 )
 
 const (
+	//nolint:unused // used by downloadDRBArtifact
 	drbNpmPackageName = "@tokamak-network/commit-reveal2-contracts"
+	//nolint:unused // used by downloadDRBArtifact
 	drbNpmTag         = "1.0.0"
+	//nolint:unused // used by downloadDRBArtifact
 	drbArtifactFile   = "CommitReveal2L2.json"
 
 	// Predeploy address for DRB (Gaming/Full preset)
@@ -35,6 +38,7 @@ const (
 )
 
 // drbArtifact represents the relevant fields from the CommitReveal2L2.json forge artifact.
+//nolint:unused // used by buildDRBCreationCode
 type drbArtifact struct {
 	ABI      json.RawMessage `json:"abi"`
 	Bytecode struct {
@@ -73,6 +77,7 @@ func DefaultDRBGenesisConfig() *DRBGenesisConfig {
 // injectDRBIntoGenesis downloads the CommitReveal2L2 artifact from npm, deploys it
 // in a simulated EVM to resolve immutables, and patches the genesis.json alloc section
 // with the DRB contract at its predeploy address.
+//nolint:unused // called during L2 deployment orchestration
 func injectDRBIntoGenesis(ctx context.Context, logger interface{ Info(args ...interface{}) }, genesisPath string, config *DRBGenesisConfig) error {
 	// Step 1: Download artifact from npm
 	artifactData, err := downloadDRBArtifact(ctx, logger)
@@ -109,6 +114,7 @@ func injectDRBIntoGenesis(ctx context.Context, logger interface{ Info(args ...in
 }
 
 // downloadDRBArtifact fetches the CommitReveal2L2.json artifact from the npm package.
+//nolint:unused // called by injectDRBIntoGenesis
 func downloadDRBArtifact(ctx context.Context, logger interface{ Info(args ...interface{}) }) ([]byte, error) {
 	logger.Info("Downloading DRB contract artifact from npm...")
 
@@ -121,6 +127,7 @@ func downloadDRBArtifact(ctx context.Context, logger interface{ Info(args ...int
 }
 
 // buildDRBCreationCode constructs the full creation bytecode: constructor code + ABI-encoded args.
+//nolint:unused // called by injectDRBIntoGenesis
 func buildDRBCreationCode(artifact *drbArtifact, config *DRBGenesisConfig) ([]byte, error) {
 	parsedABI, err := abi.JSON(strings.NewReader(string(artifact.ABI)))
 	if err != nil {
@@ -333,6 +340,7 @@ func predeployToCodeNamespace(addr common.Address) common.Address {
 }
 
 // downloadAndExtractSingleFile downloads an npm tarball and extracts a specific file.
+//nolint:unused // called by downloadDRBArtifact
 func downloadAndExtractSingleFile(ctx context.Context, tarballURL, targetFile string) ([]byte, error) {
 	req, err := newHTTPRequest(ctx, tarballURL)
 	if err != nil {

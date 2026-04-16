@@ -10,13 +10,18 @@ import (
 )
 
 const (
+	//nolint:unused // used by resolveNpmTarballURL
 	npmRegistryURL  = "https://registry.npmjs.org"
+	//nolint:unused // used by newHTTPClient
 	downloadTimeout = 120 * time.Second
+	//nolint:unused // used by extractFileFromTarball
 	maxTarballSize  = 500 * 1024 * 1024 // 500MB safety limit
+	//nolint:unused // used by extractFileFromTarball
 	maxFileSize     = 100 * 1024 * 1024 // 100MB per-file limit
 )
 
 // npmPackageVersion represents the relevant fields from npm registry version response.
+//nolint:unused // used by resolveNpmTarballURL
 type npmPackageVersion struct {
 	Dist struct {
 		Tarball string `json:"tarball"`
@@ -24,6 +29,7 @@ type npmPackageVersion struct {
 }
 
 // resolveNpmTarballURL queries the npm registry for the tarball URL of a specific package tag.
+//nolint:unused // called by downloadDRBArtifact
 func resolveNpmTarballURL(ctx context.Context, packageName, tag string) (string, error) {
 	// npm registry accepts scoped packages with literal @ and / in the URL path
 	registryURL := fmt.Sprintf("%s/%s/%s", npmRegistryURL, packageName, tag)
