@@ -1,6 +1,8 @@
 package thanos
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
@@ -33,14 +35,20 @@ func ensureTokamakDeployerWithVersion(cacheDir, version string) (string, error) 
 
 	osName := runtime.GOOS // "linux", "darwin"
 	arch := runtime.GOARCH // "amd64", "arm64"
-	assetName := fmt.Sprintf("tokamak-deployer-%s-%s", osName, arch)
+	assetName := fmt.Sprintf("tokamak-deployer-%s-%s.tar.gz", osName, arch)
 	downloadURL := fmt.Sprintf(
 		"https://github.com/%s/releases/download/%s/%s",
 		tokamakDeployerRepo, version, assetName,
 	)
 
-	if err := downloadFile(downloadURL, binaryPath); err != nil {
+	tarPath := binaryPath + ".tar.gz"
+	if err := downloadFile(downloadURL, tarPath); err != nil {
 		return "", fmt.Errorf("failed to download tokamak-deployer %s: %w\nCheck network connectivity or retry.", version, err)
+	}
+	defer os.Remove(tarPath)
+
+	if err := extractTarGz(tarPath, binaryPath); err != nil {
+		return "", fmt.Errorf("failed to extract tokamak-deployer: %w", err)
 	}
 	if err := os.Chmod(binaryPath, 0755); err != nil {
 		return "", fmt.Errorf("chmod binary: %w", err)
@@ -70,6 +78,46 @@ func downloadFile(url, destPath string) error {
 		return err
 	}
 	return nil
+}
+
+func extractTarGz(tarGzPath, destPath string) error {
+	f, err := os.Open(tarGzPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return err
+	}
+	defer gz.Close()
+
+	tr := tar.NewReader(gz)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		// Look for tokamak-deployer executable
+		if header.Typeflag == tar.TypeReg && filepath.Base(header.Name) == "tokamak-deployer" {
+			outFile, err := os.Create(destPath)
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(outFile, tr); err != nil {
+				outFile.Close()
+				return err
+			}
+			outFile.Close()
+			return nil
+		}
+	}
+	return fmt.Errorf("tokamak-deployer binary not found in archive")
 }
 
 // deployContractsOpts holds inputs for the deploy-contracts subcommand.
