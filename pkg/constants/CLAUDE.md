@@ -18,4 +18,10 @@
 | #10109 | 1:16 PM | 🔵 | TRH-SDK deployment flow and CLI structure analyzed | ~682 |
 | #9954 | 9:45 AM | 🟣 | Added DRB-node leader to local Docker Compose deployment | ~509 |
 | #9932 | 9:39 AM | ✅ | Updated trh-sdk constants and types for DRB migration | ~308 |
+
+### Apr 15, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #14571 | 2:34 AM | 🔵 | SDK/Backend Preset AWS Deployment Gaps Identified | ~383 |
 </claude-mem-context>

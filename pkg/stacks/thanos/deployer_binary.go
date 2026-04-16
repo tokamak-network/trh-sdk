@@ -90,18 +90,18 @@ type genesisOpts struct {
 }
 
 // runDeployContracts executes tokamak-deployer deploy-contracts.
-func runDeployContracts(ctx context.Context, binaryPath string, opts deployContractsOpts) error {
+func runDeployContracts(ctx context.Context, binaryPath string, opts deployContractsOpts, w io.Writer) error {
 	return runBinaryCommand(ctx, binaryPath, []string{
 		"deploy-contracts",
 		"--l1-rpc", opts.L1RPCURL,
 		"--private-key", opts.PrivateKey,
 		"--chain-id", fmt.Sprintf("%d", opts.L2ChainID),
 		"--out", opts.OutPath,
-	})
+	}, w)
 }
 
 // runGenerateGenesis executes tokamak-deployer generate-genesis.
-func runGenerateGenesis(ctx context.Context, binaryPath string, opts genesisOpts) error {
+func runGenerateGenesis(ctx context.Context, binaryPath string, opts genesisOpts, w io.Writer) error {
 	args := []string{
 		"generate-genesis",
 		"--deploy-output", opts.DeployOutputPath,
@@ -114,13 +114,16 @@ func runGenerateGenesis(ctx context.Context, binaryPath string, opts genesisOpts
 	if opts.Preset != "" {
 		args = append(args, "--preset", opts.Preset)
 	}
-	return runBinaryCommand(ctx, binaryPath, args)
+	return runBinaryCommand(ctx, binaryPath, args, w)
 }
 
-func runBinaryCommand(ctx context.Context, binaryPath string, args []string) error {
+func runBinaryCommand(ctx context.Context, binaryPath string, args []string, w io.Writer) error {
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	if w == nil {
+		w = os.Stdout
+	}
+	cmd.Stdout = w
+	cmd.Stderr = w
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("tokamak-deployer %s: %w", args[0], err)
 	}

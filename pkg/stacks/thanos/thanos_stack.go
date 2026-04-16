@@ -2,6 +2,7 @@ package thanos
 
 import (
 	"context"
+	"io"
 
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
@@ -18,6 +19,7 @@ type ThanosStack struct {
 	logger            *zap.SugaredLogger
 	deploymentPath    string
 	registerCandidate bool
+	output            io.Writer
 }
 
 func NewThanosStack(
@@ -78,5 +80,12 @@ func NewThanosStack(
 		logger:         l,
 		deploymentPath: deploymentPath,
 		deployConfig:   config,
+		output:         nil,
 	}, nil
+}
+
+// SetOutput sets the writer for binary subprocess stdout/stderr.
+// If not set, os.Stdout is used as default.
+func (t *ThanosStack) SetOutput(w io.Writer) {
+	t.output = w
 }

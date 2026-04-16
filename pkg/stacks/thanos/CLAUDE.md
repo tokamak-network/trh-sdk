@@ -28,4 +28,10 @@
 |----|------|---|-------|------|
 | #10430 | 1:17 PM | 🟣 | Complete DRB Genesis Injection Implementation with EVM-Based Immutable Resolution | ~719 |
 | #10428 | 1:16 PM | 🟣 | DRB Genesis Injection Integration Point Added to Deployment Flow | ~443 |
+
+### Apr 15, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #14571 | 2:34 AM | 🔵 | SDK/Backend Preset AWS Deployment Gaps Identified | ~383 |
 </claude-mem-context>

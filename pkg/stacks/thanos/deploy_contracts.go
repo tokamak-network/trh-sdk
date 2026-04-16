@@ -148,7 +148,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			PrivateKey: t.deployConfig.AdminPrivateKey,
 			L2ChainID:  t.deployConfig.L2ChainID,
 			OutPath:    deployOutputPath,
-		}); err != nil {
+		}, t.output); err != nil {
 			t.logger.Error("❌ Resume the contracts deployment failed!", "err", err)
 			return err
 		}
@@ -355,7 +355,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			PrivateKey: operators.AdminPrivateKey,
 			L2ChainID:  uint64(l2ChainID),
 			OutPath:    deployOutputPath,
-		}); err != nil {
+		}, t.output); err != nil {
 			t.logger.Error("failed to deploy contracts", "err", err)
 			return err
 		}
@@ -370,7 +370,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		DeployOutputPath: deployOutputPath,
 		ConfigPath:       deployConfigFilePath,
 		OutPath:          genesisPath,
-	}); err != nil {
+	}, t.output); err != nil {
 		if errors.Is(err, context.Canceled) {
 			t.logger.Warn("Deployment canceled")
 			return err
