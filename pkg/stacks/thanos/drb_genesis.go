@@ -20,8 +20,6 @@ import (
 )
 
 const (
-	drbNpmPackageName = "@tokamak-network/commit-reveal2-contracts"
-	drbNpmTag         = "1.0.0"
 	drbArtifactFile   = "CommitReveal2L2.json"
 
 	// Predeploy address for DRB (Gaming/Full preset)
