@@ -18,11 +18,11 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"go.uber.org/zap"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/dependencies"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
+	"go.uber.org/zap"
 )
 
 // ----------------------------------------- Deploy command  ----------------------------- //
@@ -72,6 +72,7 @@ func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string, inputs *Deplo
 		case constants.Local:
 			t.deployConfig.ChainName = inputs.ChainName
 			t.deployConfig.L1BeaconURL = inputs.L1BeaconURL
+			t.deployConfig.Mnemonic = inputs.Mnemonic
 			if err := t.deployConfig.WriteToJSONFile(t.deploymentPath); err != nil {
 				return fmt.Errorf("failed to write settings file: %w", err)
 			}
@@ -438,16 +439,16 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	// be torn down on-demand — explicit smaller requests are the correct lever.
 	if t.network == constants.Testnet {
 		testnetResources := map[string]string{
-			"op_geth.resources.cpu":      "500m",
-			"op_geth.resources.memory":   "1Gi",
-			"op_node.resources.cpu":      "500m",
-			"op_node.resources.memory":   "1Gi",
-			"op_batcher.resources.cpu":   "250m",
-			"op_batcher.resources.memory": "512Mi",
-			"op_proposer.resources.cpu":  "250m",
+			"op_geth.resources.cpu":        "500m",
+			"op_geth.resources.memory":     "1Gi",
+			"op_node.resources.cpu":        "500m",
+			"op_node.resources.memory":     "1Gi",
+			"op_batcher.resources.cpu":     "250m",
+			"op_batcher.resources.memory":  "512Mi",
+			"op_proposer.resources.cpu":    "250m",
 			"op_proposer.resources.memory": "512Mi",
-			"redis.resources.cpu":        "250m",
-			"redis.resources.memory":     "512Mi",
+			"redis.resources.cpu":          "250m",
+			"redis.resources.memory":       "512Mi",
 		}
 		for field, value := range testnetResources {
 			if err = utils.UpdateYAMLField(valueFile, field, value); err != nil {

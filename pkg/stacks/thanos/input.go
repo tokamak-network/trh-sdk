@@ -42,6 +42,7 @@ type DeployContractsInput struct {
 	// Preset and fee token selection
 	Preset   string // "general", "defi", "gaming", "full"
 	FeeToken string // "TON", "ETH", "USDT", "USDC"
+	Mnemonic string
 	// Gaming/Full preset additional inputs
 	DRBAdmin          string
 	AAPaymasterSigner string
@@ -138,6 +139,7 @@ type DeployInfraInput struct {
 	L1BeaconURL         string
 	IgnoreInstallBridge bool
 	BackupConfig        *BackupConfig
+	Mnemonic            string
 
 	// register metadata
 	GithubCredentials *types.GitHubCredentials
@@ -1526,57 +1528,57 @@ func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainI
 		SystemConfigStartBlock:                   0,
 		RequiredProtocolVersion:                  "0x0000000000000000000000000000000000000003000000010000000000000000",
 		RecommendedProtocolVersion:               "0x0000000000000000000000000000000000000003000000010000000000000000",
-		FaultGameAbsolutePrestate:                func() string {
+		FaultGameAbsolutePrestate: func() string {
 			if prestateHash != "" {
 				return prestateHash
 			}
 			return "0x0000000000000000000000000000000000000000000000000000000000000000"
 		}(),
-		FaultGameMaxDepth:                        73,
-		FaultGameClockExtension:                  10800,
-		FaultGameMaxClockDuration:                302400,
-		FaultGameGenesisBlock:                    0,
-		FaultGameGenesisOutputRoot:               "0x0000000000000000000000000000000000000000000000000000000000000000",
-		FaultGameSplitDepth:                      30,
-		FaultGameWithdrawalDelay:                 604800,
-		PreimageOracleMinProposalSize:            126000,
-		PreimageOracleChallengePeriod:            86400,
-		ProofMaturityDelaySeconds:                604800,
-		DisputeGameFinalityDelaySeconds:          302400,
-		RespectedGameType:                        0,
-		UseFaultProofs:                           enableFraudProof,
-		L1UsdcAddr:                               constants.L1ChainConfigurations[l1ChainId].USDCAddress,
-		UsdcTokenName:                            "Bridged USDC (Tokamak Network)",
-		FactoryV2addr:                            "0x0000000000000000000000000000000000000000",
-		NativeCurrencyLabelBytes:                 utils.StringToBytes32(feeTokenConfig.Symbol),
-		UniswapV3FactoryOwner:                    "0x7b91111ec983c13b3C2F36C8A84a5099225786FA",
-		UniswapV3FactoryFee500:                   500,
-		UniswapV3FactoryTickSpacing10:            10,
-		UniswapV3FactoryFee3000:                  3000,
-		UniswapV3FactoryTickSpacing60:            60,
-		UniswapV3FactoryFee10000:                 10000,
-		UniswapV3FactoryTickSpacing200:           200,
-		UniswapV3FactoryFee100:                   100,
-		UniswapV3FactoryTickSpacing1:             1,
-		PairInitCodeHash:                         "0x96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f",
-		PoolInitCodeHash:                         "0xe34f199b19b2b4f47f68442619d555527d244f78a3297ea89325f843f87b8b54",
-		GovernanceTokenName:                      "Optimism",
-		GovernanceTokenOwner:                     "0x0000000000000000000000000000000000000333",
-		GovernanceTokenSymbol:                    "OP",
-		L2OutputOracleChallenger:                 "0x0000000000000000000000000000000000000001",
-		ReuseDeployment:                          deployConfigInputs.ReuseDeployment,
-		Preset:                                   deployConfigInputs.Preset,
+		FaultGameMaxDepth:               73,
+		FaultGameClockExtension:         10800,
+		FaultGameMaxClockDuration:       302400,
+		FaultGameGenesisBlock:           0,
+		FaultGameGenesisOutputRoot:      "0x0000000000000000000000000000000000000000000000000000000000000000",
+		FaultGameSplitDepth:             30,
+		FaultGameWithdrawalDelay:        604800,
+		PreimageOracleMinProposalSize:   126000,
+		PreimageOracleChallengePeriod:   86400,
+		ProofMaturityDelaySeconds:       604800,
+		DisputeGameFinalityDelaySeconds: 302400,
+		RespectedGameType:               0,
+		UseFaultProofs:                  enableFraudProof,
+		L1UsdcAddr:                      constants.L1ChainConfigurations[l1ChainId].USDCAddress,
+		UsdcTokenName:                   "Bridged USDC (Tokamak Network)",
+		FactoryV2addr:                   "0x0000000000000000000000000000000000000000",
+		NativeCurrencyLabelBytes:        utils.StringToBytes32(feeTokenConfig.Symbol),
+		UniswapV3FactoryOwner:           "0x7b91111ec983c13b3C2F36C8A84a5099225786FA",
+		UniswapV3FactoryFee500:          500,
+		UniswapV3FactoryTickSpacing10:   10,
+		UniswapV3FactoryFee3000:         3000,
+		UniswapV3FactoryTickSpacing60:   60,
+		UniswapV3FactoryFee10000:        10000,
+		UniswapV3FactoryTickSpacing200:  200,
+		UniswapV3FactoryFee100:          100,
+		UniswapV3FactoryTickSpacing1:    1,
+		PairInitCodeHash:                "0x96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f",
+		PoolInitCodeHash:                "0xe34f199b19b2b4f47f68442619d555527d244f78a3297ea89325f843f87b8b54",
+		GovernanceTokenName:             "Optimism",
+		GovernanceTokenOwner:            "0x0000000000000000000000000000000000000333",
+		GovernanceTokenSymbol:           "OP",
+		L2OutputOracleChallenger:        "0x0000000000000000000000000000000000000001",
+		ReuseDeployment:                 deployConfigInputs.ReuseDeployment,
+		Preset:                          deployConfigInputs.Preset,
 	}
 
 	// Override fault-proof timing parameters for testnet chains.
 	// Mainnet values (days/weeks) make interactive testing impractical on Sepolia/Holesky.
 	if l1ChainId == constants.EthereumSepoliaChainID || l1ChainId == constants.EthereumHoleskyChainID {
-		defaultTemplate.FaultGameClockExtension = 300          // 5 minutes (mainnet: 3 hours)
-		defaultTemplate.FaultGameMaxClockDuration = 3600       // 1 hour (mainnet: 3.5 days)
-		defaultTemplate.FaultGameWithdrawalDelay = 12          // 1 L1 block (mainnet: 7 days)
-		defaultTemplate.PreimageOracleChallengePeriod = 300    // 5 minutes (mainnet: 1 day)
-		defaultTemplate.ProofMaturityDelaySeconds = 12         // 1 L1 block (mainnet: 7 days)
-		defaultTemplate.DisputeGameFinalityDelaySeconds = 6    // ~0.5 L1 block (mainnet: 3.5 days)
+		defaultTemplate.FaultGameClockExtension = 300       // 5 minutes (mainnet: 3 hours)
+		defaultTemplate.FaultGameMaxClockDuration = 3600    // 1 hour (mainnet: 3.5 days)
+		defaultTemplate.FaultGameWithdrawalDelay = 12       // 1 L1 block (mainnet: 7 days)
+		defaultTemplate.PreimageOracleChallengePeriod = 300 // 5 minutes (mainnet: 1 day)
+		defaultTemplate.ProofMaturityDelaySeconds = 12      // 1 L1 block (mainnet: 7 days)
+		defaultTemplate.DisputeGameFinalityDelaySeconds = 6 // ~0.5 L1 block (mainnet: 3.5 days)
 	}
 
 	// Apply preset-specific overrides

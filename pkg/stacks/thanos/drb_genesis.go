@@ -54,10 +54,10 @@ type drbArtifact struct {
 
 // DRBGenesisConfig holds the constructor parameters for the CommitReveal2L2 predeploy.
 type DRBGenesisConfig struct {
-	ActivationThreshold                *big.Int
-	FlatFee                            *big.Int
-	Name                               string
-	Version                            string
+	ActivationThreshold                 *big.Int
+	FlatFee                             *big.Int
+	Name                                string
+	Version                             string
 	OffChainSubmissionPeriod            *big.Int
 	RequestOrSubmitOrFailDecisionPeriod *big.Int
 	OnChainSubmissionPeriod             *big.Int
@@ -68,10 +68,10 @@ type DRBGenesisConfig struct {
 // DefaultDRBGenesisConfig returns sensible defaults for a local/testnet DRB deployment.
 func DefaultDRBGenesisConfig() *DRBGenesisConfig {
 	return &DRBGenesisConfig{
-		ActivationThreshold:                big.NewInt(3),
-		FlatFee:                            big.NewInt(0),
-		Name:                               "Commit-Reveal2",
-		Version:                            "1",
+		ActivationThreshold:                 big.NewInt(3),
+		FlatFee:                             big.NewInt(0),
+		Name:                                "Commit-Reveal2",
+		Version:                             "1",
 		OffChainSubmissionPeriod:            big.NewInt(120),
 		RequestOrSubmitOrFailDecisionPeriod: big.NewInt(120),
 		OnChainSubmissionPeriod:             big.NewInt(120),
@@ -134,6 +134,25 @@ func maybeInjectDRB(ctx context.Context, logger interface{ Info(args ...interfac
 	}
 
 	logger.Info("✅ DRB contract (CommitReveal2L2) injected into genesis at " + drbPredeployAddress)
+	return nil
+}
+
+// maybeFundDRBRegulars conditionally injects genesis balance for DRB regular operators.
+// This only applies to Gaming/Full presets when a mnemonic is available.
+func maybeFundDRBRegulars(genesisPath string, preset string, mnemonic string) error {
+	if !constants.PresetModules[preset]["drb"] || mnemonic == "" {
+		return nil
+	}
+
+	accounts, err := DeriveDRBAccounts(mnemonic)
+	if err != nil {
+		return fmt.Errorf("failed to derive DRB accounts: %w", err)
+	}
+
+	if err := patchGenesisWithDRBRegularFunding(genesisPath, accounts, DefaultDRBGenesisConfig().ActivationThreshold); err != nil {
+		return fmt.Errorf("failed to patch genesis with DRB regular funding: %w", err)
+	}
+
 	return nil
 }
 

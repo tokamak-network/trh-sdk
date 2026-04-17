@@ -1,6 +1,8 @@
 package thanos
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -57,5 +59,37 @@ func TestDeriveDRBAccounts_BIP44Indices(t *testing.T) {
 // This test will fail during Wave 1 because BootstrapDRBPeerIDFiles is not yet implemented.
 // It documents the expected behavior and will pass after Wave 1→2 (GREEN).
 func TestBootstrapDRBPeerIDFiles_WritesLeaderAndRegularBinaries(t *testing.T) {
-	t.Skip("Wave 1 RED: BootstrapDRBPeerIDFiles not yet implemented")
+	original := executeDRBCommand
+	defer func() { executeDRBCommand = original }()
+
+	accounts := &DRBAccounts{
+		LeaderPeerIDBytes: []byte{0x01, 0x02, 0x03},
+		Regulars: [3]DRBRegular{
+			{Index: 1, PeerIDBytes: []byte{0x11}},
+			{Index: 2, PeerIDBytes: []byte{0x22}},
+			{Index: 3, PeerIDBytes: []byte{0x33}},
+		},
+	}
+
+	var calls []string
+	executeDRBCommand = func(_ context.Context, name string, args ...string) (string, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		if len(args) >= 2 && args[0] == "run" && args[1] == "-d" {
+			return "helper-container-id\n", nil
+		}
+		return "", nil
+	}
+
+	err := BootstrapDRBPeerIDFiles(context.Background(), "demo", accounts)
+	require.NoError(t, err)
+	require.Len(t, calls, 7)
+	require.Contains(t, calls[1], "demo_drb-leader-keys:/peer-id-leader")
+	require.Contains(t, calls[1], "demo_drb-regular-1-keys:/peer-id-regular-1")
+	require.Contains(t, calls[1], "demo_drb-regular-2-keys:/peer-id-regular-2")
+	require.Contains(t, calls[1], "demo_drb-regular-3-keys:/peer-id-regular-3")
+	require.Contains(t, calls[2], "leadernode.bin")
+	require.Contains(t, calls[3], "regularnode.bin")
+	require.Contains(t, calls[4], "regularnode.bin")
+	require.Contains(t, calls[5], "regularnode.bin")
+	require.Equal(t, "docker rm -f helper-container-id", calls[6])
 }

@@ -280,6 +280,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		t.deployConfig.ChainConfiguration = deployContractsConfig.ChainConfiguration
 		t.deployConfig.Preset = deployContractsConfig.Preset
 		t.deployConfig.FeeToken = deployContractsConfig.FeeToken
+		t.deployConfig.Mnemonic = deployContractsConfig.Mnemonic
 
 		err = makeDeployContractConfigJsonFile(ctx, l1Client, operators, deployContractsTemplate, deployConfigFilePath)
 		if err != nil {
@@ -443,6 +444,10 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		t.logger.Error("❌ Failed to inject DRB predeploy", "err", err)
 		return err
 	}
+	if err := maybeFundDRBRegulars(genesisPath, t.deployConfig.Preset, t.deployConfig.Mnemonic); err != nil {
+		t.logger.Error("❌ Failed to fund DRB regular operators in genesis", "err", err)
+		return err
+	}
 
 	// Mark deployment as complete so subsequent steps (e.g. local_network start,
 	// deploy-aws-infra) pass the `Status == Completed` gate in their preflight
@@ -477,7 +482,6 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 
 	return nil
 }
-
 
 // clearAnchorStateRegistryFromAddressFile removes the "AnchorStateRegistry" implementation
 // address from thanos-stack-sepolia/address.json inside contractsDir.

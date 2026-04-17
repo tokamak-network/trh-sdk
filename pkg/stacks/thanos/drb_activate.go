@@ -13,6 +13,40 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos/bindings/commitreveal2"
 )
 
+func activateRegularOperatorsSequentially(
+	ctx context.Context,
+	accounts *DRBAccounts,
+	threshold *big.Int,
+	newTransactor func(regular DRBRegular) (*bind.TransactOpts, error),
+	submitActivation func(regular DRBRegular, auth *bind.TransactOpts) (*types.Transaction, error),
+	waitReceipt func(regular DRBRegular, tx *types.Transaction) (*types.Receipt, error),
+) error {
+	for _, regular := range accounts.Regulars {
+		auth, err := newTransactor(regular)
+		if err != nil {
+			return fmt.Errorf("create transactor for regular %d: %w", regular.Index, err)
+		}
+
+		auth.Value = threshold
+
+		tx, err := submitActivation(regular, auth)
+		if err != nil {
+			return fmt.Errorf("regular %d depositAndActivate submission failed: %w", regular.Index, err)
+		}
+
+		receipt, err := waitReceipt(regular, tx)
+		if err != nil {
+			return fmt.Errorf("regular %d transaction failed: %w", regular.Index, err)
+		}
+
+		if receipt.Status != types.ReceiptStatusSuccessful {
+			return fmt.Errorf("regular %d transaction reverted: status=%d", regular.Index, receipt.Status)
+		}
+	}
+
+	return nil
+}
+
 // ActivateRegularOperators calls depositAndActivate() for each Regular operator sequentially.
 // Must be called after all DRB nodes (Leader + Regular 1/2/3) are healthy and running.
 // Activation is sequential (not concurrent) to avoid nonce collisions.
@@ -35,40 +69,28 @@ func ActivateRegularOperators(ctx context.Context, rpcURL string, contractAddr s
 		return fmt.Errorf("get chain ID: %w", err)
 	}
 
-	// Sequential activation: iterate Regular 1, 2, 3
-	for _, regular := range accounts.Regulars {
-		// Parse private key
-		privKey, err := crypto.HexToECDSA(regular.PrivateKey)
-		if err != nil {
-			return fmt.Errorf("parse regular %d private key: %w", regular.Index, err)
-		}
+	return activateRegularOperatorsSequentially(
+		ctx,
+		accounts,
+		threshold,
+		func(regular DRBRegular) (*bind.TransactOpts, error) {
+			privKey, err := crypto.HexToECDSA(regular.PrivateKey)
+			if err != nil {
+				return nil, fmt.Errorf("parse regular %d private key: %w", regular.Index, err)
+			}
 
-		// Create transactor (signs tx with privKey, sets chain ID)
-		auth, err := bind.NewKeyedTransactorWithChainID(privKey, chainID)
-		if err != nil {
-			return fmt.Errorf("create transactor for regular %d: %w", regular.Index, err)
-		}
+			auth, err := bind.NewKeyedTransactorWithChainID(privKey, chainID)
+			if err != nil {
+				return nil, fmt.Errorf("create transactor for regular %d: %w", regular.Index, err)
+			}
 
-		// Set msg.value = activationThreshold
-		auth.Value = threshold
-
-		// Submit depositAndActivate transaction
-		tx, err := contract.DepositAndActivate(auth)
-		if err != nil {
-			return fmt.Errorf("regular %d depositAndActivate submission failed: %w", regular.Index, err)
-		}
-
-		// Wait for receipt
-		receipt, err := bind.WaitMined(ctx, client, tx)
-		if err != nil {
-			return fmt.Errorf("regular %d transaction failed: %w", regular.Index, err)
-		}
-
-		// Verify success
-		if receipt.Status != types.ReceiptStatusSuccessful {
-			return fmt.Errorf("regular %d transaction reverted: status=%d", regular.Index, receipt.Status)
-		}
-	}
-
-	return nil
+			return auth, nil
+		},
+		func(regular DRBRegular, auth *bind.TransactOpts) (*types.Transaction, error) {
+			return contract.DepositAndActivate(auth)
+		},
+		func(regular DRBRegular, tx *types.Transaction) (*types.Receipt, error) {
+			return bind.WaitMined(ctx, client, tx)
+		},
+	)
 }

@@ -117,10 +117,10 @@ type localComposeData struct {
 	AAOperatorEnabled bool
 	AAAdminPrivateKey string
 	// CrossTrade dApp — populated after DeployCrossTradeLocal succeeds.
-	CrossTradeEnabled          bool
-	CrossTradeProjectID        string
-	CrossTradeChainConfigL2L1  string // NEXT_PUBLIC_CHAIN_CONFIG_L2_L1 (L2→L1 bridging)
-	CrossTradeChainConfigL2L2  string // NEXT_PUBLIC_CHAIN_CONFIG_L2_L2 (L2→L2 bridging)
+	CrossTradeEnabled         bool
+	CrossTradeProjectID       string
+	CrossTradeChainConfigL2L1 string // NEXT_PUBLIC_CHAIN_CONFIG_L2_L1 (L2→L1 bridging)
+	CrossTradeChainConfigL2L2 string // NEXT_PUBLIC_CHAIN_CONFIG_L2_L2 (L2→L2 bridging)
 }
 
 func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
@@ -234,8 +234,7 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 	// Post-startup DRB orchestration (Gaming/Full presets only)
 	if modules["drb"] && t.deployConfig.Mnemonic != "" {
 		if err := t.orchestrateDRBOperators(ctx, composePath); err != nil {
-			t.logger.Warnf("⚠️  DRB operator orchestration failed: %v (services may still be running but operators not activated)", err)
-			// Non-blocking: continue to print service URLs
+			return fmt.Errorf("failed to orchestrate DRB operators: %w", err)
 		} else {
 			t.logger.Info("✅ DRB operators orchestrated and activated successfully")
 		}
@@ -322,10 +321,10 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		MaxChannelDuration:        l1ChainConfig.MaxChannelDuration,
 		L2OutputOracleAddress:     contracts.L2OutputOracleProxy,
 		DisputeGameFactoryAddress: contracts.DisputeGameFactoryProxy,
-		UseBlobs:             t.network != constants.LocalDevnet,
-		DataAvailabilityType: "blobs",
-		BlobFeeCapMultiplier: 4,
-		MaxBlobBaseFeeGwei:   "50", // 50 gwei threshold: pause submission during Sepolia spike
+		UseBlobs:                  t.network != constants.LocalDevnet,
+		DataAvailabilityType:      "blobs",
+		BlobFeeCapMultiplier:      4,
+		MaxBlobBaseFeeGwei:        "50", // 50 gwei threshold: pause submission during Sepolia spike
 		EnableFraudProof:          t.deployConfig.EnableFraudProof,
 		Preset:                    t.deployConfig.Preset,
 		DRBNodeImage:              fmt.Sprintf("tokamaknetwork/drb-node:%s", imageTags.DRBNodeImageTag),
@@ -529,7 +528,7 @@ providers:
 	}
 
 	filesToWrite := map[string]string{
-		filepath.Join(monitoringDir, "prometheus.yml"):                               promConfig,
+		filepath.Join(monitoringDir, "prometheus.yml"):                                 promConfig,
 		filepath.Join(monitoringDir, "provisioning", "datasources", "prometheus.yaml"): datasourceConfig,
 		filepath.Join(monitoringDir, "provisioning", "dashboards", "default.yaml"):     dashboardProviderConfig,
 		filepath.Join(monitoringDir, "dashboards", "thanos-stack-application.json"):    grafanaDashboardApplication,
@@ -542,10 +541,10 @@ providers:
 
 	// Map host paths → destination names inside the monitoring volume
 	monitoringFiles := map[string]string{
-		"prometheus.yml":                                          filepath.Join(monitoringDir, "prometheus.yml"),
-		"provisioning/datasources/prometheus.yaml":               filepath.Join(monitoringDir, "provisioning", "datasources", "prometheus.yaml"),
-		"provisioning/dashboards/default.yaml":                   filepath.Join(monitoringDir, "provisioning", "dashboards", "default.yaml"),
-		"dashboards/thanos-stack-application.json":               filepath.Join(monitoringDir, "dashboards", "thanos-stack-application.json"),
+		"prometheus.yml": filepath.Join(monitoringDir, "prometheus.yml"),
+		"provisioning/datasources/prometheus.yaml": filepath.Join(monitoringDir, "provisioning", "datasources", "prometheus.yaml"),
+		"provisioning/dashboards/default.yaml":     filepath.Join(monitoringDir, "provisioning", "dashboards", "default.yaml"),
+		"dashboards/thanos-stack-application.json": filepath.Join(monitoringDir, "dashboards", "thanos-stack-application.json"),
 	}
 	return t.copyFilesToMonitoringVolume(ctx, monitoringFiles)
 }
@@ -831,7 +830,6 @@ func (t *ThanosStack) printLocalServiceURLs(modules map[string]bool) {
 	t.logger.Info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 }
 
-
 // writeComposeEnvFile writes a .env file next to the docker-compose.local.yml
 // with COMPOSE_PROFILES set based on the deployment configuration.
 // Docker Compose reads .env from the same directory as the compose file,
@@ -927,10 +925,10 @@ type crossTradeL2TokenEntry struct {
 
 // Thanos Sepolia fixed partner constants for L2_L2 bridging.
 const (
-	crossTradeThanosSepolia            uint64 = 111551119090
-	crossTradeThanosSepL2CTProxy              = "0x7BbEC445F9BDF6c579e81EAda5df86654184BcE3"
-	crossTradeThanosSepRPCURL                 = "https://rpc.thanos-sepolia.tokamak.network"
-	crossTradeThanosSepExplorerURL            = "https://explorer.thanos-sepolia-test.tokamak.network"
+	crossTradeThanosSepolia        uint64 = 111551119090
+	crossTradeThanosSepL2CTProxy          = "0x7BbEC445F9BDF6c579e81EAda5df86654184BcE3"
+	crossTradeThanosSepRPCURL             = "https://rpc.thanos-sepolia.tokamak.network"
+	crossTradeThanosSepExplorerURL        = "https://explorer.thanos-sepolia-test.tokamak.network"
 	// crossTradeSepoliaL2toL2L1 is the L2toL2CrossTradeProxyL1 address on Sepolia deployed by
 	// the Tokamak team. Used as the L1-side contract in NEXT_PUBLIC_CHAIN_CONFIG_L2_L2.
 	crossTradeSepoliaL2toL2L1 = "0xF09Af74810010a0e9A452f71B3921641350c21D0"

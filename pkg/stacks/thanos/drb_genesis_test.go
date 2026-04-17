@@ -405,13 +405,49 @@ func (ml *mockLogger) Info(args ...interface{}) {}
 
 // Test 7: Regular balance allocation (Phase 7-02 Wave 1 RED)
 func TestPatchGenesisWithDRB_IncludesRegularBalance(t *testing.T) {
-	// This test will fail during Wave 1 (RED) because patchGenesisWithDRB
-	// doesn't yet accept accounts parameter or inject Regular balances.
-	// It will pass after Wave 1→2 (GREEN) implementation.
+	tmpDir := t.TempDir()
+	genesisPath := filepath.Join(tmpDir, "genesis.json")
+	copyFixture(t, genesisPath)
 
-	// This is a placeholder test that documents the expected behavior.
-	// The actual implementation will be added in Wave 1→2.
-	t.Skip("Wave 1 RED: Test will pass after patchGenesisWithDRB extends with Regular balance injection")
+	err := maybeFundDRBRegulars(genesisPath, "gaming", "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about")
+	if err != nil {
+		t.Fatalf("maybeFundDRBRegulars failed: %v", err)
+	}
+
+	data, err := os.ReadFile(genesisPath)
+	if err != nil {
+		t.Fatalf("read genesis: %v", err)
+	}
+
+	var genesis map[string]json.RawMessage
+	if err := json.Unmarshal(data, &genesis); err != nil {
+		t.Fatalf("unmarshal genesis: %v", err)
+	}
+
+	var alloc map[string]json.RawMessage
+	if err := json.Unmarshal(genesis["alloc"], &alloc); err != nil {
+		t.Fatalf("unmarshal alloc: %v", err)
+	}
+
+	accounts, err := DeriveDRBAccounts("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about")
+	if err != nil {
+		t.Fatalf("derive accounts: %v", err)
+	}
+
+	for _, regular := range accounts.Regulars {
+		raw, ok := alloc[strings.ToLower(regular.Address.Hex())]
+		if !ok {
+			t.Fatalf("regular operator alloc missing for %s", regular.Address.Hex())
+		}
+
+		var entry map[string]string
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			t.Fatalf("unmarshal regular alloc: %v", err)
+		}
+		if entry["balance"] != "0xde0b6b3a7640000" {
+			t.Fatalf("regular operator balance = %s, want 0xde0b6b3a7640000", entry["balance"])
+		}
+	}
 }
 
 // Test 8: resolveDRBNpmTag defaults to constant when env var not set

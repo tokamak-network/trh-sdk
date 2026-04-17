@@ -8,27 +8,29 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
+	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"github.com/tyler-smith/go-bip32"
 	"github.com/tyler-smith/go-bip39"
-	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
+
+var executeDRBCommand = utils.ExecuteCommand
 
 // DRBRegular holds a single Regular operator's deterministically-derived keys.
 type DRBRegular struct {
-	Index        int            // 1, 2, 3
-	PrivateKey   string         // Hex string (without 0x prefix)
-	Address      common.Address // Derived from PrivateKey
-	PeerID       string         // libp2p Ed25519 peer ID (string form)
-	PeerIDBytes  []byte         // libp2p Ed25519 peer ID as protobuf bytes (for volume injection)
+	Index       int            // 1, 2, 3
+	PrivateKey  string         // Hex string (without 0x prefix)
+	Address     common.Address // Derived from PrivateKey
+	PeerID      string         // libp2p Ed25519 peer ID (string form)
+	PeerIDBytes []byte         // libp2p Ed25519 peer ID as protobuf bytes (for volume injection)
 }
 
 // DRBAccounts holds all deterministically-derived DRB accounts.
 type DRBAccounts struct {
-	LeaderPrivateKey string         // Reuses admin key (index 0)
-	LeaderEOA        common.Address // Derived from LeaderPrivateKey
-	LeaderPeerID     string         // libp2p Ed25519 peer ID (string form)
-	LeaderPeerIDBytes []byte        // libp2p Ed25519 peer ID as protobuf bytes (for volume injection)
-	Regulars         [3]DRBRegular
+	LeaderPrivateKey  string         // Reuses admin key (index 0)
+	LeaderEOA         common.Address // Derived from LeaderPrivateKey
+	LeaderPeerID      string         // libp2p Ed25519 peer ID (string form)
+	LeaderPeerIDBytes []byte         // libp2p Ed25519 peer ID as protobuf bytes (for volume injection)
+	Regulars          [3]DRBRegular
 }
 
 // DeriveDRBAccounts derives all DRB accounts deterministically from a mnemonic.
@@ -145,7 +147,7 @@ func BootstrapDRBPeerIDFiles(ctx context.Context, composeProject string, account
 	const helperName = "drb-peer-id-init"
 
 	// Remove any stale helper container from a previous run.
-	_, _ = utils.ExecuteCommand(ctx, "docker", "rm", "-f", helperName)
+	_, _ = executeDRBCommand(ctx, "docker", "rm", "-f", helperName)
 
 	// Start temporary alpine container with volumes mounted
 	volumeFlags := []string{"-v", composeProject + "_drb-leader-keys:/peer-id-leader"}
@@ -158,17 +160,17 @@ func BootstrapDRBPeerIDFiles(ctx context.Context, composeProject string, account
 		[]string{"run", "-d", "--name", helperName},
 		append(volumeFlags, "alpine", "sleep", "infinity")...,
 	)
-	containerIDOutput, err := utils.ExecuteCommand(ctx, "docker", allArgs...)
+	containerIDOutput, err := executeDRBCommand(ctx, "docker", allArgs...)
 	if err != nil {
 		return fmt.Errorf("failed to start peer ID helper container: %w", err)
 	}
 	containerID := extractLastLine(containerIDOutput)
-	defer utils.ExecuteCommand(ctx, "docker", "rm", "-f", containerID)
+	defer executeDRBCommand(ctx, "docker", "rm", "-f", containerID)
 
 	// Write Leader peer ID binary file
 	leaderPeerIDB64 := base64.StdEncoding.EncodeToString(accounts.LeaderPeerIDBytes)
 	cmd := fmt.Sprintf("echo %s | base64 -d > /peer-id-leader/leadernode.bin", leaderPeerIDB64)
-	if _, err := utils.ExecuteCommand(ctx, "docker", "exec", containerID, "sh", "-c", cmd); err != nil {
+	if _, err := executeDRBCommand(ctx, "docker", "exec", containerID, "sh", "-c", cmd); err != nil {
 		return fmt.Errorf("failed to write leader peer ID file: %w", err)
 	}
 
@@ -177,7 +179,7 @@ func BootstrapDRBPeerIDFiles(ctx context.Context, composeProject string, account
 		regularPeerIDB64 := base64.StdEncoding.EncodeToString(regular.PeerIDBytes)
 		cmd := fmt.Sprintf("echo %s | base64 -d > /peer-id-regular-%d/regularnode.bin",
 			regularPeerIDB64, regular.Index)
-		if _, err := utils.ExecuteCommand(ctx, "docker", "exec", containerID, "sh", "-c", cmd); err != nil {
+		if _, err := executeDRBCommand(ctx, "docker", "exec", containerID, "sh", "-c", cmd); err != nil {
 			return fmt.Errorf("failed to write regular %d peer ID file: %w", regular.Index, err)
 		}
 	}
