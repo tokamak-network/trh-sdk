@@ -437,6 +437,51 @@ services:
     volumes:
       - drb-leader-keys:/app/static-key
     restart: unless-stopped
+
+{{- range $i, $r := .DRBRegulars }}
+  drb-postgres-regular-{{ $r.Index }}:
+    image: postgres:14.13-alpine
+    environment:
+      POSTGRES_PASSWORD: drbpassword
+      POSTGRES_DB: drb_regular_{{ $r.Index }}
+    volumes:
+      - drb-postgres-regular-{{ $r.Index }}-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  drb-regular-{{ $r.Index }}:
+    image: {{.DRBNodeImage}}
+    depends_on:
+      op-geth:
+        condition: service_healthy
+      drb-postgres-regular-{{ $r.Index }}:
+        condition: service_healthy
+    environment:
+      NODE_TYPE: regular
+      REGULAR_INDEX: "{{ $r.Index }}"
+      REGULAR_PRIVATE_KEY: "{{ $r.PrivateKey }}"
+      REGULAR_EOA: "{{ $r.Address }}"
+      LEADER_PEER_ID: "{{ $.DRBLeaderPeerID }}"
+      LEADER_MULTIADDR: "{{ $.DRBLeaderPeerID }}@drb-leader:9600"
+      LEADER_PORT: "9600"
+      REGULAR_PORT: {{ add 9600 $r.Index }}
+      ETH_RPC_URLS: ws://op-geth:8546
+      CONTRACT_ADDRESS: "0x4200000000000000000000000000000000000060"
+      CHAIN_ID: "{{.L2ChainID}}"
+      STATUS: dev
+      POSTGRES_PASSWORD: drbpassword
+      POSTGRES_HOST: drb-postgres-regular-{{ $r.Index }}
+      POSTGRES_DB: drb_regular_{{ $r.Index }}
+    ports:
+      - "{{ add 9600 $r.Index }}:{{ add 9600 $r.Index }}"
+    volumes:
+      - drb-regular-{{ $r.Index }}-keys:/app/static-key
+    restart: unless-stopped
+{{- end }}
 {{- end }}
 {{- if .AAOperatorEnabled }}
 
@@ -496,4 +541,8 @@ volumes:
 {{- if or (eq .Preset "gaming") (eq .Preset "full") }}
   drb-postgres-data:
   drb-leader-keys:
+{{- range $i, $r := .DRBRegulars }}
+  drb-postgres-regular-{{ $r.Index }}-data:
+  drb-regular-{{ $r.Index }}-keys:
+{{- end }}
 {{- end }}

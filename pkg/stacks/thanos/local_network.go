@@ -69,6 +69,8 @@ type localComposeData struct {
 	DRBNodeImage              string
 	DRBLeaderPrivateKey       string
 	DRBLeaderEOA              string
+	DRBLeaderPeerID           string
+	DRBRegulars               [3]DRBRegular
 	// Bridge environment variables
 	BridgeL1ChainName                   string
 	BridgeL1ChainID                     string
@@ -366,6 +368,10 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 				data.DRBLeaderEOA = addr.Hex()
 			}
 		}
+
+		// TODO(phase-7-03): Derive DRB accounts (Leader + 3 Regulars) deterministically from mnemonic
+		// when mnemonic is available in deployment config.
+		// For now, leave DRBLeaderPeerID and DRBRegulars empty (will be populated by BootstrapDRBPeerIDFiles).
 	}
 
 	// Populate CrossTrade dApp fields — only when local contracts have been deployed AND the preset
