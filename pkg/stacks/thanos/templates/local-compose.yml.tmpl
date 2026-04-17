@@ -463,8 +463,8 @@ services:
     environment:
       NODE_TYPE: regular
       REGULAR_INDEX: "{{ $r.Index }}"
-      REGULAR_PRIVATE_KEY: "{{ $r.PrivateKey }}"
-      REGULAR_EOA: "{{ $r.Address }}"
+      EOA_PRIVATE_KEY: "{{ $r.PrivateKey }}"
+      LEADER_IP: "drb-leader"
       LEADER_PEER_ID: "{{ $.DRBLeaderPeerID }}"
       LEADER_MULTIADDR: "{{ $.DRBLeaderPeerID }}@drb-leader:9600"
       LEADER_PORT: "9600"
