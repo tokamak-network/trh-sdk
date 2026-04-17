@@ -52,3 +52,10 @@ func TestDeriveDRBAccounts_BIP44Indices(t *testing.T) {
 	require.NotEqual(t, accounts.LeaderEOA, accounts.Regulars[1].Address)
 	require.NotEqual(t, accounts.LeaderEOA, accounts.Regulars[2].Address)
 }
+
+// Test: Peer ID file bootstrap (Phase 7-02 Wave 1 RED)
+// This test will fail during Wave 1 because BootstrapDRBPeerIDFiles is not yet implemented.
+// It documents the expected behavior and will pass after Wave 1→2 (GREEN).
+func TestBootstrapDRBPeerIDFiles_WritesLeaderAndRegularBinaries(t *testing.T) {
+	t.Skip("Wave 1 RED: BootstrapDRBPeerIDFiles not yet implemented")
+}

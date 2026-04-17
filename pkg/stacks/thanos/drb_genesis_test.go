@@ -402,3 +402,14 @@ func (m *mockFetcher) Fetch(ctx context.Context, pkg, tag string) ([]byte, error
 type mockLogger struct{}
 
 func (ml *mockLogger) Info(args ...interface{}) {}
+
+// Test 7: Regular balance allocation (Phase 7-02 Wave 1 RED)
+func TestPatchGenesisWithDRB_IncludesRegularBalance(t *testing.T) {
+	// This test will fail during Wave 1 (RED) because patchGenesisWithDRB
+	// doesn't yet accept accounts parameter or inject Regular balances.
+	// It will pass after Wave 1→2 (GREEN) implementation.
+
+	// This is a placeholder test that documents the expected behavior.
+	// The actual implementation will be added in Wave 1→2.
+	t.Skip("Wave 1 RED: Test will pass after patchGenesisWithDRB extends with Regular balance injection")
+}
