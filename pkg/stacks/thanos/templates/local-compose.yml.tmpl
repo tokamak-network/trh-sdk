@@ -454,7 +454,7 @@ services:
     restart: unless-stopped
 
   drb-regular-{{ $r.Index }}:
-    image: {{.DRBNodeImage}}
+    image: {{ $.DRBNodeImage }}
     depends_on:
       op-geth:
         condition: service_healthy
@@ -468,10 +468,10 @@ services:
       LEADER_PEER_ID: "{{ $.DRBLeaderPeerID }}"
       LEADER_MULTIADDR: "{{ $.DRBLeaderPeerID }}@drb-leader:9600"
       LEADER_PORT: "9600"
-      REGULAR_PORT: {{ add 9600 $r.Index }}
+      PORT: "{{ add 9600 $r.Index }}"
       ETH_RPC_URLS: ws://op-geth:8546
       CONTRACT_ADDRESS: "0x4200000000000000000000000000000000000060"
-      CHAIN_ID: "{{.L2ChainID}}"
+      CHAIN_ID: "{{ $.L2ChainID }}"
       STATUS: dev
       POSTGRES_PASSWORD: drbpassword
       POSTGRES_HOST: drb-postgres-regular-{{ $r.Index }}

@@ -256,8 +256,8 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 
 	l1ChainConfig := constants.L1ChainConfigurations[t.deployConfig.L1ChainID]
 
-	genesisPath := filepath.Join(t.deploymentPath, "tokamak-thanos/build/genesis.json")
-	rollupPath := filepath.Join(t.deploymentPath, "tokamak-thanos/build/rollup.json")
+	genesisPath := filepath.Join(t.deploymentPath, "genesis.json")
+	rollupPath := filepath.Join(t.deploymentPath, "rollup.json")
 	prestatePath := filepath.Join(t.deploymentPath, "tokamak-thanos/op-program/bin/prestate.json")
 	jwtPath := filepath.Join(t.deploymentPath, "jwt.txt")
 
@@ -428,7 +428,9 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		data.AAAdminPrivateKey = adminKey
 	}
 
-	tmpl, err := template.New("local-compose").Parse(localComposeTmpl)
+	tmpl, err := template.New("local-compose").Funcs(template.FuncMap{
+		"add": func(a, b int) int { return a + b },
+	}).Parse(localComposeTmpl)
 	if err != nil {
 		return fmt.Errorf("failed to parse compose template: %w", err)
 	}
@@ -596,7 +598,7 @@ func (t *ThanosStack) initLocalOpGeth(ctx context.Context, composePath string) e
 		}
 	}
 
-	genesisPath := filepath.Join(t.deploymentPath, "tokamak-thanos/build/genesis.json")
+	genesisPath := filepath.Join(t.deploymentPath, "genesis.json")
 	genesisHashFile := filepath.Join(t.deploymentPath, "op-geth-data", ".genesis-hash")
 	chainDataPath := filepath.Join(t.deploymentPath, "op-geth-data", "chaindata")
 
