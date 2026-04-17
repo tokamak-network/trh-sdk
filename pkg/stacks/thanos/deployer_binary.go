@@ -14,7 +14,7 @@ import (
 )
 
 // TokamakDeployerVersion is the pinned version of the tokamak-deployer binary.
-const TokamakDeployerVersion = "v0.0.2"
+const TokamakDeployerVersion = "v0.0.3"
 
 const tokamakDeployerRepo = "tokamak-network/tokamak-thanos"
 
@@ -140,6 +140,21 @@ type genesisOpts struct {
 	OutPath          string
 	RollupOutPath    string
 	Preset           string
+
+	// L1RPCURL is passed to op-node via --l1-rpc. Required unless BaseGenesisPath is set.
+	L1RPCURL string
+
+	// L2AllocsPath is the state dump produced by forge L2Genesis.s.sol. Passed to
+	// op-node via --l2-allocs. Required unless BaseGenesisPath is set.
+	L2AllocsPath string
+
+	// OpNodeBinary overrides the op-node binary lookup. Useful when op-node is
+	// built locally at tokamak-thanos/op-node/bin/op-node rather than $PATH.
+	OpNodeBinary string
+
+	// BaseGenesisPath, when set, skips tokamak-deployer's internal op-node call
+	// and uses this file as the base genesis. Only for testing / advanced flows.
+	BaseGenesisPath string
 }
 
 // runDeployContracts executes tokamak-deployer deploy-contracts.
@@ -166,6 +181,22 @@ func runGenerateGenesis(ctx context.Context, binaryPath string, opts genesisOpts
 	}
 	if opts.Preset != "" {
 		args = append(args, "--preset", opts.Preset)
+	}
+	if opts.BaseGenesisPath != "" {
+		args = append(args, "--base-genesis", opts.BaseGenesisPath)
+	} else {
+		// --l1-rpc and --l2-allocs are required by op-node genesis l2 (as of
+		// tokamak-deployer v0.0.3). If the caller forgot them and also didn't
+		// pass --base-genesis, let the binary surface the same error.
+		if opts.L1RPCURL != "" {
+			args = append(args, "--l1-rpc", opts.L1RPCURL)
+		}
+		if opts.L2AllocsPath != "" {
+			args = append(args, "--l2-allocs", opts.L2AllocsPath)
+		}
+	}
+	if opts.OpNodeBinary != "" {
+		args = append(args, "--op-node-bin", opts.OpNodeBinary)
 	}
 	return runBinaryCommand(ctx, binaryPath, args, w)
 }

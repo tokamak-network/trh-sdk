@@ -304,9 +304,12 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		}
 		t.logger.Infof("⛽ Current gas price: %.4f Gwei", new(big.Float).Quo(new(big.Float).SetInt(gasPriceWei), big.NewFloat(1e9)))
 
-		// Estimate deployment cost
+		// Estimate deployment cost.
+		// 3x margin (was 2x) to cover gas-price surges during the ~5-10 min deploy
+		// window and the tokamak-deployer v0.0.2+ gas-bump retries (up to ~2.44x
+		// from the initial suggested price).
 		estimatedCost := new(big.Int).Mul(gasPriceWei, estimatedDeployContracts)
-		estimatedCost.Mul(estimatedCost, big.NewInt(2))
+		estimatedCost.Mul(estimatedCost, big.NewInt(3))
 		t.logger.Infof("💰 Estimated deployment cost: %.4f ETH", utils.WeiToEther(estimatedCost))
 
 		// Check if balance is sufficient
@@ -361,15 +364,62 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		}
 	}
 
-	// STEP 5: Generate genesis and rollup files via tokamak-deployer binary
-	// Binary handles all post-processing: DRB inject, USDC inject, MultiTokenPaymaster inject,
-	// L1Block Isthmus bytecode patch, rollup hash update.
+	// STEP 5: Generate genesis and rollup files.
+	//
+	// op-node's "genesis l2" subcommand requires two inputs that tokamak-deployer
+	// does not produce itself:
+	//   - --l2-allocs: the L2 state dump written by forge scripts/L2Genesis.s.sol
+	//   - --l1-rpc:    an L1 JSON-RPC endpoint for block lookups
+	//
+	// We stage the deploy-output (addresses-only) and deploy-config under the
+	// contracts-bedrock project root (forge's FFI sandbox rejects /tmp reads),
+	// run the forge script, ensure op-node is built, then hand all paths to
+	// tokamak-deployer which calls op-node and applies the tokamak-specific
+	// post-processing (DRB / USDC / MultiTokenPaymaster / L1Block / rollup hash).
+	tokamakThanosDirForGenesis := filepath.Join(t.deploymentPath, "tokamak-thanos")
+	stagedAddrPath, stagedConfigPath, err := prepareL2GenesisInputs(
+		tokamakThanosDirForGenesis,
+		deployOutputPath,
+		deployConfigFilePath,
+		t.deployConfig.L2ChainID,
+	)
+	if err != nil {
+		t.logger.Error("❌ Failed to stage L2 genesis inputs", "err", err)
+		return err
+	}
+
+	stateDumpPath, err := runForgeL2GenesisScript(
+		ctx,
+		t.logger,
+		tokamakThanosDirForGenesis,
+		stagedAddrPath,
+		stagedConfigPath,
+		t.deployConfig.L1RPCURL,
+	)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			t.logger.Warn("Deployment canceled")
+			return err
+		}
+		t.logger.Error("❌ Failed to run forge L2Genesis.s.sol", "err", err)
+		return err
+	}
+
+	opNodeBin, err := ensureOpNodeBinary(ctx, t.logger, tokamakThanosDirForGenesis)
+	if err != nil {
+		t.logger.Error("❌ Failed to obtain op-node binary", "err", err)
+		return err
+	}
+
 	genesisPath := filepath.Join(t.deploymentPath, "genesis.json")
 	t.logger.Info("Generating the rollup and genesis files...")
 	if err = runGenerateGenesis(ctx, binaryPath, genesisOpts{
-		DeployOutputPath: deployOutputPath,
+		DeployOutputPath: stagedAddrPath, // addresses-only; op-node & deployer both accept this
 		ConfigPath:       deployConfigFilePath,
 		OutPath:          genesisPath,
+		L1RPCURL:         t.deployConfig.L1RPCURL,
+		L2AllocsPath:     stateDumpPath,
+		OpNodeBinary:     opNodeBin,
 	}, t.output); err != nil {
 		if errors.Is(err, context.Canceled) {
 			t.logger.Warn("Deployment canceled")
