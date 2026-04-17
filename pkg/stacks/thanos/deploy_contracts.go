@@ -438,6 +438,12 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 	t.logger.Infof("Genesis file path: %s", genesisPath)
 	t.logger.Infof("Rollup file path: %s/rollup.json", t.deploymentPath)
 
+	// Inject DRB predeploy if enabled for Gaming/Full preset
+	if err := maybeInjectDRB(ctx, t.logger, genesisPath, t.deployConfig.Preset, &defaultArtifactFetcher{}); err != nil {
+		t.logger.Error("❌ Failed to inject DRB predeploy", "err", err)
+		return err
+	}
+
 	// Mark deployment as complete so subsequent steps (e.g. local_network start,
 	// deploy-aws-infra) pass the `Status == Completed` gate in their preflight
 	// checks. This persist was accidentally dropped in df52538 when the forge
