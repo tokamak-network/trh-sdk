@@ -17,6 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm/runtime"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 )
 
 const (
@@ -72,6 +73,63 @@ func DefaultDRBGenesisConfig() *DRBGenesisConfig {
 		OffChainSubmissionPeriodPerOperator: big.NewInt(30),
 		OnChainSubmissionPeriodPerOperator:  big.NewInt(30),
 	}
+}
+
+// ArtifactFetcher abstracts artifact download for testability.
+type ArtifactFetcher interface {
+	Fetch(ctx context.Context, pkg, tag string) ([]byte, error)
+}
+
+// defaultArtifactFetcher uses the real npm download.
+type defaultArtifactFetcher struct{}
+
+func (d *defaultArtifactFetcher) Fetch(ctx context.Context, pkg, tag string) ([]byte, error) {
+	return downloadDRBArtifact(ctx, &noopLogger{})
+}
+
+type noopLogger struct{}
+
+func (nl *noopLogger) Info(args ...interface{}) {}
+
+// maybeInjectDRB conditionally injects DRB based on preset.
+// Used as seam for testing and from deploy_contracts.go.
+func maybeInjectDRB(ctx context.Context, logger interface{ Info(args ...interface{}) }, genesisPath string, preset string, fetcher ArtifactFetcher) error {
+	// Check preset condition gate
+	if !constants.PresetModules[preset]["drb"] {
+		return nil // Skip for General/DeFi
+	}
+
+	// Fetch artifact
+	artifactData, err := fetcher.Fetch(ctx, drbNpmPackageName, drbNpmTag)
+	if err != nil {
+		return fmt.Errorf("failed to download DRB artifact: %w", err)
+	}
+
+	// Parse artifact
+	var artifact drbArtifact
+	if err := json.Unmarshal(artifactData, &artifact); err != nil {
+		return fmt.Errorf("failed to parse DRB artifact: %w", err)
+	}
+
+	// Build creation code
+	creationCode, err := buildDRBCreationCode(&artifact, DefaultDRBGenesisConfig())
+	if err != nil {
+		return fmt.Errorf("failed to build DRB creation code: %w", err)
+	}
+
+	// Deploy in simulated EVM
+	runtimeBytecode, err := deployDRBSimulated(creationCode, DefaultDRBGenesisConfig().ActivationThreshold)
+	if err != nil {
+		return fmt.Errorf("failed to deploy DRB in simulated EVM: %w", err)
+	}
+
+	// Patch genesis
+	if err := patchGenesisWithDRB(genesisPath, runtimeBytecode); err != nil {
+		return fmt.Errorf("failed to patch genesis with DRB: %w", err)
+	}
+
+	logger.Info("✅ DRB contract (CommitReveal2L2) injected into genesis at " + drbPredeployAddress)
+	return nil
 }
 
 // injectDRBIntoGenesis downloads the CommitReveal2L2 artifact from npm, deploys it

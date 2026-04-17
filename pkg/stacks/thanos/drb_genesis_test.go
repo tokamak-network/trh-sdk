@@ -1,7 +1,9 @@
 package thanos
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -203,3 +205,200 @@ func allocKeys(alloc map[string]json.RawMessage) []string {
 	}
 	return keys
 }
+
+// Test 1: Gaming preset calls fetcher
+func TestMaybeInjectDRB_GamingPreset_CallsFetcher(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	genesisPath := filepath.Join(tmpDir, "genesis.json")
+
+	// Create minimal genesis
+	copyFixture(t, genesisPath)
+
+	// Mock fetcher
+	called := false
+	mockFetcher := &mockFetcher{
+		fn: func(c context.Context, pkg, tag string) ([]byte, error) {
+			called = true
+			// Return minimal valid artifact JSON with empty abi and bytecode
+			return []byte(`{"abi": [], "bytecode": {"object": "0x6080"}}`), nil
+		},
+	}
+
+	mockLogger := &mockLogger{}
+	_ = maybeInjectDRB(ctx, mockLogger, genesisPath, "gaming", mockFetcher)
+
+	// Even if there's an error in artifact parsing, we want to verify fetcher was called
+	if !called {
+		t.Error("fetcher.Fetch not called for gaming preset")
+	}
+}
+
+// Test 2: General preset skips injection
+func TestMaybeInjectDRB_GeneralPreset_SkipsInjection(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	genesisPath := filepath.Join(tmpDir, "genesis.json")
+	copyFixture(t, genesisPath)
+
+	called := false
+	mockFetcher := &mockFetcher{
+		fn: func(c context.Context, pkg, tag string) ([]byte, error) {
+			called = true
+			return nil, nil
+		},
+	}
+
+	err := maybeInjectDRB(ctx, &mockLogger{}, genesisPath, "general", mockFetcher)
+
+	if err != nil {
+		t.Fatalf("maybeInjectDRB failed: %v", err)
+	}
+	if called {
+		t.Error("fetcher.Fetch should not be called for general preset")
+	}
+}
+
+// Test 3: DeFi preset skips injection
+func TestMaybeInjectDRB_DeFiPreset_SkipsInjection(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	genesisPath := filepath.Join(tmpDir, "genesis.json")
+	copyFixture(t, genesisPath)
+
+	called := false
+	mockFetcher := &mockFetcher{
+		fn: func(c context.Context, pkg, tag string) ([]byte, error) {
+			called = true
+			return nil, nil
+		},
+	}
+
+	err := maybeInjectDRB(ctx, &mockLogger{}, genesisPath, "defi", mockFetcher)
+
+	if err != nil {
+		t.Fatalf("maybeInjectDRB failed: %v", err)
+	}
+	if called {
+		t.Error("fetcher.Fetch should not be called for defi preset")
+	}
+}
+
+// Test 4: Fetcher error propagates
+func TestMaybeInjectDRB_FetcherError_ReturnsWrappedError(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	genesisPath := filepath.Join(tmpDir, "genesis.json")
+	copyFixture(t, genesisPath)
+
+	mockFetcher := &mockFetcher{
+		fn: func(c context.Context, pkg, tag string) ([]byte, error) {
+			return nil, fmt.Errorf("network error")
+		},
+	}
+
+	err := maybeInjectDRB(ctx, &mockLogger{}, genesisPath, "gaming", mockFetcher)
+
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to download DRB artifact") {
+		t.Errorf("error message missing context: %v", err)
+	}
+}
+
+// Test 5: Genesis patch includes proxy + impl
+func TestPatchGenesisWithDRB_WritesProxyAndImpl(t *testing.T) {
+	tmpDir := t.TempDir()
+	genesisPath := filepath.Join(tmpDir, "genesis.json")
+	copyFixture(t, genesisPath)
+
+	// Use real patchGenesisWithDRB with fake bytecode
+	fakeBytecode := []byte{0x60, 0x80, 0x60, 0x40, 0x52}
+	err := patchGenesisWithDRB(genesisPath, fakeBytecode)
+	if err != nil {
+		t.Fatalf("patchGenesisWithDRB failed: %v", err)
+	}
+
+	// Read back and verify
+	data, _ := os.ReadFile(genesisPath)
+	var parsed map[string]json.RawMessage
+	json.Unmarshal(data, &parsed)
+	var alloc map[string]json.RawMessage
+	json.Unmarshal(parsed["alloc"], &alloc)
+
+	proxyAddr := "0x4200000000000000000000000000000000000060"
+	if _, ok := alloc[proxyAddr]; !ok {
+		t.Errorf("proxy address not found in alloc")
+	}
+
+	implAddr := predeployToCodeNamespace(common.HexToAddress(proxyAddr))
+	implAddrHex := strings.ToLower(implAddr.Hex())
+	if _, ok := alloc[implAddrHex]; !ok {
+		t.Errorf("impl address not found in alloc: %s", implAddrHex)
+	}
+}
+
+// Test 6: ERC1967 slot set correctly
+func TestPatchGenesisWithDRB_SetsERC1967Slot(t *testing.T) {
+	tmpDir := t.TempDir()
+	genesisPath := filepath.Join(tmpDir, "genesis.json")
+	copyFixture(t, genesisPath)
+
+	fakeBytecode := []byte{0x60, 0x80, 0x60, 0x40, 0x52}
+	err := patchGenesisWithDRB(genesisPath, fakeBytecode)
+	if err != nil {
+		t.Fatalf("patchGenesisWithDRB failed: %v", err)
+	}
+
+	data, _ := os.ReadFile(genesisPath)
+	var parsed map[string]json.RawMessage
+	json.Unmarshal(data, &parsed)
+	var alloc map[string]json.RawMessage
+	json.Unmarshal(parsed["alloc"], &alloc)
+
+	proxyAddr := "0x4200000000000000000000000000000000000060"
+	var proxyData map[string]json.RawMessage
+	json.Unmarshal(alloc[proxyAddr], &proxyData)
+	var storage map[string]string
+	json.Unmarshal(proxyData["storage"], &storage)
+
+	implSlotVal, ok := storage[erc1967ImplementationSlot]
+	if !ok {
+		t.Error("ERC1967 implementation slot not set in proxy storage")
+	}
+
+	implAddr := predeployToCodeNamespace(common.HexToAddress(proxyAddr))
+	expectedSlot := common.BytesToHash(implAddr.Bytes()).Hex()
+	if implSlotVal != expectedSlot {
+		t.Errorf("implementation slot value mismatch: got %s, want %s", implSlotVal, expectedSlot)
+	}
+}
+
+// Helper: copy fixture
+func copyFixture(t *testing.T, dest string) {
+	fixtureData := []byte(`{
+  "config": {"chainId": 12345},
+  "alloc": {
+    "0x4200000000000000000000000000000000000060": {
+      "code": "0x608060405234801561001057600080fd5b50",
+      "balance": "0x0"
+    }
+  }
+}`)
+	os.WriteFile(dest, fixtureData, 0644)
+}
+
+// Mock fetcher
+type mockFetcher struct {
+	fn func(context.Context, string, string) ([]byte, error)
+}
+
+func (m *mockFetcher) Fetch(ctx context.Context, pkg, tag string) ([]byte, error) {
+	return m.fn(ctx, pkg, tag)
+}
+
+// Mock logger
+type mockLogger struct{}
+
+func (ml *mockLogger) Info(args ...interface{}) {}
