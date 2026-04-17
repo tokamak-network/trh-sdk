@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -599,8 +600,6 @@ func (t *ThanosStack) initLocalOpGeth(ctx context.Context, composePath string) e
 	}
 
 	genesisPath := filepath.Join(t.deploymentPath, "genesis.json")
-	genesisHashFile := filepath.Join(t.deploymentPath, "op-geth-data", ".genesis-hash")
-	chainDataPath := filepath.Join(t.deploymentPath, "op-geth-data", "chaindata")
 
 	// Compute current genesis hash
 	currentHash, err := hashFile(genesisPath)
@@ -608,16 +607,21 @@ func (t *ThanosStack) initLocalOpGeth(ctx context.Context, composePath string) e
 		return fmt.Errorf("failed to hash genesis.json: %w", err)
 	}
 
-	// Check if chaindata exists and genesis hash matches
-	if _, err := os.Stat(chainDataPath); err == nil {
-		prevHash, readErr := os.ReadFile(genesisHashFile)
-		if readErr == nil && string(prevHash) == currentHash {
-			t.logger.Info("op-geth data directory already exists with matching genesis, skipping init")
+	// The op-geth chaindata lives in a named Docker volume (not the host
+	// filesystem), so we can't probe it with os.Stat. Instead, use `docker
+	// volume inspect` + a helper container to read a marker file that tracks
+	// which genesis the volume was initialized against.
+	projectName := filepath.Base(t.deploymentPath)
+	opGethVolume := projectName + "_op-geth-data"
+	if volumeExists(ctx, opGethVolume) {
+		prevHash, readErr := readGenesisHashFromVolume(ctx, opGethVolume)
+		if readErr == nil && prevHash == currentHash {
+			t.logger.Info("op-geth volume already initialized with matching genesis, skipping init")
 			return nil
 		}
 
-		// Genesis changed — wipe stale chaindata to prevent hash mismatch
-		t.logger.Warn("genesis.json changed since last init, reinitializing op-geth data...")
+		// Genesis changed (or marker missing) — wipe stale chaindata.
+		t.logger.Warn("op-geth volume out of sync with current genesis.json, reinitializing...")
 		if err := t.resetOpGethVolume(ctx, composePath); err != nil {
 			return fmt.Errorf("failed to reset op-geth volume: %w", err)
 		}
@@ -633,13 +637,10 @@ func (t *ThanosStack) initLocalOpGeth(ctx context.Context, composePath string) e
 		return err
 	}
 
-	// Persist genesis hash for future change detection
-	hashDir := filepath.Dir(genesisHashFile)
-	if err := os.MkdirAll(hashDir, 0755); err != nil {
-		t.logger.Warnf("Failed to create directory for genesis hash: %v", err)
-	}
-	if err := os.WriteFile(genesisHashFile, []byte(currentHash), 0644); err != nil {
-		t.logger.Warnf("Failed to save genesis hash (init will repeat next run): %v", err)
+	// Persist genesis hash inside the volume so future resumes can detect
+	// whether the existing chaindata matches this genesis.
+	if err := writeGenesisHashToVolume(ctx, opGethVolume, currentHash); err != nil {
+		return fmt.Errorf("failed to persist genesis hash in volume: %w", err)
 	}
 	return nil
 }
@@ -1073,6 +1074,19 @@ func (t *ThanosStack) orchestrateDRBOperators(ctx context.Context, composePath s
 	}
 	t.logger.Info("✅ DRB peer ID files bootstrapped")
 
+	// Restart DRB containers so they reload the freshly-written peer ID keys.
+	// Without this, leader/regulars started with docker compose up before
+	// BootstrapDRBPeerIDFiles wrote the bin files, loading stale keys from a
+	// prior deployment's volume.
+	restartArgs := []string{"compose", "-f", composePath, "restart", "drb-leader"}
+	for _, regular := range accounts.Regulars {
+		restartArgs = append(restartArgs, fmt.Sprintf("drb-regular-%d", regular.Index))
+	}
+	t.logger.Infof("🔁 Restarting DRB containers to reload peer ID keys: %v", restartArgs[3:])
+	if err := utils.ExecuteCommandStream(ctx, t.logger, "docker", restartArgs...); err != nil {
+		return fmt.Errorf("restart DRB containers after bootstrap: %w", err)
+	}
+
 	// Wait for DRB containers to be healthy (simple implementation: just wait a bit)
 	t.logger.Infof("⏳ Waiting for DRB containers to stabilize...")
 	select {
@@ -1092,4 +1106,33 @@ func (t *ThanosStack) orchestrateDRBOperators(ctx context.Context, composePath s
 	t.logger.Info("✅ Regular DRB operators activated")
 
 	return nil
+}
+
+// volumeExists returns true if a named Docker volume exists.
+func volumeExists(ctx context.Context, name string) bool {
+	cmd := exec.CommandContext(ctx, "docker", "volume", "inspect", name)
+	return cmd.Run() == nil
+}
+
+// readGenesisHashFromVolume reads the `.genesis-hash` marker file from inside a
+// named Docker volume via a short-lived alpine helper container. Returns an
+// empty string and non-nil error if the marker is missing or unreadable.
+func readGenesisHashFromVolume(ctx context.Context, volume string) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "run", "--rm",
+		"-v", volume+":/data",
+		"alpine", "sh", "-c", "cat /data/.genesis-hash 2>/dev/null || true")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("read genesis hash from volume %s: %w", volume, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// writeGenesisHashToVolume writes the current genesis hash to the `.genesis-hash`
+// marker file inside a named Docker volume.
+func writeGenesisHashToVolume(ctx context.Context, volume, hash string) error {
+	cmd := exec.CommandContext(ctx, "docker", "run", "--rm",
+		"-v", volume+":/data",
+		"alpine", "sh", "-c", fmt.Sprintf("printf %%s %q > /data/.genesis-hash", hash))
+	return cmd.Run()
 }

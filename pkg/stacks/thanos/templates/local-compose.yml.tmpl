@@ -436,6 +436,10 @@ services:
       - "9600:9600"
     volumes:
       - drb-leader-keys:/app/static-key
+    networks:
+      default:
+        aliases:
+          - leadernode
     restart: unless-stopped
 
 {{- range $i, $r := .DRBRegulars }}
