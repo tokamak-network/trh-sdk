@@ -21,6 +21,23 @@ func TestEnsureTokamakDeployer_DownloadFailure(t *testing.T) {
 	}
 }
 
+func TestEnsureTokamakDeployer_CreatesMissingCacheDir(t *testing.T) {
+	cacheDir := filepath.Join(t.TempDir(), ".trh", "bin")
+
+	_, err := ensureTokamakDeployerWithVersion(cacheDir, "v0.0.0-nonexistent")
+	if err == nil {
+		t.Fatal("expected download failure for nonexistent version")
+	}
+
+	info, statErr := os.Stat(cacheDir)
+	if statErr != nil {
+		t.Fatalf("expected cache dir to be created, got stat error: %v", statErr)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected %s to be a directory", cacheDir)
+	}
+}
+
 func TestEnsureTokamakDeployer_CacheHit(t *testing.T) {
 	cacheDir := t.TempDir()
 

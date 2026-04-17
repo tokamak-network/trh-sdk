@@ -42,6 +42,9 @@ func ensureTokamakDeployerWithVersion(cacheDir, version string) (string, error) 
 	if _, err := os.Stat(binaryPath); err == nil {
 		return binaryPath, nil // cache hit
 	}
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return "", fmt.Errorf("create tokamak-deployer cache dir: %w", err)
+	}
 
 	osName := runtime.GOOS // "linux", "darwin"
 	arch := runtime.GOARCH // "amd64", "arm64"
