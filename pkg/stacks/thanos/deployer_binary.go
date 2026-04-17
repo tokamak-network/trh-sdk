@@ -18,6 +18,11 @@ const TokamakDeployerVersion = "v0.0.1"
 
 const tokamakDeployerRepo = "tokamak-network/tokamak-thanos"
 
+// tokamakDeployerTagPrefix is the monorepo tag prefix used for tokamak-deployer
+// releases (full tag: tokamak-deployer/vX.Y.Z). GitHub release asset URLs
+// include this prefix: releases/download/tokamak-deployer/vX.Y.Z/<asset>.
+const tokamakDeployerTagPrefix = "tokamak-deployer/"
+
 // ensureTokamakDeployer checks the cache dir for the binary; downloads from GitHub Releases if missing.
 // Returns the path to the executable binary.
 func ensureTokamakDeployer(cacheDir string) (string, error) {
@@ -37,8 +42,8 @@ func ensureTokamakDeployerWithVersion(cacheDir, version string) (string, error) 
 	arch := runtime.GOARCH // "amd64", "arm64"
 	assetName := fmt.Sprintf("tokamak-deployer-%s-%s.tar.gz", osName, arch)
 	downloadURL := fmt.Sprintf(
-		"https://github.com/%s/releases/download/%s/%s",
-		tokamakDeployerRepo, version, assetName,
+		"https://github.com/%s/releases/download/%s%s/%s",
+		tokamakDeployerRepo, tokamakDeployerTagPrefix, version, assetName,
 	)
 
 	tarPath := binaryPath + ".tar.gz"
