@@ -35,6 +35,15 @@ const (
 	drbDeployGasLimit = 30_000_000
 )
 
+// resolveDRBNpmTag returns the DRB npm package tag from env var or compile-time constant.
+// Allows override via DRB_CONTRACTS_VERSION env var for testnet experimentation.
+func resolveDRBNpmTag() string {
+	if v := os.Getenv("DRB_CONTRACTS_VERSION"); v != "" {
+		return v
+	}
+	return drbNpmTag
+}
+
 // drbArtifact represents the relevant fields from the CommitReveal2L2.json forge artifact.
 type drbArtifact struct {
 	ABI      json.RawMessage `json:"abi"`
@@ -170,7 +179,8 @@ func injectDRBIntoGenesis(ctx context.Context, logger interface{ Info(args ...in
 func downloadDRBArtifact(ctx context.Context, logger interface{ Info(args ...interface{}) }) ([]byte, error) {
 	logger.Info("Downloading DRB contract artifact from npm...")
 
-	tarballURL, err := resolveNpmTarballURL(ctx, drbNpmPackageName, drbNpmTag)
+	tag := resolveDRBNpmTag()
+	tarballURL, err := resolveNpmTarballURL(ctx, drbNpmPackageName, tag)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve DRB npm tarball URL: %w", err)
 	}

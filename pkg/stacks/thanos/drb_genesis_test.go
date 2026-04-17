@@ -413,3 +413,27 @@ func TestPatchGenesisWithDRB_IncludesRegularBalance(t *testing.T) {
 	// The actual implementation will be added in Wave 1→2.
 	t.Skip("Wave 1 RED: Test will pass after patchGenesisWithDRB extends with Regular balance injection")
 }
+
+// Test 8: resolveDRBNpmTag defaults to constant when env var not set
+func TestResolveDRBNpmTag_DefaultsToConstant(t *testing.T) {
+	// Ensure env var is NOT set
+	t.Setenv("DRB_CONTRACTS_VERSION", "")
+
+	result := resolveDRBNpmTag()
+
+	if result != drbNpmTag {
+		t.Errorf("expected %q, got %q", drbNpmTag, result)
+	}
+}
+
+// Test 9: resolveDRBNpmTag is overridden by env var
+func TestResolveDRBNpmTag_OverriddenByEnv(t *testing.T) {
+	// Set env var to override default
+	t.Setenv("DRB_CONTRACTS_VERSION", "2.0.0")
+
+	result := resolveDRBNpmTag()
+
+	if result != "2.0.0" {
+		t.Errorf("expected %q, got %q", "2.0.0", result)
+	}
+}
