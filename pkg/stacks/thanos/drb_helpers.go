@@ -13,19 +13,16 @@ import (
 )
 
 // newHTTPRequest creates a GET request with context.
-//nolint:unused // called by downloadAndExtractSingleFile
 func newHTTPRequest(ctx context.Context, url string) (*http.Request, error) {
 	return http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 }
 
 // newHTTPClient creates an HTTP client with the given timeout.
-//nolint:unused // called by downloadAndExtractSingleFile
 func newHTTPClient(timeout time.Duration) *http.Client {
 	return &http.Client{Timeout: timeout}
 }
 
 // extractFileFromTarball reads a gzipped tar stream and returns the content of the named file.
-//nolint:unused // called by downloadAndExtractSingleFile
 func extractFileFromTarball(r io.Reader, targetPath string) ([]byte, error) {
 	gzReader, err := gzip.NewReader(io.LimitReader(r, maxTarballSize))
 	if err != nil {
