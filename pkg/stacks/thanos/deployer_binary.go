@@ -14,7 +14,7 @@ import (
 )
 
 // TokamakDeployerVersion is the pinned version of the tokamak-deployer binary.
-const TokamakDeployerVersion = "v0.0.3"
+const TokamakDeployerVersion = "v0.0.4"
 
 const tokamakDeployerRepo = "tokamak-network/tokamak-thanos"
 
