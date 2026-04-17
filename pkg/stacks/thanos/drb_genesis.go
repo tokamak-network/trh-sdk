@@ -390,6 +390,91 @@ func predeployToCodeNamespace(addr common.Address) common.Address {
 	return result
 }
 
+// patchGenesisWithDRBRegularFunding injects balance allocations for Regular operators
+// into the genesis alloc section. Funding amount is max(activationThreshold × 10, 1e18)
+// to ensure each Regular has sufficient balance to activate on-chain.
+func patchGenesisWithDRBRegularFunding(genesisPath string, accounts *DRBAccounts, activationThreshold *big.Int) error {
+	data, err := os.ReadFile(genesisPath)
+	if err != nil {
+		return fmt.Errorf("failed to read genesis file: %w", err)
+	}
+
+	var genesis map[string]json.RawMessage
+	if err := json.Unmarshal(data, &genesis); err != nil {
+		return fmt.Errorf("failed to parse genesis JSON: %w", err)
+	}
+
+	var alloc map[string]json.RawMessage
+	if err := json.Unmarshal(genesis["alloc"], &alloc); err != nil {
+		return fmt.Errorf("failed to parse alloc section: %w", err)
+	}
+
+	// Detect alloc key format (with or without 0x prefix) from existing entries
+	has0xPrefix := false
+	for key := range alloc {
+		if strings.HasPrefix(key, "0x") || strings.HasPrefix(key, "0X") {
+			has0xPrefix = true
+		}
+		break
+	}
+
+	formatAddr := func(addr common.Address) string {
+		hex := strings.ToLower(addr.Hex())
+		if !has0xPrefix {
+			return strings.TrimPrefix(hex, "0x")
+		}
+		return hex
+	}
+
+	// Calculate funding amount: max(threshold × 10, 1e18)
+	fundingAmount := new(big.Int).Mul(activationThreshold, big.NewInt(10))
+	defaultFunding := big.NewInt(1_000_000_000_000_000_000) // 1e18
+	if fundingAmount.Cmp(defaultFunding) < 0 {
+		fundingAmount = defaultFunding
+	}
+
+	// Inject balance for each Regular operator
+	for _, regular := range accounts.Regulars {
+		addrHex := formatAddr(regular.Address)
+
+		// Check if address already has an alloc entry
+		if _, exists := alloc[addrHex]; exists {
+			// Parse existing entry and update balance
+			var existing map[string]json.RawMessage
+			if err := json.Unmarshal(alloc[addrHex], &existing); err != nil {
+				return fmt.Errorf("failed to parse existing alloc for regular %d: %w", regular.Index, err)
+			}
+			existing["balance"] = json.RawMessage(`"0x` + fundingAmount.Text(16) + `"`)
+			updated, err := json.Marshal(existing)
+			if err != nil {
+				return fmt.Errorf("failed to marshal updated alloc for regular %d: %w", regular.Index, err)
+			}
+			alloc[addrHex] = updated
+		} else {
+			// Create new alloc entry
+			newEntry, err := json.Marshal(map[string]interface{}{
+				"balance": "0x" + fundingAmount.Text(16),
+			})
+			if err != nil {
+				return fmt.Errorf("failed to marshal alloc for regular %d: %w", regular.Index, err)
+			}
+			alloc[addrHex] = newEntry
+		}
+	}
+
+	allocJSON, err := json.Marshal(alloc)
+	if err != nil {
+		return err
+	}
+	genesis["alloc"] = allocJSON
+
+	output, err := json.MarshalIndent(genesis, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(genesisPath, output, 0644)
+}
+
 // downloadAndExtractSingleFile downloads an npm tarball and extracts a specific file.
 func downloadAndExtractSingleFile(ctx context.Context, tarballURL, targetFile string) ([]byte, error) {
 	req, err := newHTTPRequest(ctx, tarballURL)

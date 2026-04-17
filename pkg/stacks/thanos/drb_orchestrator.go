@@ -1,27 +1,33 @@
 package thanos
 
 import (
+	"context"
+	"encoding/base64"
 	"fmt"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
+	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/tyler-smith/go-bip32"
 	"github.com/tyler-smith/go-bip39"
+	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
 // DRBRegular holds a single Regular operator's deterministically-derived keys.
 type DRBRegular struct {
-	Index      int            // 1, 2, 3
-	PrivateKey string         // Hex string (without 0x prefix)
-	Address    common.Address // Derived from PrivateKey
-	PeerID     string         // libp2p Ed25519 peer ID (string form)
+	Index        int            // 1, 2, 3
+	PrivateKey   string         // Hex string (without 0x prefix)
+	Address      common.Address // Derived from PrivateKey
+	PeerID       string         // libp2p Ed25519 peer ID (string form)
+	PeerIDBytes  []byte         // libp2p Ed25519 peer ID as protobuf bytes (for volume injection)
 }
 
 // DRBAccounts holds all deterministically-derived DRB accounts.
 type DRBAccounts struct {
 	LeaderPrivateKey string         // Reuses admin key (index 0)
 	LeaderEOA        common.Address // Derived from LeaderPrivateKey
-	LeaderPeerID     string         // libp2p Ed25519 peer ID
+	LeaderPeerID     string         // libp2p Ed25519 peer ID (string form)
+	LeaderPeerIDBytes []byte        // libp2p Ed25519 peer ID as protobuf bytes (for volume injection)
 	Regulars         [3]DRBRegular
 }
 
@@ -33,7 +39,7 @@ func DeriveDRBAccounts(mnemonic string) (*DRBAccounts, error) {
 	}
 
 	// Derive leader peer ID (reuses admin key index 0)
-	leaderPeerID, _, err := DerivePeerID(mnemonic, "leader")
+	leaderPeerID, leaderPeerIDBytes, err := DerivePeerID(mnemonic, "leader")
 	if err != nil {
 		return nil, fmt.Errorf("failed to derive leader peer ID: %w", err)
 	}
@@ -45,9 +51,10 @@ func DeriveDRBAccounts(mnemonic string) (*DRBAccounts, error) {
 	}
 
 	accounts := &DRBAccounts{
-		LeaderPrivateKey: leaderPrivKey,
-		LeaderEOA:        leaderAddr,
-		LeaderPeerID:     leaderPeerID,
+		LeaderPrivateKey:  leaderPrivKey,
+		LeaderEOA:         leaderAddr,
+		LeaderPeerID:      leaderPeerID,
+		LeaderPeerIDBytes: leaderPeerIDBytes,
 	}
 
 	// Derive 3 Regular operators at BIP44 indices 5, 6, 7
@@ -58,16 +65,17 @@ func DeriveDRBAccounts(mnemonic string) (*DRBAccounts, error) {
 		}
 
 		role := fmt.Sprintf("regular-%d", i+1)
-		peerID, _, err := DerivePeerID(mnemonic, role)
+		peerID, peerIDBytes, err := DerivePeerID(mnemonic, role)
 		if err != nil {
 			return nil, fmt.Errorf("failed to derive regular %d peer ID: %w", i+1, err)
 		}
 
 		accounts.Regulars[i] = DRBRegular{
-			Index:      i + 1,
-			PrivateKey: privKey,
-			Address:    addr,
-			PeerID:     peerID,
+			Index:       i + 1,
+			PrivateKey:  privKey,
+			Address:     addr,
+			PeerID:      peerID,
+			PeerIDBytes: peerIDBytes,
 		}
 	}
 
@@ -113,16 +121,78 @@ func getAccountFromIndex(mnemonic string, index int) (string, common.Address, er
 	}
 
 	// Extract ECDSA private key
-	childPrivKey, err := crypto.HexToECDSA(fmt.Sprintf("%064x", childKey.Key))
+	childPrivKey, err := ethcrypto.HexToECDSA(fmt.Sprintf("%064x", childKey.Key))
 	if err != nil {
 		return "", common.Address{}, fmt.Errorf("ECDSA parse: %w", err)
 	}
 
 	// Derive address from private key
-	childAddr := crypto.PubkeyToAddress(childPrivKey.PublicKey)
+	childAddr := ethcrypto.PubkeyToAddress(childPrivKey.PublicKey)
 
 	// Return hex string (no 0x prefix, matches Phase 6 convention)
 	privKeyHex := fmt.Sprintf("%064x", childKey.Key)
 
 	return privKeyHex, childAddr, nil
+}
+
+// BootstrapDRBPeerIDFiles injects Leader and Regular peer ID binary files into their
+// respective static-key Docker volumes. This must be called after postgres containers
+// are healthy but before DRB nodes attempt to start (they expect these files to exist).
+//
+// Uses a temporary alpine container to write base64-encoded data into the volume,
+// avoiding shell escaping issues and working correctly in DinD environments.
+func BootstrapDRBPeerIDFiles(ctx context.Context, composeProject string, accounts *DRBAccounts) error {
+	const helperName = "drb-peer-id-init"
+
+	// Remove any stale helper container from a previous run.
+	_, _ = utils.ExecuteCommand(ctx, "docker", "rm", "-f", helperName)
+
+	// Start temporary alpine container with volumes mounted
+	volumeFlags := []string{"-v", composeProject + "_drb-leader-keys:/peer-id-leader"}
+	for _, regular := range accounts.Regulars {
+		volumeFlags = append(volumeFlags, "-v", fmt.Sprintf("%s_drb-regular-%d-keys:/peer-id-regular-%d",
+			composeProject, regular.Index, regular.Index))
+	}
+
+	allArgs := append(
+		[]string{"run", "-d", "--name", helperName},
+		append(volumeFlags, "alpine", "sleep", "infinity")...,
+	)
+	containerIDOutput, err := utils.ExecuteCommand(ctx, "docker", allArgs...)
+	if err != nil {
+		return fmt.Errorf("failed to start peer ID helper container: %w", err)
+	}
+	containerID := extractLastLine(containerIDOutput)
+	defer utils.ExecuteCommand(ctx, "docker", "rm", "-f", containerID)
+
+	// Write Leader peer ID binary file
+	leaderPeerIDB64 := base64.StdEncoding.EncodeToString(accounts.LeaderPeerIDBytes)
+	cmd := fmt.Sprintf("echo %s | base64 -d > /peer-id-leader/leadernode.bin", leaderPeerIDB64)
+	if _, err := utils.ExecuteCommand(ctx, "docker", "exec", containerID, "sh", "-c", cmd); err != nil {
+		return fmt.Errorf("failed to write leader peer ID file: %w", err)
+	}
+
+	// Write Regular peer ID binary files
+	for _, regular := range accounts.Regulars {
+		regularPeerIDB64 := base64.StdEncoding.EncodeToString(regular.PeerIDBytes)
+		cmd := fmt.Sprintf("echo %s | base64 -d > /peer-id-regular-%d/regularnode.bin",
+			regularPeerIDB64, regular.Index)
+		if _, err := utils.ExecuteCommand(ctx, "docker", "exec", containerID, "sh", "-c", cmd); err != nil {
+			return fmt.Errorf("failed to write regular %d peer ID file: %w", regular.Index, err)
+		}
+	}
+
+	return nil
+}
+
+// extractLastLine extracts the last non-empty line from a string.
+// Used to parse container ID from docker run -d output, which may include pull progress.
+func extractLastLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			return line
+		}
+	}
+	return strings.TrimSpace(s)
 }
