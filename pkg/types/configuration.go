@@ -160,6 +160,9 @@ type Config struct {
 	Preset   string `json:"preset,omitempty"`
 	FeeToken string `json:"fee_token,omitempty"` // "TON", "ETH", "USDT", "USDC"
 
+	// Mnemonic for deterministic key derivation (used for DRB operator key generation in Gaming/Full presets)
+	Mnemonic string `json:"mnemonic,omitempty"`
+
 	// CrossTrade local deployment contracts (set after DeployCrossTradeLocal succeeds)
 	CrossTradeContracts *CrossTradeLocalContracts `json:"cross_trade_contracts,omitempty"`
 }

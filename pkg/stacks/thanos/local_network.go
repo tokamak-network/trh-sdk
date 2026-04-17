@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+	"time"
 
 	_ "embed"
 
@@ -230,6 +231,16 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 		return fmt.Errorf("failed to start preset modules: %w", err)
 	}
 
+	// Post-startup DRB orchestration (Gaming/Full presets only)
+	if modules["drb"] && t.deployConfig.Mnemonic != "" {
+		if err := t.orchestrateDRBOperators(ctx, composePath); err != nil {
+			t.logger.Warnf("⚠️  DRB operator orchestration failed: %v (services may still be running but operators not activated)", err)
+			// Non-blocking: continue to print service URLs
+		} else {
+			t.logger.Info("✅ DRB operators orchestrated and activated successfully")
+		}
+	}
+
 	t.logger.Info("✅ Local L2 network started successfully!")
 	t.printLocalServiceURLs(modules)
 	return nil
@@ -360,7 +371,7 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		MonitoringConfigVolume:           localMonitoringVolume,
 	}
 
-	// Derive DRB leader EOA from admin private key for gaming/full presets
+	// Derive DRB leader EOA and Regular accounts from mnemonic for gaming/full presets
 	if t.deployConfig.Preset == constants.PresetGaming || t.deployConfig.Preset == constants.PresetFull {
 		if t.deployConfig.AdminPrivateKey != "" {
 			addr, err := utils.GetAddressFromPrivateKey(t.deployConfig.AdminPrivateKey)
@@ -369,9 +380,20 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 			}
 		}
 
-		// TODO(phase-7-03): Derive DRB accounts (Leader + 3 Regulars) deterministically from mnemonic
-		// when mnemonic is available in deployment config.
-		// For now, leave DRBLeaderPeerID and DRBRegulars empty (will be populated by BootstrapDRBPeerIDFiles).
+		// Derive DRB accounts (Leader + 3 Regulars) deterministically from mnemonic
+		if t.deployConfig.Mnemonic != "" {
+			accounts, err := DeriveDRBAccounts(t.deployConfig.Mnemonic)
+			if err != nil {
+				t.logger.Warnf("Failed to derive DRB accounts from mnemonic: %v (DRB services will start but without derived peer IDs)", err)
+			} else {
+				// Populate compose data with Leader peer ID and Regular accounts
+				data.DRBLeaderPeerID = accounts.LeaderPeerID
+				for i := range accounts.Regulars {
+					data.DRBRegulars[i] = accounts.Regulars[i]
+				}
+				t.logger.Infof("✅ Derived DRB accounts: Leader peer ID + 3 Regular operators")
+			}
+		}
 	}
 
 	// Populate CrossTrade dApp fields — only when local contracts have been deployed AND the preset
@@ -1030,4 +1052,44 @@ func (t *ThanosStack) buildCrossTradeChainConfigL2L2JSON(ct *types.CrossTradeLoc
 		return "", err
 	}
 	return string(b), nil
+}
+
+// orchestrateDRBOperators executes the post-startup DRB orchestration:
+// 1. Derives DRB accounts from mnemonic
+// 2. Bootstraps peer ID files into Docker volumes
+// 3. Activates Regular operators on-chain
+func (t *ThanosStack) orchestrateDRBOperators(ctx context.Context, composePath string) error {
+	// Derive DRB accounts from mnemonic
+	accounts, err := DeriveDRBAccounts(t.deployConfig.Mnemonic)
+	if err != nil {
+		return fmt.Errorf("derive DRB accounts: %w", err)
+	}
+
+	// Inject peer ID files into static-key volumes
+	projectName := filepath.Base(t.deploymentPath)
+	t.logger.Infof("🔧 Bootstrapping DRB peer ID files into Docker volumes...")
+	if err := BootstrapDRBPeerIDFiles(ctx, projectName, accounts); err != nil {
+		return fmt.Errorf("bootstrap DRB peer ID files: %w", err)
+	}
+	t.logger.Info("✅ DRB peer ID files bootstrapped")
+
+	// Wait for DRB containers to be healthy (simple implementation: just wait a bit)
+	t.logger.Infof("⏳ Waiting for DRB containers to stabilize...")
+	select {
+	case <-time.After(5 * time.Second):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	// Activate Regular operators on-chain
+	t.logger.Infof("📡 Activating Regular DRB operators on-chain...")
+	l2RPC := localL2RPCURL()
+	contractAddr := "0x4200000000000000000000000000000000000060" // CommitReveal2L2 predeploy address
+	threshold := DefaultDRBGenesisConfig().ActivationThreshold
+	if err := ActivateRegularOperators(ctx, l2RPC, contractAddr, accounts, threshold); err != nil {
+		return fmt.Errorf("activate regular operators: %w", err)
+	}
+	t.logger.Info("✅ Regular DRB operators activated")
+
+	return nil
 }
