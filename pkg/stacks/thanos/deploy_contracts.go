@@ -432,6 +432,16 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 	t.logger.Infof("Genesis file path: %s", genesisPath)
 	t.logger.Infof("Rollup file path: %s/rollup.json", t.deploymentPath)
 
+	// Mark deployment as complete so subsequent steps (e.g. local_network start,
+	// deploy-aws-infra) pass the `Status == Completed` gate in their preflight
+	// checks. This persist was accidentally dropped in df52538 when the forge
+	// pipeline was replaced by the tokamak-deployer binary.
+	t.deployConfig.DeployContractState.Status = types.DeployContractStatusCompleted
+	if err = t.deployConfig.WriteToJSONFile(t.deploymentPath); err != nil {
+		t.logger.Error("Failed to persist Completed deploy-contract state", "err", err)
+		return err
+	}
+
 	t.logger.Infof("✅ Configuration successfully saved to: %s/settings.json", t.deploymentPath)
 
 	// If --no-candidate flag is NOT provided, register the candidate
