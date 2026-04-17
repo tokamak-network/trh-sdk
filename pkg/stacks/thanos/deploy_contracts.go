@@ -296,18 +296,23 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		}
 		t.logger.Infof("Admin account balance: %.2f ETH", utils.WeiToEther(balance))
 
-		// Estimate gas price
+		// Estimate gas price. The same suggested price is reused as a fixed
+		// gas price passed to tokamak-deployer (× deployGasPriceMultiplier)
+		// so the deployer avoids 26-32 per-TX SuggestGasPrice round-trips.
 		gasPriceWei, err := l1Client.SuggestGasPrice(ctx)
 		if err != nil {
 			t.logger.Error("❌ Failed to get gas price", "err", err)
 			return err
 		}
 		t.logger.Infof("⛽ Current gas price: %.4f Gwei", new(big.Float).Quo(new(big.Float).SetInt(gasPriceWei), big.NewFloat(1e9)))
+		fixedGasPrice := new(big.Int).Mul(gasPriceWei, deployGasPriceMultiplier)
+		t.logger.Infof("⛽ Fixed gas price for deploy: %.4f Gwei (suggested × %d)",
+			new(big.Float).Quo(new(big.Float).SetInt(fixedGasPrice), big.NewFloat(1e9)),
+			deployGasPriceMultiplier)
 
 		// Estimate deployment cost.
-		// 3x margin (was 2x) to cover gas-price surges during the ~5-10 min deploy
-		// window and the tokamak-deployer v0.0.2+ gas-bump retries (up to ~2.44x
-		// from the initial suggested price).
+		// 3× margin remains on the raw suggested price to keep the balance
+		// precheck wider than the 2× actually charged via fixedGasPrice.
 		estimatedCost := new(big.Int).Mul(gasPriceWei, estimatedDeployContracts)
 		estimatedCost.Mul(estimatedCost, big.NewInt(3))
 		t.logger.Infof("💰 Estimated deployment cost: %.4f ETH", utils.WeiToEther(estimatedCost))
@@ -354,10 +359,11 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 
 		// Deploy contracts via tokamak-deployer binary
 		if err = runDeployContracts(ctx, binaryPath, deployContractsOpts{
-			L1RPCURL:   deployContractsConfig.L1RPCurl,
-			PrivateKey: operators.AdminPrivateKey,
-			L2ChainID:  uint64(l2ChainID),
-			OutPath:    deployOutputPath,
+			L1RPCURL:    deployContractsConfig.L1RPCurl,
+			PrivateKey:  operators.AdminPrivateKey,
+			L2ChainID:   uint64(l2ChainID),
+			OutPath:     deployOutputPath,
+			GasPriceWei: fixedGasPrice,
 		}, t.output); err != nil {
 			t.logger.Error("failed to deploy contracts", "err", err)
 			return err

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"os"
 	"os/exec"
@@ -14,7 +15,11 @@ import (
 )
 
 // TokamakDeployerVersion is the pinned version of the tokamak-deployer binary.
-const TokamakDeployerVersion = "v0.0.4"
+//
+// v0.0.5: --gas-price / --gas-price-multiplier flags introduced. trh-sdk now
+// resolves a conservative fixed gas price once and passes it via --gas-price,
+// so tokamak-deployer no longer calls SuggestGasPrice per TX.
+const TokamakDeployerVersion = "v0.0.5"
 
 const tokamakDeployerRepo = "tokamak-network/tokamak-thanos"
 
@@ -131,6 +136,13 @@ type deployContractsOpts struct {
 	PrivateKey string
 	L2ChainID  uint64
 	OutPath    string
+
+	// GasPriceWei, when non-nil, is forwarded to tokamak-deployer via
+	// --gas-price. The deployer reuses this exact price for every one of
+	// its 26-32 transactions instead of calling SuggestGasPrice per-TX.
+	// trh-sdk sets this to (current suggested) × 2 so the bump-on-timeout
+	// retry path inside the deployer rarely activates.
+	GasPriceWei *big.Int
 }
 
 // genesisOpts holds inputs for the generate-genesis subcommand.
@@ -159,13 +171,17 @@ type genesisOpts struct {
 
 // runDeployContracts executes tokamak-deployer deploy-contracts.
 func runDeployContracts(ctx context.Context, binaryPath string, opts deployContractsOpts, w io.Writer) error {
-	return runBinaryCommand(ctx, binaryPath, []string{
+	args := []string{
 		"deploy-contracts",
 		"--l1-rpc", opts.L1RPCURL,
 		"--private-key", opts.PrivateKey,
 		"--chain-id", fmt.Sprintf("%d", opts.L2ChainID),
 		"--out", opts.OutPath,
-	}, w)
+	}
+	if opts.GasPriceWei != nil && opts.GasPriceWei.Sign() > 0 {
+		args = append(args, "--gas-price", opts.GasPriceWei.String())
+	}
+	return runBinaryCommand(ctx, binaryPath, args, w)
 }
 
 // runGenerateGenesis executes tokamak-deployer generate-genesis.
