@@ -278,7 +278,19 @@ func (s *ThanosStack) readDeploymentContracts() (*types.Contracts, error) {
 	}
 
 	fileName := fmt.Sprintf("%d-deploy.json", bedrockConfig.L1ChainID)
+	// Prefer the tokamak-deployer binary's output. The legacy
+	// <L1ChainID>-deploy.json under contracts-bedrock/deployments/ is often
+	// stale: cloneSourcecode checks the file in from the tokamak-thanos repo
+	// so it exists even on fresh deploys, but no step in the new pipeline
+	// rewrites it. Reading it first shadowed fault-proof addresses the new
+	// pipeline actually produces (Bug #8 consumer gap). See wiki
+	// troubleshooting/drb-local-compose-path-template-bugs.
+	//
+	// types.Contracts silently ignores l1ChainId/l2ChainId metadata keys,
+	// and overlaps with tokamak-deployer's DeployOutput on all address fields
+	// by JSON tag.
 	searchPaths := []string{
+		filepath.Join(s.deploymentPath, "deploy-output.json"),
 		filepath.Join(s.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "deployments", fileName),
 		filepath.Join(filepath.Dir(filepath.Dir(s.deploymentPath)), "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "deployments", fileName),
 		filepath.Join(s.deploymentPath, "deployments", fileName),

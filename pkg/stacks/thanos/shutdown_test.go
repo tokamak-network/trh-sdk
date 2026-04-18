@@ -125,6 +125,109 @@ func TestReadBedrockDeployConfigTemplate_NewPathPrecedence(t *testing.T) {
 	}
 }
 
+// TestReadDeploymentContracts_DeployOutputJSON verifies that the new
+// tokamak-deployer binary flow — which writes to <deploymentPath>/deploy-output.json
+// rather than contracts-bedrock/deployments/<L1ChainID>-deploy.json —
+// is surfaced by readDeploymentContracts. Without this, fault-proof
+// addresses are never delivered to consumers like local_network.go's
+// anchor-init pre-check (Bug #8 consumer half).
+func TestReadDeploymentContracts_DeployOutputJSON(t *testing.T) {
+	dir := t.TempDir()
+
+	// Satisfy readBedrockDeployConfigTemplate.
+	if err := os.MkdirAll(filepath.Join(dir, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	const l1ChainID = 11155111
+	cfg := types.DeployConfigTemplate{L1ChainID: l1ChainID, L2ChainID: 424242}
+	cfgData, _ := json.Marshal(cfg)
+	if err := os.WriteFile(filepath.Join(dir, "deploy-config.json"), cfgData, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// deploy-output.json shape matches tokamak-deployer's DeployOutput struct —
+	// includes l1ChainId/l2ChainId metadata alongside addresses. json.Unmarshal
+	// into types.Contracts ignores unknown keys.
+	const wantAnchor = "0x1111111111111111111111111111111111111111"
+	const wantDispute = "0x2222222222222222222222222222222222222222"
+	deployOutputJSON := `{
+		"l1ChainId": 11155111,
+		"l2ChainId": 424242,
+		"ProxyAdmin": "0x3333333333333333333333333333333333333333",
+		"SystemConfigProxy": "0x4444444444444444444444444444444444444444",
+		"AnchorStateRegistryProxy": "` + wantAnchor + `",
+		"DisputeGameFactoryProxy": "` + wantDispute + `"
+	}`
+	if err := os.WriteFile(filepath.Join(dir, "deploy-output.json"), []byte(deployOutputJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stack := &ThanosStack{
+		deploymentPath: dir,
+		logger:         zap.NewNop().Sugar(),
+	}
+
+	got, err := stack.readDeploymentContracts()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.AnchorStateRegistryProxy != wantAnchor {
+		t.Errorf("AnchorStateRegistryProxy mismatch: got %q, want %q",
+			got.AnchorStateRegistryProxy, wantAnchor)
+	}
+	if got.DisputeGameFactoryProxy != wantDispute {
+		t.Errorf("DisputeGameFactoryProxy mismatch: got %q, want %q",
+			got.DisputeGameFactoryProxy, wantDispute)
+	}
+}
+
+// TestReadDeploymentContracts_DeployOutputPrecedence verifies that when
+// deploy-output.json (new binary flow) and <L1ChainID>-deploy.json (legacy
+// forge artifact, often stale after cloneSourcecode) both exist, the new
+// path wins — otherwise the stale checked-in tokamak-thanos file shadows
+// the actually-deployed addresses.
+func TestReadDeploymentContracts_DeployOutputPrecedence(t *testing.T) {
+	dir := t.TempDir()
+
+	bedrockDeployments := filepath.Join(dir, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "deployments")
+	if err := os.MkdirAll(bedrockDeployments, 0755); err != nil {
+		t.Fatal(err)
+	}
+	const l1ChainID = 11155111
+	cfg := types.DeployConfigTemplate{L1ChainID: l1ChainID, L2ChainID: 424242}
+	cfgData, _ := json.Marshal(cfg)
+	if err := os.WriteFile(filepath.Join(dir, "deploy-config.json"), cfgData, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Legacy: stale pre-cloned artifact with no fault-proof fields.
+	legacy := `{"ProxyAdmin": "0xAAA0000000000000000000000000000000000000"}`
+	if err := os.WriteFile(filepath.Join(bedrockDeployments, "11155111-deploy.json"), []byte(legacy), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// New: deploy-output.json with the fault-proof addresses populated.
+	const wantAnchor = "0x5555555555555555555555555555555555555555"
+	newJSON := `{"l1ChainId":11155111,"l2ChainId":424242,"ProxyAdmin":"0xBBB0000000000000000000000000000000000000","AnchorStateRegistryProxy":"` + wantAnchor + `"}`
+	if err := os.WriteFile(filepath.Join(dir, "deploy-output.json"), []byte(newJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stack := &ThanosStack{
+		deploymentPath: dir,
+		logger:         zap.NewNop().Sugar(),
+	}
+
+	got, err := stack.readDeploymentContracts()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.AnchorStateRegistryProxy != wantAnchor {
+		t.Errorf("expected new path to win with AnchorStateRegistryProxy=%q, got %q",
+			wantAnchor, got.AnchorStateRegistryProxy)
+	}
+}
+
 // TestReadDeploymentContracts_FaultProofAddresses verifies that
 // AnchorStateRegistryProxy and DisputeGameFactoryProxy written by
 // tokamak-deployer v0.0.6 --fault-proof mode are surfaced by
