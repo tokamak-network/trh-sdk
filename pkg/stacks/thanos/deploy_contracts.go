@@ -403,7 +403,6 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		tokamakThanosDirForGenesis,
 		stagedAddrPath,
 		stagedConfigPath,
-		t.deployConfig.L1RPCURL,
 	)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {

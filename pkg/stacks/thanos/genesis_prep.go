@@ -1,6 +1,7 @@
 package thanos
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"go.uber.org/zap"
@@ -112,16 +114,21 @@ func copyFile(src, dst string) error {
 // runForgeL2GenesisScript runs forge scripts/L2Genesis.s.sol inside the
 // contracts-bedrock directory to produce state-dump-<l2ChainID>.json, the L2
 // allocs file op-node will need.
+//
+// No --rpc-url: L2Genesis.s.sol builds state purely from staged JSON via
+// Forge cheatcodes (vm.etch, vm.chainId, vm.dumpState) and never touches L1.
+// Passing --rpc-url forced forge to fork the remote chain for no purpose and
+// stretched this step into a silent multi-minute wait. This matches the
+// upstream `pnpm genesis` script in contracts-bedrock/package.json.
 func runForgeL2GenesisScript(
 	ctx context.Context,
 	logger *zap.SugaredLogger,
-	tokamakThanosDir, stagedAddrPath, stagedConfigPath, l1RPCURL string,
+	tokamakThanosDir, stagedAddrPath, stagedConfigPath string,
 ) (stateDumpPath string, err error) {
 	contractsDir := filepath.Join(tokamakThanosDir, "packages", "tokamak", "contracts-bedrock")
 
 	cmd := exec.CommandContext(ctx, "forge", "script",
 		"scripts/L2Genesis.s.sol:L2Genesis",
-		"--rpc-url", l1RPCURL,
 	)
 	cmd.Dir = contractsDir
 	cmd.Env = append(os.Environ(),
@@ -129,13 +136,39 @@ func runForgeL2GenesisScript(
 		"DEPLOY_CONFIG_PATH="+stagedConfigPath,
 	)
 
-	logger.Info("Running forge L2Genesis.s.sol to produce state-dump",
+	logger.Infow("Running forge L2Genesis.s.sol to produce state-dump",
 		"dir", contractsDir,
 		"addresses", stagedAddrPath,
 		"config", stagedConfigPath)
-	out, err := cmd.CombinedOutput()
+
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return "", fmt.Errorf("forge L2Genesis failed: %w\n%s", err, out)
+		return "", fmt.Errorf("forge L2Genesis stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return "", fmt.Errorf("forge L2Genesis stderr pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("forge L2Genesis start: %w", err)
+	}
+
+	var wg sync.WaitGroup
+	stream := func(r io.Reader) {
+		defer wg.Done()
+		sc := bufio.NewScanner(r)
+		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for sc.Scan() {
+			logger.Info("[forge] " + sc.Text())
+		}
+	}
+	wg.Add(2)
+	go stream(stdout)
+	go stream(stderr)
+	wg.Wait()
+
+	if err := cmd.Wait(); err != nil {
+		return "", fmt.Errorf("forge L2Genesis failed: %w", err)
 	}
 
 	// forge derives the filename from l2ChainID in deploy-config; we infer it
@@ -146,7 +179,7 @@ func runForgeL2GenesisScript(
 	if _, err := os.Stat(stateDumpPath); err != nil {
 		return "", fmt.Errorf("forge L2Genesis completed but state dump missing at %s: %w", stateDumpPath, err)
 	}
-	logger.Info("✅ L2 state dump generated", "path", stateDumpPath)
+	logger.Infow("✅ L2 state dump generated", "path", stateDumpPath)
 	return stateDumpPath, nil
 }
 
@@ -162,7 +195,7 @@ func ensureOpNodeBinary(ctx context.Context, logger *zap.SugaredLogger, tokamakT
 		return binPath, nil
 	}
 
-	logger.Info("op-node binary not found, building it", "dir", opNodeDir, "out", binPath)
+	logger.Infow("op-node binary not found, building it", "dir", opNodeDir, "out", binPath)
 	if err := os.MkdirAll(filepath.Dir(binPath), 0o755); err != nil {
 		return "", fmt.Errorf("mkdir %s: %w", filepath.Dir(binPath), err)
 	}
