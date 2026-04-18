@@ -144,10 +144,11 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 
 	if isResume {
 		if err = runDeployContracts(ctx, binaryPath, deployContractsOpts{
-			L1RPCURL:   t.deployConfig.L1RPCURL,
-			PrivateKey: t.deployConfig.AdminPrivateKey,
-			L2ChainID:  t.deployConfig.L2ChainID,
-			OutPath:    deployOutputPath,
+			L1RPCURL:         t.deployConfig.L1RPCURL,
+			PrivateKey:       t.deployConfig.AdminPrivateKey,
+			L2ChainID:        t.deployConfig.L2ChainID,
+			OutPath:          deployOutputPath,
+			EnableFaultProof: t.deployConfig.EnableFraudProof,
 		}, t.output); err != nil {
 			t.logger.Error("❌ Resume the contracts deployment failed!", "err", err)
 			return err
@@ -360,11 +361,12 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 
 		// Deploy contracts via tokamak-deployer binary
 		if err = runDeployContracts(ctx, binaryPath, deployContractsOpts{
-			L1RPCURL:    deployContractsConfig.L1RPCurl,
-			PrivateKey:  operators.AdminPrivateKey,
-			L2ChainID:   uint64(l2ChainID),
-			OutPath:     deployOutputPath,
-			GasPriceWei: fixedGasPrice,
+			L1RPCURL:         deployContractsConfig.L1RPCurl,
+			PrivateKey:       operators.AdminPrivateKey,
+			L2ChainID:        uint64(l2ChainID),
+			OutPath:          deployOutputPath,
+			EnableFaultProof: deployContractsConfig.EnableFaultProof,
+			GasPriceWei:      fixedGasPrice,
 		}, t.output); err != nil {
 			t.logger.Error("failed to deploy contracts", "err", err)
 			return err

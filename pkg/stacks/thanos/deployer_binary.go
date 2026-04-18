@@ -16,10 +16,14 @@ import (
 
 // TokamakDeployerVersion is the pinned version of the tokamak-deployer binary.
 //
+// v0.0.6: --fault-proof bool flag added. Without it cfg.EnableFaultProof stays
+// false and steps 27-32 (DisputeGameFactory + AnchorStateRegistry) are silently
+// skipped, breaking DRB stacks that expect those addresses (Bug #8).
+//
 // v0.0.5: --gas-price / --gas-price-multiplier flags introduced. trh-sdk now
 // resolves a conservative fixed gas price once and passes it via --gas-price,
 // so tokamak-deployer no longer calls SuggestGasPrice per TX.
-const TokamakDeployerVersion = "v0.0.5"
+const TokamakDeployerVersion = "v0.0.6"
 
 const tokamakDeployerRepo = "tokamak-network/tokamak-thanos"
 
@@ -140,6 +144,12 @@ type deployContractsOpts struct {
 	L2ChainID  uint64
 	OutPath    string
 
+	// EnableFaultProof, when true, adds --fault-proof so tokamak-deployer
+	// runs steps 27-32 (DisputeGameFactory + AnchorStateRegistry). Required
+	// for DRB / fault-proof stacks; the CLI flag has been present since
+	// tokamak-deployer v0.0.6 (Bug #8).
+	EnableFaultProof bool
+
 	// GasPriceWei, when non-nil, is forwarded to tokamak-deployer via
 	// --gas-price. The deployer reuses this exact price for every one of
 	// its 26-32 transactions instead of calling SuggestGasPrice per-TX.
@@ -172,8 +182,10 @@ type genesisOpts struct {
 	BaseGenesisPath string
 }
 
-// runDeployContracts executes tokamak-deployer deploy-contracts.
-func runDeployContracts(ctx context.Context, binaryPath string, opts deployContractsOpts, w io.Writer) error {
+// buildDeployContractsArgs constructs the argv for tokamak-deployer
+// deploy-contracts. Extracted so args can be exercised in unit tests
+// without spawning a subprocess.
+func buildDeployContractsArgs(opts deployContractsOpts) []string {
 	args := []string{
 		"deploy-contracts",
 		"--l1-rpc", opts.L1RPCURL,
@@ -181,10 +193,18 @@ func runDeployContracts(ctx context.Context, binaryPath string, opts deployContr
 		"--chain-id", fmt.Sprintf("%d", opts.L2ChainID),
 		"--out", opts.OutPath,
 	}
+	if opts.EnableFaultProof {
+		args = append(args, "--fault-proof")
+	}
 	if opts.GasPriceWei != nil && opts.GasPriceWei.Sign() > 0 {
 		args = append(args, "--gas-price", opts.GasPriceWei.String())
 	}
-	return runBinaryCommand(ctx, binaryPath, args, w)
+	return args
+}
+
+// runDeployContracts executes tokamak-deployer deploy-contracts.
+func runDeployContracts(ctx context.Context, binaryPath string, opts deployContractsOpts, w io.Writer) error {
+	return runBinaryCommand(ctx, binaryPath, buildDeployContractsArgs(opts), w)
 }
 
 // runGenerateGenesis executes tokamak-deployer generate-genesis.
