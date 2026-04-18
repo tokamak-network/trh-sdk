@@ -917,6 +917,17 @@ func initL1CrossDomainMessenger(
 	systemConfigAddr string,
 	l1ChainID uint64,
 ) error {
+	for _, pair := range []struct{ name, val string }{
+		{"cdmProxyAddr", cdmProxyAddr},
+		{"superchainConfigAddr", superchainConfigAddr},
+		{"portalAddr", portalAddr},
+		{"systemConfigAddr", systemConfigAddr},
+	} {
+		if pair.val == "" {
+			return fmt.Errorf("initL1CrossDomainMessenger: %s is empty", pair.name)
+		}
+	}
+
 	l1Client, err := ethclient.DialContext(ctx, l1RPCURL)
 	if err != nil {
 		return fmt.Errorf("failed to connect to L1 RPC for CDM init: %w", err)
