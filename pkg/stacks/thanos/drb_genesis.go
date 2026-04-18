@@ -156,44 +156,6 @@ func maybeFundDRBRegulars(genesisPath string, preset string, mnemonic string) er
 	return nil
 }
 
-// injectDRBIntoGenesis downloads the CommitReveal2L2 artifact from npm, deploys it
-// in a simulated EVM to resolve immutables, and patches the genesis.json alloc section
-// with the DRB contract at its predeploy address.
-func injectDRBIntoGenesis(ctx context.Context, logger interface{ Info(args ...interface{}) }, genesisPath string, config *DRBGenesisConfig) error {
-	// Step 1: Download artifact from npm
-	artifactData, err := downloadDRBArtifact(ctx, logger)
-	if err != nil {
-		return fmt.Errorf("failed to download DRB artifact: %w", err)
-	}
-
-	// Step 2: Parse artifact
-	var artifact drbArtifact
-	if err := json.Unmarshal(artifactData, &artifact); err != nil {
-		return fmt.Errorf("failed to parse DRB artifact: %w", err)
-	}
-
-	// Step 3: Build constructor input (bytecode + ABI-encoded args)
-	creationCode, err := buildDRBCreationCode(&artifact, config)
-	if err != nil {
-		return fmt.Errorf("failed to build DRB creation code: %w", err)
-	}
-
-	// Step 4: Execute constructor in simulated EVM to get runtime bytecode with immutables
-	// CommitReveal2 constructor requires msg.value >= activationThreshold
-	runtimeBytecode, err := deployDRBSimulated(creationCode, config.ActivationThreshold)
-	if err != nil {
-		return fmt.Errorf("failed to deploy DRB in simulated EVM: %w", err)
-	}
-
-	// Step 5: Patch genesis.json
-	if err := patchGenesisWithDRB(genesisPath, runtimeBytecode); err != nil {
-		return fmt.Errorf("failed to patch genesis with DRB: %w", err)
-	}
-
-	logger.Info("✅ DRB contract (CommitReveal2L2) injected into genesis at " + drbPredeployAddress)
-	return nil
-}
-
 // downloadDRBArtifact fetches the CommitReveal2L2.json artifact from the npm package.
 func downloadDRBArtifact(ctx context.Context, logger interface{ Info(args ...interface{}) }) ([]byte, error) {
 	logger.Info("Downloading DRB contract artifact from npm...")
