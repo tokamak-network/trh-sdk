@@ -174,7 +174,7 @@ func (t *ThanosStack) DeployCrossTradeLocal(
 		l2CrossTradeProxyABI, l2CrossTradeImplABI,
 		common.HexToAddress(input.CrossDomainMessenger),
 		common.HexToAddress(input.L1CrossTradeProxy),
-		l1ChainID,
+		l1ChainID, l2ChainID,
 		input.SupportedTokens,
 		l2CrossTradeRegisterTokenFn,
 		t.logger,
@@ -205,7 +205,7 @@ func (t *ThanosStack) DeployCrossTradeLocal(
 		l2toL2CrossTradeProxyABI, l2toL2CrossTradeL2ImplABI,
 		common.HexToAddress(input.CrossDomainMessenger),
 		common.HexToAddress(input.L2toL2CrossTradeL1),
-		l1ChainID,
+		l1ChainID, l2ChainID,
 		input.SupportedTokens,
 		l2toL2RegisterTokenFn,
 		t.logger,
@@ -394,6 +394,7 @@ func deployL2CrossTradePair(
 	crossDomainMessenger common.Address,
 	l1CrossTradeAddr common.Address,
 	l1ChainID *big.Int,
+	l2ChainID *big.Int,
 	tokens []TokenPair,
 	registerTokenFn registerTokenFunc,
 	logger *zap.SugaredLogger,
@@ -551,15 +552,43 @@ func deployL2CrossTradePair(
 		if _, err := sendDepositCall(ctx, portal, opts, l1Client, proxyAddr, calldata, 1_000_000, logger); err != nil {
 			return nil, fmt.Errorf("step 7 (token %d) failed: %w", i, err)
 		}
-		// L2 verification: registerCheck(l1ChainId, l1Token, l2Token) should return true.
-		// Falls back to sleep if registerCheck view function is not available in proxy ABI.
-		if _, hasRegCheck := proxyABI.Methods["registerCheck"]; hasRegCheck {
-			checkCalldata, err = proxyABI.Pack("registerCheck", l1ChainID, l1Token, l2Token)
-			if err != nil {
-				return nil, fmt.Errorf("step 7 (token %d): failed to pack registerCheck calldata: %w", i, err)
+		// L2 verification: registerCheck should return true after registerToken deposit lands.
+		// Two ABI variants exist:
+		//   L2CrossTrade:        registerCheck(uint256 l1ChainId, address l1Token, address l2Token)
+		//   L2toL2CrossTradeL2:  registerCheck(bytes32 id) where
+		//                          id = keccak256(abi.encode(l1ChainId, l2SrcChainId, l2DstChainId,
+		//                                                    l1token, l2SrcToken, l2DstToken))
+		if method, hasRegCheck := proxyABI.Methods["registerCheck"]; hasRegCheck {
+			switch len(method.Inputs) {
+			case 3:
+				checkCalldata, err = proxyABI.Pack("registerCheck", l1ChainID, l1Token, l2Token)
+				if err != nil {
+					return nil, fmt.Errorf("step 7 (token %d): failed to pack registerCheck calldata: %w", i, err)
+				}
+			case 1:
+				// L2toL2CrossTradeL2: same-L2 deployment uses l2ChainID for both src and dst.
+				uint256Type, _ := abi.NewType("uint256", "", nil)
+				addrType, _ := abi.NewType("address", "", nil)
+				hashArgs := abi.Arguments{
+					{Type: uint256Type}, {Type: uint256Type}, {Type: uint256Type},
+					{Type: addrType}, {Type: addrType}, {Type: addrType},
+				}
+				packed, packErr := hashArgs.Pack(l1ChainID, l2ChainID, l2ChainID, l1Token, l2Token, l2Token)
+				if packErr != nil {
+					return nil, fmt.Errorf("step 7 (token %d): failed to compute registerCheck id: %w", i, packErr)
+				}
+				id := crypto.Keccak256Hash(packed)
+				checkCalldata, err = proxyABI.Pack("registerCheck", id)
+				if err != nil {
+					return nil, fmt.Errorf("step 7 (token %d): failed to pack registerCheck calldata: %w", i, err)
+				}
+			default:
+				checkCalldata = nil
 			}
-			if err := verifyDepositCallEffect(ctx, l2Client, proxyAddr, checkCalldata, logger); err != nil {
-				return nil, fmt.Errorf("step 7 (token %d) L2 verification failed: %w", i, err)
+			if len(checkCalldata) > 0 {
+				if err := verifyDepositCallEffect(ctx, l2Client, proxyAddr, checkCalldata, logger); err != nil {
+					return nil, fmt.Errorf("step 7 (token %d) L2 verification failed: %w", i, err)
+				}
 			}
 		} else {
 			logger.Infof("no view function for registerToken verification (token %d), waited 10s", i)
