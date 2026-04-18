@@ -125,6 +125,64 @@ func TestReadBedrockDeployConfigTemplate_NewPathPrecedence(t *testing.T) {
 	}
 }
 
+// TestReadDeploymentContracts_FaultProofAddresses verifies that
+// AnchorStateRegistryProxy and DisputeGameFactoryProxy written by
+// tokamak-deployer v0.0.6 --fault-proof mode are surfaced by
+// readDeploymentContracts. Regression test for the consumer half of Bug #8.
+func TestReadDeploymentContracts_FaultProofAddresses(t *testing.T) {
+	dir := t.TempDir()
+
+	// Bedrock path so readBedrockDeployConfigTemplate has somewhere to look
+	// even though we only need deploy-config.json at the new location.
+	if err := os.MkdirAll(filepath.Join(dir, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "deployments"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	const l1ChainID = 11155111
+	cfg := types.DeployConfigTemplate{L1ChainID: l1ChainID, L2ChainID: 424242}
+	cfgData, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "deploy-config.json"), cfgData, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Contracts file with fault-proof addresses populated, mirroring what
+	// tokamak-deployer v0.0.6 emits when --fault-proof is set.
+	deployFile := filepath.Join(dir, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "deployments",
+		"11155111-deploy.json")
+	const wantAnchor = "0x1111111111111111111111111111111111111111"
+	const wantDispute = "0x2222222222222222222222222222222222222222"
+	contractsJSON := `{
+		"ProxyAdmin": "0x3333333333333333333333333333333333333333",
+		"SystemConfigProxy": "0x4444444444444444444444444444444444444444",
+		"AnchorStateRegistryProxy": "` + wantAnchor + `",
+		"DisputeGameFactoryProxy": "` + wantDispute + `"
+	}`
+	if err := os.WriteFile(deployFile, []byte(contractsJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stack := &ThanosStack{
+		deploymentPath: dir,
+		logger:         zap.NewNop().Sugar(),
+	}
+
+	got, err := stack.readDeploymentContracts()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.AnchorStateRegistryProxy != wantAnchor {
+		t.Errorf("AnchorStateRegistryProxy mismatch: got %q, want %q",
+			got.AnchorStateRegistryProxy, wantAnchor)
+	}
+	if got.DisputeGameFactoryProxy != wantDispute {
+		t.Errorf("DisputeGameFactoryProxy mismatch: got %q, want %q",
+			got.DisputeGameFactoryProxy, wantDispute)
+	}
+}
+
 // TestReadBedrockDeployConfigTemplate_NoneFound verifies the error message
 // when neither location has a deploy-config.json.
 func TestReadBedrockDeployConfigTemplate_NoneFound(t *testing.T) {
