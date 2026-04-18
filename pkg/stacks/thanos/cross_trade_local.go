@@ -203,7 +203,7 @@ func (t *ThanosStack) DeployCrossTradeLocal(
 		deployerAddr, l2toL2Nonce,
 		L2toL2CrossTradeL2Bytecode, L2toL2CrossTradeProxyBytecode,
 		l2toL2CrossTradeProxyABI, l2toL2CrossTradeL2ImplABI,
-		common.HexToAddress(input.CrossDomainMessenger),
+		common.HexToAddress("0x4200000000000000000000000000000000000007"), // L2CDM predeploy
 		common.HexToAddress(input.L2toL2CrossTradeL1),
 		l1ChainID, l2ChainID,
 		input.SupportedTokens,

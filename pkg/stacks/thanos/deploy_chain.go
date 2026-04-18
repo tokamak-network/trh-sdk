@@ -902,6 +902,91 @@ func initGenesisAnchorState(
 	return nil
 }
 
+// initL1CrossDomainMessenger calls initialize(SuperchainConfig, OptimismPortal, SystemConfig)
+// on the L1CrossDomainMessengerProxy. tokamak-deployer only calls upgrade(proxy, impl), so the
+// initialize() initializer is never invoked, leaving portal = 0x0 and CDM non-functional.
+// Idempotency: skipped if portal() already returns a non-zero address.
+func initL1CrossDomainMessenger(
+	ctx context.Context,
+	logger *zap.SugaredLogger,
+	l1RPCURL string,
+	adminPrivateKey string,
+	cdmProxyAddr string,
+	superchainConfigAddr string,
+	portalAddr string,
+	systemConfigAddr string,
+	l1ChainID uint64,
+) error {
+	l1Client, err := ethclient.DialContext(ctx, l1RPCURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to L1 RPC for CDM init: %w", err)
+	}
+	defer l1Client.Close()
+
+	cdmAddr := common.HexToAddress(cdmProxyAddr)
+
+	// Idempotency guard: read portal() slot. If already non-zero, CDM is initialized.
+	portalSelector := crypto.Keccak256([]byte("portal()"))[:4]
+	if result, callErr := l1Client.CallContract(ctx, ethereum.CallMsg{To: &cdmAddr, Data: portalSelector}, nil); callErr == nil && len(result) >= 32 {
+		existingPortal := common.BytesToAddress(result[12:32])
+		if existingPortal != (common.Address{}) {
+			logger.Infof("✅ L1CrossDomainMessenger already initialized (portal=%s), skipping", existingPortal.Hex())
+			return nil
+		}
+	}
+
+	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(adminPrivateKey, "0x"))
+	if err != nil {
+		return fmt.Errorf("invalid admin private key for CDM init: %w", err)
+	}
+	adminAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	chainID := big.NewInt(int64(l1ChainID))
+
+	// Build initialize(address,address,address) calldata.
+	// ABI encoding: 4-byte selector + 3 * 32-byte left-padded address slots.
+	selector := crypto.Keccak256([]byte("initialize(address,address,address)"))[:4]
+	calldata := make([]byte, 100)
+	copy(calldata[0:4], selector)
+	copy(calldata[16:36], common.HexToAddress(superchainConfigAddr).Bytes()) // slot 0
+	copy(calldata[48:68], common.HexToAddress(portalAddr).Bytes())            // slot 1
+	copy(calldata[80:100], common.HexToAddress(systemConfigAddr).Bytes())     // slot 2
+
+	// Pre-flight: detect reverts before spending L1 gas (mirrors initGenesisAnchorState pattern)
+	if _, simErr := l1Client.CallContract(ctx, ethereum.CallMsg{From: adminAddr, To: &cdmAddr, Data: calldata}, nil); simErr != nil {
+		return fmt.Errorf("L1CrossDomainMessenger initialize pre-flight failed: %w", simErr)
+	}
+
+	nonce, err := l1Client.PendingNonceAt(ctx, adminAddr)
+	if err != nil {
+		return fmt.Errorf("failed to get nonce for CDM init: %w", err)
+	}
+	gasPrice, err := l1Client.SuggestGasPrice(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get gas price for CDM init: %w", err)
+	}
+	gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(2))
+
+	tx := ethtypes.NewTransaction(nonce, cdmAddr, big.NewInt(0), 300_000, gasPrice, calldata)
+	signedTx, err := ethtypes.SignTx(tx, ethtypes.NewEIP155Signer(chainID), privKey)
+	if err != nil {
+		return fmt.Errorf("failed to sign CDM init tx: %w", err)
+	}
+	if err := l1Client.SendTransaction(ctx, signedTx); err != nil {
+		return fmt.Errorf("failed to send CDM init tx: %w", err)
+	}
+	logger.Infof("L1CrossDomainMessenger.initialize() tx sent: %s (waiting for receipt...)", signedTx.Hash().Hex())
+
+	receipt, err := bind.WaitMined(ctx, l1Client, signedTx)
+	if err != nil {
+		return fmt.Errorf("failed to wait for CDM init tx receipt: %w", err)
+	}
+	if receipt.Status != ethtypes.ReceiptStatusSuccessful {
+		return fmt.Errorf("L1CrossDomainMessenger.initialize() tx reverted (tx: %s)", signedTx.Hash().Hex())
+	}
+	logger.Info("✅ L1CrossDomainMessenger initialized successfully")
+	return nil
+}
+
 // installPresetModules installs all modules enabled for the configured preset.
 // Modules that require user input (blockExplorer, crossTrade) are skipped with
 // a guidance log; they must be installed manually via 'trh install <plugin>'.

@@ -154,12 +154,14 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 		return fmt.Errorf("failed to start core services: %w", err)
 	}
 
+	// Read deployed contracts for initialization steps (anchor state and CDM init).
+	deployedContracts, contractsErr := t.readDeploymentContracts()
+	if contractsErr != nil {
+		return fmt.Errorf("failed to read deployed contracts: %w", contractsErr)
+	}
+
 	// Initialize AnchorStateRegistry for fault proof chains
 	if t.deployConfig.EnableFraudProof {
-		deployedContracts, contractsErr := t.readDeploymentContracts()
-		if contractsErr != nil {
-			return fmt.Errorf("failed to read deployed contracts for anchor init: %w", contractsErr)
-		}
 		if deployedContracts.AnchorStateRegistryProxy == "" {
 			return fmt.Errorf("AnchorStateRegistryProxy address not found in deployed contracts — cannot initialize genesis anchor state")
 		}
@@ -178,6 +180,24 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 		}
 		t.logger.Info("✅ Genesis anchor state initialized in AnchorStateRegistry")
 	}
+
+	// Initialize L1CrossDomainMessenger. tokamak-deployer upgrade(proxy, impl) does not call
+	// initialize(), leaving portal = 0x0. Required for CDM-based message passing (CRT-02).
+	cdmErr := initL1CrossDomainMessenger(
+		ctx,
+		t.logger,
+		t.deployConfig.L1RPCURL,
+		t.deployConfig.AdminPrivateKey,
+		deployedContracts.L1CrossDomainMessengerProxy,
+		deployedContracts.SuperchainConfigProxy,
+		deployedContracts.OptimismPortalProxy,
+		deployedContracts.SystemConfigProxy,
+		t.deployConfig.L1ChainID,
+	)
+	if cdmErr != nil {
+		return fmt.Errorf("failed to initialize L1CrossDomainMessenger: %w", cdmErr)
+	}
+	t.logger.Info("✅ L1CrossDomainMessenger initialized")
 
 	// Setup AA Paymaster for non-TON fee tokens.
 	// Runs after core services are healthy. Non-blocking: failure logs a warning
