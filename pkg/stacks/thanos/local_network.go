@@ -702,6 +702,30 @@ func (t *ThanosStack) resetOpGethVolume(ctx context.Context, composePath string)
 		projectName+"_op-geth-data")
 }
 
+// resetDRBVolumes removes all DRB-related Docker volumes (drb-leader-keys and drb-regular-X-keys)
+// so they can be reinitialized with fresh peer ID files. Called when mnemonic changes.
+func (t *ThanosStack) resetDRBVolumes(ctx context.Context, composePath string) error {
+	// Stop DRB containers to release the volumes
+	_ = utils.ExecuteCommandStream(ctx, t.logger, "docker", "compose",
+		"-f", composePath, "stop", "drb-leader", "drb-regular-1", "drb-regular-2", "drb-regular-3")
+
+	// Remove the DRB containers to release the volumes
+	_ = utils.ExecuteCommandStream(ctx, t.logger, "docker", "compose",
+		"-f", composePath, "rm", "-f", "drb-leader", "drb-regular-1", "drb-regular-2", "drb-regular-3")
+
+	// Remove the named volumes
+	projectName := filepath.Base(t.deploymentPath)
+	volumes := []string{
+		projectName + "_drb-leader-keys",
+		projectName + "_drb-regular-1-keys",
+		projectName + "_drb-regular-2-keys",
+		projectName + "_drb-regular-3-keys",
+	}
+	args := []string{"volume", "rm", "-f"}
+	args = append(args, volumes...)
+	return utils.ExecuteCommandStream(ctx, t.logger, "docker", args...)
+}
+
 // hashFile returns the hex-encoded SHA-256 hash of a file's contents.
 func hashFile(path string) (string, error) {
 	data, err := os.ReadFile(path)
@@ -1056,10 +1080,30 @@ func (t *ThanosStack) buildCrossTradeChainConfigL2L2JSON(ct *types.CrossTradeLoc
 }
 
 // orchestrateDRBOperators executes the post-startup DRB orchestration:
-// 1. Derives DRB accounts from mnemonic
-// 2. Bootstraps peer ID files into Docker volumes
-// 3. Activates Regular operators on-chain
+// 1. Detects mnemonic changes and resets DRB volumes if needed
+// 2. Derives DRB accounts from mnemonic
+// 3. Bootstraps peer ID files into Docker volumes
+// 4. Activates Regular operators on-chain
 func (t *ThanosStack) orchestrateDRBOperators(ctx context.Context, composePath string) error {
+	// Compute current mnemonic hash
+	currentMnemonicHash := mnemonicHash(t.deployConfig.Mnemonic)
+
+	// Check if DRB volumes exist and if mnemonic has changed
+	projectName := filepath.Base(t.deploymentPath)
+	leaderVolume := projectName + "_drb-leader-keys"
+	if volumeExists(ctx, leaderVolume) {
+		prevHash, readErr := readMnemonicHashFromDRBVolume(ctx, leaderVolume)
+		if readErr == nil && prevHash == currentMnemonicHash {
+			t.logger.Info("DRB volumes already initialized with matching mnemonic, skipping volume reset")
+		} else if prevHash != currentMnemonicHash {
+			// Mnemonic changed (or marker missing) — wipe stale DRB volumes
+			t.logger.Warn("DRB volumes out of sync with current mnemonic, reinitializing...")
+			if err := t.resetDRBVolumes(ctx, composePath); err != nil {
+				return fmt.Errorf("failed to reset DRB volumes: %w", err)
+			}
+		}
+	}
+
 	// Derive DRB accounts from mnemonic
 	accounts, err := DeriveDRBAccounts(t.deployConfig.Mnemonic)
 	if err != nil {
@@ -1067,12 +1111,23 @@ func (t *ThanosStack) orchestrateDRBOperators(ctx context.Context, composePath s
 	}
 
 	// Inject peer ID files into static-key volumes
-	projectName := filepath.Base(t.deploymentPath)
 	t.logger.Infof("🔧 Bootstrapping DRB peer ID files into Docker volumes...")
 	if err := BootstrapDRBPeerIDFiles(ctx, projectName, accounts); err != nil {
 		return fmt.Errorf("bootstrap DRB peer ID files: %w", err)
 	}
 	t.logger.Info("✅ DRB peer ID files bootstrapped")
+
+	// Persist mnemonic hash in DRB volumes so future resumes can detect
+	// whether the existing volumes match this mnemonic.
+	if err := writeMnemonicHashToDRBVolume(ctx, leaderVolume, currentMnemonicHash); err != nil {
+		return fmt.Errorf("failed to persist mnemonic hash in leader volume: %w", err)
+	}
+	for _, regular := range accounts.Regulars {
+		regularVolume := projectName + "_drb-regular-" + fmt.Sprintf("%d", regular.Index) + "-keys"
+		if err := writeMnemonicHashToDRBVolume(ctx, regularVolume, currentMnemonicHash); err != nil {
+			return fmt.Errorf("failed to persist mnemonic hash in regular %d volume: %w", regular.Index, err)
+		}
+	}
 
 	// Restart DRB containers so they reload the freshly-written peer ID keys.
 	// Without this, leader/regulars started with docker compose up before

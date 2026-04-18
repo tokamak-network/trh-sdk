@@ -2,8 +2,11 @@ package thanos
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
+	"os/exec"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -197,4 +200,33 @@ func extractLastLine(s string) string {
 		}
 	}
 	return strings.TrimSpace(s)
+}
+
+// mnemonicHash computes the SHA-256 hash of a mnemonic string (hex-encoded).
+// Used to detect when mnemonic changes between deployments.
+func mnemonicHash(mnemonic string) string {
+	hash := sha256.Sum256([]byte(mnemonic))
+	return hex.EncodeToString(hash[:])
+}
+
+// readMnemonicHashFromDRBVolume reads the `.mnemonic-hash` marker file from a DRB volume.
+// Returns empty string and non-nil error if the marker is missing or unreadable.
+func readMnemonicHashFromDRBVolume(ctx context.Context, volume string) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "run", "--rm",
+		"-v", volume+":/data",
+		"alpine", "sh", "-c", "cat /data/.mnemonic-hash 2>/dev/null || true")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("read mnemonic hash from volume %s: %w", volume, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// writeMnemonicHashToDRBVolume writes the current mnemonic hash to the `.mnemonic-hash`
+// marker file inside a DRB volume.
+func writeMnemonicHashToDRBVolume(ctx context.Context, volume, hash string) error {
+	cmd := exec.CommandContext(ctx, "docker", "run", "--rm",
+		"-v", volume+":/data",
+		"alpine", "sh", "-c", fmt.Sprintf("printf %%s %q > /data/.mnemonic-hash", hash))
+	return cmd.Run()
 }
