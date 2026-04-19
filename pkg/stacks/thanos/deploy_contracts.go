@@ -450,6 +450,32 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		return err
 	}
 
+	// RC1 fix: maybeInjectDRB and maybeFundDRBRegulars modify genesis.json alloc
+	// (adding DRB predeploy + regular operator funding), which changes the state root
+	// and therefore the block hash. The rollup.json produced above still contains the
+	// pre-DRB genesis.l2.hash, so op-node would crash with a genesis hash mismatch.
+	// Regenerate rollup.json from the final genesis.json using --base-genesis so the
+	// deployer recomputes core.Genesis.ToBlock().Hash() without re-running op-node.
+	if constants.PresetModules[t.deployConfig.Preset]["drb"] {
+		rollupPath := filepath.Join(t.deploymentPath, "rollup.json")
+		t.logger.Info("Regenerating rollup.json genesis hash after DRB genesis injection...")
+		if err := runGenerateGenesis(ctx, binaryPath, genesisOpts{
+			DeployOutputPath: stagedAddrPath,
+			ConfigPath:       deployConfigFilePath,
+			OutPath:          genesisPath,
+			RollupOutPath:    rollupPath,
+			BaseGenesisPath:  genesisPath,
+		}, t.output); err != nil {
+			if errors.Is(err, context.Canceled) {
+				t.logger.Warn("Deployment canceled")
+				return err
+			}
+			t.logger.Error("❌ Failed to regenerate rollup.json after DRB injection", "err", err)
+			return err
+		}
+		t.logger.Info("✅ rollup.json genesis.l2.hash updated to match post-DRB genesis")
+	}
+
 	// Mark deployment as complete so subsequent steps (e.g. local_network start,
 	// deploy-aws-infra) pass the `Status == Completed` gate in their preflight
 	// checks. This persist was accidentally dropped in df52538 when the forge
