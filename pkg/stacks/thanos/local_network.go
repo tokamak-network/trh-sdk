@@ -172,6 +172,8 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 			localL2RPCURL(),
 			t.deployConfig.AdminPrivateKey,
 			deployedContracts.AnchorStateRegistryProxy,
+			deployedContracts.ProxyAdmin,
+			deployedContracts.AnchorStateRegistry, // impl addr for StorageSetter fallback restore
 			t.deployConfig.L1ChainID,
 			0, // gameType 0 = CANNON
 		)

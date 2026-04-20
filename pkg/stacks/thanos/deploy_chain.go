@@ -2,6 +2,7 @@ package thanos
 
 import (
 	"context"
+	gocrypto "crypto/ecdsa"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -534,6 +535,8 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 			l2RPCUrl,
 			t.deployConfig.AdminPrivateKey,
 			deployedContracts.AnchorStateRegistryProxy,
+			deployedContracts.ProxyAdmin,
+			deployedContracts.AnchorStateRegistry, // impl addr for StorageSetter fallback restore
 			t.deployConfig.L1ChainID,
 			0, // gameType 0 = CANNON (default respected game type)
 		)
@@ -767,6 +770,167 @@ func patchAnchorStateRegistry(tokamakThanosDir string) error {
 //   - stateRoot = genesis block header Root field
 //   - messagePasserStorageRoot = empty MPT root (L2ToL1MessagePasser has no storage at block 0)
 //   - blockHash = genesis block hash
+// storageSetterBytecode is a pre-compiled StorageSetter contract that exposes
+// setBytes32(bytes32,bytes32). Deployed transiently during RC3 fallback to write
+// the genesis anchor root directly into AnchorStateRegistry proxy storage.
+// Compiled from Optimism's StorageSetter.sol at solc 0.8.15.
+var storageSetterBytecode = common.FromHex("608060405234801561001057600080fd5b506103a9806100206000396000f3fe608060405234801561001057600080fd5b506004361061009e5760003560e01c8063a6ed563e11610066578063a6ed563e14610149578063abfdcced14610165578063bd02d0f514610149578063ca446dd914610173578063e2a4853a146100e857600080fd5b80630528afe2146100a357806321f8a721146100b85780634e91db08146100e857806354fd4d50146100fa5780637ae1cfca1461012b575b600080fd5b6100b66100b13660046101f4565b610181565b005b6100cb6100c6366004610269565b6101e4565b6040516001600160a01b0390911681526020015b60405180910390f35b6100b66100f6366004610282565b9055565b61011e604051806040016040528060058152602001640312e322e360dc1b81525081565b6040516100df91906102a4565b6101396100c6366004610269565b60405190151581526020016100df565b6101576100c6366004610269565b6040519081526020016100df565b6100b66100f6366004610282565b8060005b818110156101de576101cc8484838181106101a2576101a261035f565b905060400201600001358585848181106101be576101be61035f565b905060400201602001359055565b806101d681610375565b915050610185565b50505050565b60006101ee825490565b92915050565b6000806020838503121561020757600080fd5b823567ffffffffffffffff8082111561021f57600080fd5b818501915085601f83011261023357600080fd5b81358181111561024257600080fd5b8660208260061b850101111561025757600080fd5b60209290920196919550909350505050565b60006020828403121561027b57600080fd5b5035919050565b6000806040838503121561029557600080fd5b50508035926020909101359150565b600060208083528351808285015260005b818110156102d1578581018301518582016040015282016102b5565b818111156102e3576000604083870101525b50601f01601f1916929092016040019392505050565b6000806040838503121561030c57600080fd5b823591506020830135801515811461032357600080fd5b809150509250929050565b6000806040838503121561034157600080fd5b8235915060208301356001600160a01b038116811461032357600080fd5b634e487b7160e01b600052603260045260246000fd5b60006001820161039557634e487b7160e01b600052601160045260246000fd5b506001019056fea164736f6c634300080f000a")
+
+// bootstrapAnchorStateViaStorageSetter writes outputRootHash to the AnchorStateRegistry proxy
+// storage slot for anchors[gameType].root without requiring setInitialAnchorState on the impl.
+// Used as an RC3 fallback when the deployed impl (embedded pre-compiled bytecode in
+// tokamak-deployer) lacks the setInitialAnchorState function.
+//
+// Procedure mirrors scripts/fix-anchor-state-registry.mjs:
+//  1. Verify ProxyAdmin owner is EOA (Gnosis Safe would require multisig approval)
+//  2. Deploy StorageSetter transiently
+//  3. ProxyAdmin.upgradeAndCall(proxy, storageSetter, setBytes32(slot, root))
+//  4. Verify storage slot was written
+//  5. ProxyAdmin.upgrade(proxy, originalImpl) — restore; loud-fail if this fails
+//
+// Storage slot: keccak256(abi.encode(uint256(gameType), uint256(1)))
+// For gameType=0: 0xa6eef7e35abe7026729641147f7915573c7e97b47efa546f5f6e3230263bcb49
+// This assumes anchors mapping is at storage slot 1 in the current impl bytecode.
+func bootstrapAnchorStateViaStorageSetter(
+	ctx context.Context,
+	logger *zap.SugaredLogger,
+	l1Client *ethclient.Client,
+	privKey *gocrypto.PrivateKey,
+	adminAddr common.Address,
+	chainID *big.Int,
+	anchorProxy common.Address,
+	proxyAdmin common.Address,
+	originalImpl common.Address,
+	outputRootHash common.Hash,
+	gameType uint32,
+) error {
+	// 1. Verify ProxyAdmin owner is EOA.
+	ownerSel := crypto.Keccak256([]byte("owner()"))[:4]
+	ownerResult, err := l1Client.CallContract(ctx, ethereum.CallMsg{To: &proxyAdmin, Data: ownerSel}, nil)
+	if err != nil || len(ownerResult) < 32 {
+		return fmt.Errorf("failed to call ProxyAdmin.owner(): %w", err)
+	}
+	ownerAddr := common.BytesToAddress(ownerResult[12:32])
+	ownerCode, err := l1Client.CodeAt(ctx, ownerAddr, nil)
+	if err != nil {
+		return fmt.Errorf("failed to check ProxyAdmin owner code size: %w", err)
+	}
+	if len(ownerCode) > 0 {
+		return fmt.Errorf("ProxyAdmin owner %s is a contract (Gnosis Safe?), not EOA — "+
+			"StorageSetter fallback requires EOA ownership; run fix-anchor-state-registry.mjs manually", ownerAddr.Hex())
+	}
+
+	signer := ethtypes.NewEIP155Signer(chainID)
+
+	sendAndWait := func(nonce uint64, to *common.Address, data []byte, gasLimit uint64, gasPrice *big.Int) (*ethtypes.Receipt, error) {
+		var tx *ethtypes.Transaction
+		if to == nil {
+			tx = ethtypes.NewContractCreation(nonce, big.NewInt(0), gasLimit, gasPrice, data)
+		} else {
+			tx = ethtypes.NewTransaction(nonce, *to, big.NewInt(0), gasLimit, gasPrice, data)
+		}
+		signed, signErr := ethtypes.SignTx(tx, signer, privKey)
+		if signErr != nil {
+			return nil, fmt.Errorf("sign tx: %w", signErr)
+		}
+		if sendErr := l1Client.SendTransaction(ctx, signed); sendErr != nil {
+			return nil, fmt.Errorf("send tx: %w", sendErr)
+		}
+		receipt, waitErr := bind.WaitMined(ctx, l1Client, signed)
+		if waitErr != nil {
+			return nil, fmt.Errorf("wait mined: %w", waitErr)
+		}
+		if receipt.Status != ethtypes.ReceiptStatusSuccessful {
+			return nil, fmt.Errorf("tx reverted (hash: %s)", signed.Hash().Hex())
+		}
+		return receipt, nil
+	}
+
+	gasPrice, err := l1Client.SuggestGasPrice(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get gas price: %w", err)
+	}
+	gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(2))
+
+	// 2. Deploy StorageSetter.
+	nonce, err := l1Client.PendingNonceAt(ctx, adminAddr)
+	if err != nil {
+		return fmt.Errorf("failed to get nonce: %w", err)
+	}
+	deployReceipt, err := sendAndWait(nonce, nil, storageSetterBytecode, 500_000, gasPrice)
+	if err != nil {
+		return fmt.Errorf("StorageSetter deploy failed: %w", err)
+	}
+	storageSetterAddr := deployReceipt.ContractAddress
+	logger.Infof("StorageSetter deployed at %s", storageSetterAddr.Hex())
+
+	// 3. Build setBytes32(slot, root) calldata.
+	// Storage slot for anchors[gameType].root (anchors mapping at storage slot 1):
+	//   keccak256(abi.encode(uint256(gameType), uint256(1)))
+	// For gameType=0 this is 0xa6eef7e35abe7026729641147f7915573c7e97b47efa546f5f6e3230263bcb49.
+	var slotPreimage [64]byte
+	binary.BigEndian.PutUint32(slotPreimage[28:32], gameType) // uint256(gameType), right-aligned
+	slotPreimage[63] = 1                                      // uint256(1) for slot index
+	anchorsRootSlot := crypto.Keccak256Hash(slotPreimage[:])
+
+	setBytes32Sel := crypto.Keccak256([]byte("setBytes32(bytes32,bytes32)"))[:4]
+	setBytes32Data := make([]byte, 68)
+	copy(setBytes32Data[0:4], setBytes32Sel)
+	copy(setBytes32Data[4:36], anchorsRootSlot.Bytes())
+	copy(setBytes32Data[36:68], outputRootHash.Bytes())
+
+	// 4. Build upgradeAndCall(proxy, storageSetter, setBytes32Data) calldata.
+	// ABI-encode (address, address, bytes): static head (3×32) + dynamic tail (length word + padded data).
+	paddedLen := (len(setBytes32Data) + 31) / 32 * 32
+	upgradeAndCallSel := crypto.Keccak256([]byte("upgradeAndCall(address,address,bytes)"))[:4]
+	upgradeAndCallData := make([]byte, 4+3*32+32+paddedLen)
+	copy(upgradeAndCallData[0:4], upgradeAndCallSel)
+	copy(upgradeAndCallData[4+12:4+32], anchorProxy.Bytes())
+	copy(upgradeAndCallData[36+12:68], storageSetterAddr.Bytes())
+	upgradeAndCallData[4+64+31] = 96 // offset to bytes = 3×32 = 96
+	binary.BigEndian.PutUint64(upgradeAndCallData[100+24:132], uint64(len(setBytes32Data)))
+	copy(upgradeAndCallData[132:], setBytes32Data)
+
+	nonce, err = l1Client.PendingNonceAt(ctx, adminAddr)
+	if err != nil {
+		return fmt.Errorf("failed to get nonce for upgradeAndCall: %w", err)
+	}
+	if _, err = sendAndWait(nonce, &proxyAdmin, upgradeAndCallData, 300_000, gasPrice); err != nil {
+		return fmt.Errorf("ProxyAdmin.upgradeAndCall (StorageSetter) failed: %w", err)
+	}
+	logger.Infof("upgradeAndCall(StorageSetter) confirmed — slot %s should be set", anchorsRootSlot.Hex())
+
+	// 5. Verify storage slot was written before restoring impl.
+	storedValue, err := l1Client.StorageAt(ctx, anchorProxy, anchorsRootSlot, nil)
+	if err != nil {
+		return fmt.Errorf("failed to verify storage slot after StorageSetter write: %w", err)
+	}
+	storedHash := common.BytesToHash(storedValue)
+	if storedHash != outputRootHash {
+		return fmt.Errorf("storage slot verification failed: expected %s, got %s", outputRootHash.Hex(), storedHash.Hex())
+	}
+	logger.Infof("✅ Storage slot verified: anchors[%d].root = %s", gameType, storedHash.Hex())
+
+	// 6. Restore original impl via ProxyAdmin.upgrade(proxy, originalImpl).
+	// LOUD-FAIL: if this fails the proxy is stuck pointing at StorageSetter — must not swallow.
+	upgradeSel := crypto.Keccak256([]byte("upgrade(address,address)"))[:4]
+	upgradeData := make([]byte, 4+32+32)
+	copy(upgradeData[0:4], upgradeSel)
+	copy(upgradeData[4+12:4+32], anchorProxy.Bytes())
+	copy(upgradeData[36+12:68], originalImpl.Bytes())
+
+	nonce, err = l1Client.PendingNonceAt(ctx, adminAddr)
+	if err != nil {
+		return fmt.Errorf("CRITICAL: failed to get nonce for impl restore (proxy stuck at StorageSetter %s): %w", storageSetterAddr.Hex(), err)
+	}
+	if _, err = sendAndWait(nonce, &proxyAdmin, upgradeData, 200_000, gasPrice); err != nil {
+		return fmt.Errorf("CRITICAL: ProxyAdmin.upgrade (restore impl) failed — proxy %s is stuck pointing at StorageSetter %s, manual intervention required: %w",
+			anchorProxy.Hex(), storageSetterAddr.Hex(), err)
+	}
+	logger.Infof("✅ AnchorStateRegistry impl restored to %s", originalImpl.Hex())
+	return nil
+}
+
 func initGenesisAnchorState(
 	ctx context.Context,
 	logger *zap.SugaredLogger,
@@ -774,6 +938,8 @@ func initGenesisAnchorState(
 	l2RPCURL string,
 	adminPrivateKey string,
 	anchorStateRegistryAddr string,
+	proxyAdminAddr string,
+	implAddr string,
 	l1ChainID uint64,
 	gameType uint32,
 ) error {
@@ -852,19 +1018,19 @@ func initGenesisAnchorState(
 		}
 	}
 
-	// Guard B: Pre-flight eth_call simulation — detect missing function before wasting L1 gas.
-	// Simulates the call as the admin address (= guardian) so authorization passes when the
-	// function exists. If the simulation reverts, the deployed AnchorStateRegistry likely lacks
-	// setInitialAnchorState (deployed without patchAnchorStateRegistry patch).
+	// Guard B: Pre-flight eth_call simulation — detect missing setInitialAnchorState before wasting gas.
+	// If the simulation reverts, the deployed impl (embedded pre-compiled bytecode in tokamak-deployer)
+	// lacks setInitialAnchorState. Automatically fall back to the StorageSetter pattern.
 	if _, simErr := l1Client.CallContract(ctx, ethereum.CallMsg{From: adminAddr, To: &anchorAddr, Data: calldata}, nil); simErr != nil {
-		return fmt.Errorf("setInitialAnchorState pre-flight simulation failed — "+
-			"AnchorStateRegistry at %s likely lacks the setInitialAnchorState function "+
-			"(deploy-l1-contracts was run with an older backend that did not patch the contract). "+
-			"Fix options:\n"+
-			"  (1) Delete this deployment and redeploy from scratch with the current backend.\n"+
-			"  (2) Run scripts/fix-anchor-state-registry.mjs to write anchor state directly to storage,\n"+
-			"      then retry deploy-aws-infra (the idempotency check will skip the tx).\n"+
-			"Simulation error: %w", anchorStateRegistryAddr, simErr)
+		logger.Warnf("setInitialAnchorState simulation failed for %s — impl lacks function, applying StorageSetter fallback (RC3): %v", anchorStateRegistryAddr, simErr)
+		return bootstrapAnchorStateViaStorageSetter(
+			ctx, logger, l1Client, privKey, adminAddr, chainID,
+			anchorAddr,
+			common.HexToAddress(proxyAdminAddr),
+			common.HexToAddress(implAddr),
+			outputRootHash,
+			gameType,
+		)
 	}
 
 	nonce, err := l1Client.PendingNonceAt(ctx, adminAddr)
