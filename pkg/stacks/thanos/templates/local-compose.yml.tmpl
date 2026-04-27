@@ -63,7 +63,9 @@ services:
       - OP_NODE_METRICS_ADDR=0.0.0.0
       - OP_NODE_METRICS_PORT=7300
       - OP_NODE_IGNORE_MISSING_PECTRA_BLOB_SCHEDULE=true
-      - OP_NODE_L1_RPC_RATE_LIMIT=5
+      - OP_NODE_L1_RPC_RATE_LIMIT=3
+      - OP_NODE_L1_RPC_KIND=alchemy
+      - OP_NODE_L1_MAX_CONCURRENCY=3
     depends_on:
       op-geth:
         condition: service_healthy
