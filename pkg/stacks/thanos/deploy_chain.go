@@ -1179,6 +1179,109 @@ func initL1CrossDomainMessenger(
 	return nil
 }
 
+// initL2OutputOracle calls initialize(...) on the L2OutputOracleProxy.
+// tokamak-deployer only calls upgrade(proxy, impl), so the initialize() initializer is
+// never invoked, leaving proposer = address(0) and op-proposer unable to submit outputs.
+// Idempotency: skipped if proposer() already returns a non-zero address.
+func initL2OutputOracle(
+	ctx context.Context,
+	logger *zap.SugaredLogger,
+	l1RPCURL string,
+	adminPrivateKey string,
+	l2OOProxyAddr string,
+	submissionInterval uint64,
+	l2BlockTime uint64,
+	startingBlockNumber uint64,
+	startingTimestamp uint64,
+	proposerAddr string,
+	challengerAddr string,
+	finalizationPeriodSeconds uint64,
+	l1ChainID uint64,
+) error {
+	for _, pair := range []struct{ name, val string }{
+		{"l2OOProxyAddr", l2OOProxyAddr},
+		{"proposerAddr", proposerAddr},
+		{"challengerAddr", challengerAddr},
+	} {
+		if pair.val == "" {
+			return fmt.Errorf("initL2OutputOracle: %s is empty", pair.name)
+		}
+	}
+
+	l1Client, err := ethclient.DialContext(ctx, l1RPCURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to L1 RPC for L2OO init: %w", err)
+	}
+	defer l1Client.Close()
+
+	l2OOAddr := common.HexToAddress(l2OOProxyAddr)
+
+	// Idempotency guard: read proposer(). If already non-zero, L2OO is initialized.
+	proposerSelector := crypto.Keccak256([]byte("proposer()"))[:4]
+	if result, callErr := l1Client.CallContract(ctx, ethereum.CallMsg{To: &l2OOAddr, Data: proposerSelector}, nil); callErr == nil && len(result) >= 32 {
+		existingProposer := common.BytesToAddress(result[12:32])
+		if existingProposer != (common.Address{}) {
+			logger.Infof("✅ L2OutputOracle already initialized (proposer=%s), skipping", existingProposer.Hex())
+			return nil
+		}
+	}
+
+	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(adminPrivateKey, "0x"))
+	if err != nil {
+		return fmt.Errorf("invalid admin private key for L2OO init: %w", err)
+	}
+	adminAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	chainID := big.NewInt(int64(l1ChainID))
+
+	// Build initialize(uint256,uint256,uint256,uint256,address,address,uint256) calldata.
+	// ABI: 4-byte selector + 7 × 32-byte slots (uint256 big-endian, address right-aligned).
+	selector := crypto.Keccak256([]byte("initialize(uint256,uint256,uint256,uint256,address,address,uint256)"))[:4]
+	calldata := make([]byte, 4+7*32)
+	copy(calldata[0:4], selector)
+	new(big.Int).SetUint64(submissionInterval).FillBytes(calldata[4+0*32 : 4+1*32])
+	new(big.Int).SetUint64(l2BlockTime).FillBytes(calldata[4+1*32 : 4+2*32])
+	new(big.Int).SetUint64(startingBlockNumber).FillBytes(calldata[4+2*32 : 4+3*32])
+	new(big.Int).SetUint64(startingTimestamp).FillBytes(calldata[4+3*32 : 4+4*32])
+	copy(calldata[4+4*32+12:4+5*32], common.HexToAddress(proposerAddr).Bytes())
+	copy(calldata[4+5*32+12:4+6*32], common.HexToAddress(challengerAddr).Bytes())
+	new(big.Int).SetUint64(finalizationPeriodSeconds).FillBytes(calldata[4+6*32 : 4+7*32])
+
+	// Pre-flight simulation before spending L1 gas.
+	if _, simErr := l1Client.CallContract(ctx, ethereum.CallMsg{From: adminAddr, To: &l2OOAddr, Data: calldata}, nil); simErr != nil {
+		return fmt.Errorf("L2OutputOracle initialize pre-flight failed: %w", simErr)
+	}
+
+	nonce, err := l1Client.PendingNonceAt(ctx, adminAddr)
+	if err != nil {
+		return fmt.Errorf("failed to get nonce for L2OO init: %w", err)
+	}
+	gasPrice, err := l1Client.SuggestGasPrice(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get gas price for L2OO init: %w", err)
+	}
+	gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(2))
+
+	tx := ethtypes.NewTransaction(nonce, l2OOAddr, big.NewInt(0), 300_000, gasPrice, calldata)
+	signedTx, err := ethtypes.SignTx(tx, ethtypes.NewEIP155Signer(chainID), privKey)
+	if err != nil {
+		return fmt.Errorf("failed to sign L2OO init tx: %w", err)
+	}
+	if err := l1Client.SendTransaction(ctx, signedTx); err != nil {
+		return fmt.Errorf("failed to send L2OO init tx: %w", err)
+	}
+	logger.Infof("L2OutputOracle.initialize() tx sent: %s (waiting for receipt...)", signedTx.Hash().Hex())
+
+	receipt, err := bind.WaitMined(ctx, l1Client, signedTx)
+	if err != nil {
+		return fmt.Errorf("failed to wait for L2OO init tx receipt: %w", err)
+	}
+	if receipt.Status != ethtypes.ReceiptStatusSuccessful {
+		return fmt.Errorf("L2OutputOracle.initialize() tx reverted (tx: %s)", signedTx.Hash().Hex())
+	}
+	logger.Info("✅ L2OutputOracle initialized successfully")
+	return nil
+}
+
 // installPresetModules installs all modules enabled for the configured preset.
 // Modules that require user input (blockExplorer, crossTrade) are skipped with
 // a guidance log; they must be installed manually via 'trh install <plugin>'.

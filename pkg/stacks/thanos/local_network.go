@@ -202,6 +202,36 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 	}
 	t.logger.Info("✅ L1CrossDomainMessenger initialized")
 
+	// Initialize L2OutputOracle. tokamak-deployer upgrade(proxy, impl) does not call
+	// initialize(), leaving proposer = address(0) and op-proposer unable to submit outputs.
+	if deployedContracts.L2OutputOracleProxy != "" {
+		bedrockCfg, bedrockErr := t.readBedrockDeployConfigTemplate()
+		if bedrockErr != nil {
+			return fmt.Errorf("failed to read bedrock deploy config for L2OO init: %w", bedrockErr)
+		}
+		l2ooErr := initL2OutputOracle(
+			ctx,
+			t.logger,
+			t.deployConfig.L1RPCURL,
+			t.deployConfig.AdminPrivateKey,
+			deployedContracts.L2OutputOracleProxy,
+			bedrockCfg.L2OutputOracleSubmissionInterval,
+			t.deployConfig.ChainConfiguration.L2BlockTime,
+			bedrockCfg.L2OutputOracleStartingBlockNumber,
+			bedrockCfg.L2OutputOracleStartingTimestamp,
+			bedrockCfg.L2OutputOracleProposer,
+			bedrockCfg.L2OutputOracleChallenger,
+			t.deployConfig.ChainConfiguration.GetFinalizationPeriodSeconds(),
+			t.deployConfig.L1ChainID,
+		)
+		if l2ooErr != nil {
+			return fmt.Errorf("failed to initialize L2OutputOracle: %w", l2ooErr)
+		}
+		t.logger.Info("✅ L2OutputOracle initialized")
+	} else {
+		t.logger.Warn("⚠️  L2OutputOracleProxy address not found in deployed contracts — skipping L2OO init")
+	}
+
 	// Setup AA Paymaster for non-TON fee tokens.
 	// Runs after core services are healthy. Non-blocking: failure logs a warning
 	// but does not prevent the L2 network from starting.
