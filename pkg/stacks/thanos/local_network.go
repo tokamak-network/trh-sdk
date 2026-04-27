@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -184,6 +185,47 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 		t.logger.Info("✅ Genesis anchor state initialized in AnchorStateRegistry")
 	}
 
+	// Initialize SystemConfig. tokamak-deployer upgrade(proxy, impl) does not call initialize(),
+	// leaving batcherHash, gasLimit, and all L1 contract references at zero. op-node reads
+	// batcherHash + gasLimit from SystemConfig for the derivation pipeline — without this the
+	// chain cannot derive L2 blocks from L1 batches.
+	{
+		bedrockCfg, bedrockErr := t.readBedrockDeployConfigTemplate()
+		if bedrockErr != nil {
+			return fmt.Errorf("failed to read bedrock deploy config for SystemConfig init: %w", bedrockErr)
+		}
+		// L2GenesisBlockGasLimit is stored as a hex string (e.g. "0x1c9c380").
+		gasLimitHex := strings.TrimPrefix(bedrockCfg.L2GenesisBlockGasLimit, "0x")
+		gasLimit, parseErr := strconv.ParseUint(gasLimitHex, 16, 64)
+		if parseErr != nil {
+			return fmt.Errorf("invalid L2GenesisBlockGasLimit %q: %w", bedrockCfg.L2GenesisBlockGasLimit, parseErr)
+		}
+		scErr := initSystemConfig(
+			ctx,
+			t.logger,
+			t.deployConfig.L1RPCURL,
+			t.deployConfig.AdminPrivateKey,
+			deployedContracts.SystemConfigProxy,
+			bedrockCfg.FinalSystemOwner,
+			bedrockCfg.BatchSenderAddress,
+			gasLimit,
+			bedrockCfg.P2pSequencerAddress,
+			bedrockCfg.BatchInboxAddress,
+			deployedContracts.L1CrossDomainMessengerProxy,
+			deployedContracts.L1ERC721BridgeProxy,
+			deployedContracts.L1StandardBridgeProxy,
+			deployedContracts.DisputeGameFactoryProxy,
+			deployedContracts.OptimismPortalProxy,
+			deployedContracts.OptimismMintableERC20FactoryProxy,
+			bedrockCfg.NativeTokenAddress,
+			t.deployConfig.L1ChainID,
+		)
+		if scErr != nil {
+			return fmt.Errorf("failed to initialize SystemConfig: %w", scErr)
+		}
+		t.logger.Info("✅ SystemConfig initialized")
+	}
+
 	// Initialize L1CrossDomainMessenger. tokamak-deployer upgrade(proxy, impl) does not call
 	// initialize(), leaving portal = 0x0. Required for CDM-based message passing (CRT-02).
 	cdmErr := initL1CrossDomainMessenger(
@@ -202,34 +244,104 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 	}
 	t.logger.Info("✅ L1CrossDomainMessenger initialized")
 
-	// Initialize L2OutputOracle. tokamak-deployer upgrade(proxy, impl) does not call
-	// initialize(), leaving proposer = address(0) and op-proposer unable to submit outputs.
-	if deployedContracts.L2OutputOracleProxy != "" {
-		bedrockCfg, bedrockErr := t.readBedrockDeployConfigTemplate()
-		if bedrockErr != nil {
-			return fmt.Errorf("failed to read bedrock deploy config for L2OO init: %w", bedrockErr)
-		}
-		l2ooErr := initL2OutputOracle(
+	// L2OO mode: initialize OptimismPortal (l2Oracle path) and L2OutputOracle.
+	// DGF mode: OptimismPortal2 upgrade + initialization is handled below.
+	if !t.deployConfig.EnableFraudProof {
+		portalErr := initOptimismPortal(
 			ctx,
 			t.logger,
 			t.deployConfig.L1RPCURL,
 			t.deployConfig.AdminPrivateKey,
+			deployedContracts.OptimismPortalProxy,
 			deployedContracts.L2OutputOracleProxy,
-			bedrockCfg.L2OutputOracleSubmissionInterval,
-			t.deployConfig.ChainConfiguration.L2BlockTime,
-			bedrockCfg.L2OutputOracleStartingBlockNumber,
-			bedrockCfg.L2OutputOracleStartingTimestamp,
-			bedrockCfg.L2OutputOracleProposer,
-			bedrockCfg.L2OutputOracleChallenger,
-			t.deployConfig.ChainConfiguration.GetFinalizationPeriodSeconds(),
+			deployedContracts.SystemConfigProxy,
+			deployedContracts.SuperchainConfigProxy,
 			t.deployConfig.L1ChainID,
 		)
-		if l2ooErr != nil {
-			return fmt.Errorf("failed to initialize L2OutputOracle: %w", l2ooErr)
+		if portalErr != nil {
+			return fmt.Errorf("failed to initialize OptimismPortal: %w", portalErr)
 		}
-		t.logger.Info("✅ L2OutputOracle initialized")
+		t.logger.Info("✅ OptimismPortal initialized")
+
+		// Initialize L2OutputOracle. tokamak-deployer upgrade(proxy, impl) does not call
+		// initialize(), leaving proposer = address(0) and op-proposer unable to submit outputs.
+		if deployedContracts.L2OutputOracleProxy != "" {
+			bedrockCfg, bedrockErr := t.readBedrockDeployConfigTemplate()
+			if bedrockErr != nil {
+				return fmt.Errorf("failed to read bedrock deploy config for L2OO init: %w", bedrockErr)
+			}
+			l2ooErr := initL2OutputOracle(
+				ctx,
+				t.logger,
+				t.deployConfig.L1RPCURL,
+				t.deployConfig.AdminPrivateKey,
+				deployedContracts.L2OutputOracleProxy,
+				bedrockCfg.L2OutputOracleSubmissionInterval,
+				t.deployConfig.ChainConfiguration.L2BlockTime,
+				bedrockCfg.L2OutputOracleStartingBlockNumber,
+				bedrockCfg.L2OutputOracleStartingTimestamp,
+				bedrockCfg.L2OutputOracleProposer,
+				bedrockCfg.L2OutputOracleChallenger,
+				t.deployConfig.ChainConfiguration.GetFinalizationPeriodSeconds(),
+				t.deployConfig.L1ChainID,
+			)
+			if l2ooErr != nil {
+				return fmt.Errorf("failed to initialize L2OutputOracle: %w", l2ooErr)
+			}
+			t.logger.Info("✅ L2OutputOracle initialized")
+		} else {
+			t.logger.Warn("⚠️  L2OutputOracleProxy address not found in deployed contracts — skipping L2OO init")
+		}
 	} else {
-		t.logger.Warn("⚠️  L2OutputOracleProxy address not found in deployed contracts — skipping L2OO init")
+		// DGF mode: initialize DisputeGameFactory + register FaultDisputeGame impl,
+		// then upgrade portal proxy to OptimismPortal2 and initialize it.
+		bedrockCfg, bedrockErr := t.readBedrockDeployConfigTemplate()
+		if bedrockErr != nil {
+			return fmt.Errorf("failed to read bedrock deploy config for DGF init: %w", bedrockErr)
+		}
+
+		dgfErr := initDisputeGameFactory(
+			ctx,
+			t.logger,
+			t.deployConfig.L1RPCURL,
+			t.deployConfig.AdminPrivateKey,
+			deployedContracts.DisputeGameFactoryProxy,
+			deployedContracts.Mips,
+			deployedContracts.DelayedWETHProxy,
+			deployedContracts.AnchorStateRegistryProxy,
+			t.deployConfig.L1ChainID,
+			t.deployConfig.L2ChainID,
+			uint32(bedrockCfg.RespectedGameType),
+			bedrockCfg.FaultGameAbsolutePrestate,
+			bedrockCfg.FaultGameMaxDepth,
+			bedrockCfg.FaultGameSplitDepth,
+			bedrockCfg.FaultGameClockExtension,
+			bedrockCfg.FaultGameMaxClockDuration,
+		)
+		if dgfErr != nil {
+			return fmt.Errorf("failed to initialize DisputeGameFactory: %w", dgfErr)
+		}
+		t.logger.Info("✅ DisputeGameFactory initialized")
+
+		portal2Err := initOptimismPortal2(
+			ctx,
+			t.logger,
+			t.deployConfig.L1RPCURL,
+			t.deployConfig.AdminPrivateKey,
+			deployedContracts.OptimismPortalProxy,
+			deployedContracts.ProxyAdmin,
+			deployedContracts.DisputeGameFactoryProxy,
+			deployedContracts.SystemConfigProxy,
+			deployedContracts.SuperchainConfigProxy,
+			t.deployConfig.L1ChainID,
+			bedrockCfg.ProofMaturityDelaySeconds,
+			bedrockCfg.DisputeGameFinalityDelaySeconds,
+			uint32(bedrockCfg.RespectedGameType),
+		)
+		if portal2Err != nil {
+			return fmt.Errorf("failed to initialize OptimismPortal2: %w", portal2Err)
+		}
+		t.logger.Info("✅ OptimismPortal2 initialized")
 	}
 
 	// Setup AA Paymaster for non-TON fee tokens.

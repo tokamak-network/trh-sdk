@@ -3,7 +3,9 @@ package thanos
 import (
 	"context"
 	gocrypto "crypto/ecdsa"
+	_ "embed"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +27,12 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"go.uber.org/zap"
 )
+
+//go:embed artifacts/FaultDisputeGame.json
+var faultDisputeGameArtifact []byte
+
+//go:embed artifacts/OptimismPortal2.json
+var optimismPortal2Artifact []byte
 
 // ----------------------------------------- Deploy command  ----------------------------- //
 
@@ -1279,6 +1287,741 @@ func initL2OutputOracle(
 		return fmt.Errorf("L2OutputOracle.initialize() tx reverted (tx: %s)", signedTx.Hash().Hex())
 	}
 	logger.Info("✅ L2OutputOracle initialized successfully")
+	return nil
+}
+
+// initSystemConfig calls initialize(...) on the SystemConfigProxy.
+// tokamak-deployer only calls upgrade(proxy, impl) and never invokes initialize(),
+// leaving batcherHash, gasLimit, unsafeBlockSigner, and all L1 contract addresses at
+// zero / empty. op-node reads batcherHash + gasLimit from SystemConfig for derivation,
+// so the chain stalls without this call.
+// Idempotency: skipped if gasLimit() already returns a non-zero value.
+func initSystemConfig(
+	ctx context.Context,
+	logger *zap.SugaredLogger,
+	l1RPCURL string,
+	adminPrivateKey string,
+	systemConfigProxyAddr string,
+	owner string,
+	batcherAddr string,
+	gasLimit uint64,
+	unsafeBlockSigner string,
+	batchInbox string,
+	l1CDMProxy string,
+	l1ERC721BridgeProxy string,
+	l1StandardBridgeProxy string,
+	disputeGameFactoryProxy string,
+	optimismPortalProxy string,
+	optimismMintableERC20FactoryProxy string,
+	nativeTokenAddress string,
+	l1ChainID uint64,
+) error {
+	for _, pair := range []struct{ name, val string }{
+		{"systemConfigProxyAddr", systemConfigProxyAddr},
+		{"owner", owner},
+		{"batcherAddr", batcherAddr},
+		{"unsafeBlockSigner", unsafeBlockSigner},
+		{"batchInbox", batchInbox},
+		{"l1CDMProxy", l1CDMProxy},
+		{"l1StandardBridgeProxy", l1StandardBridgeProxy},
+		{"optimismPortalProxy", optimismPortalProxy},
+	} {
+		if pair.val == "" {
+			return fmt.Errorf("initSystemConfig: %s is empty", pair.name)
+		}
+	}
+
+	l1Client, err := ethclient.DialContext(ctx, l1RPCURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to L1 RPC for SystemConfig init: %w", err)
+	}
+	defer l1Client.Close()
+
+	scAddr := common.HexToAddress(systemConfigProxyAddr)
+
+	// Idempotency guard: read gasLimit(). If non-zero, SystemConfig is already initialized.
+	gasLimitSelector := crypto.Keccak256([]byte("gasLimit()"))[:4]
+	if result, callErr := l1Client.CallContract(ctx, ethereum.CallMsg{To: &scAddr, Data: gasLimitSelector}, nil); callErr == nil && len(result) >= 32 {
+		existing := new(big.Int).SetBytes(result[24:32])
+		if existing.Sign() > 0 {
+			logger.Infof("✅ SystemConfig already initialized (gasLimit=%d), skipping", existing.Uint64())
+			return nil
+		}
+	}
+
+	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(adminPrivateKey, "0x"))
+	if err != nil {
+		return fmt.Errorf("invalid admin private key for SystemConfig init: %w", err)
+	}
+	adminAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	chainID := big.NewInt(int64(l1ChainID))
+
+	// ABI selector for:
+	// initialize(address,uint32,uint32,bytes32,uint64,address,
+	//            (uint32,uint8,uint8,uint32,uint32,uint128),
+	//            address,
+	//            (address,address,address,address,address,address,address,address))
+	selector := crypto.Keccak256([]byte(
+		"initialize(address,uint32,uint32,bytes32,uint64,address,(uint32,uint8,uint8,uint32,uint32,uint128),address,(address,address,address,address,address,address,address,address))",
+	))[:4]
+
+	// Standard OP Stack EIP-4844 scalar defaults (used across Tokamak deployments).
+	const (
+		basefeeScalar     = uint32(1368)
+		blobbasefeeScalar = uint32(810949)
+	)
+
+	// Standard ResourceConfig values matching the OP Stack reference deployment.
+	const (
+		rcMaxResourceLimit            = uint32(20_000_000)
+		rcElasticityMultiplier        = uint8(10)
+		rcBaseFeeMaxChangeDenominator = uint8(8)
+		rcMinimumBaseFee              = uint32(1_000_000_000) // 1 gwei
+		rcSystemTxMaxGas              = uint32(1_000_000)
+	)
+	// maximumBaseFee = type(uint128).max = 2^128 - 1
+	maxUint128 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 128), big.NewInt(1))
+
+	// batcherHash is the batcher address zero-padded to bytes32 (left-aligned in uint256).
+	var batcherHash [32]byte
+	batcherAddrBytes := common.HexToAddress(batcherAddr).Bytes()
+	copy(batcherHash[12:], batcherAddrBytes) // address occupies bytes 12-31
+
+	// nativeTokenAddress defaults to address(0) if not set (ETH fee token).
+	nativeTokenAddr := common.Address{}
+	if nativeTokenAddress != "" && nativeTokenAddress != "0x0000000000000000000000000000000000000000" {
+		nativeTokenAddr = common.HexToAddress(nativeTokenAddress)
+	}
+
+	// disputeGameFactory defaults to address(0) for L2OO mode.
+	dgfAddr := common.Address{}
+	if disputeGameFactoryProxy != "" {
+		dgfAddr = common.HexToAddress(disputeGameFactoryProxy)
+	}
+
+	// Build calldata: 4-byte selector + 21 × 32-byte slots.
+	calldata := make([]byte, 4+21*32)
+	copy(calldata[0:4], selector)
+	offset := 4
+
+	// slot 0: _owner (address)
+	copy(calldata[offset+12:offset+32], common.HexToAddress(owner).Bytes())
+	offset += 32
+	// slot 1: _basefeeScalar (uint32)
+	new(big.Int).SetUint64(uint64(basefeeScalar)).FillBytes(calldata[offset : offset+32])
+	offset += 32
+	// slot 2: _blobbasefeeScalar (uint32)
+	new(big.Int).SetUint64(uint64(blobbasefeeScalar)).FillBytes(calldata[offset : offset+32])
+	offset += 32
+	// slot 3: _batcherHash (bytes32)
+	copy(calldata[offset:offset+32], batcherHash[:])
+	offset += 32
+	// slot 4: _gasLimit (uint64)
+	new(big.Int).SetUint64(gasLimit).FillBytes(calldata[offset : offset+32])
+	offset += 32
+	// slot 5: _unsafeBlockSigner (address)
+	copy(calldata[offset+12:offset+32], common.HexToAddress(unsafeBlockSigner).Bytes())
+	offset += 32
+	// ResourceConfig tuple (6 slots):
+	// slot 6: maxResourceLimit (uint32)
+	new(big.Int).SetUint64(uint64(rcMaxResourceLimit)).FillBytes(calldata[offset : offset+32])
+	offset += 32
+	// slot 7: elasticityMultiplier (uint8)
+	calldata[offset+31] = byte(rcElasticityMultiplier)
+	offset += 32
+	// slot 8: baseFeeMaxChangeDenominator (uint8)
+	calldata[offset+31] = byte(rcBaseFeeMaxChangeDenominator)
+	offset += 32
+	// slot 9: minimumBaseFee (uint32)
+	new(big.Int).SetUint64(uint64(rcMinimumBaseFee)).FillBytes(calldata[offset : offset+32])
+	offset += 32
+	// slot 10: systemTxMaxGas (uint32)
+	new(big.Int).SetUint64(uint64(rcSystemTxMaxGas)).FillBytes(calldata[offset : offset+32])
+	offset += 32
+	// slot 11: maximumBaseFee (uint128)
+	maxUint128.FillBytes(calldata[offset : offset+32])
+	offset += 32
+	// slot 12: _batchInbox (address)
+	copy(calldata[offset+12:offset+32], common.HexToAddress(batchInbox).Bytes())
+	offset += 32
+	// Addresses tuple (8 slots):
+	// slot 13: l1CrossDomainMessenger
+	copy(calldata[offset+12:offset+32], common.HexToAddress(l1CDMProxy).Bytes())
+	offset += 32
+	// slot 14: l1ERC721Bridge
+	l1ERC721 := common.Address{}
+	if l1ERC721BridgeProxy != "" {
+		l1ERC721 = common.HexToAddress(l1ERC721BridgeProxy)
+	}
+	copy(calldata[offset+12:offset+32], l1ERC721.Bytes())
+	offset += 32
+	// slot 15: l1StandardBridge
+	copy(calldata[offset+12:offset+32], common.HexToAddress(l1StandardBridgeProxy).Bytes())
+	offset += 32
+	// slot 16: disputeGameFactory
+	copy(calldata[offset+12:offset+32], dgfAddr.Bytes())
+	offset += 32
+	// slot 17: optimismPortal
+	copy(calldata[offset+12:offset+32], common.HexToAddress(optimismPortalProxy).Bytes())
+	offset += 32
+	// slot 18: optimismMintableERC20Factory
+	mintableFactory := common.Address{}
+	if optimismMintableERC20FactoryProxy != "" {
+		mintableFactory = common.HexToAddress(optimismMintableERC20FactoryProxy)
+	}
+	copy(calldata[offset+12:offset+32], mintableFactory.Bytes())
+	offset += 32
+	// slot 19: gasPayingToken (always address(0) — not used)
+	offset += 32
+	// slot 20: nativeTokenAddress
+	copy(calldata[offset+12:offset+32], nativeTokenAddr.Bytes())
+
+	// Pre-flight simulation before spending L1 gas.
+	if _, simErr := l1Client.CallContract(ctx, ethereum.CallMsg{From: adminAddr, To: &scAddr, Data: calldata}, nil); simErr != nil {
+		return fmt.Errorf("SystemConfig initialize pre-flight failed: %w", simErr)
+	}
+
+	nonce, err := l1Client.PendingNonceAt(ctx, adminAddr)
+	if err != nil {
+		return fmt.Errorf("failed to get nonce for SystemConfig init: %w", err)
+	}
+	gasPrice, err := l1Client.SuggestGasPrice(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get gas price for SystemConfig init: %w", err)
+	}
+	gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(2))
+
+	tx := ethtypes.NewTransaction(nonce, scAddr, big.NewInt(0), 500_000, gasPrice, calldata)
+	signedTx, err := ethtypes.SignTx(tx, ethtypes.NewEIP155Signer(chainID), privKey)
+	if err != nil {
+		return fmt.Errorf("failed to sign SystemConfig init tx: %w", err)
+	}
+	if err := l1Client.SendTransaction(ctx, signedTx); err != nil {
+		return fmt.Errorf("failed to send SystemConfig init tx: %w", err)
+	}
+	logger.Infof("SystemConfig.initialize() tx sent: %s (waiting for receipt...)", signedTx.Hash().Hex())
+
+	receipt, err := bind.WaitMined(ctx, l1Client, signedTx)
+	if err != nil {
+		return fmt.Errorf("failed to wait for SystemConfig init tx receipt: %w", err)
+	}
+	if receipt.Status != ethtypes.ReceiptStatusSuccessful {
+		return fmt.Errorf("SystemConfig.initialize() tx reverted (tx: %s)", signedTx.Hash().Hex())
+	}
+	logger.Info("✅ SystemConfig initialized successfully")
+	return nil
+}
+
+// initOptimismPortal calls initialize(L2OutputOracle, SystemConfig, SuperchainConfig)
+// on the OptimismPortalProxy. Used in L2OO mode (EnableFraudProof=false).
+// tokamak-deployer only calls upgrade(proxy, impl) and never invokes initialize().
+// Idempotency: skipped if l2Oracle() already returns a non-zero address.
+func initOptimismPortal(
+	ctx context.Context,
+	logger *zap.SugaredLogger,
+	l1RPCURL string,
+	adminPrivateKey string,
+	portalProxyAddr string,
+	l2OracleProxyAddr string,
+	systemConfigProxyAddr string,
+	superchainConfigProxyAddr string,
+	l1ChainID uint64,
+) error {
+	for _, pair := range []struct{ name, val string }{
+		{"portalProxyAddr", portalProxyAddr},
+		{"l2OracleProxyAddr", l2OracleProxyAddr},
+		{"systemConfigProxyAddr", systemConfigProxyAddr},
+		{"superchainConfigProxyAddr", superchainConfigProxyAddr},
+	} {
+		if pair.val == "" {
+			return fmt.Errorf("initOptimismPortal: %s is empty", pair.name)
+		}
+	}
+
+	l1Client, err := ethclient.DialContext(ctx, l1RPCURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to L1 RPC for OptimismPortal init: %w", err)
+	}
+	defer l1Client.Close()
+
+	portalAddr := common.HexToAddress(portalProxyAddr)
+
+	// Idempotency guard: read l2Oracle(). If already non-zero, portal is initialized.
+	l2OracleSelector := crypto.Keccak256([]byte("l2Oracle()"))[:4]
+	if result, callErr := l1Client.CallContract(ctx, ethereum.CallMsg{To: &portalAddr, Data: l2OracleSelector}, nil); callErr == nil && len(result) >= 32 {
+		existing := common.BytesToAddress(result[12:32])
+		if existing != (common.Address{}) {
+			logger.Infof("✅ OptimismPortal already initialized (l2Oracle=%s), skipping", existing.Hex())
+			return nil
+		}
+	}
+
+	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(adminPrivateKey, "0x"))
+	if err != nil {
+		return fmt.Errorf("invalid admin private key for OptimismPortal init: %w", err)
+	}
+	adminAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	chainID := big.NewInt(int64(l1ChainID))
+
+	// Build initialize(address,address,address) calldata.
+	// Arg order: _l2Oracle, _systemConfig, _superchainConfig.
+	selector := crypto.Keccak256([]byte("initialize(address,address,address)"))[:4]
+	calldata := make([]byte, 100)
+	copy(calldata[0:4], selector)
+	copy(calldata[16:36], common.HexToAddress(l2OracleProxyAddr).Bytes())          // slot 0: _l2Oracle
+	copy(calldata[48:68], common.HexToAddress(systemConfigProxyAddr).Bytes())       // slot 1: _systemConfig
+	copy(calldata[80:100], common.HexToAddress(superchainConfigProxyAddr).Bytes())  // slot 2: _superchainConfig
+
+	if _, simErr := l1Client.CallContract(ctx, ethereum.CallMsg{From: adminAddr, To: &portalAddr, Data: calldata}, nil); simErr != nil {
+		return fmt.Errorf("OptimismPortal initialize pre-flight failed: %w", simErr)
+	}
+
+	nonce, err := l1Client.PendingNonceAt(ctx, adminAddr)
+	if err != nil {
+		return fmt.Errorf("failed to get nonce for OptimismPortal init: %w", err)
+	}
+	gasPrice, err := l1Client.SuggestGasPrice(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get gas price for OptimismPortal init: %w", err)
+	}
+	gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(2))
+
+	tx := ethtypes.NewTransaction(nonce, portalAddr, big.NewInt(0), 300_000, gasPrice, calldata)
+	signedTx, err := ethtypes.SignTx(tx, ethtypes.NewEIP155Signer(chainID), privKey)
+	if err != nil {
+		return fmt.Errorf("failed to sign OptimismPortal init tx: %w", err)
+	}
+	if err := l1Client.SendTransaction(ctx, signedTx); err != nil {
+		return fmt.Errorf("failed to send OptimismPortal init tx: %w", err)
+	}
+	logger.Infof("OptimismPortal.initialize() tx sent: %s (waiting for receipt...)", signedTx.Hash().Hex())
+
+	receipt, err := bind.WaitMined(ctx, l1Client, signedTx)
+	if err != nil {
+		return fmt.Errorf("failed to wait for OptimismPortal init tx receipt: %w", err)
+	}
+	if receipt.Status != ethtypes.ReceiptStatusSuccessful {
+		return fmt.Errorf("OptimismPortal.initialize() tx reverted (tx: %s)", signedTx.Hash().Hex())
+	}
+	logger.Info("✅ OptimismPortal initialized successfully")
+	return nil
+}
+
+// initDisputeGameFactory initializes the DisputeGameFactory proxy and registers
+// the FaultDisputeGame implementation. tokamak-deployer only calls
+// ProxyAdmin.upgrade(proxy, impl) and never calls initialize() or setImplementation().
+// Steps:
+//  1. DGF.initialize(adminAddr)        — idempotency: owner() non-zero → skip
+//  2. Deploy FaultDisputeGame impl     — idempotency: gameImpls(gameType) non-zero → skip all
+//  3. DGF.setImplementation(gameType, fdgAddr)
+func initDisputeGameFactory(
+	ctx context.Context,
+	logger *zap.SugaredLogger,
+	l1RPCURL string,
+	adminPrivateKey string,
+	dgfProxyAddr string,
+	mipsAddr string,
+	delayedWETHProxyAddr string,
+	anchorStateRegistryProxyAddr string,
+	l1ChainID uint64,
+	l2ChainID uint64,
+	gameType uint32,
+	absolutePrestate string,
+	maxGameDepth uint64,
+	splitDepth uint64,
+	clockExtension uint64,
+	maxClockDuration uint64,
+) error {
+	for _, pair := range []struct{ name, val string }{
+		{"dgfProxyAddr", dgfProxyAddr},
+		{"mipsAddr", mipsAddr},
+		{"delayedWETHProxyAddr", delayedWETHProxyAddr},
+		{"anchorStateRegistryProxyAddr", anchorStateRegistryProxyAddr},
+	} {
+		if pair.val == "" {
+			return fmt.Errorf("initDisputeGameFactory: %s is empty", pair.name)
+		}
+	}
+
+	l1Client, err := ethclient.DialContext(ctx, l1RPCURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to L1 RPC for DGF init: %w", err)
+	}
+	defer l1Client.Close()
+
+	dgfAddr := common.HexToAddress(dgfProxyAddr)
+
+	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(adminPrivateKey, "0x"))
+	if err != nil {
+		return fmt.Errorf("invalid admin private key for DGF init: %w", err)
+	}
+	adminAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	chainID := big.NewInt(int64(l1ChainID))
+
+	// Idempotency: check gameImpls(gameType). If already set, skip all steps.
+	gameImplsSelector := crypto.Keccak256([]byte("gameImpls(uint32)"))[:4]
+	gameTypeSlot := make([]byte, 32)
+	binary.BigEndian.PutUint32(gameTypeSlot[28:32], gameType)
+	gameImplsCalldata := append(gameImplsSelector, gameTypeSlot...)
+	if result, callErr := l1Client.CallContract(ctx, ethereum.CallMsg{To: &dgfAddr, Data: gameImplsCalldata}, nil); callErr == nil && len(result) >= 32 {
+		existing := common.BytesToAddress(result[12:32])
+		if existing != (common.Address{}) {
+			logger.Infow("✅ DisputeGameFactory impl already registered, skipping", "gameType", gameType, "impl", existing.Hex())
+			return nil
+		}
+	}
+
+	// ---- Step 1: DGF.initialize(owner) ----
+	ownerSelector := crypto.Keccak256([]byte("owner()"))[:4]
+	ownerResult, _ := l1Client.CallContract(ctx, ethereum.CallMsg{To: &dgfAddr, Data: ownerSelector}, nil)
+	if len(ownerResult) < 32 || common.BytesToAddress(ownerResult[12:32]) == (common.Address{}) {
+		initSelector := crypto.Keccak256([]byte("initialize(address)"))[:4]
+		initCalldata := make([]byte, 36)
+		copy(initCalldata[0:4], initSelector)
+		copy(initCalldata[16:36], adminAddr.Bytes())
+
+		nonce, err := l1Client.PendingNonceAt(ctx, adminAddr)
+		if err != nil {
+			return fmt.Errorf("failed to get nonce for DGF initialize: %w", err)
+		}
+		gasPrice, err := l1Client.SuggestGasPrice(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get gas price for DGF initialize: %w", err)
+		}
+		gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(2))
+
+		tx := ethtypes.NewTransaction(nonce, dgfAddr, big.NewInt(0), 300_000, gasPrice, initCalldata)
+		signedTx, err := ethtypes.SignTx(tx, ethtypes.NewEIP155Signer(chainID), privKey)
+		if err != nil {
+			return fmt.Errorf("failed to sign DGF initialize tx: %w", err)
+		}
+		if err := l1Client.SendTransaction(ctx, signedTx); err != nil {
+			return fmt.Errorf("failed to send DGF initialize tx: %w", err)
+		}
+		logger.Infof("DisputeGameFactory.initialize() tx sent: %s", signedTx.Hash().Hex())
+		receipt, err := bind.WaitMined(ctx, l1Client, signedTx)
+		if err != nil {
+			return fmt.Errorf("failed to wait for DGF initialize tx: %w", err)
+		}
+		if receipt.Status != ethtypes.ReceiptStatusSuccessful {
+			return fmt.Errorf("DisputeGameFactory.initialize() reverted (tx: %s)", signedTx.Hash().Hex())
+		}
+		logger.Info("✅ DisputeGameFactory initialized")
+	} else {
+		logger.Infow("✅ DisputeGameFactory already initialized, skipping", "owner", common.BytesToAddress(ownerResult[12:32]).Hex())
+	}
+
+	// ---- Step 2: Deploy FaultDisputeGame implementation ----
+	var fdgArtifact struct {
+		Bytecode string `json:"bytecode"`
+	}
+	if err := json.Unmarshal(faultDisputeGameArtifact, &fdgArtifact); err != nil {
+		return fmt.Errorf("failed to parse FaultDisputeGame artifact: %w", err)
+	}
+	fdgBytecodeHex := strings.TrimPrefix(fdgArtifact.Bytecode, "0x")
+	fdgBytecode, err := hex.DecodeString(fdgBytecodeHex)
+	if err != nil {
+		return fmt.Errorf("failed to decode FaultDisputeGame bytecode: %w", err)
+	}
+
+	// ABI-encode FDG constructor args (10 slots × 32 bytes each = 320 bytes):
+	// uint32 _gameType, bytes32 _absolutePrestate, uint256 _maxGameDepth, uint256 _splitDepth,
+	// uint64 _clockExtension, uint64 _maxClockDuration, address _vm, address _weth,
+	// address _anchorStateRegistry, uint256 _l2ChainId
+	constructorArgs := make([]byte, 320)
+	binary.BigEndian.PutUint32(constructorArgs[28:32], gameType) // slot 0: uint32 right-aligned
+	prestateHex := strings.TrimPrefix(absolutePrestate, "0x")
+	prestateBytes, err := hex.DecodeString(prestateHex)
+	if err != nil || len(prestateBytes) != 32 {
+		return fmt.Errorf("invalid absolutePrestate: must be a 32-byte hex string (got %q)", absolutePrestate)
+	}
+	copy(constructorArgs[32:64], prestateBytes)                                          // slot 1: bytes32
+	new(big.Int).SetUint64(maxGameDepth).FillBytes(constructorArgs[64:96])               // slot 2: uint256
+	new(big.Int).SetUint64(splitDepth).FillBytes(constructorArgs[96:128])                // slot 3: uint256
+	new(big.Int).SetUint64(clockExtension).FillBytes(constructorArgs[128:160])           // slot 4: uint256
+	new(big.Int).SetUint64(maxClockDuration).FillBytes(constructorArgs[160:192])         // slot 5: uint256
+	copy(constructorArgs[204:224], common.HexToAddress(mipsAddr).Bytes())                // slot 6: address (12 zero pad + 20 bytes)
+	copy(constructorArgs[236:256], common.HexToAddress(delayedWETHProxyAddr).Bytes())    // slot 7: address
+	copy(constructorArgs[268:288], common.HexToAddress(anchorStateRegistryProxyAddr).Bytes()) // slot 8: address
+	new(big.Int).SetUint64(l2ChainID).FillBytes(constructorArgs[288:320])                // slot 9: uint256
+
+	deployData := append(fdgBytecode, constructorArgs...)
+
+	nonce, err := l1Client.PendingNonceAt(ctx, adminAddr)
+	if err != nil {
+		return fmt.Errorf("failed to get nonce for FDG deploy: %w", err)
+	}
+	gasPrice, err := l1Client.SuggestGasPrice(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get gas price for FDG deploy: %w", err)
+	}
+	gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(2))
+
+	deployTx := ethtypes.NewContractCreation(nonce, big.NewInt(0), 8_000_000, gasPrice, deployData)
+	signedDeployTx, err := ethtypes.SignTx(deployTx, ethtypes.NewEIP155Signer(chainID), privKey)
+	if err != nil {
+		return fmt.Errorf("failed to sign FDG deploy tx: %w", err)
+	}
+	if err := l1Client.SendTransaction(ctx, signedDeployTx); err != nil {
+		return fmt.Errorf("failed to send FDG deploy tx: %w", err)
+	}
+	logger.Infof("FaultDisputeGame impl deploy tx sent: %s (waiting for receipt...)", signedDeployTx.Hash().Hex())
+
+	deployReceipt, err := bind.WaitMined(ctx, l1Client, signedDeployTx)
+	if err != nil {
+		return fmt.Errorf("failed to wait for FDG deploy tx: %w", err)
+	}
+	if deployReceipt.Status != ethtypes.ReceiptStatusSuccessful {
+		return fmt.Errorf("FaultDisputeGame deploy reverted (tx: %s)", signedDeployTx.Hash().Hex())
+	}
+	fdgImplAddr := deployReceipt.ContractAddress
+	logger.Infof("FaultDisputeGame impl deployed at %s", fdgImplAddr.Hex())
+
+	// ---- Step 3: DGF.setImplementation(gameType, fdgImplAddr) ----
+	setImplSelector := crypto.Keccak256([]byte("setImplementation(uint32,address)"))[:4]
+	setImplCalldata := make([]byte, 68)
+	copy(setImplCalldata[0:4], setImplSelector)
+	binary.BigEndian.PutUint32(setImplCalldata[32:36], gameType) // slot 0: uint32 right-aligned (selector at [0:4], slot at [4:36])
+	copy(setImplCalldata[48:68], fdgImplAddr.Bytes())             // slot 1: address
+
+	nonce, err = l1Client.PendingNonceAt(ctx, adminAddr)
+	if err != nil {
+		return fmt.Errorf("failed to get nonce for DGF setImplementation: %w", err)
+	}
+	gasPrice, err = l1Client.SuggestGasPrice(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get gas price for DGF setImplementation: %w", err)
+	}
+	gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(2))
+
+	setImplTx := ethtypes.NewTransaction(nonce, dgfAddr, big.NewInt(0), 300_000, gasPrice, setImplCalldata)
+	signedSetImplTx, err := ethtypes.SignTx(setImplTx, ethtypes.NewEIP155Signer(chainID), privKey)
+	if err != nil {
+		return fmt.Errorf("failed to sign DGF setImplementation tx: %w", err)
+	}
+	if err := l1Client.SendTransaction(ctx, signedSetImplTx); err != nil {
+		return fmt.Errorf("failed to send DGF setImplementation tx: %w", err)
+	}
+	logger.Infof("DisputeGameFactory.setImplementation() tx sent: %s", signedSetImplTx.Hash().Hex())
+
+	setImplReceipt, err := bind.WaitMined(ctx, l1Client, signedSetImplTx)
+	if err != nil {
+		return fmt.Errorf("failed to wait for DGF setImplementation tx: %w", err)
+	}
+	if setImplReceipt.Status != ethtypes.ReceiptStatusSuccessful {
+		return fmt.Errorf("DisputeGameFactory.setImplementation() reverted (tx: %s)", signedSetImplTx.Hash().Hex())
+	}
+	logger.Infow("✅ DisputeGameFactory FaultDisputeGame impl registered", "gameType", gameType, "impl", fdgImplAddr.Hex())
+	return nil
+}
+
+// initOptimismPortal2 upgrades the OptimismPortal proxy to OptimismPortal2
+// and initializes it for DGF mode. tokamak-deployer deploys OptimismPortal (L2OO
+// version) for ALL presets — DGF mode requires a new Portal2 impl + proxy upgrade.
+// Steps:
+//  1. Deploy OptimismPortal2 impl (constructor: proofMaturityDelay, dgfFinalityDelay)
+//  2. ProxyAdmin.upgrade(portalProxy, portal2Impl)
+//  3. Portal2.initialize(dgf, systemConfig, superchainConfig, respectedGameType)
+//
+// Idempotency: skipped entirely if disputeGameFactory() already returns non-zero.
+func initOptimismPortal2(
+	ctx context.Context,
+	logger *zap.SugaredLogger,
+	l1RPCURL string,
+	adminPrivateKey string,
+	portalProxyAddr string,
+	proxyAdminAddr string,
+	dgfProxyAddr string,
+	systemConfigProxyAddr string,
+	superchainConfigProxyAddr string,
+	l1ChainID uint64,
+	proofMaturityDelaySeconds uint64,
+	disputeGameFinalityDelaySeconds uint64,
+	respectedGameType uint32,
+) error {
+	for _, pair := range []struct{ name, val string }{
+		{"portalProxyAddr", portalProxyAddr},
+		{"proxyAdminAddr", proxyAdminAddr},
+		{"dgfProxyAddr", dgfProxyAddr},
+		{"systemConfigProxyAddr", systemConfigProxyAddr},
+		{"superchainConfigProxyAddr", superchainConfigProxyAddr},
+	} {
+		if pair.val == "" {
+			return fmt.Errorf("initOptimismPortal2: %s is empty", pair.name)
+		}
+	}
+
+	l1Client, err := ethclient.DialContext(ctx, l1RPCURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to L1 RPC for Portal2 init: %w", err)
+	}
+	defer l1Client.Close()
+
+	portalAddr := common.HexToAddress(portalProxyAddr)
+
+	// Idempotency: if disputeGameFactory() returns non-zero, Portal2 is already initialized.
+	dgfSelector := crypto.Keccak256([]byte("disputeGameFactory()"))[:4]
+	if result, callErr := l1Client.CallContract(ctx, ethereum.CallMsg{To: &portalAddr, Data: dgfSelector}, nil); callErr == nil && len(result) >= 32 {
+		existing := common.BytesToAddress(result[12:32])
+		if existing != (common.Address{}) {
+			logger.Infow("✅ OptimismPortal2 already initialized, skipping", "dgf", existing.Hex())
+			return nil
+		}
+	}
+
+	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(adminPrivateKey, "0x"))
+	if err != nil {
+		return fmt.Errorf("invalid admin private key for Portal2 init: %w", err)
+	}
+	adminAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	chainID := big.NewInt(int64(l1ChainID))
+
+	// Verify ProxyAdmin owner is an EOA (not Gnosis Safe).
+	proxyAdminAddress := common.HexToAddress(proxyAdminAddr)
+	ownerSel := crypto.Keccak256([]byte("owner()"))[:4]
+	ownerResult, err := l1Client.CallContract(ctx, ethereum.CallMsg{To: &proxyAdminAddress, Data: ownerSel}, nil)
+	if err != nil || len(ownerResult) < 32 {
+		return fmt.Errorf("initOptimismPortal2: failed to call ProxyAdmin.owner(): %w", err)
+	}
+	proxyAdminOwner := common.BytesToAddress(ownerResult[12:32])
+	if proxyAdminOwner != adminAddr {
+		return fmt.Errorf("initOptimismPortal2: ProxyAdmin.owner() is %s but admin key is %s — wrong key",
+			proxyAdminOwner.Hex(), adminAddr.Hex())
+	}
+	ownerCode, err := l1Client.CodeAt(ctx, proxyAdminOwner, nil)
+	if err != nil {
+		return fmt.Errorf("initOptimismPortal2: failed to check ProxyAdmin owner code size: %w", err)
+	}
+	if len(ownerCode) > 0 {
+		return fmt.Errorf("initOptimismPortal2: ProxyAdmin owner %s is a contract (Gnosis Safe?) — EOA required for direct upgrade call",
+			proxyAdminOwner.Hex())
+	}
+
+	// ---- Step 1: Deploy OptimismPortal2 implementation ----
+	var portal2Artifact struct {
+		Bytecode string `json:"bytecode"`
+	}
+	if err := json.Unmarshal(optimismPortal2Artifact, &portal2Artifact); err != nil {
+		return fmt.Errorf("failed to parse OptimismPortal2 artifact: %w", err)
+	}
+	portal2BytecodeHex := strings.TrimPrefix(portal2Artifact.Bytecode, "0x")
+	portal2Bytecode, err := hex.DecodeString(portal2BytecodeHex)
+	if err != nil {
+		return fmt.Errorf("failed to decode OptimismPortal2 bytecode: %w", err)
+	}
+
+	// ABI-encode constructor args (2 slots × 32 bytes = 64 bytes):
+	// uint256 _proofMaturityDelaySeconds, uint256 _disputeGameFinalityDelaySeconds
+	portal2ConstructorArgs := make([]byte, 64)
+	new(big.Int).SetUint64(proofMaturityDelaySeconds).FillBytes(portal2ConstructorArgs[0:32])
+	new(big.Int).SetUint64(disputeGameFinalityDelaySeconds).FillBytes(portal2ConstructorArgs[32:64])
+
+	portal2DeployData := append(portal2Bytecode, portal2ConstructorArgs...)
+
+	nonce, err := l1Client.PendingNonceAt(ctx, adminAddr)
+	if err != nil {
+		return fmt.Errorf("failed to get nonce for Portal2 deploy: %w", err)
+	}
+	gasPrice, err := l1Client.SuggestGasPrice(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get gas price for Portal2 deploy: %w", err)
+	}
+	gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(2))
+
+	portal2DeployTx := ethtypes.NewContractCreation(nonce, big.NewInt(0), 8_000_000, gasPrice, portal2DeployData)
+	signedPortal2DeployTx, err := ethtypes.SignTx(portal2DeployTx, ethtypes.NewEIP155Signer(chainID), privKey)
+	if err != nil {
+		return fmt.Errorf("failed to sign Portal2 deploy tx: %w", err)
+	}
+	if err := l1Client.SendTransaction(ctx, signedPortal2DeployTx); err != nil {
+		return fmt.Errorf("failed to send Portal2 deploy tx: %w", err)
+	}
+	logger.Infof("OptimismPortal2 impl deploy tx sent: %s (waiting for receipt...)", signedPortal2DeployTx.Hash().Hex())
+
+	portal2DeployReceipt, err := bind.WaitMined(ctx, l1Client, signedPortal2DeployTx)
+	if err != nil {
+		return fmt.Errorf("failed to wait for Portal2 deploy tx: %w", err)
+	}
+	if portal2DeployReceipt.Status != ethtypes.ReceiptStatusSuccessful {
+		return fmt.Errorf("OptimismPortal2 deploy reverted (tx: %s)", signedPortal2DeployTx.Hash().Hex())
+	}
+	portal2ImplAddr := portal2DeployReceipt.ContractAddress
+	logger.Infof("OptimismPortal2 impl deployed at %s", portal2ImplAddr.Hex())
+
+	// ---- Step 2: ProxyAdmin.upgrade(portalProxy, portal2Impl) ----
+	proxyAdminContractAddr := common.HexToAddress(proxyAdminAddr)
+	upgradeSelector := crypto.Keccak256([]byte("upgrade(address,address)"))[:4]
+	upgradeCalldata := make([]byte, 68)
+	copy(upgradeCalldata[0:4], upgradeSelector)
+	copy(upgradeCalldata[16:36], portalAddr.Bytes())          // slot 0: proxy
+	copy(upgradeCalldata[48:68], portal2ImplAddr.Bytes())     // slot 1: impl
+
+	nonce, err = l1Client.PendingNonceAt(ctx, adminAddr)
+	if err != nil {
+		return fmt.Errorf("failed to get nonce for ProxyAdmin upgrade: %w", err)
+	}
+	gasPrice, err = l1Client.SuggestGasPrice(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get gas price for ProxyAdmin upgrade: %w", err)
+	}
+	gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(2))
+
+	upgradeTx := ethtypes.NewTransaction(nonce, proxyAdminContractAddr, big.NewInt(0), 300_000, gasPrice, upgradeCalldata)
+	signedUpgradeTx, err := ethtypes.SignTx(upgradeTx, ethtypes.NewEIP155Signer(chainID), privKey)
+	if err != nil {
+		return fmt.Errorf("failed to sign ProxyAdmin upgrade tx: %w", err)
+	}
+	if err := l1Client.SendTransaction(ctx, signedUpgradeTx); err != nil {
+		return fmt.Errorf("failed to send ProxyAdmin upgrade tx: %w", err)
+	}
+	logger.Infof("ProxyAdmin.upgrade(portal → Portal2) tx sent: %s", signedUpgradeTx.Hash().Hex())
+
+	upgradeReceipt, err := bind.WaitMined(ctx, l1Client, signedUpgradeTx)
+	if err != nil {
+		return fmt.Errorf("failed to wait for ProxyAdmin upgrade tx: %w", err)
+	}
+	if upgradeReceipt.Status != ethtypes.ReceiptStatusSuccessful {
+		return fmt.Errorf("ProxyAdmin.upgrade() reverted (tx: %s)", signedUpgradeTx.Hash().Hex())
+	}
+	logger.Info("✅ Portal proxy upgraded to OptimismPortal2")
+
+	// ---- Step 3: Portal2.initialize(dgf, systemConfig, superchainConfig, respectedGameType) ----
+	initSelector := crypto.Keccak256([]byte("initialize(address,address,address,uint32)"))[:4]
+	initCalldata := make([]byte, 132)
+	copy(initCalldata[0:4], initSelector)
+	copy(initCalldata[16:36], common.HexToAddress(dgfProxyAddr).Bytes())            // slot 0: _disputeGameFactory
+	copy(initCalldata[48:68], common.HexToAddress(systemConfigProxyAddr).Bytes())   // slot 1: _systemConfig
+	copy(initCalldata[80:100], common.HexToAddress(superchainConfigProxyAddr).Bytes()) // slot 2: _superchainConfig
+	binary.BigEndian.PutUint32(initCalldata[128:132], respectedGameType)            // slot 3: uint32 right-aligned
+
+	nonce, err = l1Client.PendingNonceAt(ctx, adminAddr)
+	if err != nil {
+		return fmt.Errorf("failed to get nonce for Portal2 initialize: %w", err)
+	}
+	gasPrice, err = l1Client.SuggestGasPrice(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get gas price for Portal2 initialize: %w", err)
+	}
+	gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(2))
+
+	initTx := ethtypes.NewTransaction(nonce, portalAddr, big.NewInt(0), 400_000, gasPrice, initCalldata)
+	signedInitTx, err := ethtypes.SignTx(initTx, ethtypes.NewEIP155Signer(chainID), privKey)
+	if err != nil {
+		return fmt.Errorf("failed to sign Portal2 initialize tx: %w", err)
+	}
+	if err := l1Client.SendTransaction(ctx, signedInitTx); err != nil {
+		return fmt.Errorf("failed to send Portal2 initialize tx: %w", err)
+	}
+	logger.Infof("OptimismPortal2.initialize() tx sent: %s (waiting for receipt...)", signedInitTx.Hash().Hex())
+
+	initReceipt, err := bind.WaitMined(ctx, l1Client, signedInitTx)
+	if err != nil {
+		return fmt.Errorf("failed to wait for Portal2 initialize tx: %w", err)
+	}
+	if initReceipt.Status != ethtypes.ReceiptStatusSuccessful {
+		return fmt.Errorf("OptimismPortal2.initialize() reverted (tx: %s)", signedInitTx.Hash().Hex())
+	}
+	logger.Info("✅ OptimismPortal2 initialized successfully")
 	return nil
 }
 
