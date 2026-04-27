@@ -1178,8 +1178,7 @@ func (t *ThanosStack) orchestrateDRBOperators(ctx context.Context, composePath s
 	// Activate Regular operators on-chain
 	t.logger.Infof("📡 Activating Regular DRB operators on-chain...")
 	contractAddr := "0x4200000000000000000000000000000000000060" // CommitReveal2L2 predeploy address
-	threshold := DefaultDRBGenesisConfig().ActivationThreshold
-	if err := ActivateRegularOperators(ctx, l2RPC, contractAddr, accounts, threshold); err != nil {
+	if err := ActivateRegularOperators(ctx, l2RPC, contractAddr, accounts); err != nil {
 		return fmt.Errorf("activate regular operators: %w", err)
 	}
 	t.logger.Info("✅ Regular DRB operators activated")

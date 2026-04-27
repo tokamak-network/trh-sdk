@@ -13,6 +13,18 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/stacks/thanos/bindings/commitreveal2"
 )
 
+type activationThresholdReader interface {
+	SActivationThreshold(opts *bind.CallOpts) (*big.Int, error)
+}
+
+func readActivationThreshold(_ context.Context, reader activationThresholdReader) (*big.Int, error) {
+	threshold, err := reader.SActivationThreshold(nil)
+	if err != nil {
+		return nil, fmt.Errorf("read s_activationThreshold from contract: %w", err)
+	}
+	return threshold, nil
+}
+
 func activateRegularOperatorsSequentially(
 	ctx context.Context,
 	accounts *DRBAccounts,
@@ -50,7 +62,9 @@ func activateRegularOperatorsSequentially(
 // ActivateRegularOperators calls depositAndActivate() for each Regular operator sequentially.
 // Must be called after all DRB nodes (Leader + Regular 1/2/3) are healthy and running.
 // Activation is sequential (not concurrent) to avoid nonce collisions.
-func ActivateRegularOperators(ctx context.Context, rpcURL string, contractAddr string, accounts *DRBAccounts, threshold *big.Int) error {
+// The activation threshold is read from the live contract rather than a local config value,
+// so it always matches whatever the deployer set in genesis storage.
+func ActivateRegularOperators(ctx context.Context, rpcURL string, contractAddr string, accounts *DRBAccounts) error {
 	client, err := ethclient.Dial(rpcURL)
 	if err != nil {
 		return fmt.Errorf("dial RPC %s: %w", rpcURL, err)
@@ -61,6 +75,14 @@ func ActivateRegularOperators(ctx context.Context, rpcURL string, contractAddr s
 	contract, err := commitreveal2.NewCommitReveal2L2(common.HexToAddress(contractAddr), client)
 	if err != nil {
 		return fmt.Errorf("load CommitReveal2L2 contract: %w", err)
+	}
+
+	// Read the threshold from the live contract — the genesis was deployed by tokamak-deployer
+	// with its own threshold value (e.g. 0.1 ETH). Using a local hardcoded constant here
+	// would cause depositAndActivate() to revert with the wrong msg.value.
+	threshold, err := readActivationThreshold(ctx, contract)
+	if err != nil {
+		return err
 	}
 
 	// Get chain ID for signing

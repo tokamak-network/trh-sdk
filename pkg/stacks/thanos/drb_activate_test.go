@@ -13,6 +13,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// mockThresholdReader stubs the activationThresholdReader interface for tests.
+type mockThresholdReader struct {
+	threshold *big.Int
+	err       error
+}
+
+func (m *mockThresholdReader) SActivationThreshold(opts *bind.CallOpts) (*big.Int, error) {
+	return m.threshold, m.err
+}
+
+func TestReadActivationThreshold_ReturnsContractValue(t *testing.T) {
+	expected := big.NewInt(100_000_000_000_000_000) // 0.1 ETH
+	got, err := readActivationThreshold(context.Background(), &mockThresholdReader{threshold: expected})
+	require.NoError(t, err)
+	require.Equal(t, expected, got)
+}
+
+func TestReadActivationThreshold_PropagatesError(t *testing.T) {
+	_, err := readActivationThreshold(context.Background(), &mockThresholdReader{err: errors.New("rpc error")})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "rpc error")
+}
+
 // Test: Sequential activation (Phase 7-02 Wave 1 RED)
 // This test will fail during Wave 1 because ActivateRegularOperators is not yet implemented.
 // It documents the expected behavior: sequential (not concurrent) transaction submission.
