@@ -119,6 +119,7 @@ services:
       - OP_PROPOSER_POLL_INTERVAL=30s
       - OP_PROPOSER_TXMGR_RECEIPT_QUERY_INTERVAL=60s
       - OP_PROPOSER_RESUBMISSION_TIMEOUT=120s
+      - OP_PROPOSER_PROPOSAL_INTERVAL=1800s
     depends_on:
       op-geth:
         condition: service_healthy
