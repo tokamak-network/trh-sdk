@@ -269,6 +269,14 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 	return nil
 }
 
+// buildBatcherDAConfig returns the op-batcher Data Availability type configuration.
+// calldata is used unconditionally: Sepolia blob fees spike to astronomical values
+// (~4e25 wei), causing "insufficient funds" even with threshold disabled because
+// BlobFeeCap = BlobFeeCapMultiplier × blob_base_fee far exceeds the batcher balance.
+func buildBatcherDAConfig() (useBlobs bool, daType string) {
+	return false, "calldata"
+}
+
 func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath string) error {
 	imageTags := constants.DockerImageTag[t.network]
 
@@ -327,6 +335,7 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 	}
 
 	feeTokenConfig := constants.GetFeeTokenConfig(t.deployConfig.FeeToken, t.deployConfig.L1ChainID)
+	useBlobs, daType := buildBatcherDAConfig()
 
 	data := localComposeData{
 		OpGethImage:               fmt.Sprintf("tokamaknetwork/thanos-op-geth:%s", imageTags.OpGethImageTag),
@@ -345,10 +354,10 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		MaxChannelDuration:        l1ChainConfig.MaxChannelDuration,
 		L2OutputOracleAddress:     contracts.L2OutputOracleProxy,
 		DisputeGameFactoryAddress: contracts.DisputeGameFactoryProxy,
-		UseBlobs:                  t.network != constants.LocalDevnet,
-		DataAvailabilityType:      "blobs",
+		UseBlobs:                  useBlobs,
+		DataAvailabilityType:      daType,
 		BlobFeeCapMultiplier:      4,
-		MaxBlobBaseFeeGwei:        "0", // 0 = disabled: Sepolia blob fees spike unpredictably; always submit
+		MaxBlobBaseFeeGwei:        "0",
 		EnableFraudProof:          t.deployConfig.EnableFraudProof,
 		Preset:                    t.deployConfig.Preset,
 		DRBNodeImage:              fmt.Sprintf("tokamaknetwork/drb-node:%s", imageTags.DRBNodeImageTag),
