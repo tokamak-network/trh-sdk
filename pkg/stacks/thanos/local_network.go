@@ -348,7 +348,7 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		UseBlobs:                  t.network != constants.LocalDevnet,
 		DataAvailabilityType:      "blobs",
 		BlobFeeCapMultiplier:      4,
-		MaxBlobBaseFeeGwei:        "50", // 50 gwei threshold: pause submission during Sepolia spike
+		MaxBlobBaseFeeGwei:        "0", // 0 = disabled: Sepolia blob fees spike unpredictably; always submit
 		EnableFraudProof:          t.deployConfig.EnableFraudProof,
 		Preset:                    t.deployConfig.Preset,
 		DRBNodeImage:              fmt.Sprintf("tokamaknetwork/drb-node:%s", imageTags.DRBNodeImageTag),
