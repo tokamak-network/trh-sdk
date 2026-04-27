@@ -17,6 +17,7 @@ import (
 
 	_ "embed"
 
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -1164,17 +1165,18 @@ func (t *ThanosStack) orchestrateDRBOperators(ctx context.Context, composePath s
 		return fmt.Errorf("restart DRB containers after bootstrap: %w", err)
 	}
 
-	// Wait for DRB containers to be healthy (simple implementation: just wait a bit)
-	t.logger.Infof("⏳ Waiting for DRB containers to stabilize...")
-	select {
-	case <-time.After(5 * time.Second):
-	case <-ctx.Done():
-		return ctx.Err()
+	// Wait for L2 to produce at least one block before activating operators.
+	// A simple fixed delay is insufficient — DRB containers restart while L2 is
+	// still at genesis (block 0), and depositAndActivate reverts until the chain
+	// is live and sequencing.
+	l2RPC := localL2RPCURL()
+	t.logger.Infof("⏳ Waiting for L2 to produce blocks (rpc: %s)...", l2RPC)
+	if err := waitForL2Ready(ctx, l2RPC, t.logger); err != nil {
+		return fmt.Errorf("L2 not ready after timeout: %w", err)
 	}
 
 	// Activate Regular operators on-chain
 	t.logger.Infof("📡 Activating Regular DRB operators on-chain...")
-	l2RPC := localL2RPCURL()
 	contractAddr := "0x4200000000000000000000000000000000000060" // CommitReveal2L2 predeploy address
 	threshold := DefaultDRBGenesisConfig().ActivationThreshold
 	if err := ActivateRegularOperators(ctx, l2RPC, contractAddr, accounts, threshold); err != nil {
@@ -1212,4 +1214,49 @@ func writeGenesisHashToVolume(ctx context.Context, volume, hash string) error {
 		"-v", volume+":/data",
 		"alpine", "sh", "-c", fmt.Sprintf("printf %%s %q > /data/.genesis-hash", hash))
 	return cmd.Run()
+}
+
+// waitForL2Ready polls the L2 RPC until block number > 0, indicating the sequencer
+// is live and state is queryable. depositAndActivate reverts when called at genesis
+// (block 0) because the CommitReveal2L2 predeploy state is not yet active.
+func waitForL2Ready(ctx context.Context, rpcURL string, logger interface {
+	Infof(string, ...any)
+	Warnf(string, ...any)
+}) error {
+	const (
+		pollInterval = 2 * time.Second
+		timeout      = 2 * time.Minute
+	)
+
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	client, err := ethclient.Dial(rpcURL)
+	if err != nil {
+		return fmt.Errorf("dial L2 RPC %s: %w", rpcURL, err)
+	}
+	defer client.Close()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if time.Now().After(deadline) {
+				return fmt.Errorf("L2 did not produce blocks within %s", timeout)
+			}
+
+			blockNum, err := client.BlockNumber(ctx)
+			if err != nil {
+				logger.Warnf("L2 not reachable yet (%v), retrying...", err)
+				continue
+			}
+			if blockNum > 0 {
+				logger.Infof("✅ L2 is live at block %d", blockNum)
+				return nil
+			}
+			logger.Infof("⏳ L2 at genesis (block 0), waiting for first block...")
+		}
+	}
 }
