@@ -133,6 +133,14 @@ func (t *ThanosStack) deployLocalDevnet(ctx context.Context) error {
 		return err
 	}
 
+	// Pre-create op-program/bin so the pre-devnet Makefile target skips cannon-prestate.
+	// DEVNET_L2OO=true uses L2OutputOracle (no fault proofs), so cannon prestate is not needed.
+	// The cannon binary now requires --type but the Makefile doesn't pass it; skipping avoids the error.
+	opProgramBinDir := filepath.Join(t.deploymentPath, "tokamak-thanos", "op-program", "bin")
+	if err := os.MkdirAll(opProgramBinDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create op-program/bin dir: %w", err)
+	}
+
 	// Start the devnet
 	t.logger.Info("Starting the devnet...")
 
