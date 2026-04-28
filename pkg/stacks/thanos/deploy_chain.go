@@ -2075,11 +2075,15 @@ func (t *ThanosStack) installPresetModules(ctx context.Context) error {
 		}
 	}
 
-	if modules["aaPaymaster"] && t.deployConfig.FeeToken != constants.FeeTokenTON {
-		t.logger.Info("  ↳ aa-paymaster")
-		if err := t.setupAAPaymaster(ctx); err != nil {
-			t.logger.Errorw("Failed to set up AA Paymaster", "err", err)
-			installErr = err
+	if modules["aaPaymaster"] {
+		if t.deployConfig.FeeToken != constants.FeeTokenTON {
+			t.logger.Info("  ↳ aa-paymaster")
+			if err := t.setupAAPaymaster(ctx); err != nil {
+				t.logger.Errorw("Failed to set up AA Paymaster", "err", err)
+				installErr = err
+			}
+		} else {
+			t.logger.Info("  ↳ aa-paymaster skipped: TON is the native fee token; AA paymaster is not required")
 		}
 	}
 
