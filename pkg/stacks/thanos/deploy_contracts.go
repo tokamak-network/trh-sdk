@@ -449,16 +449,22 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		t.logger.Error("❌ Failed to fund DRB regular operators in genesis", "err", err)
 		return err
 	}
+	if err := maybeFundAAAdmin(genesisPath, t.deployConfig.Preset, t.deployConfig.FeeToken, t.deployConfig.AdminPrivateKey); err != nil {
+		t.logger.Error("❌ Failed to fund AA admin in genesis", "err", err)
+		return err
+	}
 
-	// RC1 fix: maybeInjectDRB and maybeFundDRBRegulars modify genesis.json alloc
-	// (adding DRB predeploy + regular operator funding), which changes the state root
-	// and therefore the block hash. The rollup.json produced above still contains the
-	// pre-DRB genesis.l2.hash, so op-node would crash with a genesis hash mismatch.
+	// RC1 fix: maybeInjectDRB, maybeFundDRBRegulars, and maybeFundAAAdmin all modify
+	// genesis.json alloc, changing the state root and therefore the block hash.
+	// The rollup.json produced above still contains the pre-patch genesis.l2.hash,
+	// so op-node would crash with a genesis hash mismatch.
 	// Regenerate rollup.json from the final genesis.json using --base-genesis so the
 	// deployer recomputes core.Genesis.ToBlock().Hash() without re-running op-node.
-	if constants.PresetModules[t.deployConfig.Preset]["drb"] {
+	genesisPatched := constants.PresetModules[t.deployConfig.Preset]["drb"] ||
+		constants.NeedsAASetup(t.deployConfig.Preset, t.deployConfig.FeeToken)
+	if genesisPatched {
 		rollupPath := filepath.Join(t.deploymentPath, "rollup.json")
-		t.logger.Info("Regenerating rollup.json genesis hash after DRB genesis injection...")
+		t.logger.Info("Regenerating rollup.json genesis hash after genesis patching...")
 		if err := runGenerateGenesis(ctx, binaryPath, genesisOpts{
 			DeployOutputPath: stagedAddrPath,
 			ConfigPath:       deployConfigFilePath,
@@ -470,10 +476,10 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 				t.logger.Warn("Deployment canceled")
 				return err
 			}
-			t.logger.Error("❌ Failed to regenerate rollup.json after DRB injection", "err", err)
+			t.logger.Error("❌ Failed to regenerate rollup.json after genesis patching", "err", err)
 			return err
 		}
-		t.logger.Info("✅ rollup.json genesis.l2.hash updated to match post-DRB genesis")
+		t.logger.Info("✅ rollup.json genesis.l2.hash updated to match post-patch genesis")
 	}
 
 	// Mark deployment as complete so subsequent steps (e.g. local_network start,
