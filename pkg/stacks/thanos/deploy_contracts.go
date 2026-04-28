@@ -221,14 +221,15 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 
 		var prestateHash string
 
-		// Fault proof requires tokamak-thanos clone for cannon prestate build
+		// tokamak-thanos is always needed: forge L2Genesis.s.sol and op-node binary
+		err = t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
+		if err != nil {
+			t.logger.Error("failed to clone the repository", "err", err)
+			return err
+		}
+		tokamakThanosDir := filepath.Join(t.deploymentPath, "tokamak-thanos")
+
 		if deployContractsConfig.EnableFaultProof {
-			err = t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
-			if err != nil {
-				t.logger.Error("failed to clone the repository", "err", err)
-				return err
-			}
-			tokamakThanosDir := filepath.Join(t.deploymentPath, "tokamak-thanos")
 			if patchErr := patchAnchorStateRegistry(tokamakThanosDir); patchErr != nil {
 				return fmt.Errorf("failed to patch AnchorStateRegistry.sol: %w", patchErr)
 			}
