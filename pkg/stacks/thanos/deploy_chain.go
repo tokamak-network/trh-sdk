@@ -2083,12 +2083,22 @@ func (t *ThanosStack) installPresetModules(ctx context.Context) error {
 		}
 	}
 
-	// blockExplorer and crossTrade require external API keys — cannot auto-install.
+	// blockExplorer requires external API keys — cannot auto-install.
 	if modules["blockExplorer"] {
 		t.logger.Info("ℹ️  Block Explorer is included in your preset. Run 'trh install block-explorer' to configure and deploy it.")
 	}
+
+	// crossTrade: auto-install on AWS (K8s available); manual on local (separate Docker Compose).
 	if modules["crossTrade"] {
-		t.logger.Info("ℹ️  Cross-Chain Trade is included in your preset. Run 'trh install cross-trade' to configure and deploy it.")
+		if t.deployConfig.K8s != nil {
+			t.logger.Info("  ↳ cross-trade (AWS auto-install)")
+			if err := t.autoInstallCrossTradeAWS(ctx); err != nil {
+				t.logger.Errorw("Failed to auto-install CrossTrade", "err", err)
+				installErr = err
+			}
+		} else {
+			t.logger.Info("ℹ️  Cross-Chain Trade is included in your preset. Run 'trh install cross-trade' to configure and deploy it.")
+		}
 	}
 
 	return installErr
