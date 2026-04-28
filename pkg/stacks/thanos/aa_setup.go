@@ -88,19 +88,41 @@ func (t *ThanosStack) setupAAPaymaster(ctx context.Context) error {
 	}
 
 	// sendTxAndWait builds, signs, sends a transaction, and waits for its receipt.
+	// Uses EIP-1559 (type 2) transactions to avoid overpaying on OP Stack L2.
+	// SuggestGasPrice on OP Stack can return inflated values that include L1 data cost
+	// guidance, but legacy tx gas cost = gasLimit × gasPrice can exceed admin balance.
+	// With EIP-1559, actual cost = (baseFee + tipCap) × gasUsed — much lower on a fresh L2.
 	sendTxAndWait := func(toAddr common.Address, value *big.Int, calldata []byte) (*types.Receipt, error) {
 		nonce, err := l2Client.PendingNonceAt(ctx, adminAddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get nonce: %w", err)
 		}
-		gasPrice, err := l2Client.SuggestGasPrice(ctx)
+		header, err := l2Client.HeaderByNumber(ctx, nil)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get gas price: %w", err)
+			return nil, fmt.Errorf("failed to get latest block header: %w", err)
 		}
-		gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(2)) // 2× for reliable inclusion
+		tipCap, err := l2Client.SuggestGasTipCap(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get gas tip cap: %w", err)
+		}
+		// maxFeePerGas = baseFee * 2 + tipCap — standard EIP-1559 headroom.
+		baseFee := header.BaseFee
+		if baseFee == nil {
+			baseFee = big.NewInt(0)
+		}
+		maxFeePerGas := new(big.Int).Add(new(big.Int).Mul(baseFee, big.NewInt(2)), tipCap)
 
-		tx := types.NewTransaction(nonce, toAddr, value, 300_000, gasPrice, calldata)
-		signedTx, err := types.SignTx(tx, types.NewEIP155Signer(l2ChainID), privKey)
+		tx := types.NewTx(&types.DynamicFeeTx{
+			ChainID:   l2ChainID,
+			Nonce:     nonce,
+			To:        &toAddr,
+			Value:     value,
+			Gas:       300_000,
+			GasTipCap: tipCap,
+			GasFeeCap: maxFeePerGas,
+			Data:      calldata,
+		})
+		signedTx, err := types.SignTx(tx, types.NewLondonSigner(l2ChainID), privKey)
 		if err != nil {
 			return nil, fmt.Errorf("failed to sign tx: %w", err)
 		}
