@@ -233,15 +233,19 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 			t.logger.Info("✅ Cannon prestate built successfully")
 		}
 	}
-	prestateHash, err := readPrestateHash(prestateSrc)
-	if err != nil {
-		t.logger.Error("Failed to read cannon prestate hash",
-			"err", err,
-			"path", prestateSrc,
-			"hint", "Ensure start-deploy.sh build completed successfully before deploying chain")
-		return err
+	prestateHash := ""
+	if t.deployConfig.EnableFraudProof {
+		var readErr error
+		prestateHash, readErr = readPrestateHash(prestateSrc)
+		if readErr != nil {
+			t.logger.Error("Failed to read cannon prestate hash",
+				"err", readErr,
+				"path", prestateSrc,
+				"hint", "Ensure start-deploy.sh build completed successfully before deploying chain")
+			return readErr
+		}
+		t.logger.Info("Cannon prestate hash loaded", "hash", prestateHash)
 	}
-	t.logger.Info("Cannon prestate hash loaded", "hash", prestateHash)
 
 	namespace := utils.ConvertChainNameToNamespace(inputs.ChainName)
 	// L2 native token is always TON regardless of fee token.
