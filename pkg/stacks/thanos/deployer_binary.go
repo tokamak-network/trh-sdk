@@ -16,6 +16,10 @@ import (
 
 // TokamakDeployerVersion is the pinned version of the tokamak-deployer binary.
 //
+// v0.0.7: DelayedWETH proxy/impl deployment added as steps 33-35 inside the
+// fault-proof block. Without it initDisputeGameFactory fails with
+// "delayedWETHProxyAddr is empty". --delayed-weth-delay flag added (default 0).
+//
 // v0.0.6: --fault-proof bool flag added. Without it cfg.EnableFaultProof stays
 // false and steps 27-32 (DisputeGameFactory + AnchorStateRegistry) are silently
 // skipped, breaking DRB stacks that expect those addresses (Bug #8).
@@ -23,7 +27,7 @@ import (
 // v0.0.5: --gas-price / --gas-price-multiplier flags introduced. trh-sdk now
 // resolves a conservative fixed gas price once and passes it via --gas-price,
 // so tokamak-deployer no longer calls SuggestGasPrice per TX.
-const TokamakDeployerVersion = "v0.0.6"
+const TokamakDeployerVersion = "v0.0.7"
 
 const tokamakDeployerRepo = "tokamak-network/tokamak-thanos"
 
@@ -145,10 +149,15 @@ type deployContractsOpts struct {
 	OutPath    string
 
 	// EnableFaultProof, when true, adds --fault-proof so tokamak-deployer
-	// runs steps 27-32 (DisputeGameFactory + AnchorStateRegistry). Required
-	// for DRB / fault-proof stacks; the CLI flag has been present since
-	// tokamak-deployer v0.0.6 (Bug #8).
+	// runs steps 27-35 (DisputeGameFactory + AnchorStateRegistry + DelayedWETH).
+	// Required for DRB / fault-proof stacks; the CLI flag has been present since
+	// tokamak-deployer v0.0.6 (Bug #8). DelayedWETH added in v0.0.7.
 	EnableFaultProof bool
+
+	// DelayedWETHDelay is the withdrawal delay in seconds forwarded via
+	// --delayed-weth-delay. 0 (default) means no enforced delay, which is
+	// appropriate for local testnets.
+	DelayedWETHDelay uint64
 
 	// GasPriceWei, when non-nil, is forwarded to tokamak-deployer via
 	// --gas-price. The deployer reuses this exact price for every one of
@@ -195,6 +204,9 @@ func buildDeployContractsArgs(opts deployContractsOpts) []string {
 	}
 	if opts.EnableFaultProof {
 		args = append(args, "--fault-proof")
+		if opts.DelayedWETHDelay > 0 {
+			args = append(args, "--delayed-weth-delay", fmt.Sprintf("%d", opts.DelayedWETHDelay))
+		}
 	}
 	if opts.GasPriceWei != nil && opts.GasPriceWei.Sign() > 0 {
 		args = append(args, "--gas-price", opts.GasPriceWei.String())

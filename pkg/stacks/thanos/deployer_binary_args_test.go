@@ -45,6 +45,40 @@ func TestBuildDeployContractsArgs_FaultProofOff(t *testing.T) {
 	}
 }
 
+// TestBuildDeployContractsArgs_DelayedWETHDelay verifies that a non-zero
+// DelayedWETHDelay emits --delayed-weth-delay only when fault-proof is enabled,
+// and that zero (default) omits the flag.
+func TestBuildDeployContractsArgs_DelayedWETHDelay(t *testing.T) {
+	// Non-zero delay with fault-proof on → flag must appear
+	args := buildDeployContractsArgs(deployContractsOpts{
+		L1RPCURL:         "https://example",
+		PrivateKey:       "0xabc",
+		L2ChainID:        42,
+		OutPath:          "/tmp/out.json",
+		EnableFaultProof: true,
+		DelayedWETHDelay: 604800,
+	})
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--delayed-weth-delay 604800") {
+		t.Errorf("expected --delayed-weth-delay 604800 in args, got: %v", args)
+	}
+
+	// Zero delay (default) → flag must be absent
+	argsZero := buildDeployContractsArgs(deployContractsOpts{
+		L1RPCURL:         "https://example",
+		PrivateKey:       "0xabc",
+		L2ChainID:        42,
+		OutPath:          "/tmp/out.json",
+		EnableFaultProof: true,
+		DelayedWETHDelay: 0,
+	})
+	for _, a := range argsZero {
+		if a == "--delayed-weth-delay" {
+			t.Errorf("expected no --delayed-weth-delay when delay is 0, got: %v", argsZero)
+		}
+	}
+}
+
 // TestBuildDeployContractsArgs_GasPricePreserved verifies the existing gas-price
 // wiring is untouched by the new flag.
 func TestBuildDeployContractsArgs_GasPricePreserved(t *testing.T) {
