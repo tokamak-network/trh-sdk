@@ -126,6 +126,10 @@ var L1ChainConfigurations = map[uint64]struct {
 	StakingURL                       string `json:"staking_url"`
 	TxmgrCellProofTime               uint64 `json:"txmgr_cell_proof_time"`
 	NextPublicRollupL1BaseUrl        string `json:"next_public_rollup_l1_base_url"`
+	// MipsAddress is the shared MIPS VM contract deployed on L1 for fault proof game resolution.
+	// tokamak-deployer does not deploy MIPS (it's a pre-existing canonical contract on each network),
+	// so this address is used as a fallback when deploy-output.json does not include it.
+	MipsAddress string `json:"mips_address"`
 }{
 	//TODO: Updated the addresses for L1VerificationContractAddress, L2TonAddress, L2ManagerAddress and L1BridgeRegistry for different chains
 	EthereumMainnetChainID: {
@@ -171,6 +175,7 @@ var L1ChainConfigurations = map[uint64]struct {
 		StakingURL:                       "https://sepolia.staking.tokamak.network/staking",
 		TxmgrCellProofTime:               1760427360,
 		NextPublicRollupL1BaseUrl:        "https://eth-sepolia.blockscout.com",
+		MipsAddress:                      "0x34AEe6D040136ba8C43b06B048B1e06C61131F17",
 	},
 	EthereumHoleskyChainID: {
 		BlockTimeInSeconds:   12,

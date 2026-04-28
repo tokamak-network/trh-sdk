@@ -300,13 +300,22 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 			return fmt.Errorf("failed to read bedrock deploy config for DGF init: %w", bedrockErr)
 		}
 
+		mipsAddr := deployedContracts.Mips
+		if mipsAddr == "" {
+			if chainCfg, ok := constants.L1ChainConfigurations[t.deployConfig.L1ChainID]; ok && chainCfg.MipsAddress != "" {
+				t.logger.Info("Mips address not in deploy-output.json, using canonical address for chain",
+					"l1ChainID", t.deployConfig.L1ChainID, "mipsAddress", chainCfg.MipsAddress)
+				mipsAddr = chainCfg.MipsAddress
+			}
+		}
+
 		dgfErr := initDisputeGameFactory(
 			ctx,
 			t.logger,
 			t.deployConfig.L1RPCURL,
 			t.deployConfig.AdminPrivateKey,
 			deployedContracts.DisputeGameFactoryProxy,
-			deployedContracts.Mips,
+			mipsAddr,
 			deployedContracts.DelayedWETHProxy,
 			deployedContracts.AnchorStateRegistryProxy,
 			t.deployConfig.L1ChainID,
