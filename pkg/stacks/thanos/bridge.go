@@ -33,22 +33,12 @@ func (t *ThanosStack) InstallBridge(ctx context.Context) (string, error) {
 	}
 	if len(opBridgePods) > 0 {
 		t.logger.Info("OP Bridge is running: \n")
-		var bridgeUrl string
-		for {
-			k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, "op-bridge")
-			if err != nil {
-				t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
-				return "", err
-			}
-
-			if len(k8sIngresses) > 0 {
-				bridgeUrl = "http://" + k8sIngresses[0]
-				break
-			}
-
-			time.Sleep(15 * time.Second)
+		ingressAddr, err := utils.WaitForIngressAddress(ctx, namespace, "op-bridge", 45*time.Minute)
+		if err != nil {
+			t.logger.Error("Error retrieving bridge ingress address", "err", err)
+			return "", err
 		}
-		return bridgeUrl, nil
+		return "http://" + ingressAddr, nil
 	}
 
 	t.logger.Info("Installing a bridge component...")
@@ -155,21 +145,12 @@ func (t *ThanosStack) InstallBridge(ctx context.Context) (string, error) {
 	}
 
 	t.logger.Info("✅ Bridge component installed successfully and is being initialized. Please wait for the ingress address to become available...")
-	var bridgeUrl string
-	for {
-		k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, helmReleaseName)
-		if err != nil {
-			t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
-			return "", err
-		}
-
-		if len(k8sIngresses) > 0 {
-			bridgeUrl = "http://" + k8sIngresses[0]
-			break
-		}
-
-		time.Sleep(15 * time.Second)
+	ingressAddr, err := utils.WaitForIngressAddress(ctx, namespace, helmReleaseName, 45*time.Minute)
+	if err != nil {
+		t.logger.Error("Error retrieving bridge ingress address", "err", err)
+		return "", err
 	}
+	bridgeUrl := "http://" + ingressAddr
 	t.logger.Infof("✅ Bridge component is up and running. You can access it at: %s", bridgeUrl)
 
 	return bridgeUrl, nil

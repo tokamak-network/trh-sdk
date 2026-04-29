@@ -299,17 +299,18 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		return err
 	}
 
-	// Copy cannon prestate to Terraform config-files directory.
-	// The prestate is built by start-deploy.sh build (make cannon-prestate target)
-	// and placed at op-program/bin/prestate.json.
-	prestateDstPath := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/config-files/prestate.json", t.deploymentPath)
-	err = utils.CopyFile(prestateSrc, prestateDstPath)
-	if err != nil {
-		t.logger.Error("Error copying cannon prestate file",
-			"err", err,
-			"src", prestateSrc,
-			"hint", "Run 'make cannon-prestate' in tokamak-thanos to build the prestate")
-		return err
+	// Copy cannon prestate to Terraform config-files directory only when fault proof
+	// is enabled; the file is only built in that path.
+	if t.deployConfig.EnableFraudProof {
+		prestateDstPath := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/config-files/prestate.json", t.deploymentPath)
+		err = utils.CopyFile(prestateSrc, prestateDstPath)
+		if err != nil {
+			t.logger.Error("Error copying cannon prestate file",
+				"err", err,
+				"src", prestateSrc,
+				"hint", "Run 'make cannon-prestate' in tokamak-thanos to build the prestate")
+			return err
+		}
 	}
 
 	// Wait for terraform to be installed before infrastructure provisioning
@@ -361,7 +362,11 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		return fmt.Errorf("failed to get terraform output for %s: %w", "vpc_id", err)
 	}
 
-	t.deployConfig.AWS.VpcID = strings.Trim(vpcIdOutput, `"`)
+	vpcID := strings.Trim(vpcIdOutput, `"`)
+	if vpcID == "" || vpcID == "null" {
+		return fmt.Errorf("terraform output vpc_id is empty — thanos-stack apply may not have completed successfully")
+	}
+	t.deployConfig.AWS.VpcID = vpcID
 	if err := t.deployConfig.WriteToJSONFile(t.deploymentPath); err != nil {
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
@@ -505,21 +510,12 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 
 	t.logger.Info("✅ Helm charts installed successfully")
 
-	var l2RPCUrl string
-	for {
-		k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, helmReleaseName)
-		if err != nil {
-			t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
-			return err
-		}
-
-		if len(k8sIngresses) > 0 {
-			l2RPCUrl = "http://" + k8sIngresses[0]
-			break
-		}
-
-		time.Sleep(15 * time.Second)
+	ingressAddr, err := utils.WaitForIngressAddress(ctx, namespace, helmReleaseName, 45*time.Minute)
+	if err != nil {
+		t.logger.Error("Error retrieving L2 RPC ingress address", "err", err)
+		return err
 	}
+	l2RPCUrl := "http://" + ingressAddr
 	t.logger.Info("✅ Network deployment completed successfully!")
 	t.logger.Infof("🌐 RPC endpoint: %s", l2RPCUrl)
 
@@ -596,6 +592,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		_, err = t.InstallBridge(ctx)
 		if err != nil {
 			t.logger.Error("Error installing bridge", "err", err)
+			return err
 		}
 	}
 
