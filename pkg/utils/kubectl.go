@@ -344,50 +344,72 @@ func CheckPVCStatus(ctx context.Context, namespace string) (bool, error) {
 
 // WaitForIngressAddress polls until an ingress matching name has a non-empty
 // LoadBalancer address, then returns it. Returns an error if timeout elapses
-// or ctx is cancelled.
+// or ctx is cancelled. Tolerates up to 3 consecutive kubectl errors before
+// giving up, to handle transient API server unavailability.
 func WaitForIngressAddress(ctx context.Context, namespace, name string, timeout time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
+	consecutiveErrors := 0
 	for {
-		if time.Now().After(deadline) {
-			return "", fmt.Errorf("timeout after %v waiting for ingress %q address in namespace %q", timeout, name, namespace)
-		}
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
 		default:
 		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("timeout after %v waiting for ingress %q address in namespace %q", timeout, name, namespace)
+		}
 		addrs, err := GetAddressByIngress(ctx, namespace, name)
 		if err != nil {
-			return "", err
+			consecutiveErrors++
+			if consecutiveErrors >= 3 {
+				return "", fmt.Errorf("failed to list ingresses for %q after 3 consecutive errors: %w", name, err)
+			}
+		} else {
+			consecutiveErrors = 0
+			if len(addrs) > 0 {
+				return addrs[0], nil
+			}
 		}
-		if len(addrs) > 0 {
-			return addrs[0], nil
+		select {
+		case <-time.After(15 * time.Second):
+		case <-ctx.Done():
+			return "", ctx.Err()
 		}
-		time.Sleep(15 * time.Second)
 	}
 }
 
 // WaitForServiceName polls until a service matching name exists in namespace,
-// then returns the service name. Returns an error if timeout elapses or ctx is cancelled.
+// then returns the service name. Returns an error if timeout elapses or ctx is
+// cancelled. Tolerates up to 3 consecutive kubectl errors before giving up.
 func WaitForServiceName(ctx context.Context, namespace, name string, timeout time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
+	consecutiveErrors := 0
 	for {
-		if time.Now().After(deadline) {
-			return "", fmt.Errorf("timeout after %v waiting for service %q in namespace %q", timeout, name, namespace)
-		}
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
 		default:
 		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("timeout after %v waiting for service %q in namespace %q", timeout, name, namespace)
+		}
 		svcs, err := GetServiceNames(ctx, namespace, name)
 		if err != nil {
-			return "", err
+			consecutiveErrors++
+			if consecutiveErrors >= 3 {
+				return "", fmt.Errorf("failed to list services for %q after 3 consecutive errors: %w", name, err)
+			}
+		} else {
+			consecutiveErrors = 0
+			if len(svcs) > 0 {
+				return svcs[0], nil
+			}
 		}
-		if len(svcs) > 0 {
-			return svcs[0], nil
+		select {
+		case <-time.After(15 * time.Second):
+		case <-ctx.Done():
+			return "", ctx.Err()
 		}
-		time.Sleep(15 * time.Second)
 	}
 }
 
