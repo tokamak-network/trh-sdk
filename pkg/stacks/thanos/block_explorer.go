@@ -190,7 +190,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		releaseName,
 		t.deployConfig.ChainName,
 		walletConnectID,
-		fmt.Sprintf("%s/tokamak-thanos/build/rollup.json", t.deploymentPath),
+		t.rollupConfigPath(),
 		rdsConnectionUrl,
 		t.deployConfig.L1BeaconURL,
 		opGethSVC,

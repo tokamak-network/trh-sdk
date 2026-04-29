@@ -3,6 +3,7 @@ package thanos
 import (
 	"context"
 	"io"
+	"path/filepath"
 
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
@@ -88,4 +89,12 @@ func NewThanosStack(
 // If not set, os.Stdout is used as default.
 func (t *ThanosStack) SetOutput(w io.Writer) {
 	t.output = w
+}
+
+func (t *ThanosStack) rollupConfigPath() string {
+	return filepath.Join(t.deploymentPath, "rollup.json")
+}
+
+func (t *ThanosStack) genesisConfigPath() string {
+	return filepath.Join(t.deploymentPath, "genesis.json")
 }

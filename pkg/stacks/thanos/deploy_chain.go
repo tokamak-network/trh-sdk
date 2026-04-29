@@ -282,7 +282,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 
 	// STEP 4. Copy configuration files
 	err = utils.CopyFile(
-		fmt.Sprintf("%s/tokamak-thanos/build/rollup.json", t.deploymentPath),
+		t.rollupConfigPath(),
 		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/config-files/rollup.json", t.deploymentPath),
 	)
 	if err != nil {
@@ -291,7 +291,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	}
 
 	err = utils.CopyFile(
-		fmt.Sprintf("%s/tokamak-thanos/build/genesis.json", t.deploymentPath),
+		t.genesisConfigPath(),
 		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/config-files/genesis.json", t.deploymentPath),
 	)
 	if err != nil {
