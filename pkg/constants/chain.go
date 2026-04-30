@@ -208,13 +208,17 @@ const (
 	OptimismChainID        = 11155420
 	BaseSepoliaChainID     = 84532
 	BaseChainID            = 8453
+	UnichainChainID        = 130
+	UnichainSepoliaChainID = 1301
 )
 
 var L2ChainConfigurations = map[uint64]struct {
-	ETHAddress  string `json:"eth_address"`
-	USDCAddress string `json:"usdc_address"`
-	USDTAddress string `json:"usdt_address"`
-	TONAddress  string `json:"ton_address"`
+	ETHAddress        string `json:"eth_address"`
+	USDCAddress       string `json:"usdc_address"`
+	USDTAddress       string `json:"usdt_address"`
+	TONAddress        string `json:"ton_address"`
+	NativeTokenName   string `json:"native_token_name"`
+	NativeTokenSymbol string `json:"native_token_symbol"`
 }{
 	OptimismSepoliaChainID: {
 		ETHAddress:  "0x0000000000000000000000000000000000000000",

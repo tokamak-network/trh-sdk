@@ -99,23 +99,12 @@ func (t *ThanosStack) installCrossTradeHelmAWS(ctx context.Context, l1CTProxy, l
 			DisplayName: l1Config.ChainName,
 			Contracts:   types.CrossTradeContracts{L1CrossTrade: &l1CTProxy},
 			RPCURL:      t.deployConfig.L1RPCURL,
-			Tokens: types.CrossTradeTokens{
-				ETH:  "0x0000000000000000000000000000000000000000",
-				USDC: l1Config.USDCAddress,
-				USDT: l1Config.USDTAddress,
-				TON:  l1Config.TON,
-			},
 		},
 		fmt.Sprintf("%d", l2ChainID): {
 			Name:        fmt.Sprintf("%d", l2ChainID),
 			DisplayName: t.deployConfig.ChainName,
 			Contracts:   types.CrossTradeContracts{L2CrossTrade: &l2CTProxy},
 			RPCURL:      l2RPC,
-			Tokens: types.CrossTradeTokens{
-				ETH:  constants.ETH,
-				USDC: constants.USDCAddress,
-				TON:  constants.TON,
-			},
 		},
 	}
 
@@ -126,7 +115,7 @@ func (t *ThanosStack) installCrossTradeHelmAWS(ctx context.Context, l1CTProxy, l
 
 	crossTradeConfig := types.CrossTradeConfig{}
 	crossTradeConfig.CrossTrade.Env.NextPublicProjectID = "568b8d3d0528e743b0e2c6c92f54d721"
-	crossTradeConfig.CrossTrade.Env.NextPublicChainConfig = string(chainConfigJSON)
+	crossTradeConfig.CrossTrade.Env.L2L1Config = string(chainConfigJSON)
 	crossTradeConfig.CrossTrade.Ingress = types.Ingress{
 		Enabled:   true,
 		ClassName: "alb",
