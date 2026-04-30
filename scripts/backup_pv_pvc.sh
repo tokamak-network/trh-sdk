@@ -57,7 +57,9 @@ if [ -z "$PVC_LIST" ]; then
 fi
 
 SUMMARY="$OUT/summary.txt"
-touch "$SUMMARY"
+if [ "${BACKUP_SKIP_SUMMARY:-}" != "1" ]; then
+  touch "$SUMMARY"
+fi
 
 while IFS= read -r PVC; do
   [ -z "$PVC" ] && continue
@@ -70,9 +72,11 @@ while IFS= read -r PVC; do
   kubectl get pv "$PV" -o yaml > "$OUT/pv_${PV}.yaml"
   SC="$(kubectl get pv "$PV" -o jsonpath='{.spec.storageClassName}' || true)"
   EFS="$(kubectl get pv "$PV" -o jsonpath='{.spec.csi.volumeHandle}' 2>/dev/null || true)"
-  {
-    echo "PVC: $PVC"; echo "PV : $PV"; echo "SC : $SC"; echo "EFS: $EFS"; echo "-----"
-  } >> "$SUMMARY"
+  if [ "${BACKUP_SKIP_SUMMARY:-}" != "1" ]; then
+    {
+      echo "PVC: $PVC"; echo "PV : $PV"; echo "SC : $SC"; echo "EFS: $EFS"; echo "-----"
+    } >> "$SUMMARY"
+  fi
 done <<< "$PVC_LIST"
 
 kubectl -n "$NAMESPACE" get statefulset -o name | egrep 'op-(geth|node)' | while read -r STS; do

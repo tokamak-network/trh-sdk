@@ -2,13 +2,17 @@ package thanos
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
+	"path/filepath"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
-	"github.com/tokamak-network/trh-sdk/pkg/dependencies"
 	"github.com/tokamak-network/trh-sdk/pkg/scanner"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -126,9 +130,26 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 
 	registerCandidate := deployContractsConfig.RegisterCandidate
 
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+	cacheDir := filepath.Join(homeDir, ".trh", "bin")
+	binaryPath, err := ensureTokamakDeployer(cacheDir)
+	if err != nil {
+		return fmt.Errorf("tokamak-deployer binary unavailable: %w", err)
+	}
+	deployOutputPath := filepath.Join(t.deploymentPath, "deploy-output.json")
+	deployConfigFilePath := filepath.Join(t.deploymentPath, "deploy-config.json")
+
 	if isResume {
-		err = t.deployContracts(ctx, l1Client, true)
-		if err != nil {
+		if err = runDeployContracts(ctx, binaryPath, deployContractsOpts{
+			L1RPCURL:         t.deployConfig.L1RPCURL,
+			PrivateKey:       t.deployConfig.AdminPrivateKey,
+			L2ChainID:        t.deployConfig.L2ChainID,
+			OutPath:          deployOutputPath,
+			EnableFaultProof: t.deployConfig.EnableFraudProof,
+		}, t.output); err != nil {
 			t.logger.Error("❌ Resume the contracts deployment failed!", "err", err)
 			return err
 		}
@@ -137,7 +158,6 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 				t.logger.Error("register candidate is required")
 				return fmt.Errorf("register candidate is required")
 			}
-
 			adminAddress, err := utils.GetAddressFromPrivateKey(t.deployConfig.AdminPrivateKey)
 			if err != nil {
 				t.logger.Error("failed to get admin address from private key", "err", err)
@@ -162,8 +182,6 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			return err
 		}
 
-		deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig, l1ChainId.Uint64(), l2ChainID)
-
 		operators := deployContractsConfig.Operators
 
 		if operators == nil ||
@@ -174,6 +192,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			t.logger.Error("at least 5 operators are required for deploying contracts")
 			return fmt.Errorf("at least 5 operators are required for deploying contracts")
 		}
+
 		adminAccount, err := utils.GetAddressFromPrivateKey(operators.AdminPrivateKey)
 		if err != nil {
 			t.logger.Error("failed to get admin address from private key", "err", err)
@@ -200,64 +219,76 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			}
 		}
 
-		shellConfigFile := utils.GetShellConfigDefault()
+		var prestateHash string
 
-		// Check dependencies
-		if !dependencies.CheckPnpmInstallation(ctx) {
-			t.logger.Warn("pnpm is not installed, try running `source %s` to set up your environment", shellConfigFile)
-			return nil
-		}
-
-		if !dependencies.CheckFoundryInstallation(ctx) {
-			t.logger.Warn("foundry is not installed, try running `source %s` to set up your environment", shellConfigFile)
-			return nil
-		}
-
-		// STEP 2. Clone the repository
+		// tokamak-thanos is always needed: forge L2Genesis.s.sol and op-node binary
 		err = t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git")
 		if err != nil {
 			t.logger.Error("failed to clone the repository", "err", err)
 			return err
 		}
+		tokamakThanosDir := filepath.Join(t.deploymentPath, "tokamak-thanos")
+
+		if deployContractsConfig.EnableFaultProof {
+			if patchErr := patchAnchorStateRegistry(tokamakThanosDir); patchErr != nil {
+				return fmt.Errorf("failed to patch AnchorStateRegistry.sol: %w", patchErr)
+			}
+			t.logger.Info("✅ AnchorStateRegistry.sol patched with setInitialAnchorState")
+
+			g, gctx := errgroup.WithContext(ctx)
+			g.Go(func() error {
+				prestatePath := filepath.Join(tokamakThanosDir, "op-program", "bin", "prestate.json")
+				if _, statErr := os.Stat(prestatePath); os.IsNotExist(statErr) {
+					t.logger.Info("Building cannon prestate before contract deployment...")
+					if buildErr := buildCannonPrestate(gctx, t.logger, tokamakThanosDir); buildErr != nil {
+						return fmt.Errorf("failed to build cannon prestate: %w", buildErr)
+					}
+					t.logger.Info("✅ Cannon prestate built successfully")
+				} else {
+					t.logger.Info("Cannon prestate already exists, reading hash", "path", prestatePath)
+				}
+				hash, hashErr := readPrestateHash(prestatePath)
+				if hashErr != nil {
+					return hashErr
+				}
+				prestateHash = hash
+				t.logger.Info("Cannon prestate hash loaded", "hash", prestateHash)
+				return nil
+			})
+			if err = g.Wait(); err != nil {
+				return err
+			}
+		}
+
+		// Generate deploy config (needs prestateHash from Track A)
+		deployContractsTemplate := initDeployConfigTemplate(deployContractsConfig, l1ChainId.Uint64(), l2ChainID, prestateHash)
 
 		t.deployConfig.AdminPrivateKey = operators.AdminPrivateKey
 		t.deployConfig.SequencerPrivateKey = operators.SequencerPrivateKey
 		t.deployConfig.BatcherPrivateKey = operators.BatcherPrivateKey
 		t.deployConfig.ProposerPrivateKey = operators.ProposerPrivateKey
-		// if deployContractsConfig.FraudProof {
-		// 	if operators.ChallengerPrivateKey == "" {
-		// 		return fmt.Errorf("challenger operator is required for fault proof but was not found")
-		// 	}
-		// 	t.deployConfig.ChallengerPrivateKey = operators.ChallengerPrivateKey
-		// }
-		t.deployConfig.DeploymentFilePath = fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/deployments/%d-deploy.json", t.deploymentPath, deployContractsTemplate.L1ChainID)
+		if deployContractsConfig.EnableFaultProof {
+			if operators.ChallengerPrivateKey == "" {
+				return fmt.Errorf("challenger operator is required for fault proof but was not found")
+			}
+			t.deployConfig.ChallengerPrivateKey = operators.ChallengerPrivateKey
+		}
+		t.deployConfig.DeploymentFilePath = deployOutputPath
 		t.deployConfig.L1RPCProvider = utils.DetectRPCKind(deployContractsConfig.L1RPCurl)
 		t.deployConfig.L1ChainID = deployContractsTemplate.L1ChainID
 		t.deployConfig.L2ChainID = l2ChainID
 		t.deployConfig.L1RPCURL = deployContractsConfig.L1RPCurl
-		t.deployConfig.EnableFraudProof = false
+		t.deployConfig.EnableFraudProof = deployContractsConfig.EnableFaultProof
 		t.deployConfig.ChainConfiguration = deployContractsConfig.ChainConfiguration
-
-		deployConfigFilePath := fmt.Sprintf("%s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts/deploy-config.json", t.deploymentPath)
+		t.deployConfig.Preset = deployContractsConfig.Preset
+		t.deployConfig.FeeToken = deployContractsConfig.FeeToken
+		t.deployConfig.Mnemonic = deployContractsConfig.Mnemonic
 
 		err = makeDeployContractConfigJsonFile(ctx, l1Client, operators, deployContractsTemplate, deployConfigFilePath)
 		if err != nil {
 			t.logger.Error("failed to make deploy contract config json file", "err", err)
 			return err
 		}
-
-		// STEP 3. Build the contracts
-		t.logger.Info("Building smart contracts...")
-		err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh build", t.deploymentPath))
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				t.logger.Error("Deployment canceled")
-				return err
-			}
-			t.logger.Error("❌ Build the contracts failed!")
-			return err
-		}
-		t.logger.Info("✅ Build the contracts completed!")
 
 		// STEP 4. Deploy the contracts
 		// Check admin balance and estimated deployment cost
@@ -268,17 +299,25 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		}
 		t.logger.Infof("Admin account balance: %.2f ETH", utils.WeiToEther(balance))
 
-		// Estimate gas price
+		// Estimate gas price. The same suggested price is reused as a fixed
+		// gas price passed to tokamak-deployer (× deployGasPriceMultiplier)
+		// so the deployer avoids 26-32 per-TX SuggestGasPrice round-trips.
 		gasPriceWei, err := l1Client.SuggestGasPrice(ctx)
 		if err != nil {
 			t.logger.Error("❌ Failed to get gas price", "err", err)
 			return err
 		}
 		t.logger.Infof("⛽ Current gas price: %.4f Gwei", new(big.Float).Quo(new(big.Float).SetInt(gasPriceWei), big.NewFloat(1e9)))
+		fixedGasPrice := new(big.Int).Mul(gasPriceWei, deployGasPriceMultiplier)
+		t.logger.Infof("⛽ Fixed gas price for deploy: %.4f Gwei (suggested × %d)",
+			new(big.Float).Quo(new(big.Float).SetInt(fixedGasPrice), big.NewFloat(1e9)),
+			deployGasPriceMultiplier)
 
-		// Estimate deployment cost
+		// Estimate deployment cost.
+		// 3× margin remains on the raw suggested price to keep the balance
+		// precheck wider than the 2× actually charged via fixedGasPrice.
 		estimatedCost := new(big.Int).Mul(gasPriceWei, estimatedDeployContracts)
-		estimatedCost.Mul(estimatedCost, big.NewInt(2))
+		estimatedCost.Mul(estimatedCost, big.NewInt(3))
 		t.logger.Infof("💰 Estimated deployment cost: %.4f ETH", utils.WeiToEther(estimatedCost))
 
 		// Check if balance is sufficient
@@ -287,6 +326,15 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			return fmt.Errorf("admin account balance (%.4f ETH) is less than estimated deployment cost (%.4f  ETH)", utils.WeiToEther(balance), utils.WeiToEther(estimatedCost))
 		} else {
 			t.logger.Info("✅ The admin account has sufficient balance to proceed with deployment.")
+		}
+
+		// Inform the operator about automatic AA Paymaster setup that will run after L2 starts.
+		if constants.NeedsAASetup(deployContractsConfig.Preset, deployContractsConfig.FeeToken) {
+			t.logger.Infof("ℹ️  Fee token: %s (non-TON)", deployContractsConfig.FeeToken)
+			t.logger.Infof("ℹ️  AA Paymaster will be configured automatically after L2 network starts:")
+			t.logger.Infof("    • %s native token deposited to EntryPoint for gas sponsorship", constants.DefaultEntryPointDeposit.String())
+			t.logger.Infof("    • %s registered with MultiTokenPaymaster (markup: %d%%)", deployContractsConfig.FeeToken, aaMarkupForToken(deployContractsConfig.FeeToken))
+			t.logger.Infof("    • SimplePriceOracle price set with initial placeholder value (update post-deployment)")
 		}
 
 		t.deployConfig.DeployContractState = &types.DeployContractState{
@@ -298,17 +346,90 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			return err
 		}
 
-		err = t.deployContracts(ctx, l1Client, false)
-		if err != nil {
+		if deployContractsConfig.ReuseDeployment {
+			t.logger.Info("ℹ️ ReuseDeployment: Deploying with existing implementation contracts...")
+		}
+
+		// When fault proof is enabled, remove the cached AnchorStateRegistry implementation
+		// address from the Sepolia address file before running Deploy.s.sol.
+		if deployContractsConfig.EnableFaultProof {
+			tokamakThanosDir := filepath.Join(t.deploymentPath, "tokamak-thanos")
+			contractsDir := filepath.Join(tokamakThanosDir, "packages", "tokamak", "contracts-bedrock")
+			if cleared := clearAnchorStateRegistryFromAddressFile(contractsDir); cleared {
+				t.logger.Info("✅ Cleared cached AnchorStateRegistry implementation address — will deploy patched version")
+			}
+		}
+
+		// Deploy contracts via tokamak-deployer binary
+		if err = runDeployContracts(ctx, binaryPath, deployContractsOpts{
+			L1RPCURL:         deployContractsConfig.L1RPCurl,
+			PrivateKey:       operators.AdminPrivateKey,
+			L2ChainID:        uint64(l2ChainID),
+			OutPath:          deployOutputPath,
+			EnableFaultProof: deployContractsConfig.EnableFaultProof,
+			GasPriceWei:      fixedGasPrice,
+		}, t.output); err != nil {
 			t.logger.Error("failed to deploy contracts", "err", err)
 			return err
 		}
 	}
 
-	// STEP 5: Generate the genesis and rollup files
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh generate -e .env -c deploy-config.json", t.deploymentPath))
-	t.logger.Info("Generating the rollup and genesis files...")
+	// STEP 5: Generate genesis and rollup files.
+	//
+	// op-node's "genesis l2" subcommand requires two inputs that tokamak-deployer
+	// does not produce itself:
+	//   - --l2-allocs: the L2 state dump written by forge scripts/L2Genesis.s.sol
+	//   - --l1-rpc:    an L1 JSON-RPC endpoint for block lookups
+	//
+	// We stage the deploy-output (addresses-only) and deploy-config under the
+	// contracts-bedrock project root (forge's FFI sandbox rejects /tmp reads),
+	// run the forge script, ensure op-node is built, then hand all paths to
+	// tokamak-deployer which calls op-node and applies the tokamak-specific
+	// post-processing (DRB / USDC / MultiTokenPaymaster / L1Block / rollup hash).
+	tokamakThanosDirForGenesis := filepath.Join(t.deploymentPath, "tokamak-thanos")
+	stagedAddrPath, stagedConfigPath, err := prepareL2GenesisInputs(
+		tokamakThanosDirForGenesis,
+		deployOutputPath,
+		deployConfigFilePath,
+		t.deployConfig.L2ChainID,
+	)
 	if err != nil {
+		t.logger.Error("❌ Failed to stage L2 genesis inputs", "err", err)
+		return err
+	}
+
+	stateDumpPath, err := runForgeL2GenesisScript(
+		ctx,
+		t.logger,
+		tokamakThanosDirForGenesis,
+		stagedAddrPath,
+		stagedConfigPath,
+	)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			t.logger.Warn("Deployment canceled")
+			return err
+		}
+		t.logger.Error("❌ Failed to run forge L2Genesis.s.sol", "err", err)
+		return err
+	}
+
+	opNodeBin, err := ensureOpNodeBinary(ctx, t.logger, tokamakThanosDirForGenesis)
+	if err != nil {
+		t.logger.Error("❌ Failed to obtain op-node binary", "err", err)
+		return err
+	}
+
+	genesisPath := filepath.Join(t.deploymentPath, "genesis.json")
+	t.logger.Info("Generating the rollup and genesis files...")
+	if err = runGenerateGenesis(ctx, binaryPath, genesisOpts{
+		DeployOutputPath: stagedAddrPath, // addresses-only; op-node & deployer both accept this
+		ConfigPath:       deployConfigFilePath,
+		OutPath:          genesisPath,
+		L1RPCURL:         t.deployConfig.L1RPCURL,
+		L2AllocsPath:     stateDumpPath,
+		OpNodeBinary:     opNodeBin,
+	}, t.output); err != nil {
 		if errors.Is(err, context.Canceled) {
 			t.logger.Warn("Deployment canceled")
 			return err
@@ -317,16 +438,65 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		return err
 	}
 	t.logger.Info("✅ Successfully generated rollup and genesis files!")
-	t.logger.Infof("Genesis file path: %s/tokamak-thanos/build/genesis.json", t.deploymentPath)
-	t.logger.Infof("Rollup file path: %s/tokamak-thanos/build/rollup.json", t.deploymentPath)
+	t.logger.Infof("Genesis file path: %s", genesisPath)
+	t.logger.Infof("Rollup file path: %s/rollup.json", t.deploymentPath)
+
+	// Inject DRB predeploy if enabled for Gaming/Full preset
+	if err := maybeInjectDRB(ctx, t.logger, genesisPath, t.deployConfig.Preset, &defaultArtifactFetcher{}); err != nil {
+		t.logger.Error("❌ Failed to inject DRB predeploy", "err", err)
+		return err
+	}
+	if err := maybeFundDRBRegulars(genesisPath, t.deployConfig.Preset, t.deployConfig.Mnemonic); err != nil {
+		t.logger.Error("❌ Failed to fund DRB regular operators in genesis", "err", err)
+		return err
+	}
+	if err := maybeFundAAAdmin(genesisPath, t.deployConfig.Preset, t.deployConfig.FeeToken, t.deployConfig.AdminPrivateKey); err != nil {
+		t.logger.Error("❌ Failed to fund AA admin in genesis", "err", err)
+		return err
+	}
+
+	// RC1 fix: maybeInjectDRB, maybeFundDRBRegulars, and maybeFundAAAdmin all modify
+	// genesis.json alloc, changing the state root and therefore the block hash.
+	// The rollup.json produced above still contains the pre-patch genesis.l2.hash,
+	// so op-node would crash with a genesis hash mismatch.
+	// Regenerate rollup.json from the final genesis.json using --base-genesis so the
+	// deployer recomputes core.Genesis.ToBlock().Hash() without re-running op-node.
+	genesisPatched := constants.PresetModules[t.deployConfig.Preset]["drb"] ||
+		constants.NeedsAASetup(t.deployConfig.Preset, t.deployConfig.FeeToken)
+	if genesisPatched {
+		rollupPath := filepath.Join(t.deploymentPath, "rollup.json")
+		t.logger.Info("Regenerating rollup.json genesis hash after genesis patching...")
+		if err := runGenerateGenesis(ctx, binaryPath, genesisOpts{
+			DeployOutputPath: stagedAddrPath,
+			ConfigPath:       deployConfigFilePath,
+			OutPath:          genesisPath,
+			RollupOutPath:    rollupPath,
+			BaseGenesisPath:  genesisPath,
+		}, t.output); err != nil {
+			if errors.Is(err, context.Canceled) {
+				t.logger.Warn("Deployment canceled")
+				return err
+			}
+			t.logger.Error("❌ Failed to regenerate rollup.json after genesis patching", "err", err)
+			return err
+		}
+		t.logger.Info("✅ rollup.json genesis.l2.hash updated to match post-patch genesis")
+	}
+
+	// Mark deployment as complete so subsequent steps (e.g. local_network start,
+	// deploy-aws-infra) pass the `Status == Completed` gate in their preflight
+	// checks. This persist was accidentally dropped in df52538 when the forge
+	// pipeline was replaced by the tokamak-deployer binary.
+	t.deployConfig.DeployContractState.Status = types.DeployContractStatusCompleted
+	if err = t.deployConfig.WriteToJSONFile(t.deploymentPath); err != nil {
+		t.logger.Error("Failed to persist Completed deploy-contract state", "err", err)
+		return err
+	}
 
 	t.logger.Infof("✅ Configuration successfully saved to: %s/settings.json", t.deploymentPath)
 
 	// If --no-candidate flag is NOT provided, register the candidate
 	if t.registerCandidate {
-		if t.deployConfig.Network == constants.Mainnet {
-			return fmt.Errorf("register candidates verification is not supported on Mainnet")
-		}
 		t.logger.Info("Setting up the safe wallet...")
 
 		if err := t.setupSafeWallet(ctx, t.deploymentPath); err != nil {
@@ -347,72 +517,40 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 	return nil
 }
 
-func (t *ThanosStack) deployContracts(ctx context.Context,
-	l1Client *ethclient.Client,
-	isResume bool,
-) error {
-	var (
-		adminPrivateKey = t.deployConfig.AdminPrivateKey
-		l1RPC           = t.deployConfig.L1RPCURL
-	)
-
-	t.logger.Info("Deploying the contracts...")
-
-	gasPriceWei, err := l1Client.SuggestGasPrice(ctx)
-	if err != nil {
-		t.logger.Error("Failed to get gas price", "err", err)
+// clearAnchorStateRegistryFromAddressFile removes the "AnchorStateRegistry" implementation
+// address from thanos-stack-sepolia/address.json inside contractsDir.
+// This forces Deploy.s.sol to deploy the freshly compiled (patched) implementation when
+// fault proof is enabled, instead of reusing the pre-deployed Sepolia implementation which
+// lacks setInitialAnchorState.
+// Returns true if the key was found and removed, false if the file is absent or the key
+// was not present (both are no-ops — not error conditions).
+func clearAnchorStateRegistryFromAddressFile(contractsDir string) bool {
+	sepoliaAddressFile := filepath.Join(contractsDir, "deployments", "thanos-stack-sepolia", "address.json")
+	rawJSON, readErr := os.ReadFile(sepoliaAddressFile)
+	if readErr != nil {
+		return false
 	}
-
-	envValues := fmt.Sprintf("export GS_ADMIN_PRIVATE_KEY=%s\nexport L1_RPC_URL=%s\n", adminPrivateKey, l1RPC)
-	if gasPriceWei != nil && gasPriceWei.Uint64() > 0 {
-		// double gas price
-		envValues += fmt.Sprintf("export GAS_PRICE=%d\n", gasPriceWei.Uint64()*2)
+	var addresses map[string]json.RawMessage
+	if unmarshalErr := json.Unmarshal(rawJSON, &addresses); unmarshalErr != nil {
+		return false
 	}
-
-	// STEP 4.1. Generate the .env file
-	_, err = utils.ExecuteCommand(ctx,
-		"bash",
-		"-c",
-		fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && echo '%s' > .env", t.deploymentPath, envValues),
-	)
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			t.logger.Warn("Deployment canceled")
-			return err
-		}
-		t.logger.Error("❌ Make .env file failed!")
-		return err
+	existing, exists := addresses["AnchorStateRegistry"]
+	if !exists {
+		return false
 	}
-
-	// STEP 4.3. Deploy contracts
-	if isResume {
-		err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh redeploy -e .env -c deploy-config.json", t.deploymentPath))
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				t.logger.Warn("Deployment canceled")
-				return err
-			}
-			t.logger.Error("❌ Contract deployment failed!")
-			return err
-		}
-	} else {
-		err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos/packages/tokamak/contracts-bedrock/scripts && bash ./start-deploy.sh deploy -e .env -c deploy-config.json", t.deploymentPath))
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				t.logger.Warn("Deployment canceled")
-				return err
-			}
-			t.logger.Error("❌ Contract deployment failed!")
-			return err
-		}
+	// Already cleared (zero address) — idempotent no-op.
+	zeroAddr := `"0x0000000000000000000000000000000000000000"`
+	if string(existing) == zeroAddr {
+		return false
 	}
-	t.logger.Info("✅ Contract deployment completed successfully!")
-
-	t.deployConfig.DeployContractState.Status = types.DeployContractStatusCompleted
-	err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
-	if err != nil {
-		t.logger.Error("Failed to write settings file", "err", err)
-		return err
+	// Set to zero address instead of deleting the key. Deploy.s.sol calls
+	// readAddress(".AnchorStateRegistry") unconditionally when reuseDeployment is
+	// true, so the key must exist in the JSON. A zero address triggers the
+	// "deploy new" branch in Solidity (savedAddress != address(0) check).
+	addresses["AnchorStateRegistry"] = json.RawMessage(zeroAddr)
+	updated, marshalErr := json.MarshalIndent(addresses, "", "  ")
+	if marshalErr != nil {
+		return false
 	}
-	return nil
+	return os.WriteFile(sepoliaAddressFile, updated, 0644) == nil
 }

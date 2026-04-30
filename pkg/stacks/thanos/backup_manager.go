@@ -3,7 +3,9 @@ package thanos
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	backup "github.com/tokamak-network/trh-sdk/pkg/stacks/thanos/backup"
@@ -23,7 +25,7 @@ func (t *ThanosStack) BackupStatus(ctx context.Context) (*types.BackupStatusInfo
 
 // BackupSnapshot triggers on-demand EFS backup and returns snapshot information
 func (t *ThanosStack) BackupSnapshot(ctx context.Context, progressReporter func(string, float64)) (*types.BackupSnapshotInfo, error) {
-	snapshotInfo, err := backup.SnapshotExecute(ctx, t.logger, t.deployConfig.AWS.Region, t.deployConfig.K8s.Namespace)
+	snapshotInfo, err := backup.SnapshotExecute(ctx, t.logger, t.deployConfig.AWS.Region, t.deployConfig.K8s.Namespace, progressReporter)
 	if err != nil {
 		return nil, err
 	}
@@ -82,12 +84,19 @@ func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string
 		currentEfsID = "" // Not critical, continue
 	}
 
+	// Convert attach *bool to attachWorkloads bool for DirectRestore
+	attachWorkloads := false
+	if attach != nil {
+		attachWorkloads = *attach
+	}
+
 	restoreInfo, err := backup.DirectRestore(
 		ctx,
 		t.logger,
 		t.deployConfig.AWS.Region,
 		t.deployConfig.K8s.Namespace,
 		recoveryPointArn,
+		attachWorkloads,
 		func(c context.Context, arn string) (string, error) {
 			return backup.RestoreEFS(c, t.deployConfig.AWS.Region, arn, func(c2 context.Context) (string, error) {
 				acct, err := utils.DetectAWSAccountID(c2)
@@ -97,17 +106,18 @@ func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string
 				return backup.GetRestoreIAMRole(c2, t.logger, t.deployConfig.AWS.Region, t.deployConfig.K8s.Namespace, acct)
 			})
 		},
-		func(c context.Context, job string) (string, error) {
-			return backup.MonitorEFSRestoreJob(c, t.logger, t.deployConfig.AWS.Region, job)
-		},
-		func(c context.Context, job string) (string, error) {
-			return backup.HandleEFSRestoreCompletion(c, t.logger, t.deployConfig.AWS.Region, job, backup.SetEFSThroughputElastic)
+		func(c context.Context, job string, reporter func(string, float64)) (string, error) {
+			return backup.MonitorEFSRestoreJob(c, t.logger, t.deployConfig.AWS.Region, job, reporter)
 		},
 		func(c context.Context, efsId string, pvcs, stss, other *string) error {
-			// Use the same attach logic as BackupAttach
-			_, err := t.BackupAttach(c, &efsId, pvcs, stss, nil, nil)
+			defaultBackup := true
+			_, err := t.BackupAttach(c, &efsId, pvcs, stss, &defaultBackup, progressReporter)
 			return err
 		},
+		attach,
+		pvcs,
+		stss,
+		progressReporter,
 	)
 
 	if err != nil {
@@ -127,18 +137,22 @@ func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string
 		NewEFSID:         restoreInfo.NewEFSID,
 		JobID:            restoreInfo.JobID,
 		Status:           restoreInfo.Status,
+		SuggestedEFSID:   restoreInfo.SuggestedEFSID,
+		SuggestedPVCs:    restoreInfo.SuggestedPVCs,
+		SuggestedSTSs:    restoreInfo.SuggestedSTSs,
 	}, nil
 }
 
 // BackupRestoreInteractive provides interactive recovery point selection and restoration
-func (t *ThanosStack) BackupRestoreInteractive(ctx context.Context) error {
+func (t *ThanosStack) BackupRestoreInteractive(ctx context.Context, attachWorkloads bool) error {
 	return backup.InteractiveRestoreWithSelection(
 		ctx,
 		t.logger,
 		t.deployConfig.AWS.Region,
 		t.deployConfig.K8s.Namespace,
-		func(c context.Context, arn string) (*types.BackupRestoreInfo, error) {
-			return t.BackupRestore(c, arn, nil, nil, nil, nil)
+		attachWorkloads,
+		func(c context.Context, arn string, attach bool) (*types.BackupRestoreInfo, error) {
+			return t.BackupRestore(c, arn, &attach, nil, nil, nil)
 		},
 	)
 }
@@ -172,11 +186,12 @@ func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *str
 		func(c context.Context, ns string, stsCSV string) error {
 			return backup.RestartStatefulSets(c, t.logger, ns, stsCSV)
 		},
-		func(c context.Context, ai *types.BackupAttachInfo) error {
+		func(c context.Context, ai *types.BackupAttachInfo, pr func(string, float64)) error {
 			return backup.ExecuteEFSOperationsFull(c, t.logger, ai, func(ctx context.Context, namespace string) error {
 				return backup.VerifyEFSDataImpl(ctx, t.logger, namespace)
-			})
+			}, backupPvPvc, pr)
 		},
+		progressReporter,
 	)
 	if err != nil {
 		return nil, err
@@ -242,7 +257,14 @@ func (t *ThanosStack) CleanupUnusedBackupResources(ctx context.Context) error {
 	region := t.deployConfig.AWS.Region
 	namespace := t.deployConfig.K8s.Namespace
 
-	return backup.CleanupUnusedBackupResources(ctx, t.logger, region, namespace)
+	retentionDays := 14
+	if v := os.Getenv("TRH_EFS_CLEANUP_RETENTION_DAYS"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			retentionDays = parsed
+		}
+	}
+
+	return backup.CleanupUnusedBackupResources(ctx, t.logger, region, namespace, retentionDays)
 }
 
 // initializeBackupSystem initializes or reconciles the AWS Backup configuration for the current stack

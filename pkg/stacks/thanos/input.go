@@ -39,11 +39,20 @@ type DeployContractsInput struct {
 	RegisterCandidate  *RegisterCandidateInput
 	ReuseDeployment    bool
 	EnableFaultProof   bool
-	Preset             string
-	FeeToken           string
-	Mnemonic           string
-	DRBAdmin           string
-	AAPaymasterSigner  string
+	// Preset and fee token selection
+	Preset   string // "general", "defi", "gaming", "full"
+	FeeToken string // "TON", "ETH", "USDT", "USDC"
+	Mnemonic string
+	// Gaming/Full preset additional inputs
+	DRBAdmin          string
+	AAPaymasterSigner string
+}
+
+// DeployContractsOptions holds CLI flag values for deploy-contracts command.
+// Non-empty values skip the interactive prompt for that field.
+type DeployContractsOptions struct {
+	Preset   string
+	FeeToken string
 }
 
 func (c *DeployContractsInput) Validate(ctx context.Context, registerCandidate bool) error {
@@ -71,6 +80,41 @@ func (c *DeployContractsInput) Validate(ctx context.Context, registerCandidate b
 
 	if err := c.ChainConfiguration.Validate(l1ChainId.Uint64()); err != nil {
 		return fmt.Errorf("chain configuration is invalid: %w", err)
+	}
+
+	// Preset validation
+	if c.Preset != "" {
+		valid := false
+		for _, p := range constants.ValidPresets {
+			if c.Preset == p {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("invalid preset: %s (valid: general, defi, gaming, full)", c.Preset)
+		}
+	}
+
+	// Fee token validation
+	if c.FeeToken != "" {
+		valid := false
+		for _, t := range constants.ValidFeeTokens {
+			if strings.EqualFold(c.FeeToken, t) {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("invalid fee token: %s (valid: TON, ETH, USDT, USDC)", c.FeeToken)
+		}
+		// Check that non-ETH token has an L1 address configured for this chain
+		if !strings.EqualFold(c.FeeToken, constants.FeeTokenETH) {
+			feeTokenConfig := constants.GetFeeTokenConfig(c.FeeToken, l1ChainId.Uint64())
+			if feeTokenConfig.L1Address == "" {
+				return fmt.Errorf("fee token %s is not configured for L1 chain %d", c.FeeToken, l1ChainId.Uint64())
+			}
+		}
 	}
 
 	if registerCandidate {
@@ -257,7 +301,11 @@ func (c *UpdateNetworkInput) Validate(ctx context.Context) error {
 	return nil
 }
 
-func InputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
+func InputDeployContracts(ctx context.Context, enableFaultProof bool, opts *DeployContractsOptions) (*DeployContractsInput, error) {
+	if opts == nil {
+		opts = &DeployContractsOptions{}
+	}
+
 	l1RPCUrl, _, l1ChainID, err := inputL1RPC(ctx)
 	if err != nil {
 		fmt.Printf("Error while reading L1 RPC URL: %s", err)
@@ -276,13 +324,7 @@ func InputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
 		return nil, fmt.Errorf("seed phrase cannot be empty")
 	}
 
-	fraudProof := false
-	//fmt.Print("Would you like to enable the fault-proof system on your chain? [Y or N] (default: N): ")
-	//fraudProof, err = scanner.ScanBool()
-	//if err != nil {
-	//	fmt.Printf("Error while reading the fault-proof system setting: %s", err)
-	//	return nil, err
-	//}
+	fraudProof := enableFaultProof
 
 	// Select operators Accounts
 	l1Client, err := ethclient.Dial(l1RPCUrl)
@@ -297,6 +339,33 @@ func InputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
 
 	if operators == nil {
 		return nil, fmt.Errorf("no operators were found")
+	}
+
+	// --- Preset selection ---
+	preset := opts.Preset
+	if preset == "" {
+		preset, err = inputPreset()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// --- Fee token selection ---
+	feeToken := opts.FeeToken
+	if feeToken == "" {
+		feeToken, err = inputFeeToken()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// --- Gaming/Full: additional inputs ---
+	var drbAdmin, aaPaymasterSigner string
+	if preset == constants.PresetGaming || preset == constants.PresetFull {
+		drbAdmin, aaPaymasterSigner, err = inputAADRBAddresses(operators)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	fmt.Print("Would you like to perform advanced configurations? (Refer to the SDK Guide for more details) (Y/n): ")
@@ -418,7 +487,12 @@ func InputDeployContracts(ctx context.Context) (*DeployContractsInput, error) {
 			ChallengePeriod:          challengePeriod,
 			OutputRootFrequency:      outputFrequency,
 		},
-		Operators: operators,
+		Operators:         operators,
+		EnableFaultProof:  enableFaultProof,
+		Preset:            preset,
+		FeeToken:          feeToken,
+		DRBAdmin:          drbAdmin,
+		AAPaymasterSigner: aaPaymasterSigner,
 	}, nil
 }
 
@@ -1313,6 +1387,14 @@ func makeDeployContractConfigJsonFile(
 		deployContractTemplate.FiatTokenOwner = address.Hex()
 		deployContractTemplate.UniswapV3FactoryOwner = address.Hex()
 		deployContractTemplate.UniversalRouterRewardsDistributor = address.Hex()
+
+		// Gaming/Full preset: default DRB and AA admin to operator admin address
+		if deployContractTemplate.DRBAdmin == "" {
+			deployContractTemplate.DRBAdmin = address.Hex()
+		}
+		if deployContractTemplate.AAPaymasterSigner == "" {
+			deployContractTemplate.AAPaymasterSigner = address.Hex()
+		}
 	}
 	if account := operators.SequencerPrivateKey; account != "" {
 		address, err := utils.GetAddressFromPrivateKey(account)
@@ -1357,6 +1439,11 @@ func makeDeployContractConfigJsonFile(
 	deployContractTemplate.L1StartingBlockTag = latest.Hash().Hex()
 	deployContractTemplate.L2OutputOracleStartingTimestamp = latest.Time()
 
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		fmt.Printf("Failed to create directory for configuration file: %s", err)
+		return err
+	}
+
 	file, err := os.Create(filePath)
 	if err != nil {
 		fmt.Printf("Failed to create configuration file: %s", err)
@@ -1374,7 +1461,7 @@ func makeDeployContractConfigJsonFile(
 	return nil
 }
 
-func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainID, l2ChainId uint64) *types.DeployConfigTemplate {
+func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainID, l2ChainId uint64, prestateHash string) *types.DeployConfigTemplate {
 	var (
 		chainConfiguration = deployConfigInputs.ChainConfiguration
 	)
@@ -1388,13 +1475,23 @@ func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainI
 		l1ChainId                        = l1ChainID
 		l2OutputOracleSubmissionInterval = chainConfiguration.GetL2OutputOracleSubmissionInterval()
 		finalizationPeriods              = chainConfiguration.GetFinalizationPeriodSeconds()
-		enableFraudProof                 = false
+		enableFraudProof                 = deployConfigInputs.EnableFaultProof
 	)
 
+	// Resolve fee token configuration
+	feeToken := deployConfigInputs.FeeToken
+	if feeToken == "" {
+		feeToken = constants.FeeTokenTON
+	}
+	feeTokenConfig := constants.GetFeeTokenConfig(feeToken, l1ChainId)
+	// L2 native token is always TON regardless of fee token.
+	// Non-TON fee tokens are handled by the AA paymaster layer.
+	tonConfig := constants.GetFeeTokenConfig(constants.FeeTokenTON, l1ChainId)
+
 	defaultTemplate := &types.DeployConfigTemplate{
-		NativeTokenName:                          "Tokamak Network Token",
-		NativeTokenSymbol:                        "TON",
-		NativeTokenAddress:                       constants.L1ChainConfigurations[l1ChainId].L2NativeTokenAddress,
+		NativeTokenName:                          tonConfig.Name,
+		NativeTokenSymbol:                        tonConfig.Symbol,
+		NativeTokenAddress:                       tonConfig.L1Address,
 		L1ChainID:                                l1ChainId,
 		L2ChainID:                                l2ChainId,
 		L2BlockTime:                              l2BlockTime,
@@ -1425,47 +1522,179 @@ func initDeployConfigTemplate(deployConfigInputs *DeployContractsInput, l1ChainI
 		L2GenesisDeltaTimeOffset:                 "0x0",
 		L2GenesisEcotoneTimeOffset:               "0x0",
 		L2GenesisFjordTimeOffset:                 "0x0",
+		L2GenesisGraniteTimeOffset:               "0x0",
+		L2GenesisHoloceneTimeOffset:              "0x0",
+		L2GenesisIsthmusTimeOffset:               "0x0",
 		SystemConfigStartBlock:                   0,
 		RequiredProtocolVersion:                  "0x0000000000000000000000000000000000000003000000010000000000000000",
 		RecommendedProtocolVersion:               "0x0000000000000000000000000000000000000003000000010000000000000000",
-		FaultGameAbsolutePrestate:                "0x03ab262ce124af0d5d328e09bf886a2b272fe960138115ad8b94fdc3034e3155",
-		FaultGameMaxDepth:                        73,
-		FaultGameClockExtension:                  10800,
-		FaultGameMaxClockDuration:                302400,
-		FaultGameGenesisBlock:                    0,
-		FaultGameGenesisOutputRoot:               "0xDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF",
-		FaultGameSplitDepth:                      30,
-		FaultGameWithdrawalDelay:                 604800,
-		PreimageOracleMinProposalSize:            126000,
-		PreimageOracleChallengePeriod:            86400,
-		ProofMaturityDelaySeconds:                604800,
-		DisputeGameFinalityDelaySeconds:          302400,
-		RespectedGameType:                        0,
-		UseFaultProofs:                           enableFraudProof,
-		L1UsdcAddr:                               constants.L1ChainConfigurations[l1ChainId].USDCAddress,
-		UsdcTokenName:                            "Bridged USDC (Tokamak Network)",
-		FactoryV2addr:                            "0x0000000000000000000000000000000000000000",
-		NativeCurrencyLabelBytes:                 []uint64{84, 87, 79, 78, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-		UniswapV3FactoryOwner:                    "0x7b91111ec983c13b3C2F36C8A84a5099225786FA",
-		UniswapV3FactoryFee500:                   500,
-		UniswapV3FactoryTickSpacing10:            10,
-		UniswapV3FactoryFee3000:                  3000,
-		UniswapV3FactoryTickSpacing60:            60,
-		UniswapV3FactoryFee10000:                 10000,
-		UniswapV3FactoryTickSpacing200:           200,
-		UniswapV3FactoryFee100:                   100,
-		UniswapV3FactoryTickSpacing1:             1,
-		PairInitCodeHash:                         "0x96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f",
-		PoolInitCodeHash:                         "0xe34f199b19b2b4f47f68442619d555527d244f78a3297ea89325f843f87b8b54",
-		GovernanceTokenName:                      "Optimism",
-		GovernanceTokenOwner:                     "0x0000000000000000000000000000000000000333",
-		GovernanceTokenSymbol:                    "OP",
-		L2OutputOracleChallenger:                 "0x0000000000000000000000000000000000000001",
-		ReuseDeployment:                          true,
+		FaultGameAbsolutePrestate: func() string {
+			if prestateHash != "" {
+				return prestateHash
+			}
+			return "0x0000000000000000000000000000000000000000000000000000000000000000"
+		}(),
+		FaultGameMaxDepth:               73,
+		FaultGameClockExtension:         10800,
+		FaultGameMaxClockDuration:       302400,
+		FaultGameGenesisBlock:           0,
+		FaultGameGenesisOutputRoot:      "0x0000000000000000000000000000000000000000000000000000000000000000",
+		FaultGameSplitDepth:             30,
+		FaultGameWithdrawalDelay:        604800,
+		PreimageOracleMinProposalSize:   126000,
+		PreimageOracleChallengePeriod:   86400,
+		ProofMaturityDelaySeconds:       604800,
+		DisputeGameFinalityDelaySeconds: 302400,
+		RespectedGameType:               0,
+		UseFaultProofs:                  enableFraudProof,
+		L1UsdcAddr:                      constants.L1ChainConfigurations[l1ChainId].USDCAddress,
+		UsdcTokenName:                   "Bridged USDC (Tokamak Network)",
+		FactoryV2addr:                   "0x0000000000000000000000000000000000000000",
+		NativeCurrencyLabelBytes:        utils.StringToBytes32(feeTokenConfig.Symbol),
+		UniswapV3FactoryOwner:           "0x7b91111ec983c13b3C2F36C8A84a5099225786FA",
+		UniswapV3FactoryFee500:          500,
+		UniswapV3FactoryTickSpacing10:   10,
+		UniswapV3FactoryFee3000:         3000,
+		UniswapV3FactoryTickSpacing60:   60,
+		UniswapV3FactoryFee10000:        10000,
+		UniswapV3FactoryTickSpacing200:  200,
+		UniswapV3FactoryFee100:          100,
+		UniswapV3FactoryTickSpacing1:    1,
+		PairInitCodeHash:                "0x96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f",
+		PoolInitCodeHash:                "0xe34f199b19b2b4f47f68442619d555527d244f78a3297ea89325f843f87b8b54",
+		GovernanceTokenName:             "Optimism",
+		GovernanceTokenOwner:            "0x0000000000000000000000000000000000000333",
+		GovernanceTokenSymbol:           "OP",
+		L2OutputOracleChallenger:        "0x0000000000000000000000000000000000000001",
+		ReuseDeployment:                 deployConfigInputs.ReuseDeployment,
+		Preset:                          deployConfigInputs.Preset,
+	}
+
+	// Override fault-proof timing parameters for testnet chains.
+	// Mainnet values (days/weeks) make interactive testing impractical on Sepolia/Holesky.
+	if l1ChainId == constants.EthereumSepoliaChainID || l1ChainId == constants.EthereumHoleskyChainID {
+		defaultTemplate.FaultGameClockExtension = 300       // 5 minutes (mainnet: 3 hours)
+		defaultTemplate.FaultGameMaxClockDuration = 3600    // 1 hour (mainnet: 3.5 days)
+		defaultTemplate.FaultGameWithdrawalDelay = 12       // 1 L1 block (mainnet: 7 days)
+		defaultTemplate.PreimageOracleChallengePeriod = 300 // 5 minutes (mainnet: 1 day)
+		defaultTemplate.ProofMaturityDelaySeconds = 12      // 1 L1 block (mainnet: 7 days)
+		defaultTemplate.DisputeGameFinalityDelaySeconds = 6 // ~0.5 L1 block (mainnet: 3.5 days)
+	}
+
+	// Apply preset-specific overrides
+	preset := deployConfigInputs.Preset
+	switch preset {
+	case constants.PresetGeneral:
+		// Clear DeFi-specific fields for general preset.
+		// Keep L1UsdcAddr from L1ChainConfigurations — the forge deploy script always
+		// deploys L1UsdcBridge and reverts on a zero USDC address.
+		defaultTemplate.UniswapV3FactoryOwner = "0x0000000000000000000000000000000000000000"
+		defaultTemplate.UniswapV3FactoryFee500 = 0
+		defaultTemplate.UniswapV3FactoryTickSpacing10 = 0
+		defaultTemplate.UniswapV3FactoryFee3000 = 0
+		defaultTemplate.UniswapV3FactoryTickSpacing60 = 0
+		defaultTemplate.UniswapV3FactoryFee10000 = 0
+		defaultTemplate.UniswapV3FactoryTickSpacing200 = 0
+		defaultTemplate.UniswapV3FactoryFee100 = 0
+		defaultTemplate.UniswapV3FactoryTickSpacing1 = 0
+	case constants.PresetGaming, constants.PresetFull:
+		// Gaming/Full: set DRB and AA admin addresses
+		defaultTemplate.DRBAdmin = deployConfigInputs.DRBAdmin
+		defaultTemplate.AAPaymasterSigner = deployConfigInputs.AAPaymasterSigner
 	}
 
 	return defaultTemplate
 
+}
+
+// inputPreset prompts the user to select a chain preset.
+func inputPreset() (string, error) {
+	fmt.Println("\nSelect your chain preset:")
+	fmt.Println("  1) General - Core contracts only (minimal predeploys)")
+	fmt.Println("  2) DeFi    - Core + Uniswap V3 + USDC (default)")
+	fmt.Println("  3) Gaming  - Core + DRB (Commit-Reveal Random Beacon) + Account Abstraction (ERC-4337)")
+	fmt.Println("  4) Full    - All predeploys (DeFi + Gaming)")
+	fmt.Print("Enter choice [1-4] (default: 2): ")
+
+	value, err := scanner.ScanInt()
+	if err != nil {
+		return "", fmt.Errorf("error while reading preset choice: %w", err)
+	}
+
+	switch value {
+	case 0, 2:
+		return constants.PresetDeFi, nil
+	case 1:
+		return constants.PresetGeneral, nil
+	case 3:
+		return constants.PresetGaming, nil
+	case 4:
+		return constants.PresetFull, nil
+	default:
+		fmt.Println("Invalid choice, defaulting to DeFi")
+		return constants.PresetDeFi, nil
+	}
+}
+
+// inputFeeToken prompts the user to select the L2 native fee token.
+func inputFeeToken() (string, error) {
+	fmt.Println("\nSelect L2 native fee token:")
+	fmt.Println("  1) TON  - Tokamak Network Token (default)")
+	fmt.Println("  2) ETH  - Ether")
+	fmt.Println("  3) USDT - Tether USD")
+	fmt.Println("  4) USDC - USD Coin")
+	fmt.Print("Enter choice [1-4] (default: 1): ")
+
+	value, err := scanner.ScanInt()
+	if err != nil {
+		return "", fmt.Errorf("error while reading fee token choice: %w", err)
+	}
+
+	switch value {
+	case 0, 1:
+		return constants.FeeTokenTON, nil
+	case 2:
+		return constants.FeeTokenETH, nil
+	case 3:
+		return constants.FeeTokenUSDT, nil
+	case 4:
+		return constants.FeeTokenUSDC, nil
+	default:
+		fmt.Println("Invalid choice, defaulting to TON")
+		return constants.FeeTokenTON, nil
+	}
+}
+
+// inputAADRBAddresses prompts for DRB admin and AA paymaster signer addresses
+// for Gaming/Full presets. Defaults to the admin address if left empty.
+func inputAADRBAddresses(operators *types.Operators) (drbAdmin, aaPaymasterSigner string, err error) {
+	var defaultAddr string
+	if operators != nil && operators.AdminPrivateKey != "" {
+		addr, addrErr := utils.GetAddressFromPrivateKey(operators.AdminPrivateKey)
+		if addrErr == nil {
+			defaultAddr = addr.Hex()
+		}
+	}
+
+	fmt.Printf("\nDRB Admin address (default: %s): ", defaultAddr)
+	drbAdmin, err = scanner.ScanString()
+	if err != nil {
+		return "", "", fmt.Errorf("error reading DRB Admin address: %w", err)
+	}
+	if drbAdmin == "" {
+		drbAdmin = defaultAddr
+	}
+
+	fmt.Printf("AA Paymaster Signer address (default: %s): ", defaultAddr)
+	aaPaymasterSigner, err = scanner.ScanString()
+	if err != nil {
+		return "", "", fmt.Errorf("error reading AA Paymaster Signer address: %w", err)
+	}
+	if aaPaymasterSigner == "" {
+		aaPaymasterSigner = defaultAddr
+	}
+
+	return drbAdmin, aaPaymasterSigner, nil
 }
 
 func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error {
@@ -1504,7 +1733,7 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	writer.WriteString(fmt.Sprintf("export TF_VAR_genesis_file_path=\"%s\"\n", "config-files/genesis.json"))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_rollup_file_path=\"%s\"\n", "config-files/rollup.json"))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_prestate_file_path=\"%s\"\n", "config-files/prestate.json"))
-	writer.WriteString(fmt.Sprintf("export TF_VAR_prestate_hash=\"%s\"\n", "0x03ab262ce124af0d5d328e09bf886a2b272fe960138115ad8b94fdc3034e3155"))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_prestate_hash=\"%s\"\n", config.PrestateHash))
 
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_deployments_path=\"%s\"\n", config.DeploymentFilePath))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_l1_rpc_url=\"%s\"\n", config.L1RpcUrl))
@@ -1514,6 +1743,11 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_thanos_stack_image_tag=\"%s\"\n", config.ThanosStackImageTag))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_stack_max_channel_duration=\"%d\"\n", config.MaxChannelDuration))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_txmgr_cell_proof_time=\"%d\"\n", config.TxmgrCellProofTime))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_enable_fault_proof=\"%t\"\n", config.EnableFaultProof))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_preset=\"%s\"\n", config.Preset))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_native_token_name=\"%s\"\n", config.NativeTokenName))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_native_token_symbol=\"%s\"\n", config.NativeTokenSymbol))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_native_token_address=\"%s\"\n", config.NativeTokenAddress))
 
 	// AWS Backup configuration - Always enabled for production-ready backup protection
 	scheduleCron := config.EfsBackupScheduleCron
@@ -1579,6 +1813,20 @@ func updateTerraformEnvFile(dirPath string, config types.UpdateTerraformEnvConfi
 		"TF_VAR_stack_l1_beacon_url":          config.L1BeaconUrl,
 		"TF_VAR_stack_op_geth_image_tag":      config.OpGethImageTag,
 		"TF_VAR_stack_thanos_stack_image_tag": config.ThanosStackImageTag,
+	}
+
+	// Update native token / preset values only if provided (non-empty)
+	if config.Preset != "" {
+		newValues["TF_VAR_preset"] = config.Preset
+	}
+	if config.NativeTokenName != "" {
+		newValues["TF_VAR_native_token_name"] = config.NativeTokenName
+	}
+	if config.NativeTokenSymbol != "" {
+		newValues["TF_VAR_native_token_symbol"] = config.NativeTokenSymbol
+	}
+	if config.NativeTokenAddress != "" {
+		newValues["TF_VAR_native_token_address"] = config.NativeTokenAddress
 	}
 
 	// Update or add new values

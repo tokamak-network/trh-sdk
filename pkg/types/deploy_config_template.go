@@ -49,6 +49,9 @@ type DeployConfigTemplate struct {
 	L2GenesisDeltaTimeOffset                 string   `json:"l2GenesisDeltaTimeOffset"`
 	L2GenesisEcotoneTimeOffset               string   `json:"l2GenesisEcotoneTimeOffset"`
 	L2GenesisFjordTimeOffset                 string   `json:"l2GenesisFjordTimeOffset,omitempty"`
+	L2GenesisGraniteTimeOffset               string   `json:"l2GenesisGraniteTimeOffset,omitempty"`
+	L2GenesisHoloceneTimeOffset              string   `json:"l2GenesisHoloceneTimeOffset,omitempty"`
+	L2GenesisIsthmusTimeOffset               string   `json:"l2GenesisIsthmusTimeOffset,omitempty"`
 	SystemConfigStartBlock                   uint64   `json:"systemConfigStartBlock"`
 	RequiredProtocolVersion                  string   `json:"requiredProtocolVersion"`
 	RecommendedProtocolVersion               string   `json:"recommendedProtocolVersion"`
@@ -87,4 +90,13 @@ type DeployConfigTemplate struct {
 	PoolInitCodeHash                         string   `json:"poolInitCodeHash"`
 	UniversalRouterRewardsDistributor        string   `json:"universalRouterRewardsDistributor"`
 	ReuseDeployment                          bool     `json:"reuseDeployment"`
+
+	// Preset selection
+	Preset string `json:"preset,omitempty"`
+
+	// Gaming/Full preset: DRB and AA admin addresses
+	DRBAdmin               string `json:"drbAdmin,omitempty"`
+	DRBActivationThreshold string `json:"drbActivationThreshold,omitempty"`
+	DRBFlatFee             string `json:"drbFlatFee,omitempty"`
+	AAPaymasterSigner      string `json:"aaPaymasterSigner,omitempty"`
 }

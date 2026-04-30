@@ -26,9 +26,21 @@ func (t *ThanosStack) tryToDeleteK8sNamespace(ctx context.Context, namespace str
 		t.logger.Warn("Namespace is empty, skipping namespace deletion")
 		return nil
 	}
+
+	exists, err := utils.CheckNamespaceExists(ctx, namespace)
+	if err != nil {
+		t.logger.Error("Failed to check namespace existence", "namespace", namespace, "err", err)
+		return err
+	}
+	if !exists {
+		t.logger.Info("Namespace does not exist, skipping deletion")
+		return nil
+	}
+
 	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "namespace", namespace, "-o", "json")
 	if err != nil {
 		t.logger.Error("Error getting namespace status", "err", err)
+		return err
 	}
 
 	var status K8sNamespaceStatus

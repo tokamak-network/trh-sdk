@@ -1,0 +1,551 @@
+services:
+  op-geth:
+    image: {{.OpGethImage}}
+    ports:
+      - "8545:8545"
+      - "8546:8546"
+      - "8551:8551"
+    volumes:
+      - op-geth-data:/data
+      - {{.ConfigVolume}}:/config:ro
+    command:
+      - --datadir=/data
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.port=8545
+      - --http.corsdomain=*
+      - --http.vhosts=*
+      - --http.api=web3,debug,eth,txpool,net,engine
+      - --ws
+      - --ws.addr=0.0.0.0
+      - --ws.port=8546
+      - --ws.origins=*
+      - --ws.api=debug,eth,txpool,net,engine
+      - --authrpc.addr=0.0.0.0
+      - --authrpc.port=8551
+      - --authrpc.jwtsecret=/config/jwt.txt
+      - --authrpc.vhosts=*
+      - --rollup.disabletxpoolgossip=true
+      - --gcmode=archive
+      - --nodiscover
+      - --maxpeers=0
+      - --metrics
+      - --metrics.addr=0.0.0.0
+      - --metrics.port=6060
+      - --networkid={{.L2ChainID}}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8545"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  op-node:
+    image: {{.OpNodeImage}}
+    ports:
+      - "9545:9545"
+      - "7300:7300"
+    volumes:
+      - {{.ConfigVolume}}:/config:ro
+    environment:
+      - OP_NODE_L1_ETH_RPC={{.L1RpcUrl}}
+      - OP_NODE_L1_BEACON={{.L1BeaconUrl}}
+      - OP_NODE_L2_ENGINE_RPC=http://op-geth:8551
+      - OP_NODE_L2_ENGINE_AUTH=/config/jwt.txt
+      - OP_NODE_ROLLUP_CONFIG=/config/rollup.json
+      - OP_NODE_SEQUENCER_ENABLED=true
+      - OP_NODE_SEQUENCER_L1_CONFS=4
+      - OP_NODE_P2P_SEQUENCER_KEY={{.SequencerKey}}
+      - OP_NODE_P2P_DISABLE=true
+      - OP_NODE_RPC_ADDR=0.0.0.0
+      - OP_NODE_RPC_PORT=9545
+      - OP_NODE_METRICS_ENABLED=true
+      - OP_NODE_METRICS_ADDR=0.0.0.0
+      - OP_NODE_METRICS_PORT=7300
+      - OP_NODE_IGNORE_MISSING_PECTRA_BLOB_SCHEDULE=true
+      - OP_NODE_L1_RPC_RATE_LIMIT=3
+      - OP_NODE_L1_RPC_KIND=alchemy
+      - OP_NODE_L1_MAX_CONCURRENCY=3
+    depends_on:
+      op-geth:
+        condition: service_healthy
+    restart: unless-stopped
+
+  op-batcher:
+    image: {{.OpBatcherImage}}
+    ports:
+      - "8548:8548"
+    environment:
+      - OP_BATCHER_L1_ETH_RPC={{.L1RpcUrl}}
+      - OP_BATCHER_L2_ETH_RPC=http://op-geth:8545
+      - OP_BATCHER_ROLLUP_RPC=http://op-node:9545
+      - OP_BATCHER_PRIVATE_KEY={{.BatcherKey}}
+      - OP_BATCHER_MAX_CHANNEL_DURATION={{.MaxChannelDuration}}
+      - OP_BATCHER_SUB_SAFETY_MARGIN=6
+      - OP_BATCHER_NUM_CONFIRMATIONS=1
+      - OP_BATCHER_RPC_ADDR=0.0.0.0
+      - OP_BATCHER_RPC_PORT=8548
+      - OP_BATCHER_METRICS_ENABLED=true
+      - OP_BATCHER_METRICS_ADDR=0.0.0.0
+      - OP_BATCHER_METRICS_PORT=7302
+      - OP_BATCHER_TXMGR_RECEIPT_QUERY_INTERVAL=30s
+      - OP_BATCHER_RESUBMISSION_TIMEOUT=120s
+      - OP_BATCHER_POLL_INTERVAL=30s
+      - OP_BATCHER_DATA_AVAILABILITY_TYPE={{.DataAvailabilityType}}
+      - OP_BATCHER_TXMGR_BLOB_FEE_CAP_MULTIPLIER={{.BlobFeeCapMultiplier}}
+      - OP_BATCHER_TXMGR_MAX_L1_BLOB_BASE_FEE={{.MaxBlobBaseFeeGwei}}
+    depends_on:
+      op-geth:
+        condition: service_healthy
+    restart: unless-stopped
+
+  op-proposer:
+    image: {{.OpProposerImage}}
+    ports:
+      - "8560:8560"
+    environment:
+      - OP_PROPOSER_L1_ETH_RPC={{.L1RpcUrl}}
+      - OP_PROPOSER_ROLLUP_RPC=http://op-node:9545
+      - OP_PROPOSER_PRIVATE_KEY={{.ProposerKey}}
+{{- if .EnableFraudProof}}
+      - OP_PROPOSER_GAME_FACTORY_ADDRESS={{.DisputeGameFactoryAddress}}
+{{- else}}
+      - OP_PROPOSER_L2OO_ADDRESS={{.L2OutputOracleAddress}}
+{{- end}}
+      - OP_PROPOSER_ALLOW_NON_FINALIZED=true
+      - OP_PROPOSER_NUM_CONFIRMATIONS=1
+      - OP_PROPOSER_RPC_ADDR=0.0.0.0
+      - OP_PROPOSER_RPC_PORT=8560
+      - OP_PROPOSER_POLL_INTERVAL=30s
+      - OP_PROPOSER_TXMGR_RECEIPT_QUERY_INTERVAL=60s
+      - OP_PROPOSER_RESUBMISSION_TIMEOUT=120s
+      - OP_PROPOSER_PROPOSAL_INTERVAL=1800s
+    depends_on:
+      op-geth:
+        condition: service_healthy
+    profiles: ["proposer"]
+    restart: unless-stopped
+
+  op-challenger:
+    image: {{.OpChallengerImage}}
+    volumes:
+      - op-challenger-data:/data
+      - {{.ConfigVolume}}:/config:ro
+    environment:
+      - OP_CHALLENGER_L1_ETH_RPC={{.L1RpcUrl}}
+      - OP_CHALLENGER_L1_BEACON={{.L1BeaconUrl}}
+      - OP_CHALLENGER_ROLLUP_RPC=http://op-node:9545
+      - OP_CHALLENGER_L2_ETH_RPC=http://op-geth:8545
+      - OP_CHALLENGER_PRIVATE_KEY={{.ChallengerKey}}
+      - OP_CHALLENGER_GAME_FACTORY_ADDRESS={{.DisputeGameFactoryAddress}}
+      - OP_CHALLENGER_TRACE_TYPE=cannon
+      - OP_CHALLENGER_CANNON_L2_GENESIS=/config/genesis.json
+      - OP_CHALLENGER_CANNON_ROLLUP_CONFIG=/config/rollup.json
+      - OP_CHALLENGER_CANNON_PRESTATES_URL=file:///config
+      - OP_CHALLENGER_DATADIR=/data
+      - OP_CHALLENGER_METRICS_ENABLED=true
+      - OP_CHALLENGER_METRICS_ADDR=0.0.0.0
+      - OP_CHALLENGER_METRICS_PORT=7304
+    depends_on:
+      op-geth:
+        condition: service_healthy
+    profiles: ["challenger"]
+    restart: unless-stopped
+
+  op-bridge:
+    image: tokamaknetwork/trh-op-bridge-app:latest
+    platform: linux/amd64
+    ports:
+      - "3001:3000"
+    environment:
+      - NEXT_PUBLIC_L1_CHAIN_NAME={{.BridgeL1ChainName}}
+      - NEXT_PUBLIC_L1_CHAIN_ID={{.BridgeL1ChainID}}
+      - NEXT_PUBLIC_L1_RPC={{.BridgeL1RPC}}
+      - NEXT_PUBLIC_L1_NATIVE_CURRENCY_NAME={{.BridgeL1NativeCurrencyName}}
+      - NEXT_PUBLIC_L1_NATIVE_CURRENCY_SYMBOL={{.BridgeL1NativeCurrencySymbol}}
+      - NEXT_PUBLIC_L1_NATIVE_CURRENCY_DECIMALS={{.BridgeL1NativeCurrencyDecimals}}
+      - NEXT_PUBLIC_L1_BLOCK_EXPLORER={{.BridgeL1BlockExplorer}}
+      - NEXT_PUBLIC_L1_USDC_ADDRESS={{.BridgeL1USDCAddress}}
+      - NEXT_PUBLIC_L1_USDT_ADDRESS={{.BridgeL1USDTAddress}}
+      - NEXT_PUBLIC_L2_CHAIN_NAME={{.BridgeL2ChainName}}
+      - NEXT_PUBLIC_L2_CHAIN_ID={{.BridgeL2ChainID}}
+      - NEXT_PUBLIC_L2_RPC={{.BridgeL2RPC}}
+      - NEXT_PUBLIC_L2_NATIVE_CURRENCY_NAME={{.BridgeL2NativeCurrencyName}}
+      - NEXT_PUBLIC_L2_NATIVE_CURRENCY_SYMBOL={{.BridgeL2NativeCurrencySymbol}}
+      - NEXT_PUBLIC_L2_NATIVE_CURRENCY_DECIMALS=18
+      - NEXT_PUBLIC_NATIVE_TOKEN_L1_ADDRESS={{.BridgeNativeTokenL1Address}}
+      - NEXT_PUBLIC_STANDARD_BRIDGE_ADDRESS={{.BridgeStandardBridgeAddress}}
+      - NEXT_PUBLIC_ADDRESS_MANAGER_ADDRESS={{.BridgeAddressManagerAddress}}
+      - NEXT_PUBLIC_L1_CROSS_DOMAIN_MESSENGER_ADDRESS={{.BridgeL1CrossDomainMessengerAddress}}
+      - NEXT_PUBLIC_OPTIMISM_PORTAL_ADDRESS={{.BridgeOptimismPortalAddress}}
+      - NEXT_PUBLIC_L2_OUTPUT_ORACLE_ADDRESS={{.BridgeL2OutputOracleAddress}}
+      - NEXT_PUBLIC_L1_USDC_BRIDGE_ADDRESS={{.BridgeL1USDCBridgeAddress}}
+      - NEXT_PUBLIC_DISPUTE_GAME_FACTORY_ADDRESS={{.BridgeDisputeGameFactoryAddress}}
+      - NEXT_PUBLIC_BATCH_SUBMISSION_FREQUENCY={{.BridgeBatchSubmissionFrequency}}
+      - NEXT_PUBLIC_L1_BLOCK_TIME={{.BridgeL1BlockTime}}
+      - NEXT_PUBLIC_L2_BLOCK_TIME={{.BridgeL2BlockTime}}
+      - NEXT_PUBLIC_OUTPUT_ROOT_FREQUENCY={{.BridgeOutputRootFrequency}}
+      - NEXT_PUBLIC_CHALLENGE_PERIOD={{.BridgeChallengePeriod}}
+    profiles: ["bridge"]
+    restart: unless-stopped
+
+  blockscout-db:
+    image: postgres:15
+    environment:
+      - POSTGRES_PASSWORD=blockscout
+      - POSTGRES_DB=blockscout
+      - POSTGRES_USER=postgres
+    volumes:
+      - blockscout-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d blockscout"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    profiles: ["blockExplorer"]
+    restart: unless-stopped
+
+  blockscout:
+    image: blockscout/blockscout-optimism:6.10.1
+    command: ["/bin/sh", "-c", "/app/bin/blockscout eval 'Explorer.ReleaseTasks.create_and_migrate()' && /app/bin/blockscout start"]
+    ports:
+      - "4000:4000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:blockscout@blockscout-db:5432/blockscout
+      - ETHEREUM_JSONRPC_HTTP_URL=http://op-geth:8545
+      - ETHEREUM_JSONRPC_WS_URL=ws://op-geth:8546
+      - ETHEREUM_JSONRPC_VARIANT=geth
+      - COIN={{.BlockExplorerCoinSymbol}}
+{{- if .BlockExplorerStableCoin}}
+      - DISABLE_EXCHANGE_RATES=true
+{{- end}}
+      - NETWORK=L2
+      - SUBNETWORK=Optimism
+      - CHAIN_ID={{.L2ChainID}}
+      - SECRET_KEY_BASE=RMgI4C1HSkxsEjdhtGMfwAHfyT6CKWXOgzCboJflfSm4cuBCN4bJkY2T/E5VHm4l
+      - ECTO_USE_SSL=false
+      - MIX_ENV=prod
+      - PORT=4000
+      - POOL_SIZE=10
+      - CHAIN_TYPE=optimism
+      # Use a public rate-limit-free RPC for L1 indexing (Alchemy free tier blocks 250-block eth_getLogs ranges)
+      - INDEXER_OPTIMISM_L1_RPC=https://ethereum-sepolia-rpc.publicnode.com
+      - INDEXER_BEACON_RPC_URL=https://ethereum-sepolia-beacon-api.publicnode.com
+      - INDEXER_OPTIMISM_L1_SYSTEM_CONFIG_CONTRACT={{.BlockExplorerSystemConfigAddress}}
+      - INDEXER_OPTIMISM_L1_PORTAL_CONTRACT={{.BridgeOptimismPortalAddress}}
+      - INDEXER_OPTIMISM_L1_DISPUTE_GAME_FACTORY_CONTRACT={{.DisputeGameFactoryAddress}}
+      - INDEXER_OPTIMISM_L1_BATCH_INBOX={{.BlockExplorerBatchInboxAddress}}
+      - INDEXER_OPTIMISM_L1_BATCH_START_BLOCK={{.BlockExplorerL1StartBlock}}
+      # Blobs API points to this Blockscout instance; INDEXER_BEACON_RPC_URL indexes EIP-4844 blobs,
+      # and the OP batch fetcher reads them via the /api/v2/blobs endpoint on the same host.
+      - INDEXER_OPTIMISM_L1_BATCH_BLOCKSCOUT_BLOBS_API_URL=http://blockscout:4000
+      - INDEXER_OPTIMISM_L2_WITHDRAWALS_START_BLOCK=1
+      - INDEXER_OPTIMISM_L2_BATCH_GENESIS_BLOCK_NUMBER=0
+    depends_on:
+      blockscout-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/bin/sh", "-c", "curl -sf http://localhost:4000/api/v2/blocks?limit=1 > /dev/null"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    profiles: ["blockExplorer"]
+    restart: unless-stopped
+
+  blockscout-frontend:
+    image: ghcr.io/blockscout/frontend:v1.38.0
+    environment:
+      # blockscout-gateway:4001 is the Docker-internal hostname used by Next.js SSR proxy.
+      # At startup, entrypoint.sh generates /app/public/assets/envs.js from these env vars,
+      # then the command below patches it to localhost:4001 so the browser uses the host-accessible URL.
+      - NEXT_PUBLIC_API_HOST=blockscout-gateway:4001
+      - NEXT_PUBLIC_API_PROTOCOL=http
+      - NEXT_PUBLIC_STATS_API_HOST=http://blockscout-gateway:4001
+      - NEXT_PUBLIC_APP_HOST=localhost
+      - NEXT_PUBLIC_APP_PORT=4001
+      - NEXT_PUBLIC_APP_PROTOCOL=http
+      - NEXT_PUBLIC_API_BASE_PATH=/
+      - NEXT_PUBLIC_NETWORK_NAME={{.BlockExplorerNetworkName}}
+      - NEXT_PUBLIC_NETWORK_SHORT_NAME={{.BlockExplorerNetworkName}}
+      - NEXT_PUBLIC_NETWORK_ID={{.L2ChainID}}
+      - NEXT_PUBLIC_NETWORK_CURRENCY_NAME={{.BlockExplorerCoinName}}
+      - NEXT_PUBLIC_NETWORK_CURRENCY_SYMBOL={{.BlockExplorerCoinSymbol}}
+      - NEXT_PUBLIC_NETWORK_CURRENCY_DECIMALS={{.BlockExplorerCoinDecimals}}
+      - NEXT_PUBLIC_ROLLUP_TYPE=optimistic
+      - NEXT_PUBLIC_ROLLUP_L1_BASE_URL={{.BlockExplorerL1BaseURL}}
+      - NEXT_PUBLIC_ROLLUP_L2_WITHDRAWAL_URL=http://localhost:3001
+{{- if .EnableFraudProof}}
+      - NEXT_PUBLIC_FAULT_PROOF_ENABLED=true
+{{- end}}
+    command:
+      - /bin/sh
+      - -c
+      - sed -i 's|blockscout-gateway:4001|localhost:4001|g' /app/public/assets/envs.js && node server.js
+    depends_on:
+      blockscout:
+        condition: service_healthy
+    profiles: ["blockExplorer"]
+    restart: unless-stopped
+
+  blockscout-gateway:
+    # Nginx gateway that solves the NEXT_PUBLIC_API_HOST split-brain problem on macOS.
+    #
+    # Root cause: blockscout-frontend's Next.js SSR proxy and browser WebSocket both use
+    # NEXT_PUBLIC_API_HOST, but they need different values:
+    #   - SSR proxy (inside container): needs Docker-internal hostname (blockscout-gateway:4001)
+    #   - Browser WebSocket + direct API: needs host-accessible hostname (localhost:4001)
+    #
+    # Solution: nginx listens on 4001 (host-accessible) and:
+    #   1. Routes /socket/* → blockscout:4000 with WebSocket upgrade (fixes real-time updates)
+    #   2. Routes /api/*, /graphql, /auth/* → blockscout:4000 directly
+    #   3. Routes /node-api/* → blockscout-frontend:3000 but STRIPS x-endpoint header,
+    #      forcing Next.js proxy to fall back to process.env.NEXT_PUBLIC_API_HOST
+    #      (= blockscout-gateway:4001, which is Docker-resolvable)
+    #   4. Routes everything else → blockscout-frontend:3000
+    image: nginx:alpine
+    ports:
+      - "4001:4001"
+    command:
+      - /bin/sh
+      - -c
+      - |
+        cat > /etc/nginx/conf.d/blockscout.conf << 'NGINXEOF'
+        map $$http_upgrade $$connection_upgrade {
+            default upgrade;
+            ''      close;
+        }
+        server {
+            listen 4001;
+            location /socket {
+                proxy_pass http://blockscout:4000;
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade $$http_upgrade;
+                proxy_set_header Connection "upgrade";
+                proxy_set_header Host blockscout:4000;
+                proxy_read_timeout 3600s;
+            }
+            location ~ ^/(api|graphql|auth)(/|$$) {
+                proxy_pass http://blockscout:4000;
+                proxy_http_version 1.1;
+                proxy_set_header Host blockscout:4000;
+                proxy_read_timeout 300s;
+            }
+            location /node-api {
+                proxy_pass http://blockscout-frontend:3000;
+                proxy_http_version 1.1;
+                proxy_set_header x-endpoint "";
+                proxy_set_header Host $$host;
+            }
+            location / {
+                proxy_pass http://blockscout-frontend:3000;
+                proxy_http_version 1.1;
+                proxy_set_header Host $$host;
+                proxy_set_header Upgrade $$http_upgrade;
+                proxy_set_header Connection $$connection_upgrade;
+            }
+        }
+        NGINXEOF
+        rm -f /etc/nginx/conf.d/default.conf &&
+        nginx -t &&
+        nginx -g 'daemon off;'
+    depends_on:
+      blockscout:
+        condition: service_healthy
+      blockscout-frontend:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4001/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles: ["blockExplorer"]
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - {{.MonitoringConfigVolume}}:/monitoring:ro
+    command:
+      - --config.file=/monitoring/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    profiles: ["monitoring"]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3002:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_PATHS_PROVISIONING=/monitoring/provisioning
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - {{.MonitoringConfigVolume}}:/monitoring:ro
+    profiles: ["monitoring"]
+    restart: unless-stopped
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1.23.16-debian
+    ports:
+      - "3003:3001"
+    volumes:
+      - uptime-kuma-data:/app/data
+    profiles: ["uptimeService"]
+    restart: unless-stopped
+
+{{- if or (eq .Preset "gaming") (eq .Preset "full") }}
+  drb-postgres:
+    image: postgres:14.13-alpine
+    environment:
+      POSTGRES_PASSWORD: drbpassword
+      POSTGRES_DB: drb_leader
+    volumes:
+      - drb-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  drb-leader:
+    image: {{.DRBNodeImage}}
+    depends_on:
+      op-geth:
+        condition: service_healthy
+      drb-postgres:
+        condition: service_healthy
+    environment:
+      NODE_TYPE: leader
+      LEADER_PRIVATE_KEY: {{.DRBLeaderPrivateKey}}
+      LEADER_EOA: {{.DRBLeaderEOA}}
+      LEADER_PORT: "9600"
+      ETH_RPC_URLS: ws://op-geth:8546
+      CONTRACT_ADDRESS: "0x4200000000000000000000000000000000000060"
+      CHAIN_ID: "{{.L2ChainID}}"
+      STATUS: dev
+      POSTGRES_PASSWORD: drbpassword
+      POSTGRES_HOST: drb-postgres
+      POSTGRES_DB: drb_leader
+    ports:
+      - "9600:9600"
+    volumes:
+      - drb-leader-keys:/app/static-key
+    networks:
+      default:
+        aliases:
+          - leadernode
+    restart: unless-stopped
+
+{{- range $i, $r := .DRBRegulars }}
+  drb-postgres-regular-{{ $r.Index }}:
+    image: postgres:14.13-alpine
+    environment:
+      POSTGRES_PASSWORD: drbpassword
+      POSTGRES_DB: drb_regular_{{ $r.Index }}
+    volumes:
+      - drb-postgres-regular-{{ $r.Index }}-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  drb-regular-{{ $r.Index }}:
+    image: {{ $.DRBNodeImage }}
+    depends_on:
+      op-geth:
+        condition: service_healthy
+      drb-postgres-regular-{{ $r.Index }}:
+        condition: service_healthy
+    environment:
+      NODE_TYPE: regular
+      REGULAR_INDEX: "{{ $r.Index }}"
+      EOA_PRIVATE_KEY: "{{ $r.PrivateKey }}"
+      LEADER_IP: "drb-leader"
+      LEADER_PEER_ID: "{{ $.DRBLeaderPeerID }}"
+      LEADER_MULTIADDR: "{{ $.DRBLeaderPeerID }}@drb-leader:9600"
+      LEADER_PORT: "9600"
+      PORT: "{{ add 9600 $r.Index }}"
+      ETH_RPC_URLS: ws://op-geth:8546
+      CONTRACT_ADDRESS: "0x4200000000000000000000000000000000000060"
+      CHAIN_ID: "{{ $.L2ChainID }}"
+      STATUS: dev
+      POSTGRES_PASSWORD: drbpassword
+      POSTGRES_HOST: drb-postgres-regular-{{ $r.Index }}
+      POSTGRES_DB: drb_regular_{{ $r.Index }}
+    ports:
+      - "{{ add 9600 $r.Index }}:{{ add 9600 $r.Index }}"
+    volumes:
+      - drb-regular-{{ $r.Index }}-keys:/app/static-key
+    restart: unless-stopped
+{{- end }}
+{{- end }}
+{{- if .AAOperatorEnabled }}
+
+  alto-bundler:
+    image: ghcr.io/pimlicolabs/alto:v1.2.7
+    command:
+      - run
+      - --entrypoints
+      - "0x4200000000000000000000000000000000000063"
+      - --rpc-url
+      - "http://op-geth:8545"
+      - --executor-private-keys
+      - "{{.AAAdminPrivateKey}}"
+      - --utility-private-key
+      - "{{.AAAdminPrivateKey}}"
+      - --safe-mode
+      - "false"
+      - --chain-type
+      - "op-stack"
+      - --port
+      - "4337"
+    ports:
+      - "4337:4337"
+    depends_on:
+      op-geth:
+        condition: service_healthy
+    profiles:
+      - aa
+    restart: unless-stopped
+{{- end }}
+
+{{- if .CrossTradeEnabled}}
+
+  cross-trade-dapp:
+    image: tokamaknetwork/cross-trade-app:latest
+    platform: linux/amd64
+    ports:
+      - "3004:3000"
+    environment:
+      - NEXT_PUBLIC_PROJECT_ID={{.CrossTradeProjectID}}
+      - NEXT_PUBLIC_CHAIN_CONFIG_L2_L1={{.CrossTradeChainConfigL2L1}}
+      - NEXT_PUBLIC_CHAIN_CONFIG_L2_L2={{.CrossTradeChainConfigL2L2}}
+    profiles: ["crossTrade"]
+    restart: unless-stopped
+{{- end}}
+
+volumes:
+  op-geth-data:
+  op-challenger-data:
+  {{.ConfigVolume}}:
+    external: true
+  {{.MonitoringConfigVolume}}:
+    external: true
+  blockscout-db-data:
+  grafana-data:
+  uptime-kuma-data:
+{{- if or (eq .Preset "gaming") (eq .Preset "full") }}
+  drb-postgres-data:
+  drb-leader-keys:
+{{- range $i, $r := .DRBRegulars }}
+  drb-postgres-regular-{{ $r.Index }}-data:
+  drb-regular-{{ $r.Index }}-keys:
+{{- end }}
+{{- end }}

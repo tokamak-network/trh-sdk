@@ -342,6 +342,55 @@ func CheckPVCStatus(ctx context.Context, namespace string) (bool, error) {
 	return true, nil
 }
 
+// WaitForIngressAddress polls until an ingress matching name has a non-empty
+// LoadBalancer address, then returns it. Returns an error if timeout elapses
+// or ctx is cancelled.
+func WaitForIngressAddress(ctx context.Context, namespace, name string, timeout time.Duration) (string, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("timeout after %v waiting for ingress %q address in namespace %q", timeout, name, namespace)
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		default:
+		}
+		addrs, err := GetAddressByIngress(ctx, namespace, name)
+		if err != nil {
+			return "", err
+		}
+		if len(addrs) > 0 {
+			return addrs[0], nil
+		}
+		time.Sleep(15 * time.Second)
+	}
+}
+
+// WaitForServiceName polls until a service matching name exists in namespace,
+// then returns the service name. Returns an error if timeout elapses or ctx is cancelled.
+func WaitForServiceName(ctx context.Context, namespace, name string, timeout time.Duration) (string, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("timeout after %v waiting for service %q in namespace %q", timeout, name, namespace)
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		default:
+		}
+		svcs, err := GetServiceNames(ctx, namespace, name)
+		if err != nil {
+			return "", err
+		}
+		if len(svcs) > 0 {
+			return svcs[0], nil
+		}
+		time.Sleep(15 * time.Second)
+	}
+}
+
 func WaitPVCReady(ctx context.Context, namespace string) error {
 	maxRetries := 5
 	for i := 0; i < maxRetries; i++ {

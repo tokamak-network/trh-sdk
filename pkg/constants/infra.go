@@ -1,9 +1,11 @@
 package constants
 
 const (
-	AWS = "aws"
+	AWS   = "aws"
+	Local = "local"
 )
 
 var SupportedInfra = map[string]bool{
-	"aws": true,
+	"aws":   true,
+	"local": true,
 }

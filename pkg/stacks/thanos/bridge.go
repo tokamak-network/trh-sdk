@@ -33,22 +33,12 @@ func (t *ThanosStack) InstallBridge(ctx context.Context) (string, error) {
 	}
 	if len(opBridgePods) > 0 {
 		t.logger.Info("OP Bridge is running: \n")
-		var bridgeUrl string
-		for {
-			k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, "op-bridge")
-			if err != nil {
-				t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
-				return "", err
-			}
-
-			if len(k8sIngresses) > 0 {
-				bridgeUrl = "http://" + k8sIngresses[0]
-				break
-			}
-
-			time.Sleep(15 * time.Second)
+		ingressAddr, err := utils.WaitForIngressAddress(ctx, namespace, "op-bridge", 45*time.Minute)
+		if err != nil {
+			t.logger.Error("Error retrieving bridge ingress address", "err", err)
+			return "", err
 		}
-		return bridgeUrl, nil
+		return "http://" + ingressAddr, nil
 	}
 
 	t.logger.Info("Installing a bridge component...")
@@ -71,7 +61,8 @@ func (t *ThanosStack) InstallBridge(ctx context.Context) (string, error) {
 	opBridgeConfig.OpBridge.Env.L1NativeCurrencySymbol = constants.L1ChainConfigurations[l1ChainID].NativeTokenSymbol
 	opBridgeConfig.OpBridge.Env.L1NativeCurrencyDecimals = constants.L1ChainConfigurations[l1ChainID].NativeTokenDecimals
 
-	opBridgeConfig.OpBridge.Env.NativeTokenL1Address = constants.L1ChainConfigurations[l1ChainID].L2NativeTokenAddress
+	feeTokenConfig := constants.GetFeeTokenConfig(t.deployConfig.FeeToken, l1ChainID)
+	opBridgeConfig.OpBridge.Env.NativeTokenL1Address = feeTokenConfig.L1Address
 
 	opBridgeConfig.OpBridge.Env.L1BlockExplorer = constants.L1ChainConfigurations[l1ChainID].BlockExplorer
 	opBridgeConfig.OpBridge.Env.L1USDTAddress = constants.L1ChainConfigurations[l1ChainID].USDTAddress
@@ -80,8 +71,8 @@ func (t *ThanosStack) InstallBridge(ctx context.Context) (string, error) {
 	opBridgeConfig.OpBridge.Env.L2ChainName = chainName
 	opBridgeConfig.OpBridge.Env.L2ChainID = fmt.Sprintf("%d", t.deployConfig.L2ChainID)
 	opBridgeConfig.OpBridge.Env.L2RPC = t.deployConfig.L2RpcUrl
-	opBridgeConfig.OpBridge.Env.L2NativeCurrencyName = "Tokamak Network Token"
-	opBridgeConfig.OpBridge.Env.L2NativeCurrencySymbol = "TON"
+	opBridgeConfig.OpBridge.Env.L2NativeCurrencyName = feeTokenConfig.Name
+	opBridgeConfig.OpBridge.Env.L2NativeCurrencySymbol = feeTokenConfig.Symbol
 	opBridgeConfig.OpBridge.Env.L2NativeCurrencyDecimals = 18
 	opBridgeConfig.OpBridge.Env.L2USDTAddress = ""
 
@@ -154,21 +145,12 @@ func (t *ThanosStack) InstallBridge(ctx context.Context) (string, error) {
 	}
 
 	t.logger.Info("✅ Bridge component installed successfully and is being initialized. Please wait for the ingress address to become available...")
-	var bridgeUrl string
-	for {
-		k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, helmReleaseName)
-		if err != nil {
-			t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
-			return "", err
-		}
-
-		if len(k8sIngresses) > 0 {
-			bridgeUrl = "http://" + k8sIngresses[0]
-			break
-		}
-
-		time.Sleep(15 * time.Second)
+	ingressAddr, err := utils.WaitForIngressAddress(ctx, namespace, helmReleaseName, 45*time.Minute)
+	if err != nil {
+		t.logger.Error("Error retrieving bridge ingress address", "err", err)
+		return "", err
 	}
+	bridgeUrl := "http://" + ingressAddr
 	t.logger.Infof("✅ Bridge component is up and running. You can access it at: %s", bridgeUrl)
 
 	return bridgeUrl, nil

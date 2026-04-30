@@ -154,6 +154,40 @@ type Config struct {
 	BlockExplorerURL string `json:"block_explorer_url,omitempty"`
 
 	CrossTrade map[constants.CrossTradeDeployMode]*CrossTrade `json:"cross_trade,omitempty"`
+
+	// Backup configuration
+	BackupConfig *BackupConfiguration `json:"backup_config,omitempty"`
+
+	// Shutdown configuration state (not for storing static addresses)
+	Shutdown *ShutdownConfig `json:"shutdown,omitempty"`
+
+	// Preset and fee token configuration
+	Preset   string `json:"preset,omitempty"`
+	FeeToken string `json:"fee_token,omitempty"` // "TON", "ETH", "USDT", "USDC"
+
+	// Mnemonic for deterministic key derivation (used for DRB operator key generation in Gaming/Full presets)
+	Mnemonic string `json:"mnemonic,omitempty"`
+
+	// CrossTrade local deployment contracts (set after DeployCrossTradeLocal succeeds)
+	CrossTradeContracts *CrossTradeLocalContracts `json:"cross_trade_contracts,omitempty"`
+}
+
+// CrossTradeLocalContracts holds deployed contract addresses for the local CrossTrade stack.
+// L1CrossTradeProxy is sourced from user input; L2 addresses come from DeployCrossTradeLocal output.
+type CrossTradeLocalContracts struct {
+	L1CrossTradeProxy     string `json:"l1_cross_trade_proxy"`
+	L2CrossTradeProxy     string `json:"l2_cross_trade_proxy"`
+	L2toL2CrossTradeProxy string `json:"l2_to_l2_cross_trade_proxy"`
+}
+
+type BackupConfiguration struct {
+	Enabled bool `json:"enabled"` // Whether automatic backup is enabled
+}
+
+type ShutdownConfig struct {
+	L2StartBlock   uint64 `json:"l2_start_block"`
+	L2EndBlock     string `json:"l2_end_block,omitempty"`
+	AssetsDataPath string `json:"assets_data_path,omitempty"`
 }
 
 type LoggingConfig struct {

@@ -3,6 +3,7 @@ package thanos
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,6 +14,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
+	cwTypes "github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -844,51 +850,73 @@ func (t *ThanosStack) createCloudWatchLogGroups(ctx context.Context, namespace s
 		region = t.deployConfig.AWS.Region
 	}
 
+	// Create CloudWatch Logs client
+	cwClient, err := t.getCloudWatchLogsClient(ctx, region)
+	if err != nil {
+		logger.Warnf("Failed to create CloudWatch client, falling back to defaults: %v", err)
+		return err
+	}
+
 	// Create each log group
 	for _, logGroupName := range logGroups {
-		// Create log group
-		createLogGroupCmd := []string{
-			"logs", "create-log-group",
-			"--log-group-name", logGroupName,
-			"--region", region,
-		}
-
-		out, err := utils.ExecuteCommand(ctx, "aws", createLogGroupCmd...)
+		// Create log group using SDK
+		_, err := cwClient.CreateLogGroup(ctx, &cloudwatchlogs.CreateLogGroupInput{
+			LogGroupName: aws.String(logGroupName),
+		})
 		if err != nil {
 			// If log group already exists, that's fine
-			if strings.Contains(out, "ResourceAlreadyExistsException") {
+			var alreadyExists *cwTypes.ResourceAlreadyExistsException
+			if errors.As(err, &alreadyExists) {
 				logger.Infof("Log group already exists: %s", logGroupName)
+			} else {
+				logger.Warnf("Failed to create log group %s: %v", logGroupName, err)
 				continue
 			}
-			logger.Warnf("Failed to create log group %s: %v, output: %s", logGroupName, err, out)
-			continue
+		} else {
+			logger.Infof("Successfully created log group: %s", logGroupName)
 		}
-
-		logger.Infof("Successfully created log group: %s", logGroupName)
 
 		// Create log stream for the log group
 		logStreamName := "sidecar-collection"
-		createLogStreamCmd := []string{
-			"logs", "create-log-stream",
-			"--log-group-name", logGroupName,
-			"--log-stream-name", logStreamName,
-			"--region", region,
-		}
-
-		out, err = utils.ExecuteCommand(ctx, "aws", createLogStreamCmd...)
+		_, err = cwClient.CreateLogStream(ctx, &cloudwatchlogs.CreateLogStreamInput{
+			LogGroupName:  aws.String(logGroupName),
+			LogStreamName: aws.String(logStreamName),
+		})
 		if err != nil {
 			// If log stream already exists, that's fine
-			if strings.Contains(out, "ResourceAlreadyExistsException") {
+			var alreadyExists *cwTypes.ResourceAlreadyExistsException
+			if errors.As(err, &alreadyExists) {
 				logger.Infof("Log stream already exists: %s/%s", logGroupName, logStreamName)
 				continue
 			}
-			logger.Warnf("Failed to create log stream %s/%s: %v, output: %s", logGroupName, logStreamName, err, out)
+			logger.Warnf("Failed to create log stream %s/%s: %v", logGroupName, logStreamName, err)
 			continue
 		}
 
 		logger.Infof("Successfully created log stream: %s/%s", logGroupName, logStreamName)
 	}
 	return nil
+}
+
+// getCloudWatchLogsClient creates a CloudWatch Logs client using stored credentials
+func (t *ThanosStack) getCloudWatchLogsClient(ctx context.Context, region string) (*cloudwatchlogs.Client, error) {
+	if t.awsProfile == nil || t.awsProfile.AwsConfig == nil {
+		return nil, fmt.Errorf("AWS credentials not available")
+	}
+
+	cfg, err := config.LoadDefaultConfig(ctx,
+		config.WithRegion(region),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
+			t.awsProfile.AwsConfig.AccessKey,
+			t.awsProfile.AwsConfig.SecretKey,
+			"",
+		)),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	return cloudwatchlogs.NewFromConfig(cfg), nil
 }
 
 // applyManifest applies a Kubernetes manifest
