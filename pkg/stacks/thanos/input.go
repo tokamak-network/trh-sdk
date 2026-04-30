@@ -37,6 +37,13 @@ type DeployContractsInput struct {
 	ChainConfiguration *types.ChainConfiguration
 	Operators          *types.Operators
 	RegisterCandidate  *RegisterCandidateInput
+	ReuseDeployment    bool
+	EnableFaultProof   bool
+	Preset             string
+	FeeToken           string
+	Mnemonic           string
+	DRBAdmin           string
+	AAPaymasterSigner  string
 }
 
 func (c *DeployContractsInput) Validate(ctx context.Context, registerCandidate bool) error {
@@ -79,10 +86,16 @@ func (c *DeployContractsInput) Validate(ctx context.Context, registerCandidate b
 	return nil
 }
 
+type BackupConfig struct {
+	Enabled bool
+}
+
 type DeployInfraInput struct {
 	ChainName           string
 	L1BeaconURL         string
 	IgnoreInstallBridge bool
+	BackupConfig        *BackupConfig
+	Mnemonic            string
 
 	// register metadata
 	GithubCredentials *types.GitHubCredentials

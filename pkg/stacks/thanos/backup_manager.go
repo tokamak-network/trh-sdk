@@ -3,6 +3,7 @@ package thanos
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	backup "github.com/tokamak-network/trh-sdk/pkg/stacks/thanos/backup"
@@ -21,7 +22,7 @@ func (t *ThanosStack) BackupStatus(ctx context.Context) (*types.BackupStatusInfo
 }
 
 // BackupSnapshot triggers on-demand EFS backup and returns snapshot information
-func (t *ThanosStack) BackupSnapshot(ctx context.Context) (*types.BackupSnapshotInfo, error) {
+func (t *ThanosStack) BackupSnapshot(ctx context.Context, progressReporter func(string, float64)) (*types.BackupSnapshotInfo, error) {
 	snapshotInfo, err := backup.SnapshotExecute(ctx, t.logger, t.deployConfig.AWS.Region, t.deployConfig.K8s.Namespace)
 	if err != nil {
 		return nil, err
@@ -69,7 +70,7 @@ func (t *ThanosStack) BackupList(ctx context.Context, limit string) (*types.Back
 }
 
 // BackupRestore executes EFS restore from a recovery point ARN and returns restore information
-func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string) (*types.BackupRestoreInfo, error) {
+func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string, attach *bool, pvcs *string, stss *string, progressReporter func(string, float64)) (*types.BackupRestoreInfo, error) {
 	// Validate ARN
 	if !strings.Contains(recoveryPointArn, "arn:aws:backup:") {
 		return nil, fmt.Errorf("invalid recovery point ARN format: %s", recoveryPointArn)
@@ -104,7 +105,7 @@ func (t *ThanosStack) BackupRestore(ctx context.Context, recoveryPointArn string
 		},
 		func(c context.Context, efsId string, pvcs, stss, other *string) error {
 			// Use the same attach logic as BackupAttach
-			_, err := t.BackupAttach(c, &efsId, pvcs, stss)
+			_, err := t.BackupAttach(c, &efsId, pvcs, stss, nil, nil)
 			return err
 		},
 	)
@@ -137,13 +138,13 @@ func (t *ThanosStack) BackupRestoreInteractive(ctx context.Context) error {
 		t.deployConfig.AWS.Region,
 		t.deployConfig.K8s.Namespace,
 		func(c context.Context, arn string) (*types.BackupRestoreInfo, error) {
-			return t.BackupRestore(c, arn)
+			return t.BackupRestore(c, arn, nil, nil, nil, nil)
 		},
 	)
 }
 
 // BackupAttach switches workloads to use the new EFS and verifies readiness, returns attach information
-func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *string, stss *string) (*types.BackupAttachInfo, error) {
+func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *string, stss *string, backupPvPvc *bool, progressReporter func(string, float64)) (*types.BackupAttachInfo, error) {
 	// gather info via backup subpackage
 	info, err := backup.GatherBackupAttachInfo(
 		ctx,
@@ -184,6 +185,12 @@ func (t *ThanosStack) BackupAttach(ctx context.Context, efsId *string, pvcs *str
 	// Update status after successful execution
 	info.Status = "attached"
 	return info, nil
+}
+
+// BackupPvPvcExport generates PV/PVC backup artifacts and returns the output directory.
+func (t *ThanosStack) BackupPvPvcExport(ctx context.Context) (string, error) {
+	backupDir := filepath.Join(t.deploymentPath, "k8s-efs-backup")
+	return backup.BackupPvPvcToDir(ctx, t.logger, t.deployConfig.K8s.Namespace, backupDir)
 }
 
 // BackupConfigure applies EFS backup configuration via Terraform and returns configuration info

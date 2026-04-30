@@ -350,6 +350,21 @@ func BackupPvPvcWithUserChoice(ctx context.Context, l *zap.SugaredLogger, namesp
 
 // backupPvPvc executes the PV/PVC backup script
 func backupPvPvc(ctx context.Context, l *zap.SugaredLogger, namespace string) error {
+	_, err := backupPvPvcScript(ctx, l, namespace, "")
+	return err
+}
+
+// BackupPvPvcToDir executes the PV/PVC backup script and writes output to the provided directory.
+func BackupPvPvcToDir(ctx context.Context, l *zap.SugaredLogger, namespace string, backupDir string) (string, error) {
+	backupDir = strings.TrimSpace(backupDir)
+	if backupDir == "" {
+		return "", fmt.Errorf("backup directory is required")
+	}
+	return backupPvPvcScript(ctx, l, namespace, backupDir)
+}
+
+// backupPvPvcScript is the shared implementation for backupPvPvc and BackupPvPvcToDir.
+func backupPvPvcScript(ctx context.Context, l *zap.SugaredLogger, namespace string, backupDir string) (string, error) {
 	scriptPath := "./scripts/backup_pv_pvc.sh"
 	if _, err := os.Stat(scriptPath); err != nil {
 		// Attempt to auto-download the script from a configurable raw URL
@@ -360,21 +375,32 @@ func backupPvPvc(ctx context.Context, l *zap.SugaredLogger, namespace string) er
 		l.Infof("Backup script not found. Attempting download from %s", rawURL)
 		downloadCmd := fmt.Sprintf("mkdir -p ./scripts && curl -fsSL %s -o %s && chmod +x %s", rawURL, scriptPath, scriptPath)
 		if _, dErr := utils.ExecuteCommand(ctx, "bash", "-lc", downloadCmd); dErr != nil {
-			return fmt.Errorf("failed to download backup script from %s: %w", rawURL, dErr)
+			return "", fmt.Errorf("failed to download backup script from %s: %w", rawURL, dErr)
 		}
 		if _, sErr := os.Stat(scriptPath); sErr != nil {
-			return fmt.Errorf("backup script still missing at %s after download", scriptPath)
+			return "", fmt.Errorf("backup script still missing at %s after download", scriptPath)
 		}
 	}
 	l.Infof("Running backup script for namespace %s...", namespace)
-	// Ensure NAMESPACE env is passed to the script
-	runCmd := fmt.Sprintf("NAMESPACE=%s bash %s", namespace, scriptPath)
+	envPrefix := fmt.Sprintf("NAMESPACE=%s", namespace)
+	if backupDir != "" {
+		envPrefix = fmt.Sprintf("NAMESPACE=%s BACKUP_DIR=%s BACKUP_SKIP_SUMMARY=1", namespace, backupDir)
+	}
+	runCmd := fmt.Sprintf("%s bash %s", envPrefix, scriptPath)
 	output, err := utils.ExecuteCommand(ctx, "bash", "-lc", runCmd)
 	if err != nil {
-		return fmt.Errorf("backup script failed: %w\nOutput: %s", err, output)
+		return "", fmt.Errorf("backup script failed: %w\nOutput: %s", err, output)
 	}
 	l.Info(strings.TrimSpace(output))
-	return nil
+	if backupDir == "" {
+		return "", nil
+	}
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, "[+] Backup dir: ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "[+] Backup dir: ")), nil
+		}
+	}
+	return "", fmt.Errorf("backup output directory not found in script output")
 }
 
 // UpdatePVVolumeHandles recreates PV/PVCs pointing to the new EFS ID

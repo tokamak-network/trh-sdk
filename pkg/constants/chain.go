@@ -1,5 +1,21 @@
 package constants
 
+// Preset constants
+const (
+	PresetGeneral = "general"
+	PresetDeFi    = "defi"
+	PresetGaming  = "gaming"
+	PresetFull    = "full"
+)
+
+// FeeToken constants
+const (
+	FeeTokenTON  = "TON"
+	FeeTokenETH  = "ETH"
+	FeeTokenUSDT = "USDT"
+	FeeTokenUSDC = "USDC"
+)
+
 const EthereumMainnetChainID uint64 = 1
 const EthereumSepoliaChainID uint64 = 11155111
 const EthereumHoleskyChainID uint64 = 17000
