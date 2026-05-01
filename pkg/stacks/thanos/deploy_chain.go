@@ -975,12 +975,12 @@ func initGenesisAnchorState(
 	defer l2Client.Close()
 
 	var genesisBlock *ethtypes.Block
-	for attempt := 1; attempt <= 480; attempt++ {
+	for attempt := 1; attempt <= 720; attempt++ {
 		genesisBlock, err = l2Client.BlockByNumber(ctx, big.NewInt(0))
 		if err == nil {
 			break
 		}
-		logger.Warnf("Waiting for L2 genesis block (attempt %d/480): %v", attempt, err)
+		logger.Warnf("Waiting for L2 genesis block (attempt %d/720): %v", attempt, err)
 		time.Sleep(5 * time.Second)
 	}
 	if err != nil {
