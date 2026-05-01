@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/urfave/cli/v3"
@@ -19,7 +20,7 @@ func ActionDisplayDRBLeaderInfo() cli.ActionFunc {
 			return fmt.Errorf("failed to get current directory: %w", err)
 		}
 
-		infoFilePath := fmt.Sprintf("%s/drb-leader-info.json", deploymentPath)
+		infoFilePath := filepath.Join(deploymentPath, "drb-leader-info.json")
 
 		// Prerequisite: file must exist (created by 'trh-sdk install drb')
 		if _, err := os.Stat(infoFilePath); os.IsNotExist(err) {

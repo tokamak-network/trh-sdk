@@ -4,7 +4,7 @@ const PluginBridge = "bridge"
 const PluginBlockExplorer = "block-explorer"
 const PluginMonitoring = "monitoring"
 const PluginCrossTrade = "cross-trade"
-const PluginDRB = "drb"
+const PluginDRB = "drb-vrf"
 const PluginUptimeService = "uptime-service"
 
 // DRB type values for --type flag (trh-sdk install drb --type leader|regular)

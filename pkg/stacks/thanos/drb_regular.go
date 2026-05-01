@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -277,7 +279,7 @@ func (t *ThanosStack) InstallDRBRegularNode(ctx context.Context, input *types.DR
 	userDataPath := filepath.Join(outputDir, "drb-regular-user-data.sh")
 	installDir := "/home/ubuntu/" + input.InstanceName
 	userDataContent := buildRegularNodeUserData(installDir, envContent, string(composeContent))
-	if err := os.WriteFile(userDataPath, []byte(userDataContent), 0644); err != nil {
+	if err := os.WriteFile(userDataPath, []byte(userDataContent), 0600); err != nil {
 		return fmt.Errorf("failed to write user-data script: %w", err)
 	}
 
@@ -635,6 +637,25 @@ func getLatestUbuntuAmi(ctx context.Context, region string) (string, error) {
 	return amiID, nil
 }
 
+// getPublicCIDR fetches the caller's public IP and returns it as a /32 CIDR.
+// Falls back to "0.0.0.0/0" if the lookup fails so the deployment can continue.
+func getPublicCIDR() string {
+	resp, err := http.Get("https://checkip.amazonaws.com")
+	if err != nil {
+		return "0.0.0.0/0"
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "0.0.0.0/0"
+	}
+	ip := strings.TrimSpace(string(body))
+	if ip == "" {
+		return "0.0.0.0/0"
+	}
+	return ip + "/32"
+}
+
 func createRegularNodeSecurityGroup(ctx context.Context, region, vpcID, name string) (string, error) {
 	sgID, err := utils.ExecuteCommand(ctx, "aws", "ec2", "create-security-group",
 		"--region", region,
@@ -652,12 +673,13 @@ func createRegularNodeSecurityGroup(ctx context.Context, region, vpcID, name str
 	if sgID == "" || sgID == "None" {
 		return "", fmt.Errorf("security group ID is empty")
 	}
+	sshCIDR := getPublicCIDR()
 	_, err = utils.ExecuteCommand(ctx, "aws", "ec2", "authorize-security-group-ingress",
 		"--region", region,
 		"--group-id", sgID,
 		"--protocol", "tcp",
 		"--port", "22",
-		"--cidr", "0.0.0.0/0",
+		"--cidr", sshCIDR,
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to add SSH inbound rule to security group: %w", err)
