@@ -67,12 +67,12 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	err = makeBlockExplorerEnvs(
 		fmt.Sprintf("%s/tokamak-thanos-stack/terraform", t.deploymentPath),
 		".envrc",
-		types.BlockExplorerEnvs{
-			BlockExplorerDatabasePassword: databasePassword,
-			BlockExplorerDatabaseUserName: databaseUserName,
-			BlockExplorerDatabaseName:     "blockscout",
-			VpcId:                         vpcId,
-			AwsRegion:                     t.deployConfig.AWS.Region,
+		types.AwsDatabaseEnvs{
+			DatabasePassword: databasePassword,
+			DatabaseUserName: databaseUserName,
+			DatabaseName:     "blockscout",
+			VpcId:            vpcId,
+			AwsRegion:        t.deployConfig.AWS.Region,
 		},
 	)
 	if err != nil {

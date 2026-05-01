@@ -43,6 +43,8 @@ logs/
 
 stack-info.json
 crossTrade
+Commit-Reveal2
+DRB-node
 
 k8s-efs-backup.worktrees
 .worktrees/

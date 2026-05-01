@@ -97,7 +97,8 @@ func ReadConfigFromJSONFile(deploymentPath string) (*types.Config, error) {
 	}
 
 	// If L2ChainId doesn't exist, fetch it from the L2 RPC
-	if config.L2ChainID == 0 {
+	// Only attempt if L2RpcUrl is provided (skip if empty to avoid errors)
+	if config.L2ChainID == 0 && config.L2RpcUrl != "" {
 		l2Provider, err := ethclient.Dial(config.L2RpcUrl)
 		if err != nil {
 			fmt.Println("Error connecting to L2 blockchain:", err)
