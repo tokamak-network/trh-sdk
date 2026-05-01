@@ -12,6 +12,10 @@ type DeployDRBInput struct {
 	PrivateKey      string             `json:"private_key"`
 	LeaderNodeInput *LeaderNodeInput   `json:"leader_node_input"`
 	DatabaseConfig  *DRBDatabaseConfig `json:"database_config"`
+	// If non-empty, skip forge contract deployment and use this address.
+	ExistingContractAddress string `json:"existing_contract_address,omitempty"`
+	// If non-empty, skip EKS cluster creation and use this cluster name.
+	ExistingClusterName string `json:"existing_cluster_name,omitempty"`
 }
 
 // DeployDRBContractsOutput represents the output from DRB contract deployment

@@ -11,6 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/common"
+	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
@@ -210,111 +214,26 @@ func (t *ThanosStack) getCustomNetworkInput(ctx context.Context) (string, uint64
 }
 
 func (t *ThanosStack) DeployDRB(ctx context.Context, inputs *types.DeployDRBInput) (*types.DeployDRBOutput, error) {
-	deployDRBContractsOutput, err := t.deployDRBContracts(ctx, inputs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to deploy drb contracts: %s", err)
+	var deployDRBContractsOutput *types.DeployDRBContractsOutput
+	if inputs.ExistingContractAddress != "" {
+		deployDRBContractsOutput = buildContractsOutputFromExisting(inputs.ExistingContractAddress, inputs.ChainID)
+	} else {
+		var err error
+		deployDRBContractsOutput, err = t.deployDRBContracts(ctx, inputs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to deploy drb contracts: %w", err)
+		}
 	}
 
 	deployDRBApplicationOutput, err := t.deployDRBApplication(ctx, inputs, deployDRBContractsOutput)
 	if err != nil {
-		return nil, fmt.Errorf("failed to deploy drb application: %s", err)
+		return nil, fmt.Errorf("failed to deploy drb application: %w", err)
 	}
 
 	return &types.DeployDRBOutput{
 		DeployDRBContractsOutput:   deployDRBContractsOutput,
 		DeployDRBApplicationOutput: deployDRBApplicationOutput,
 	}, nil
-}
-
-func (t *ThanosStack) UninstallDRB(ctx context.Context) error {
-	namespace := constants.DRBNamespace
-	t.logger.Info("Starting DRB uninstallation...")
-
-	// Check if DRB namespace exists
-	namespaceExists, err := utils.CheckNamespaceExists(ctx, namespace)
-	if err != nil {
-		t.logger.Warnw("Failed to check DRB namespace existence, will still attempt cleanup", "err", err)
-		namespaceExists = false
-	}
-
-	// only clean up k8s resources if namespace exists
-	if namespaceExists {
-		t.logger.Info("DRB namespace exists, cleaning up Kubernetes resources...")
-
-		releases, err := utils.FilterHelmReleases(ctx, namespace, "drb-node")
-		if err != nil {
-			t.logger.Warnw("Error filtering helm releases, continuing with cleanup", "err", err)
-		} else {
-			for _, release := range releases {
-				t.logger.Infow("Uninstalling Helm release", "release", release, "namespace", namespace)
-				_, err = utils.ExecuteCommand(ctx, "helm", []string{
-					"uninstall",
-					release,
-					"--namespace",
-					namespace,
-				}...)
-				if err != nil {
-					t.logger.Warnw("Error uninstalling DRB helm chart, continuing", "err", err)
-				}
-			}
-		}
-
-		// Delete Kubernetes Secret
-		secretName := "drb-leader-static-key"
-		_, _ = utils.ExecuteCommand(ctx, "kubectl", "delete", "secret", secretName, "-n", namespace, "--ignore-not-found=true")
-
-		t.logger.Info(fmt.Sprintf("Deleting DRB namespace: %s", namespace))
-		err = t.tryToDeleteK8sNamespace(ctx, namespace)
-		if err != nil {
-			t.logger.Warnw("Failed to delete DRB namespace, continuing with terraform cleanup", "err", err, "namespace", namespace)
-		}
-
-		// Clean up storage that might be left behind
-		if err := t.cleanupExistingDRBStorage(ctx, namespace); err != nil {
-			t.logger.Warnw("Failed to cleanup DRB storage", "err", err)
-		}
-	} else {
-		t.logger.Info("DRB namespace does not exist, skipping Kubernetes cleanup")
-	}
-
-	t.logger.Info("Destroying DRB RDS terraform resources (if any)...")
-	err = t.destroyTerraform(ctx, fmt.Sprintf("%s/tokamak-thanos-stack/terraform/drb", t.deploymentPath))
-	if err != nil {
-		t.logger.Warnf("Failed to destroy DRB RDS terraform resources: %v. Continuing with infrastructure cleanup.", err)
-	}
-
-	// Destroy DRB infrastructure (EKS cluster and VPC)
-	// This destroys the thanos-stack terraform resources for drb-ecosystem cluster
-	t.logger.Info("Destroying DRB infrastructure (EKS cluster and VPC)...")
-	thanosStackPath := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", t.deploymentPath)
-
-	// Check if this is DRB infrastructure by verifying the namespace in .envrc
-	envrcPath := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/.envrc", t.deploymentPath)
-	if utils.CheckFileExists(envrcPath) {
-		// Read .envrc to check if namespace is drb-ecosystem
-		envrcContent, err := os.ReadFile(envrcPath)
-		if err == nil {
-			envrcStr := string(envrcContent)
-			// Only destroy if this is DRB infrastructure (namespace contains "drb-ecosystem")
-			if strings.Contains(envrcStr, "drb-ecosystem") {
-				// Destroy with -lock=false to bypass state locks
-				err = utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
-					"-c",
-					fmt.Sprintf(`cd %s && source ../.envrc && terraform destroy -auto-approve -parallelism=1 -lock=false`, thanosStackPath),
-				}...)
-				if err != nil {
-					t.logger.Warnf("Failed to destroy DRB infrastructure (EKS/VPC): %v. You may need to destroy manually.", err)
-				} else {
-					t.logger.Info("✅ DRB infrastructure (EKS cluster and VPC) destroyed successfully")
-				}
-			} else {
-				t.logger.Info("Skipping infrastructure destroy - this appears to be main chain infrastructure, not DRB")
-			}
-		}
-	}
-
-	t.logger.Info("✅ Uninstall of DRB successfully!")
-	return nil
 }
 
 func (t *ThanosStack) deployDRBContracts(ctx context.Context, inputs *types.DeployDRBInput) (*types.DeployDRBContractsOutput, error) {
@@ -378,7 +297,7 @@ func (t *ThanosStack) deployDRBContracts(ctx context.Context, inputs *types.Depl
 	t.logger.Info("Deploying DRB contracts")
 
 	// Run forge script with direct exec (no shell) to avoid injection from user-controlled RPC URL/private key
-	err = utils.ExecuteCommandStreamWithDir(ctx, t.logger, commitReveal2Path, "forge",
+	err = utils.ExecuteCommandStreamInDir(ctx, t.logger, commitReveal2Path, "forge",
 		"script", "script/DeployCommitReveal2.s.sol:DeployCommitReveal2",
 		"--rpc-url", firstRpcUrl, "--private-key", privateKey, "--broadcast", "-vv")
 	if err != nil {
@@ -439,7 +358,7 @@ func (t *ThanosStack) deployConsumerExampleV2(ctx context.Context, inputs *types
 	commitReveal2Path := filepath.Join(t.deploymentPath, "Commit-Reveal2")
 
 	// Run forge script with direct exec (no shell) to avoid injection from user-controlled RPC URL/private key
-	err := utils.ExecuteCommandStreamWithDir(ctx, t.logger, commitReveal2Path, "forge",
+	err := utils.ExecuteCommandStreamInDir(ctx, t.logger, commitReveal2Path, "forge",
 		"script", "script/DeployConsumerExampleV2.s.sol:DeployConsumerExampleV2",
 		"--sig", "run()", "--rpc-url", firstRpcUrl, "--private-key", privateKey, "--broadcast", "-vv")
 	if err != nil {
@@ -696,9 +615,29 @@ func (t *ThanosStack) deployDRBInfrastructure(ctx context.Context) (*types.DRBIn
 
 func (t *ThanosStack) deployDRBApplication(ctx context.Context, inputs *types.DeployDRBInput, contracts *types.DeployDRBContractsOutput) (*types.DeployDRBApplicationOutput, error) {
 	t.logger.Info("Checking DRB infrastructure...")
-	drbInfra, err := t.deployDRBInfrastructure(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to deploy DRB infrastructure: %w", err)
+	var drbInfra *types.DRBInfrastructureConfig
+	var err error
+	if inputs.ExistingClusterName != "" {
+		// Reuse L2 EKS cluster — skip Terraform cluster creation.
+		vpcID := ""
+		region := ""
+		if t.deployConfig != nil && t.deployConfig.AWS != nil {
+			vpcID = t.deployConfig.AWS.VpcID
+			region = t.deployConfig.AWS.Region
+		}
+		if region == "" {
+			return nil, fmt.Errorf("AWS region is required when reusing existing cluster %q", inputs.ExistingClusterName)
+		}
+		drbInfra = buildInfraFromExisting(inputs.ExistingClusterName, vpcID, region)
+		err = utils.SwitchKubernetesContext(ctx, inputs.ExistingClusterName, region)
+		if err != nil {
+			return nil, fmt.Errorf("failed to switch kubeconfig to existing cluster: %w", err)
+		}
+	} else {
+		drbInfra, err = t.deployDRBInfrastructure(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to deploy DRB infrastructure: %w", err)
+		}
 	}
 
 	// Store VPC ID for database deployment
@@ -1451,4 +1390,121 @@ func (t *ThanosStack) deployDRBLeaderNodeWithHelm(ctx context.Context, inputs *t
 	return &types.DeployDRBApplicationOutput{
 		LeaderNodeURL: leaderNodeURL,
 	}, nil
+}
+
+// buildContractsOutputFromExisting constructs a DeployDRBContractsOutput for a pre-deployed contract.
+func buildContractsOutputFromExisting(contractAddress string, chainID uint64) *types.DeployDRBContractsOutput {
+	return &types.DeployDRBContractsOutput{
+		ContractAddress: contractAddress,
+		ContractName:    "CommitReveal2L2",
+		ChainID:         chainID,
+	}
+}
+
+// buildInfraFromExisting constructs a DRBInfrastructureConfig for an existing L2 EKS cluster.
+// In TRH, the L2 EKS cluster name equals the k8s namespace.
+func buildInfraFromExisting(clusterName, vpcID, region string) *types.DRBInfrastructureConfig {
+	return &types.DRBInfrastructureConfig{
+		ClusterName: clusterName,
+		Namespace:   clusterName,
+		VpcID:       vpcID,
+		Region:      region,
+	}
+}
+
+// ActivateRegularOperators calls depositAndActivate() on CommitReveal2L2 for each regular node.
+// Each key must have been funded with at least 3 TON beforehand.
+func (t *ThanosStack) ActivateRegularOperators(ctx context.Context, l2RPCURL string, contractAddr string, regularPrivKeys []string) error {
+	if regularPrivKeys == nil {
+		return fmt.Errorf("regularPrivKeys must not be nil")
+	}
+	if len(regularPrivKeys) == 0 {
+		return nil
+	}
+
+	client, err := ethclient.DialContext(ctx, l2RPCURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to L2 RPC: %w", err)
+	}
+	defer client.Close()
+
+	chainID, err := client.ChainID(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get chain ID: %w", err)
+	}
+
+	// depositAndActivate() is payable with no arguments.
+	parsedABI, err := abi.JSON(strings.NewReader(`[{"inputs":[],"name":"depositAndActivate","outputs":[],"stateMutability":"payable","type":"function"}]`))
+	if err != nil {
+		return fmt.Errorf("failed to parse ABI: %w", err)
+	}
+	calldata, err := parsedABI.Pack("depositAndActivate")
+	if err != nil {
+		return fmt.Errorf("failed to pack depositAndActivate calldata: %w", err)
+	}
+
+	// 3 TON = 3e18 wei
+	activationAmount := new(big.Int).Mul(big.NewInt(3), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+	addr := common.HexToAddress(contractAddr)
+
+	for i, privKeyHex := range regularPrivKeys {
+		privKey, err := crypto.HexToECDSA(strings.TrimPrefix(privKeyHex, "0x"))
+		if err != nil {
+			return fmt.Errorf("regular node %d: invalid private key: %w", i, err)
+		}
+
+		sender := crypto.PubkeyToAddress(privKey.PublicKey)
+
+		nonce, err := client.PendingNonceAt(ctx, sender)
+		if err != nil {
+			return fmt.Errorf("regular node %d: failed to get nonce: %w", i, err)
+		}
+
+		gasPrice, err := client.SuggestGasPrice(ctx)
+		if err != nil {
+			return fmt.Errorf("regular node %d: failed to get gas price: %w", i, err)
+		}
+
+		// depositAndActivate() is a simple storage update; 300k gas provides a 5× safety margin.
+		tx := ethtypes.NewTransaction(nonce, addr, activationAmount, 300000, gasPrice, calldata)
+
+		signer := ethtypes.LatestSignerForChainID(chainID)
+		signedTx, err := ethtypes.SignTx(tx, signer, privKey)
+		if err != nil {
+			return fmt.Errorf("regular node %d: failed to sign tx: %w", i, err)
+		}
+
+		if err := client.SendTransaction(ctx, signedTx); err != nil {
+			return fmt.Errorf("regular node %d: failed to send depositAndActivate tx: %w", i, err)
+		}
+
+		t.logger.Infof("Regular node %d (BIP44 idx %d): depositAndActivate tx sent: %s", i, 5+i, signedTx.Hash().Hex())
+
+		receipt, err := waitForTxReceipt(ctx, client, signedTx.Hash())
+		if err != nil {
+			return fmt.Errorf("regular node %d: tx confirmation failed: %w", i, err)
+		}
+		if receipt.Status == 0 {
+			return fmt.Errorf("regular node %d: depositAndActivate reverted (tx: %s)", i, signedTx.Hash().Hex())
+		}
+		t.logger.Infof("Regular node %d activated successfully", i)
+	}
+	return nil
+}
+
+func waitForTxReceipt(ctx context.Context, client *ethclient.Client, hash common.Hash) (*ethtypes.Receipt, error) {
+	for {
+		receipt, err := client.TransactionReceipt(ctx, hash)
+		if err == nil {
+			return receipt, nil
+		}
+		if err != ethereum.NotFound {
+			return nil, fmt.Errorf("failed to get transaction receipt: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
