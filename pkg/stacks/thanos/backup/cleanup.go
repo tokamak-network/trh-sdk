@@ -17,8 +17,12 @@ func CleanupUnusedBackupResources(
 	ctx context.Context,
 	l *zap.SugaredLogger,
 	region, namespace string,
+	retentionDays int,
 ) error {
 	l.Info("🧹 Cleaning up unused backup resources...")
+	if retentionDays <= 0 {
+		retentionDays = 14
+	}
 
 	// Get account ID
 	accountID, err := utils.DetectAWSAccountID(ctx)
@@ -27,12 +31,12 @@ func CleanupUnusedBackupResources(
 	}
 
 	// 1. Cleanup old recovery points
-	if err := CleanupOldRecoveryPoints(ctx, l, region, namespace, accountID); err != nil {
+	if err := CleanupOldRecoveryPoints(ctx, l, region, namespace, accountID, retentionDays); err != nil {
 		l.Warnf("Failed to cleanup old recovery points: %v", err)
 	}
 
 	// 2. Cleanup unused EFS filesystems
-	if err := CleanupUnusedEFS(ctx, l, region, namespace); err != nil {
+	if err := CleanupUnusedEFS(ctx, l, region, namespace, retentionDays); err != nil {
 		l.Warnf("Failed to cleanup unused EFS: %v", err)
 	}
 
@@ -45,8 +49,8 @@ func CleanupUnusedBackupResources(
 	return nil
 }
 
-// CleanupOldRecoveryPoints removes recovery points older than 7 days
-func CleanupOldRecoveryPoints(ctx context.Context, l *zap.SugaredLogger, region, namespace, accountID string) error {
+// CleanupOldRecoveryPoints removes recovery points older than retentionDays
+func CleanupOldRecoveryPoints(ctx context.Context, l *zap.SugaredLogger, region, namespace, accountID string, retentionDays int) error {
 	l.Info("🗑️ Cleaning up old recovery points...")
 
 	// Get current EFS ID to find its recovery points
@@ -58,8 +62,11 @@ func CleanupOldRecoveryPoints(ctx context.Context, l *zap.SugaredLogger, region,
 
 	arn := utils.BuildEFSArn(region, accountID, currentEfsID)
 
-	// List recovery points older than 7 days
-	cutoffDate := time.Now().AddDate(0, 0, -7).Format("2006-01-02T15:04:05.000000-07:00")
+	// List recovery points older than retentionDays
+	if retentionDays <= 0 {
+		retentionDays = 14
+	}
+	cutoffDate := time.Now().AddDate(0, 0, -retentionDays).Format("2006-01-02T15:04:05.000000-07:00")
 
 	rpList, err := utils.ExecuteCommand(ctx, "aws", "backup", "list-recovery-points-by-resource",
 		"--region", region,
@@ -111,8 +118,11 @@ func CleanupOldRecoveryPoints(ctx context.Context, l *zap.SugaredLogger, region,
 }
 
 // CleanupUnusedEFS removes EFS filesystems that are not currently in use
-func CleanupUnusedEFS(ctx context.Context, l *zap.SugaredLogger, region, namespace string) error {
+func CleanupUnusedEFS(ctx context.Context, l *zap.SugaredLogger, region, namespace string, retentionDays int) error {
 	l.Info("🗑️ Cleaning up unused EFS filesystems...")
+	if retentionDays <= 0 {
+		retentionDays = 14
+	}
 
 	// Get current EFS ID in use
 	currentEfsID, err := utils.DetectEFSId(ctx, namespace)
@@ -125,7 +135,7 @@ func CleanupUnusedEFS(ctx context.Context, l *zap.SugaredLogger, region, namespa
 
 	efsList, err := utils.ExecuteCommand(ctx, "aws", "efs", "describe-file-systems",
 		"--region", region,
-		"--query", "FileSystems[?FileSystemId != `"+currentEfsID+"`].{Id:FileSystemId,Name:Name,State:LifeCycleState}",
+		"--query", "FileSystems[?FileSystemId != `"+currentEfsID+"`].{Id:FileSystemId,Name:Name,State:LifeCycleState,Created:CreationTime}",
 		"--output", "json")
 
 	if err != nil {
@@ -142,6 +152,7 @@ func CleanupUnusedEFS(ctx context.Context, l *zap.SugaredLogger, region, namespa
 		Id    string `json:"Id"`
 		Name  string `json:"Name"`
 		State string `json:"State"`
+		Created string `json:"Created"`
 	}
 	if err := json.Unmarshal([]byte(efsList), &efsData); err != nil {
 		return fmt.Errorf("failed to parse EFS list JSON: %w", err)
@@ -149,10 +160,20 @@ func CleanupUnusedEFS(ctx context.Context, l *zap.SugaredLogger, region, namespa
 
 	// Filter EFS by namespace pattern
 	var unusedEFS []string
+	cutoff := time.Now().AddDate(0, 0, -retentionDays)
 	for _, efs := range efsData {
 		// Skip if Name is null or doesn't match namespace pattern
 		if efs.Name == "" || !strings.HasPrefix(efs.Name, namespace) {
 			continue
+		}
+		if efs.Created != "" {
+			createdAt, err := time.Parse(time.RFC3339, efs.Created)
+			if err != nil {
+				createdAt, err = time.Parse(time.RFC3339Nano, efs.Created)
+			}
+			if err == nil && createdAt.After(cutoff) {
+				continue
+			}
 		}
 		if efs.State == "available" {
 			unusedEFS = append(unusedEFS, efs.Id)

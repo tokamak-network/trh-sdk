@@ -2,6 +2,8 @@ package thanos
 
 import (
 	"context"
+	"io"
+	"path/filepath"
 
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
@@ -18,6 +20,7 @@ type ThanosStack struct {
 	logger            *zap.SugaredLogger
 	deploymentPath    string
 	registerCandidate bool
+	output            io.Writer
 }
 
 func NewThanosStack(
@@ -43,6 +46,19 @@ func NewThanosStack(
 	var awsProfile *types.AWSProfile
 
 	if awsConfig != nil {
+		if _, err := utils.SetAWSConfigFile(deploymentPath); err != nil {
+			l.Error("Failed to set AWS config file", "err", err)
+			return nil, err
+		}
+		if _, err := utils.SetAWSCredentialsFile(deploymentPath); err != nil {
+			l.Error("Failed to set AWS credentials file", "err", err)
+			return nil, err
+		}
+		if _, err := utils.SetKubeconfigFile(deploymentPath); err != nil {
+			l.Error("Failed to set kubeconfig file", "err", err)
+			return nil, err
+		}
+
 		awsProfile, err = aws.LoginAWS(ctx, awsConfig)
 		if err != nil {
 			l.Error("Failed to login aws", "err", err)
@@ -65,5 +81,20 @@ func NewThanosStack(
 		logger:         l,
 		deploymentPath: deploymentPath,
 		deployConfig:   config,
+		output:         nil,
 	}, nil
+}
+
+// SetOutput sets the writer for binary subprocess stdout/stderr.
+// If not set, os.Stdout is used as default.
+func (t *ThanosStack) SetOutput(w io.Writer) {
+	t.output = w
+}
+
+func (t *ThanosStack) rollupConfigPath() string {
+	return filepath.Join(t.deploymentPath, "rollup.json")
+}
+
+func (t *ThanosStack) genesisConfigPath() string {
+	return filepath.Join(t.deploymentPath, "genesis.json")
 }

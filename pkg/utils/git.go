@@ -40,7 +40,13 @@ func CloneRepo(ctx context.Context, l *zap.SugaredLogger, deploymentPath string,
 		return fmt.Errorf("destination path '%s' already exists", clonePath)
 	}
 
-	return ExecuteCommandStream(ctx, l, "git", "clone", url, clonePath)
+	// Clone without recursive submodules to avoid redundant nested clones
+	// (e.g. automate→forge-std→ds-test). Only first-level submodules are
+	// needed for building; nested ones are test-only dependencies of libraries.
+	if err := ExecuteCommandStream(ctx, l, "git", "clone", "--depth", "1", url, clonePath); err != nil {
+		return err
+	}
+	return ExecuteCommandStream(ctx, l, "git", "-C", clonePath, "submodule", "update", "--init", "--depth", "1")
 }
 
 func PullLatestCode(ctx context.Context, l *zap.SugaredLogger, deploymentPath string, folderName string) error {
@@ -68,8 +74,13 @@ func PullLatestCode(ctx context.Context, l *zap.SugaredLogger, deploymentPath st
 		return fmt.Errorf("failed to change directory to '%s': %v", clonePath, err)
 	}
 
-	// Execute the git pull command
-	return ExecuteCommandStream(ctx, l, "git", "pull")
+	// Execute the git pull command (explicitly from origin main to avoid branch tracking issues)
+	if err := ExecuteCommandStream(ctx, l, "git", "pull", "origin", "main"); err != nil {
+		return err
+	}
+
+	// Update first-level submodules only (no --recursive to skip nested test deps)
+	return ExecuteCommandStream(ctx, l, "git", "submodule", "update", "--init", "--depth", "1")
 }
 
 func CheckIfForkExists(username, token, repoName string) (bool, error) {

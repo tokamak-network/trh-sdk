@@ -111,12 +111,12 @@ The flag sources (env vars) were removed from `flags/flags.go` to prevent enviro
 
 ### ReuseDeployment Flag
 When `--reuse-deployment=true` (default):
-1. Skips repository cloning
-2. Skips smart contract build
-3. Skips contract deployment to L1
-4. Reuses artifacts from previous deployment
+1. Clones the repository (always required)
+2. Builds smart contracts (always required)
+3. Deploys contracts reusing existing implementation contracts on the network
+4. Reduces L1 transactions to under 50 (vs full deployment)
 
-This is reflected in `DeployConfigTemplate.ReuseDeployment` which must match user intent (not hardcoded).
+This is reflected in `DeployConfigTemplate.ReuseDeployment` which is passed via `deploy-config.json` to the deploy script. Testnet deployments always use `true`; mainnet defaults to `true` but can be toggled via UI.
 
 ### Sensitive Operations
 - **Private key handling**: Seed phrase → BIP39 derivation → account selection → stored in settings.json

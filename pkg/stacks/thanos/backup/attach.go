@@ -177,8 +177,14 @@ func ExecuteBackupAttach(
 	validatePrereq func(context.Context) error,
 	verify func(context.Context, string) error,
 	restart func(context.Context, string, string) error,
-	execOps func(context.Context, *types.BackupAttachInfo) error,
+	execOps func(context.Context, *types.BackupAttachInfo, func(string, float64)) error,
+	progressReporter func(string, float64),
 ) error {
+	if progressReporter == nil {
+		progressReporter = func(string, float64) {}
+	}
+
+	progressReporter("Verifying prerequisites...", 5.0)
 	l.Info("Verifying restored data and switching workloads...")
 	if err := validatePrereq(ctx); err != nil {
 		return fmt.Errorf("attach prerequisites validation failed: %w", err)
@@ -186,10 +192,12 @@ func ExecuteBackupAttach(
 
 	// Handle EFS operations
 	if attachInfo.EFSID != "" {
-		if err := execOps(ctx, attachInfo); err != nil {
+		progressReporter("Executing EFS operations...", 10.0)
+		if err := execOps(ctx, attachInfo, progressReporter); err != nil {
 			return err
 		}
 	} else {
+		progressReporter("Verifying current EFS data...", 10.0)
 		l.Info("Skipped PV update (no --efs-id provided).")
 		if err := verify(ctx, attachInfo.Namespace); err != nil {
 			l.Warnf("Current EFS data verification failed: %v", err)
@@ -199,6 +207,7 @@ func ExecuteBackupAttach(
 
 	// Handle StatefulSet restarts
 	if len(attachInfo.STSs) > 0 {
+		progressReporter("Restarting StatefulSets...", 70.0)
 		stsList := strings.Join(attachInfo.STSs, ",")
 		if err := restart(ctx, attachInfo.Namespace, stsList); err != nil {
 			return fmt.Errorf("failed to restart StatefulSets: %w", err)
@@ -209,18 +218,23 @@ func ExecuteBackupAttach(
 
 	// Create recovery point after successful attach
 	if attachInfo.EFSID == "" {
+		progressReporter("Attach completed", 100.0)
 		return nil
 	}
 
+	progressReporter("Creating recovery point...", 90.0)
 	l.Info("Creating recovery point for attached EFS...")
-	snapshotInfo, err := SnapshotExecute(ctx, l, attachInfo.Region, attachInfo.Namespace)
+	snapshotInfo, err := SnapshotExecute(ctx, l, attachInfo.Region, attachInfo.Namespace, nil)
 	if err != nil {
 		l.Warnf("Failed to create recovery point: %v", err)
+		// Don't fail the whole operation if snapshot fails
+		progressReporter("Attach completed (snapshot failed)", 100.0)
 		return nil
 	}
 
 	l.Info("✅ Recovery point created successfully")
 	l.Infof("   Job ID: %s", snapshotInfo.JobID)
+	progressReporter("Attach completed successfully", 100.0)
 	return nil
 }
 
@@ -339,7 +353,7 @@ func BackupPvPvcWithUserChoice(ctx context.Context, l *zap.SugaredLogger, namesp
 	fmt.Scanf("%s", &choice)
 	choice = strings.ToLower(strings.TrimSpace(choice))
 	if choice == "y" || choice == "yes" {
-		if err := backupPvPvc(ctx, l, namespace); err != nil {
+		if _, err := backupPvPvc(ctx, l, namespace); err != nil {
 			return fmt.Errorf("PV/PVC backup required but failed: %w", err)
 		}
 	} else {
@@ -348,8 +362,26 @@ func BackupPvPvcWithUserChoice(ctx context.Context, l *zap.SugaredLogger, namesp
 	return nil
 }
 
+// BackupPvPvc executes the PV/PVC backup script and returns the output directory.
+func BackupPvPvc(ctx context.Context, l *zap.SugaredLogger, namespace string) (string, error) {
+	return backupPvPvc(ctx, l, namespace)
+}
+
+// BackupPvPvcToDir executes the PV/PVC backup script and writes to the provided directory.
+func BackupPvPvcToDir(ctx context.Context, l *zap.SugaredLogger, namespace string, backupDir string) (string, error) {
+	backupDir = strings.TrimSpace(backupDir)
+	if backupDir == "" {
+		return "", fmt.Errorf("backup directory is required")
+	}
+	return backupPvPvcWithDir(ctx, l, namespace, &backupDir)
+}
+
 // backupPvPvc executes the PV/PVC backup script
-func backupPvPvc(ctx context.Context, l *zap.SugaredLogger, namespace string) error {
+func backupPvPvc(ctx context.Context, l *zap.SugaredLogger, namespace string) (string, error) {
+	return backupPvPvcWithDir(ctx, l, namespace, nil)
+}
+
+func backupPvPvcWithDir(ctx context.Context, l *zap.SugaredLogger, namespace string, backupDir *string) (string, error) {
 	scriptPath := "./scripts/backup_pv_pvc.sh"
 	if _, err := os.Stat(scriptPath); err != nil {
 		// Attempt to auto-download the script from a configurable raw URL
@@ -358,23 +390,52 @@ func backupPvPvc(ctx context.Context, l *zap.SugaredLogger, namespace string) er
 			rawURL = DefaultBackupPvPvcRawURL
 		}
 		l.Infof("Backup script not found. Attempting download from %s", rawURL)
-		downloadCmd := fmt.Sprintf("mkdir -p ./scripts && curl -fsSL %s -o %s && chmod +x %s", rawURL, scriptPath, scriptPath)
-		if _, dErr := utils.ExecuteCommand(ctx, "bash", "-lc", downloadCmd); dErr != nil {
-			return fmt.Errorf("failed to download backup script from %s: %w", rawURL, dErr)
+
+		// Create scripts directory using Go's os package (safer than shell)
+		if mkErr := os.MkdirAll("./scripts", 0755); mkErr != nil {
+			return "", fmt.Errorf("failed to create scripts directory: %w", mkErr)
 		}
+
+		// Download script using curl with separate arguments (prevents command injection)
+		if _, dErr := utils.ExecuteCommand(ctx, "curl", "-fsSL", rawURL, "-o", scriptPath); dErr != nil {
+			return "", fmt.Errorf("failed to download backup script from %s: %w", rawURL, dErr)
+		}
+
+		// Set executable permission using Go's os package (safer than shell)
+		if chErr := os.Chmod(scriptPath, 0755); chErr != nil {
+			return "", fmt.Errorf("failed to set executable permission on %s: %w", scriptPath, chErr)
+		}
+
 		if _, sErr := os.Stat(scriptPath); sErr != nil {
-			return fmt.Errorf("backup script still missing at %s after download", scriptPath)
+			return "", fmt.Errorf("backup script still missing at %s after download", scriptPath)
 		}
 	}
 	l.Infof("Running backup script for namespace %s...", namespace)
-	// Ensure NAMESPACE env is passed to the script
-	runCmd := fmt.Sprintf("NAMESPACE=%s bash %s", namespace, scriptPath)
-	output, err := utils.ExecuteCommand(ctx, "bash", "-lc", runCmd)
+
+	// Build environment variables for the script
+	env := []string{fmt.Sprintf("NAMESPACE=%s", namespace)}
+	if backupDir != nil && strings.TrimSpace(*backupDir) != "" {
+		env = append(env, fmt.Sprintf("BACKUP_DIR=%s", strings.TrimSpace(*backupDir)))
+		env = append(env, "BACKUP_SKIP_SUMMARY=1")
+	}
+
+	// Execute script with environment variables (safer than shell command construction)
+	output, err := utils.ExecuteCommandWithEnv(ctx, env, "bash", "-l", scriptPath)
 	if err != nil {
-		return fmt.Errorf("backup script failed: %w\nOutput: %s", err, output)
+		return "", fmt.Errorf("backup script failed: %w\nOutput: %s", err, output)
 	}
 	l.Info(strings.TrimSpace(output))
-	return nil
+	outDir := ""
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, "[+] Backup dir: ") {
+			outDir = strings.TrimSpace(strings.TrimPrefix(line, "[+] Backup dir: "))
+			break
+		}
+	}
+	if outDir == "" {
+		return "", fmt.Errorf("backup output directory not found in script output")
+	}
+	return outDir, nil
 }
 
 // UpdatePVVolumeHandles recreates PV/PVCs pointing to the new EFS ID
@@ -576,29 +637,39 @@ func ExecuteEFSOperationsFull(
 	l *zap.SugaredLogger,
 	attachInfo *types.BackupAttachInfo,
 	verify func(context.Context, string) error,
+	backupPvPvcFlag *bool,
+	progressReporter func(string, float64),
 ) error {
+	if progressReporter == nil {
+		progressReporter = func(string, float64) {}
+	}
+
 	// Replicate mount targets from current EFS to the new one (best effort)
 	srcEfs, err := utils.DetectEFSId(ctx, attachInfo.Namespace)
 	if err != nil || strings.TrimSpace(srcEfs) == "" {
 		l.Warnf("Could not detect source EFS in namespace %s. Skipping mount-target replication.", attachInfo.Namespace)
-		return nil
+		// continue to next steps
+	} else {
+		progressReporter("Replicating mount targets...", 20.0)
+		if err := ReplicateEFSMountTargets(ctx, l, attachInfo.Region, strings.TrimSpace(srcEfs), attachInfo.EFSID); err != nil {
+			l.Warnf("Failed to replicate EFS mount targets from %s to %s: %v", srcEfs, attachInfo.EFSID, err)
+			// continue even if replication fails
+		} else {
+			l.Infof("✅ Replicated mount targets from %s to %s (region: %s)", srcEfs, attachInfo.EFSID, attachInfo.Region)
+		}
 	}
 
-	if err := ReplicateEFSMountTargets(ctx, l, attachInfo.Region, strings.TrimSpace(srcEfs), attachInfo.EFSID); err != nil {
-		l.Warnf("Failed to replicate EFS mount targets from %s to %s: %v", srcEfs, attachInfo.EFSID, err)
-		return nil
-	}
-
-	l.Infof("✅ Replicated mount targets from %s to %s (region: %s)", srcEfs, attachInfo.EFSID, attachInfo.Region)
+	progressReporter("Validating mount targets...", 25.0)
 	if vErr := ValidateEFSMountTargets(ctx, l, attachInfo.Region, attachInfo.EFSID); vErr != nil {
 		l.Warnf("Mount target validation for %s reported issues: %v", attachInfo.EFSID, vErr)
-		return nil
+		// continue? usually yes, let kubelet handle attach errors
+	} else {
+		l.Infof("✅ Mount targets validated for %s", attachInfo.EFSID)
 	}
-
-	l.Infof("✅ Mount targets validated for %s", attachInfo.EFSID)
 
 	// Verify EFS data using injected verifier (best effort)
 	if verify != nil {
+		progressReporter("Verifying EFS data...", 30.0)
 		if err := verify(ctx, attachInfo.Namespace); err != nil {
 			l.Warnf("EFS data verification failed: %v", err)
 		}
@@ -606,8 +677,18 @@ func ExecuteEFSOperationsFull(
 	}
 
 	// Backup PV/PVC definitions before destructive changes
-	if err := BackupPvPvcWithUserChoice(ctx, l, attachInfo.Namespace); err != nil {
-		return err
+	progressReporter("Backing up PV/PVC configurations...", 40.0)
+	switch {
+	case backupPvPvcFlag == nil:
+		if err := BackupPvPvcWithUserChoice(ctx, l, attachInfo.Namespace); err != nil {
+			return err
+		}
+	case *backupPvPvcFlag:
+		if _, err := backupPvPvc(ctx, l, attachInfo.Namespace); err != nil {
+			return err
+		}
+	default:
+		l.Info("Skipped PV/PVC backup by user choice")
 	}
 
 	// Update PV volume handles
@@ -615,6 +696,7 @@ func ExecuteEFSOperationsFull(
 		return nil
 	}
 
+	progressReporter("Updating PV/PVC volume handles...", 60.0)
 	pvcList := strings.Join(attachInfo.PVCs, ",")
 	if err := UpdatePVVolumeHandles(ctx, l, attachInfo.Namespace, attachInfo.EFSID, &pvcList); err != nil {
 		return fmt.Errorf("failed to update PV volume handles: %w", err)

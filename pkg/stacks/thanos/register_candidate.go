@@ -502,7 +502,7 @@ func (t *ThanosStack) setupSafeWallet(ctx context.Context, cwd string) error {
 		Context: ctx,
 	}
 
-	contract, err := abis.NewSafeExtender(ethCommon.HexToAddress(safeWalletAddress), l1Client)
+	contract, err := abis.NewSafe(ethCommon.HexToAddress(safeWalletAddress), l1Client)
 	if err != nil {
 		t.logger.Error("failed to create contract instance ", "err ", err)
 		return fmt.Errorf("failed to create contract instance: %v", err)
@@ -670,8 +670,10 @@ func (t *ThanosStack) GetRegistrationAdditionalInfo(ctx context.Context, registe
 	// 1. Safe wallet information
 	if contracts.SystemOwnerSafe != "" {
 		safeAddress := ethCommon.HexToAddress(contracts.SystemOwnerSafe)
-		safeContract, err := abis.NewSafeExtender(safeAddress, l1Client)
-		if err == nil {
+		safeContract, err := abis.NewSafe(safeAddress, l1Client)
+		if err != nil {
+			t.logger.Errorf("failed to initialize the safe wallet, err: %w", err)
+		} else {
 			callOpts := &bind.CallOpts{Context: ctx}
 
 			// Get owners

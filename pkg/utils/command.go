@@ -32,6 +32,22 @@ func ExecuteCommand(ctx context.Context, command string, args ...string) (string
 	return trimmedOutput, err
 }
 
+// ExecuteCommandWithEnv executes a command with additional environment variables
+func ExecuteCommandWithEnv(ctx context.Context, env []string, command string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, command, args...)
+	cmd.Env = append(os.Environ(), env...)
+	output, err := cmd.CombinedOutput()
+
+	trimmedOutput := strings.TrimSpace(string(output))
+
+	// Handle cancellation
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
+	return trimmedOutput, err
+}
+
 // ExecuteCommandInDir executes a command in a specific directory.
 // This avoids shell injection vulnerabilities by not using "bash -c" with string interpolation.
 func ExecuteCommandInDir(ctx context.Context, dir string, command string, args ...string) (string, error) {
@@ -82,6 +98,9 @@ func ExecuteCommandStreamInDir(ctx context.Context, l *zap.SugaredLogger, dir st
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		// pty.Start may have partially set cmd.Stdout; reset before StdoutPipe
+		cmd.Stdout = nil
+		cmd.Stderr = nil
 		// Fallback to StdoutPipe
 		var rd io.ReadCloser
 		rd, err = cmd.StdoutPipe()

@@ -6,6 +6,7 @@ const PluginMonitoring = "monitoring"
 const PluginCrossTrade = "cross-trade"
 const PluginDRB = "drb"
 const PluginUptimeService = "uptime-service"
+const PluginDRB = "drb-vrf"
 
 // DRB type values for --type flag (trh-sdk install drb --type leader|regular)
 const DRBTypeLeader = "leader"
@@ -18,6 +19,7 @@ var SupportedPlugins = map[string]bool{
 	PluginCrossTrade:    true,
 	PluginDRB:           true,
 	PluginUptimeService: true,
+	PluginDRB:           true,
 }
 
 var SupportedPluginsList = []string{
@@ -27,6 +29,7 @@ var SupportedPluginsList = []string{
 	PluginCrossTrade,
 	PluginDRB,
 	PluginUptimeService,
+	PluginDRB,
 }
 
 // PluginsThatWorkWithoutChain lists plugins that can be installed without a deployed chain.

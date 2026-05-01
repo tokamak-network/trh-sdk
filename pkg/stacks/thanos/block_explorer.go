@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
@@ -38,22 +39,12 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	}
 	if len(blockExplorerPods) > 0 {
 		t.logger.Info("Block Explorer is running: \n")
-		var blockExplorerURL string
-		for {
-			k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, "block-explorer")
-			if err != nil {
-				t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
-				return "", err
-			}
-
-			if len(k8sIngresses) > 0 {
-				blockExplorerURL = "http://" + k8sIngresses[0]
-				break
-			}
-
-			time.Sleep(15 * time.Second)
+		ingressAddr, err := utils.WaitForIngressAddress(ctx, namespace, "block-explorer", 45*time.Minute)
+		if err != nil {
+			t.logger.Error("Error retrieving block explorer ingress address", "err", err)
+			return "", err
 		}
-		return blockExplorerURL, nil
+		return "http://" + ingressAddr, nil
 	}
 
 	err = t.cloneSourcecode(ctx, "tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git")
@@ -129,36 +120,16 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 
 	rdsConnectionUrl = strings.Trim(rdsConnectionUrl, `"`)
 
-	var opGethSVC string
-	for {
-		k8sSvc, err := utils.GetServiceNames(ctx, namespace, "op-geth")
-		if err != nil {
-			t.logger.Error("Error retrieving svc", "err", err, "details", k8sSvc)
-			return "", err
-		}
-
-		if len(k8sSvc) > 0 {
-			opGethSVC = k8sSvc[0]
-			break
-		}
-
-		time.Sleep(15 * time.Second)
+	opGethSVC, err := utils.WaitForServiceName(ctx, namespace, "op-geth", 45*time.Minute)
+	if err != nil {
+		t.logger.Error("Error retrieving op-geth service name", "err", err)
+		return "", err
 	}
 
-	var opGethPublicUrl string
-	for {
-		k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, "op-geth")
-		if err != nil {
-			t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
-			return "", err
-		}
-
-		if len(k8sIngresses) > 0 {
-			opGethPublicUrl = k8sIngresses[0]
-			break
-		}
-
-		time.Sleep(15 * time.Second)
+	opGethPublicUrl, err := utils.WaitForIngressAddress(ctx, namespace, "op-geth", 45*time.Minute)
+	if err != nil {
+		t.logger.Error("Error retrieving op-geth ingress address", "err", err)
+		return "", err
 	}
 
 	// generate the helm chart value file
@@ -177,6 +148,9 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		export op_geth_svc=%s
 		export op_geth_public_url=%s
 		export next_public_rollup_l1_base_url=%s
+		export enable_fault_proof=%t
+		export stack_nativetoken_name=%s
+		export stack_nativetoken_symbol=%s
 		`,
 		t.deployConfig.DeploymentFilePath,
 		t.deployConfig.L1RPCURL,
@@ -186,12 +160,15 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		releaseName,
 		t.deployConfig.ChainName,
 		walletConnectID,
-		fmt.Sprintf("%s/tokamak-thanos/build/rollup.json", t.deploymentPath),
+		t.rollupConfigPath(),
 		rdsConnectionUrl,
 		t.deployConfig.L1BeaconURL,
 		opGethSVC,
 		opGethPublicUrl,
 		t.deployConfig.NextPublicRollupL1BaseUrl,
+		t.deployConfig.EnableFraudProof,
+		constants.GetFeeTokenConfig(t.deployConfig.FeeToken, t.deployConfig.L1ChainID).Name,
+		constants.GetFeeTokenConfig(t.deployConfig.FeeToken, t.deployConfig.L1ChainID).Symbol,
 	)
 	_, err = utils.ExecuteCommand(ctx,
 		"bash",
@@ -233,20 +210,10 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 
 	// Install the frontend
 	// Get the ingress
-	var blockExplorerUrl string
-	for {
-		k8sIngresses, err := utils.GetAddressByIngress(ctx, namespace, blockExplorerBackendReleaseName)
-		if err != nil {
-			t.logger.Error("Error retrieving ingress addresses", "err", err, "details", k8sIngresses)
-			return "", err
-		}
-
-		if len(k8sIngresses) > 0 {
-			blockExplorerUrl = k8sIngresses[0]
-			break
-		}
-
-		time.Sleep(15 * time.Second)
+	blockExplorerUrl, err := utils.WaitForIngressAddress(ctx, namespace, blockExplorerBackendReleaseName, 45*time.Minute)
+	if err != nil {
+		t.logger.Error("Error retrieving block explorer backend ingress address", "err", err)
+		return "", err
 	}
 
 	// update the values file

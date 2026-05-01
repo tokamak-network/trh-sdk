@@ -10,20 +10,27 @@ import (
 	"golang.org/x/term"
 )
 
+// stdinReader is a shared reader to avoid losing buffered data between calls.
+var stdinReader = bufio.NewReader(os.Stdin)
+
 func ScanBool(defaultResponse bool) (bool, error) {
-	var response string
-	n, err := fmt.Scanln(&response)
-
-	// Blank input, default No
-	if n == 0 {
-		return defaultResponse, nil
-	}
-
+	input, err := stdinReader.ReadString('\n')
 	if err != nil {
+		// Allow EOF on empty line to mean default
+		if len(strings.TrimSpace(input)) == 0 {
+			return defaultResponse, nil
+		}
 		return false, err
 	}
 
-	switch strings.ToLower(strings.TrimSpace(response)) {
+	response := strings.TrimSpace(input)
+
+	// Blank input, use default
+	if response == "" {
+		return defaultResponse, nil
+	}
+
+	switch strings.ToLower(response) {
 	case "y":
 		return true, nil
 	case "n":
@@ -34,8 +41,7 @@ func ScanBool(defaultResponse bool) (bool, error) {
 }
 
 func ScanString() (string, error) {
-	reader := bufio.NewReader(os.Stdin)
-	input, err := reader.ReadString('\n')
+	input, err := stdinReader.ReadString('\n')
 	if err != nil {
 		return "", err
 	}

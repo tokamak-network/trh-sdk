@@ -1,5 +1,105 @@
 package constants
 
+import "strings"
+
+// Preset constants
+const (
+	PresetGeneral = "general"
+	PresetDeFi    = "defi"
+	PresetGaming  = "gaming"
+	PresetFull    = "full"
+)
+
+var ValidPresets = []string{PresetGeneral, PresetDeFi, PresetGaming, PresetFull}
+
+// PresetModules defines which operational tools are enabled for each preset.
+// bridge is always included. uptimeService and crossTrade are auto-installed.
+// blockExplorer and monitoring require user configuration after deployment.
+var PresetModules = map[string]map[string]bool{
+	PresetGeneral: {
+		"bridge":        true,
+		"blockExplorer": true,
+	},
+	PresetDeFi: {
+		"bridge":        true,
+		"blockExplorer": true,
+		"monitoring":    true,
+		"crossTrade":    true,
+		"uptimeService": true,
+	},
+	PresetGaming: {
+		"bridge":        true,
+		"blockExplorer": true,
+		"monitoring":    true,
+		"uptimeService": true,
+		"drb":           true,
+		"aaPaymaster":   true,
+	},
+	PresetFull: {
+		"bridge":        true,
+		"blockExplorer": true,
+		"monitoring":    true,
+		"crossTrade":    true,
+		"uptimeService": true,
+		"drb":           true,
+		"aaPaymaster":   true,
+	},
+}
+
+// Fee token constants
+const (
+	FeeTokenTON  = "TON"
+	FeeTokenETH  = "ETH"
+	FeeTokenUSDT = "USDT"
+	FeeTokenUSDC = "USDC"
+)
+
+var ValidFeeTokens = []string{FeeTokenTON, FeeTokenETH, FeeTokenUSDT, FeeTokenUSDC}
+
+// FeeTokenConfig holds the L1 metadata for a fee token.
+type FeeTokenConfig struct {
+	Name      string
+	Symbol    string
+	L1Address string
+}
+
+// GetFeeTokenConfig returns the fee token configuration for the given token and L1 chain.
+func GetFeeTokenConfig(token string, l1ChainID uint64) FeeTokenConfig {
+	chainConfig := L1ChainConfigurations[l1ChainID]
+	switch strings.ToUpper(token) {
+	case FeeTokenTON:
+		return FeeTokenConfig{
+			Name:      "Tokamak Network Token",
+			Symbol:    "TON",
+			L1Address: chainConfig.TON,
+		}
+	case FeeTokenETH:
+		return FeeTokenConfig{
+			Name:      "Ether",
+			Symbol:    "ETH",
+			L1Address: "0x0000000000000000000000000000000000000000",
+		}
+	case FeeTokenUSDT:
+		return FeeTokenConfig{
+			Name:      "Tether USD",
+			Symbol:    "USDT",
+			L1Address: chainConfig.USDTAddress,
+		}
+	case FeeTokenUSDC:
+		return FeeTokenConfig{
+			Name:      "USD Coin",
+			Symbol:    "USDC",
+			L1Address: chainConfig.USDCAddress,
+		}
+	default:
+		return FeeTokenConfig{
+			Name:      "Tokamak Network Token",
+			Symbol:    "TON",
+			L1Address: chainConfig.TON,
+		}
+	}
+}
+
 const EthereumMainnetChainID uint64 = 1
 const EthereumSepoliaChainID uint64 = 11155111
 const EthereumHoleskyChainID uint64 = 17000
@@ -26,6 +126,10 @@ var L1ChainConfigurations = map[uint64]struct {
 	StakingURL                       string `json:"staking_url"`
 	TxmgrCellProofTime               uint64 `json:"txmgr_cell_proof_time"`
 	NextPublicRollupL1BaseUrl        string `json:"next_public_rollup_l1_base_url"`
+	// MipsAddress is the shared MIPS VM contract deployed on L1 for fault proof game resolution.
+	// tokamak-deployer does not deploy MIPS (it's a pre-existing canonical contract on each network),
+	// so this address is used as a fallback when deploy-output.json does not include it.
+	MipsAddress string `json:"mips_address"`
 }{
 	//TODO: Updated the addresses for L1VerificationContractAddress, L2TonAddress, L2ManagerAddress and L1BridgeRegistry for different chains
 	EthereumMainnetChainID: {
@@ -71,6 +175,7 @@ var L1ChainConfigurations = map[uint64]struct {
 		StakingURL:                       "https://sepolia.staking.tokamak.network/staking",
 		TxmgrCellProofTime:               1760427360,
 		NextPublicRollupL1BaseUrl:        "https://eth-sepolia.blockscout.com",
+		MipsAddress:                      "0x34AEe6D040136ba8C43b06B048B1e06C61131F17",
 	},
 	EthereumHoleskyChainID: {
 		BlockTimeInSeconds:   12,
@@ -103,13 +208,17 @@ const (
 	OptimismChainID        = 11155420
 	BaseSepoliaChainID     = 84532
 	BaseChainID            = 8453
+	UnichainChainID        = 130
+	UnichainSepoliaChainID = 1301
 )
 
 var L2ChainConfigurations = map[uint64]struct {
-	ETHAddress  string `json:"eth_address"`
-	USDCAddress string `json:"usdc_address"`
-	USDTAddress string `json:"usdt_address"`
-	TONAddress  string `json:"ton_address"`
+	ETHAddress        string `json:"eth_address"`
+	USDCAddress       string `json:"usdc_address"`
+	USDTAddress       string `json:"usdt_address"`
+	TONAddress        string `json:"ton_address"`
+	NativeTokenName   string `json:"native_token_name"`
+	NativeTokenSymbol string `json:"native_token_symbol"`
 }{
 	OptimismSepoliaChainID: {
 		ETHAddress:  "0x0000000000000000000000000000000000000000",

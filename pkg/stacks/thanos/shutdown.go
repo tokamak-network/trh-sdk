@@ -278,7 +278,19 @@ func (s *ThanosStack) readDeploymentContracts() (*types.Contracts, error) {
 	}
 
 	fileName := fmt.Sprintf("%d-deploy.json", bedrockConfig.L1ChainID)
+	// Prefer the tokamak-deployer binary's output. The legacy
+	// <L1ChainID>-deploy.json under contracts-bedrock/deployments/ is often
+	// stale: cloneSourcecode checks the file in from the tokamak-thanos repo
+	// so it exists even on fresh deploys, but no step in the new pipeline
+	// rewrites it. Reading it first shadowed fault-proof addresses the new
+	// pipeline actually produces (Bug #8 consumer gap). See wiki
+	// troubleshooting/drb-local-compose-path-template-bugs.
+	//
+	// types.Contracts silently ignores l1ChainId/l2ChainId metadata keys,
+	// and overlaps with tokamak-deployer's DeployOutput on all address fields
+	// by JSON tag.
 	searchPaths := []string{
+		filepath.Join(s.deploymentPath, "deploy-output.json"),
 		filepath.Join(s.deploymentPath, "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "deployments", fileName),
 		filepath.Join(filepath.Dir(filepath.Dir(s.deploymentPath)), "tokamak-thanos", "packages", "tokamak", "contracts-bedrock", "deployments", fileName),
 		filepath.Join(s.deploymentPath, "deployments", fileName),
@@ -301,31 +313,44 @@ func (s *ThanosStack) readDeploymentContracts() (*types.Contracts, error) {
 	return nil, fmt.Errorf("deployment file not found for chain %d", bedrockConfig.L1ChainID)
 }
 
-// readBedrockDeployConfigTemplate reads deployment configuration from monorepo (e.g., thanos-sepolia.json)
+// readBedrockDeployConfigTemplate reads the deploy-config.json template.
+//
+// Two write-sites produce this file and both serialize the same
+// types.DeployConfigTemplate shape:
+//
+//  1. New tokamak-deployer flow (2026-04-16+, deploy_contracts.go:143)
+//     writes to <deploymentPath>/deploy-config.json.
+//  2. Legacy Foundry flow (pre-2026-04-16) writes to
+//     <bedrockPath>/scripts/deploy-config.json.
+//
+// Try the new path first — this is the canonical location for any chain
+// deployed against the current SDK. Fall back to the legacy path so that
+// shutdown workflows against old Foundry-era chains keep working unchanged.
+// See wiki troubleshooting/drb-local-compose-path-template-bugs Bug #7.
 func (s *ThanosStack) readBedrockDeployConfigTemplate() (*types.DeployConfigTemplate, error) {
-	bedrockPath, err := s.getBedrockPath()
-	if err != nil {
-		return nil, err
+	candidates := []string{
+		filepath.Join(s.deploymentPath, "deploy-config.json"),
+	}
+	if bedrockPath, err := s.getBedrockPath(); err == nil {
+		candidates = append(candidates, filepath.Join(bedrockPath, "scripts", "deploy-config.json"))
 	}
 
-	// Force use of scripts/deploy-config.json as requested
-	filePath := filepath.Join(bedrockPath, "scripts", "deploy-config.json")
-
-	if !utils.CheckFileExists(filePath) {
-		return nil, fmt.Errorf("deploy config file not found: %s", filePath)
+	for _, filePath := range candidates {
+		if !utils.CheckFileExists(filePath) {
+			continue
+		}
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			return nil, err
+		}
+		var config types.DeployConfigTemplate
+		if err := json.Unmarshal(data, &config); err != nil {
+			return nil, err
+		}
+		return &config, nil
 	}
 
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	var config types.DeployConfigTemplate
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, err
-	}
-
-	return &config, nil
+	return nil, fmt.Errorf("deploy config file not found in any known location (tried: %v)", candidates)
 }
 
 // ShutdownActivate prepares L1 withdrawal (Step 1~7) and returns the storage address if found.

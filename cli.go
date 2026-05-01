@@ -45,10 +45,16 @@ func Run() {
 
 Examples:
   # Deploy contracts on L1 with registering candidate
-  trh-sdk deploy-contracts --network testnet --stack thanos 
+  trh-sdk deploy-contracts --network testnet --stack thanos
 
   # Deploy contracts on L1 without registering candidate
   trh-sdk deploy-contracts --network testnet --stack thanos --no-candidate
+
+  # Deploy contracts with preset and fee token (skip interactive prompts)
+  trh-sdk deploy-contracts --network testnet --stack thanos --preset general --fee-token TON
+
+  # Deploy contracts with fault proof system enabled
+  trh-sdk deploy-contracts --network testnet --stack thanos --enable-fault-proof --preset full --fee-token ETH
   `,
 			},
 			{
@@ -84,6 +90,14 @@ Examples:
 						Name:  "type",
 						Usage: "Plugin type (e.g. drb: leader|regular, cross-trade)",
 						Value: "",
+					},
+					&cli.BoolFlag{
+						Name:  "register-chain",
+						Usage: "Register a new chain to the cross-trade plugin",
+					},
+					&cli.BoolFlag{
+						Name:  "register-tokens",
+						Usage: "Register new tokens to the cross-trade plugin",
 					},
 				},
 				Action: commands.ActionInstallationPlugins(),
