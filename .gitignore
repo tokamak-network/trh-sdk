@@ -48,3 +48,6 @@ DRB-node
 
 k8s-efs-backup.worktrees
 .worktrees/
+
+docs/superpowers/
+docs/codex-review/
