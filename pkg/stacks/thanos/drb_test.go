@@ -39,14 +39,32 @@ func TestInstallDRB_RequiresL2RpcUrl(t *testing.T) {
 	}
 }
 
+// TestInstallDRB_RequiresMnemonic verifies that InstallDRB returns an error
+// when Mnemonic is empty (required for deterministic key derivation).
+func TestInstallDRB_RequiresMnemonic(t *testing.T) {
+	stack := &ThanosStack{
+		deployConfig: &types.Config{
+			K8s:      &types.K8sConfig{Namespace: "test"},
+			L2RpcUrl: "http://localhost:8545",
+			Mnemonic: "",
+		},
+		deploymentPath: t.TempDir(),
+		logger:         zap.NewNop().Sugar(),
+	}
+	err := stack.InstallDRB(context.Background())
+	if err == nil {
+		t.Fatal("expected error when Mnemonic is empty, got nil")
+	}
+}
+
 // TestInstallDRB_ChartNotFound verifies that InstallDRB returns a descriptive error
-// when the drb-vrf chart directory does not exist (PRD 1 not yet delivered).
+// when the drb-vrf chart directory does not exist (tokamak-thanos-stack not cloned).
 func TestInstallDRB_ChartNotFound(t *testing.T) {
 	stack := &ThanosStack{
 		deployConfig: &types.Config{
-			K8s:             &types.K8sConfig{Namespace: "test"},
-			L2RpcUrl:        "http://localhost:8545",
-			AdminPrivateKey: "0xdeadbeef",
+			K8s:      &types.K8sConfig{Namespace: "test"},
+			L2RpcUrl: "http://localhost:8545",
+			Mnemonic: "test test test test test test test test test test test junk",
 		},
 		deploymentPath: t.TempDir(), // no tokamak-thanos-stack/charts/drb-vrf inside
 		logger:         zap.NewNop().Sugar(),
@@ -74,14 +92,3 @@ func TestUninstallDRB_LocalPath(t *testing.T) {
 	_ = err // result is acceptable either way; path taken is what matters
 }
 
-// TestDrbImageTag_Default verifies that drbImageTag returns a non-empty tag.
-func TestDrbImageTag_Default(t *testing.T) {
-	stack := &ThanosStack{
-		deployConfig: &types.Config{Network: "testnet"},
-		logger:       zap.NewNop().Sugar(),
-	}
-	tag := stack.drbImageTag()
-	if tag == "" {
-		t.Error("drbImageTag() returned empty string")
-	}
-}

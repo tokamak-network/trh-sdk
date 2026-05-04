@@ -334,6 +334,13 @@ func (t *ThanosStack) DeployCrossTradeContracts(ctx context.Context, input *type
 		t.logger.Infof("Setting chain information for L2")
 		for _, l2ChainConfig := range input.L2ChainConfig {
 
+			// Skip chains without RPC or deployed CrossTrade proxy address
+			proxyAddr := l2l2CrossTradeProxyAddresses[l2ChainConfig.ChainID]
+			if l2ChainConfig.RPC == "" || proxyAddr == "" {
+				t.logger.Infof("Skipping SetChainInfo for chain %d: missing RPC or proxy address", l2ChainConfig.ChainID)
+				continue
+			}
+
 			// Set chain information for L2
 			script := fmt.Sprintf(
 				`cd crossTrade && PRIVATE_KEY=%s L2_CROSS_TRADE_PROXY=%s L1_CROSS_TRADE_PROXY=%s L1_CHAIN_ID=%d forge script %s --rpc-url %s --broadcast`,

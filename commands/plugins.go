@@ -159,12 +159,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 						if pluginName == constants.PluginMonitoring {
 							displayNamespace = constants.MonitoringNamespace
 						} else if pluginName == constants.PluginDRB {
-							drbType := strings.TrimSpace(strings.ToLower(cmd.String("type")))
-							if drbType == constants.DRBTypeRegular {
-								displayNamespace = "ec2"
-							} else {
-								displayNamespace = constants.DRBNamespace
-							}
+							displayNamespace = constants.DRBNamespace
 						} else {
 							if !constants.CanPluginWorkWithoutChain(pluginName) && (config == nil || config.K8s == nil) {
 								return fmt.Errorf("the chain has not been deployed yet, please deploy the chain first")
@@ -316,31 +311,8 @@ func ActionInstallationPlugins() cli.ActionFunc {
 							return nil
 
 						case constants.PluginDRB:
-							drbType := strings.TrimSpace(strings.ToLower(cmd.String("type")))
-							if drbType == "" {
-								drbType = constants.DRBTypeLeader // default for backwards compat
-							}
-							if drbType != constants.DRBTypeLeader && drbType != constants.DRBTypeRegular {
-								return fmt.Errorf("unsupported DRB type: %s. Use --type leader or --type regular", drbType)
-							}
-							if drbType == constants.DRBTypeLeader {
-								input, err := thanosStack.GetDRBInput(ctx)
-								if err != nil {
-									return err
-								}
-								_, err = thanosStack.DeployDRB(ctx, input)
-								if err != nil {
-									return thanosStack.UninstallDRB(ctx)
-								}
-								return nil
-							}
-							// regular
-							input, err := thanosStack.GetDRBRegularNodeInput(ctx)
-							if err != nil {
-								return err
-							}
-							if err := thanosStack.InstallDRBRegularNode(ctx, input); err != nil {
-								return err
+							if err := thanosStack.InstallDRB(ctx); err != nil {
+								return thanosStack.UninstallDRB(ctx)
 							}
 							return nil
 
@@ -363,12 +335,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 						if pluginName == constants.PluginMonitoring {
 							displayNamespace = constants.MonitoringNamespace
 						} else if pluginName == constants.PluginDRB {
-							drbType := strings.TrimSpace(strings.ToLower(cmd.String("type")))
-							if drbType == constants.DRBTypeRegular {
-								displayNamespace = "ec2"
-							} else {
-								displayNamespace = constants.DRBNamespace
-							}
+							displayNamespace = constants.DRBNamespace
 						} else {
 							displayNamespace = config.K8s.Namespace
 						}
@@ -398,17 +365,7 @@ func ActionInstallationPlugins() cli.ActionFunc {
 
 							return thanosStack.UninstallCrossTrade(ctx, constants.CrossTradeDeployMode(crossTradeType))
 						case constants.PluginDRB:
-							drbType := strings.TrimSpace(strings.ToLower(cmd.String("type")))
-							if drbType == "" {
-								drbType = constants.DRBTypeLeader // default for backwards compat
-							}
-							if drbType != constants.DRBTypeLeader && drbType != constants.DRBTypeRegular {
-								return fmt.Errorf("unsupported DRB type: %s. Use --type leader or --type regular", drbType)
-							}
-							if drbType == constants.DRBTypeLeader {
-								return thanosStack.UninstallDRB(ctx)
-							}
-							return thanosStack.UninstallDRBRegularNode(ctx)
+							return thanosStack.UninstallDRB(ctx)
 						}
 					}
 				default:
