@@ -49,14 +49,14 @@ func SetAWSConfigFile(basePath string) (string, error) {
 	if basePath == "" {
 		return "", fmt.Errorf("base path is required")
 	}
-	if existing := os.Getenv("AWS_CONFIG_FILE"); existing != "" {
-		return existing, nil
+	cfgPath := filepath.Join(basePath, ".aws", "config")
+	if existing := os.Getenv("AWS_CONFIG_FILE"); existing == cfgPath {
+		return cfgPath, nil
 	}
 	cfgDir := filepath.Join(basePath, ".aws")
 	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
 		return "", fmt.Errorf("failed to create aws config dir: %w", err)
 	}
-	cfgPath := filepath.Join(cfgDir, "config")
 	if err := os.Setenv("AWS_CONFIG_FILE", cfgPath); err != nil {
 		return "", fmt.Errorf("failed to set AWS_CONFIG_FILE: %w", err)
 	}
@@ -68,14 +68,14 @@ func SetAWSCredentialsFile(basePath string) (string, error) {
 	if basePath == "" {
 		return "", fmt.Errorf("base path is required")
 	}
-	if existing := os.Getenv("AWS_SHARED_CREDENTIALS_FILE"); existing != "" {
-		return existing, nil
+	credPath := filepath.Join(basePath, ".aws", "credentials")
+	if existing := os.Getenv("AWS_SHARED_CREDENTIALS_FILE"); existing == credPath {
+		return credPath, nil
 	}
 	credDir := filepath.Join(basePath, ".aws")
 	if err := os.MkdirAll(credDir, 0o700); err != nil {
 		return "", fmt.Errorf("failed to create aws credentials dir: %w", err)
 	}
-	credPath := filepath.Join(credDir, "credentials")
 	if err := os.Setenv("AWS_SHARED_CREDENTIALS_FILE", credPath); err != nil {
 		return "", fmt.Errorf("failed to set AWS_SHARED_CREDENTIALS_FILE: %w", err)
 	}
@@ -87,14 +87,14 @@ func SetKubeconfigFile(basePath string) (string, error) {
 	if basePath == "" {
 		return "", fmt.Errorf("base path is required")
 	}
-	if existing := os.Getenv("KUBECONFIG"); existing != "" {
-		return existing, nil
+	kubePath := filepath.Join(basePath, ".kube", "config")
+	if existing := os.Getenv("KUBECONFIG"); existing == kubePath {
+		return kubePath, nil
 	}
 	kubeDir := filepath.Join(basePath, ".kube")
 	if err := os.MkdirAll(kubeDir, 0o700); err != nil {
 		return "", fmt.Errorf("failed to create kubeconfig dir: %w", err)
 	}
-	kubePath := filepath.Join(kubeDir, "config")
 	if err := os.Setenv("KUBECONFIG", kubePath); err != nil {
 		return "", fmt.Errorf("failed to set KUBECONFIG: %w", err)
 	}
