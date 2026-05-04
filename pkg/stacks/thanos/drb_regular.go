@@ -192,9 +192,8 @@ func (t *ThanosStack) InstallDRBRegularNode(ctx context.Context, input *types.DR
 	if err := t.cloneSourcecode(ctx, "tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git"); err != nil {
 		return fmt.Errorf("failed to clone tokamak-thanos-stack: %w", err)
 	}
-	// Checkout to feat/add-drb-node for alpha. TODO: change to main once this PR is merged.
-	if err := utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos-stack && git fetch origin && git checkout feat/add-drb-node && git pull origin feat/add-drb-node", t.deploymentPath)); err != nil {
-		return fmt.Errorf("failed to checkout feat/add-drb-node: %w", err)
+	if err := utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s/tokamak-thanos-stack && git fetch --depth=1 origin feat/add-drb-node && git checkout -B feat/add-drb-node FETCH_HEAD", t.deploymentPath)); err != nil {
+		return fmt.Errorf("failed to fetch and checkout feat/add-drb-node: %w", err)
 	}
 
 	vpcID := input.VpcID

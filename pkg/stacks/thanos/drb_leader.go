@@ -424,10 +424,10 @@ func (t *ThanosStack) deployDRBInfrastructure(ctx context.Context) (*types.DRBIn
 	// use absolute path for tokamak-thanos-stack
 	thanosStackPath := filepath.Join(t.deploymentPath, "tokamak-thanos-stack")
 
-	// Checkout to `feat/add-drb-node` branch for alpha release and pull latest changes
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && git checkout feat/add-drb-node && git pull origin feat/add-drb-node", thanosStackPath))
+	// Fetch feat/add-drb-node and checkout (shallow clone only has main by default)
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && git fetch --depth=1 origin feat/add-drb-node && git checkout -B feat/add-drb-node FETCH_HEAD", thanosStackPath))
 	if err != nil {
-		return nil, fmt.Errorf("failed to checkout and pull feat/add-drb-node: %w", err)
+		return nil, fmt.Errorf("failed to fetch and checkout feat/add-drb-node: %w", err)
 	}
 
 	t.logger.Info("Deploying DRB infrastructure (EKS cluster with separate VPC)...")
@@ -669,11 +669,10 @@ func (t *ThanosStack) deployDRBApplication(ctx context.Context, inputs *types.De
 	// use absolute path for tokamak-thanos-stack
 	thanosStackPath := filepath.Join(t.deploymentPath, "tokamak-thanos-stack")
 
-	// Checkout to `feat/add-drb-node` and pull latest changes
-	// err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", "cd tokamak-thanos-stack && git checkout feat/add-drb-node && git pull origin feat/add-drb-node")
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && git checkout feat/add-drb-node && git pull origin feat/add-drb-node", thanosStackPath))
+	// Fetch feat/add-drb-node and checkout (shallow clone only has main by default)
+	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && git fetch --depth=1 origin feat/add-drb-node && git checkout -B feat/add-drb-node FETCH_HEAD", thanosStackPath))
 	if err != nil {
-		return nil, fmt.Errorf("failed to checkout and pull feat/add-drb-node: %s", err)
+		return nil, fmt.Errorf("failed to fetch and checkout feat/add-drb-node: %s", err)
 	}
 
 	// Generate leader node ID
@@ -959,7 +958,7 @@ func (t *ThanosStack) getDRBContractAddressFromOutput(_ context.Context, deployF
 // generateLeaderNodeID clones DRB-node repository, runs the generator script, and extracts the leader peer ID
 func (t *ThanosStack) generateLeaderNodeID(ctx context.Context) (string, error) {
 	drbNodeRepoURL := "https://github.com/tokamak-network/DRB-node.git"
-	branch := "dispute-mechanism"
+	branch := "main"
 
 	// Clone or update DRB-node repository
 	t.logger.Info("Cloning DRB-node repository...")
@@ -971,7 +970,7 @@ func (t *ThanosStack) generateLeaderNodeID(ctx context.Context) (string, error) 
 	// use absolute path to avoid issues with working directory
 	drbNodePath := filepath.Join(t.deploymentPath, "DRB-node")
 
-	// Checkout to dispute-mechanism branch
+	// Checkout to main branch
 	t.logger.Infof("Checking out branch: %s", branch)
 	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", "-c", fmt.Sprintf("cd %s && git checkout %s", drbNodePath, branch))
 	if err != nil {
@@ -1446,8 +1445,8 @@ func (t *ThanosStack) ActivateRegularOperators(ctx context.Context, l2RPCURL str
 		return fmt.Errorf("failed to pack depositAndActivate calldata: %w", err)
 	}
 
-	// 3 TON = 3e18 wei
-	activationAmount := new(big.Int).Mul(big.NewInt(3), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+	// 1 TON = 1e18 wei (contract minimum is 3 wei; 1 ETH matches genesis allocation per regular)
+	activationAmount := new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
 	addr := common.HexToAddress(contractAddr)
 
 	for i, privKeyHex := range regularPrivKeys {
