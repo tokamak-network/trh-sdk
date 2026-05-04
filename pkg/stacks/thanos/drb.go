@@ -2,22 +2,24 @@ package thanos
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 )
 
 // InstallDRB installs the DRB (Distributed Random Beacon) VRF node via Helm.
 // The DRB contract is already injected into genesis at predeploy address 0x4200...0060.
-// This function deploys the off-chain DRB operator node that submits random values.
+// Deploys leader + 3 regular operator nodes, each with its own postgres sidecar.
 //
 // Requires:
-//   - t.deployConfig.K8s set (chain deployed)
-//   - t.deployConfig.L2RpcUrl set (AWS EKS path)
-//   - t.deployConfig.AdminPrivateKey set
+//   - t.deployConfig.K8s set (chain deployed on AWS EKS)
+//   - t.deployConfig.L2RpcUrl set
+//   - t.deployConfig.Mnemonic set (for deterministic key derivation)
 func (t *ThanosStack) InstallDRB(ctx context.Context) error {
 	if t.deployConfig.K8s == nil {
 		return fmt.Errorf("K8s configuration is not set. Please run the deploy command first")
@@ -25,30 +27,48 @@ func (t *ThanosStack) InstallDRB(ctx context.Context) error {
 	if t.deployConfig.L2RpcUrl == "" {
 		return fmt.Errorf("L2 RPC URL is not set — DRB install requires the chain to be deployed on AWS EKS")
 	}
+	if t.deployConfig.Mnemonic == "" {
+		return fmt.Errorf("mnemonic is not set — DRB install requires a mnemonic for key derivation")
+	}
 
 	chartPath := fmt.Sprintf("%s/tokamak-thanos-stack/charts/drb-vrf", t.deploymentPath)
 	namespace := t.deployConfig.K8s.Namespace
 
-	// Check if DRB chart exists (tokamak-thanos-stack must be cloned first)
 	if _, err := os.Stat(chartPath); err != nil {
 		return fmt.Errorf("drb-vrf chart not found at %s: clone tokamak-thanos-stack first (run deploy-chain)", chartPath)
 	}
 
-	imageTag := t.drbImageTag()
+	accounts, err := DeriveDRBAccounts(t.deployConfig.Mnemonic)
+	if err != nil {
+		return fmt.Errorf("failed to derive DRB accounts: %w", err)
+	}
+
+	imageTag := constants.DockerImageTag[t.network].DRBNodeImageTag
 
 	t.logger.Infof("🔧 Installing DRB VRF node (image tag: %s)...", imageTag)
 
 	args := []string{
-		"upgrade",
-		"--install",
-		"drb-vrf",
-		chartPath,
-		"--namespace", namespace,
-		"--create-namespace",
-		"--set", fmt.Sprintf("drb_vrf.env.l2_rpc_url=%s", t.deployConfig.L2RpcUrl),
-		"--set", fmt.Sprintf("drb_vrf.env.contract_address=%s", drbPredeployAddress),
-		"--set", fmt.Sprintf("drb_vrf.env.operator_private_key=%s", t.deployConfig.AdminPrivateKey),
-		"--set", fmt.Sprintf("drb_vrf.image.tag=%s", imageTag),
+		"upgrade", "--install", "drb-vrf", chartPath,
+		"--namespace", namespace, "--create-namespace",
+		"--set-string", fmt.Sprintf("image.tag=%s", imageTag),
+		"--set-string", fmt.Sprintf("contractAddress=%s", drbPredeployAddress),
+		"--set-string", fmt.Sprintf("chainID=%d", t.deployConfig.L2ChainID),
+		"--set-string", fmt.Sprintf("ethRpcUrls=%s", t.deployConfig.L2RpcUrl),
+		"--set-string", fmt.Sprintf("leader.privateKey=%s", accounts.LeaderPrivateKey),
+		"--set-string", fmt.Sprintf("leader.eoa=%s", accounts.LeaderEOA.Hex()),
+		"--set-string", fmt.Sprintf("leader.peerID=%s", accounts.LeaderPeerID),
+		"--set-string", fmt.Sprintf("leader.peerIDBytes=%s", base64.StdEncoding.EncodeToString(accounts.LeaderPeerIDBytes)),
+	}
+
+	regularPorts := []int{9601, 9602, 9603}
+	for i, r := range accounts.Regulars {
+		prefix := fmt.Sprintf("regulars[%d]", i)
+		args = append(args,
+			"--set-string", fmt.Sprintf("%s.privateKey=%s", prefix, r.PrivateKey),
+			"--set-string", fmt.Sprintf("%s.peerID=%s", prefix, r.PeerID),
+			"--set-string", fmt.Sprintf("%s.peerIDBytes=%s", prefix, base64.StdEncoding.EncodeToString(r.PeerIDBytes)),
+			"--set", fmt.Sprintf("%s.port=%d", prefix, regularPorts[i]),
+		)
 	}
 
 	output, err := utils.ExecuteCommand(ctx, "helm", args...)
@@ -100,12 +120,4 @@ func (t *ThanosStack) UninstallDRB(ctx context.Context) error {
 
 	t.logger.Info("✅ DRB VRF node uninstalled successfully")
 	return nil
-}
-
-// drbImageTag returns the DRB node Docker image tag for the current network.
-func (t *ThanosStack) drbImageTag() string {
-	if t.deployConfig == nil || t.deployConfig.Network == "" {
-		return "sha-8c37f63"
-	}
-	return "sha-8c37f63" // default; future: read from constants.DockerImageTag[network]
 }
