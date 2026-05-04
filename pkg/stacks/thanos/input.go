@@ -1917,11 +1917,6 @@ func makeBlockExplorerEnvs(dirPath string, filename string, config types.AwsData
 	return os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0600)
 }
 
-// makeDRBEnvs creates .envrc file for DRB Terraform deployment
-func (t *ThanosStack) makeDRBEnvs(dirPath string, filename string, config types.AwsDatabaseEnvs) error {
-	return makeBlockExplorerEnvs(dirPath, filename, config)
-}
-
 func (t *ThanosStack) cloneSourcecode(ctx context.Context, repositoryName, url string) error {
 	existingSourcecode, err := utils.CheckExistingSourceCode(t.deploymentPath, repositoryName)
 	if err != nil {
