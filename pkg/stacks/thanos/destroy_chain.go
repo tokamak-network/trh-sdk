@@ -2,6 +2,7 @@ package thanos
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -39,6 +40,35 @@ func (t *ThanosStack) destroyDevnet(ctx context.Context) error {
 	return nil
 }
 
+// uninstallFeatures removes all optional Helm-managed features from the K8s cluster.
+// It uses a best-effort strategy: each uninstaller is called regardless of prior failures.
+// All errors are collected and returned joined; the caller decides whether to treat them as fatal.
+func (t *ThanosStack) uninstallFeatures(ctx context.Context) error {
+	type uninstaller struct {
+		name string
+		fn   func(context.Context) error
+	}
+
+	uninstallers := []uninstaller{
+		{"DRB", t.UninstallDRB},
+		{"CrossTrade", t.UninstallCrossTradeAWS},
+		{"Bridge", t.UninstallBridge},
+		{"BlockExplorer", t.UninstallBlockExplorer},
+		{"Monitoring", t.UninstallMonitoring},
+		{"UptimeService", t.UninstallUptimeService},
+	}
+
+	var errs []error
+	for _, u := range uninstallers {
+		if err := u.fn(ctx); err != nil {
+			t.logger.Warnf("Failed to uninstall %s: %v", u.name, err)
+			errs = append(errs, fmt.Errorf("uninstall %s: %w", u.name, err))
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
 func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 	var (
 		err error
@@ -57,6 +87,12 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 	// Perform backup cleanup early while Kubernetes context still exists
 	if err := t.CleanupUnusedBackupResources(ctx); err != nil {
 		t.logger.Warnf("Failed to cleanup unused backup resources: %v", err)
+	}
+
+	// Uninstall all optional features (best-effort: continues on error)
+	if err := t.uninstallFeatures(ctx); err != nil {
+		t.logger.Warnf("Some features failed to uninstall (will be cleaned up by Terraform): %v", err)
+		// intentionally non-fatal: Terraform teardown removes underlying infrastructure
 	}
 
 	helmReleases, err := utils.GetHelmReleases(ctx, namespace)
@@ -83,19 +119,6 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 		} else {
 			t.logger.Warnf("Some Helm releases failed to uninstall: %v", failedReleases)
 		}
-	}
-
-	// Delete monitoring resources
-	err = t.UninstallMonitoring(ctx)
-	if err != nil {
-		t.logger.Warnf("Failed to uninstall monitoring resources: %v. Continuing with destroy process.", err)
-		// Continue even if monitoring uninstall fails, as monitoring may not exist
-	}
-
-	// Uninstall uptime-service if needed
-	err = t.UninstallUptimeService(ctx)
-	if err != nil {
-		t.logger.Warnf("Failed to uninstall uptime-service: %v. Continuing with destroy process.", err)
 	}
 
 	// Delete namespace before destroying the infrastructure

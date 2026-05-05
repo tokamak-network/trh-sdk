@@ -107,3 +107,27 @@ func TestL1CrossTradeAddresses_SepoliaValues(t *testing.T) {
 		t.Errorf("L2toL2CrossTradeL1 mismatch:\n  got  %s\n  want %s", addrs.L2toL2CrossTradeL1, wantL2toL2CTL1)
 	}
 }
+
+// TestCrossTradeReleaseName verifies the deterministic release name format.
+func TestCrossTradeReleaseName(t *testing.T) {
+	got := crossTradeReleaseName(12345)
+	want := "cross-trade-12345"
+	if got != want {
+		t.Errorf("crossTradeReleaseName(12345) = %q, want %q", got, want)
+	}
+}
+
+// TestUninstallCrossTradeAWS_NoK8s verifies that when K8s config is nil
+// (no cluster deployed), UninstallCrossTradeAWS returns nil without errors.
+// This is required by the best-effort destroy strategy — missing features are not errors.
+func TestUninstallCrossTradeAWS_NoK8s(t *testing.T) {
+	stack := &ThanosStack{
+		deployConfig:   &types.Config{L2ChainID: 12345},
+		logger:         zap.NewNop().Sugar(),
+		deploymentPath: t.TempDir(),
+	}
+	err := stack.UninstallCrossTradeAWS(context.Background())
+	if err != nil {
+		t.Errorf("expected nil when K8s is nil, got: %v", err)
+	}
+}

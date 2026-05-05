@@ -3,6 +3,7 @@ package thanos
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,6 +25,11 @@ var l1CrossTradeAddresses = map[uint64]struct {
 		L1CrossTradeProxy:  "0xf3473E20F1d9EB4468C72454a27aA1C65B67AB35",
 		L2toL2CrossTradeL1: "0xDa2CbF69352cB46d9816dF934402b421d93b6BC2",
 	},
+}
+
+// crossTradeReleaseName generates a deterministic Helm release name using the L2 chain ID.
+func crossTradeReleaseName(l2ChainID uint64) string {
+	return fmt.Sprintf("cross-trade-%d", l2ChainID)
 }
 
 // autoInstallCrossTradeAWS deploys CrossTrade L2 contracts via L1 OptimismPortal depositTransaction
@@ -143,7 +149,7 @@ func (t *ThanosStack) installCrossTradeHelmAWS(ctx context.Context, l1CTProxy, l
 		return fmt.Errorf("failed to write cross-trade-values.yaml: %w", err)
 	}
 
-	helmReleaseName := fmt.Sprintf("cross-trade-%d", time.Now().Unix())
+	helmReleaseName := crossTradeReleaseName(l2ChainID)
 	chartPath := fmt.Sprintf("%s/tokamak-thanos-stack/charts/cross-trade", t.deploymentPath)
 
 	_, err = utils.ExecuteCommand(ctx, "helm", []string{
@@ -173,4 +179,53 @@ func (t *ThanosStack) installCrossTradeHelmAWS(ctx context.Context, l1CTProxy, l
 		case <-time.After(15 * time.Second):
 		}
 	}
+}
+
+// UninstallCrossTradeAWS removes the CrossTrade Helm release from the K8s cluster.
+// It first tries the deterministic name (cross-trade-{l2ChainID}), then falls back
+// to a prefix scan for legacy timestamp-based names (cross-trade-{unix}).
+// Returns nil if no release is found (not installed = not an error).
+func (t *ThanosStack) UninstallCrossTradeAWS(ctx context.Context) error {
+	if t.deployConfig.K8s == nil {
+		return nil
+	}
+
+	namespace := t.deployConfig.K8s.Namespace
+	l2ChainID := t.deployConfig.L2ChainID
+
+	// Try deterministic name first
+	releaseName := crossTradeReleaseName(l2ChainID)
+	releases, err := utils.FilterHelmReleases(ctx, namespace, releaseName)
+	if err != nil {
+		t.logger.Warnf("Could not list CrossTrade helm releases by name, trying prefix scan: %v", err)
+		releases = nil
+	}
+
+	// Fallback: prefix scan for legacy timestamp-based names
+	if len(releases) == 0 {
+		releases, err = utils.FilterHelmReleases(ctx, namespace, "cross-trade-")
+		if err != nil {
+			t.logger.Warnf("Could not list CrossTrade helm releases by prefix: %v", err)
+			return nil
+		}
+	}
+
+	if len(releases) == 0 {
+		t.logger.Info("No CrossTrade Helm release found, skipping uninstall")
+		return nil
+	}
+
+	var errs []error
+	for _, release := range releases {
+		t.logger.Infof("Uninstalling CrossTrade Helm release: %s in namespace: %s", release, namespace)
+		if err := utils.UninstallHelmRelease(ctx, namespace, release); err != nil {
+			t.logger.Warnf("Failed to uninstall CrossTrade release %s: %v", release, err)
+			errs = append(errs, fmt.Errorf("helm uninstall %s: %w", release, err))
+		}
+	}
+
+	if len(errs) == 0 {
+		t.logger.Info("✅ CrossTrade uninstalled successfully")
+	}
+	return errors.Join(errs...)
 }
