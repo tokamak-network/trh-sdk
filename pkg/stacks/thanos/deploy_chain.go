@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -525,14 +526,16 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	t.deployConfig.L2RpcUrl = l2RPCUrl
 	t.deployConfig.L1BeaconURL = inputs.L1BeaconURL
 
+	// Read deployed contracts once — shared by Steps 8.2.5 and 8.2.6.
+	deployedContracts, contractsErr := t.readDeploymentContracts()
+	if contractsErr != nil {
+		return fmt.Errorf("failed to read deployed contracts for post-deploy init: %w", contractsErr)
+	}
+
 	// Step 8.2.5. Initialize AnchorStateRegistry genesis anchor state (fault proof chains only).
 	// Without this, every FaultDisputeGame.initialize() reverts with AnchorRootNotFound because
 	// the registry starts with bytes32(0) as the anchor root for every game type.
 	if t.deployConfig.EnableFraudProof {
-		deployedContracts, contractsErr := t.readDeploymentContracts()
-		if contractsErr != nil {
-			return fmt.Errorf("failed to read deployed contracts for anchor init: %w", contractsErr)
-		}
 		if deployedContracts.AnchorStateRegistryProxy == "" {
 			return fmt.Errorf("AnchorStateRegistryProxy address not found in deployed contracts — cannot initialize genesis anchor state")
 		}
@@ -552,6 +555,157 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 			return fmt.Errorf("failed to initialize genesis anchor state (op-proposer will fail with AnchorRootNotFound): %w", anchorErr)
 		}
 		t.logger.Info("✅ Genesis anchor state initialized in AnchorStateRegistry")
+	}
+
+	// Step 8.2.6. Initialize proxy contracts.
+	// tokamak-deployer calls upgrade(proxy, impl) but never initialize(), leaving all proxy
+	// storage slots at zero. Consequences:
+	//   - SystemConfig zero → op-node cannot derive batches (batcherHash=0, gasLimit=0)
+	//   - L1CrossDomainMessenger zero → CDM message passing fails (portal=0)
+	//   - OptimismPortal zero → depositTransaction reverts inside _metered() when
+	//     systemConfig=0 causes address(0).resourceConfig() to return empty bytes
+	{
+		bedrockCfg, bedrockErr := t.readBedrockDeployConfigTemplate()
+		if bedrockErr != nil {
+			return fmt.Errorf("failed to read bedrock deploy config for contract init: %w", bedrockErr)
+		}
+		gasLimitHex := strings.TrimPrefix(bedrockCfg.L2GenesisBlockGasLimit, "0x")
+		gasLimit, parseErr := strconv.ParseUint(gasLimitHex, 16, 64)
+		if parseErr != nil {
+			return fmt.Errorf("invalid L2GenesisBlockGasLimit %q: %w", bedrockCfg.L2GenesisBlockGasLimit, parseErr)
+		}
+
+		if scErr := initSystemConfig(
+			ctx,
+			t.logger,
+			t.deployConfig.L1RPCURL,
+			t.deployConfig.AdminPrivateKey,
+			deployedContracts.SystemConfigProxy,
+			bedrockCfg.FinalSystemOwner,
+			bedrockCfg.BatchSenderAddress,
+			gasLimit,
+			bedrockCfg.P2pSequencerAddress,
+			bedrockCfg.BatchInboxAddress,
+			deployedContracts.L1CrossDomainMessengerProxy,
+			deployedContracts.L1ERC721BridgeProxy,
+			deployedContracts.L1StandardBridgeProxy,
+			deployedContracts.DisputeGameFactoryProxy,
+			deployedContracts.OptimismPortalProxy,
+			deployedContracts.OptimismMintableERC20FactoryProxy,
+			bedrockCfg.NativeTokenAddress,
+			t.deployConfig.L1ChainID,
+		); scErr != nil {
+			return fmt.Errorf("failed to initialize SystemConfig: %w", scErr)
+		}
+		t.logger.Info("✅ SystemConfig initialized")
+
+		if cdmErr := initL1CrossDomainMessenger(
+			ctx,
+			t.logger,
+			t.deployConfig.L1RPCURL,
+			t.deployConfig.AdminPrivateKey,
+			deployedContracts.L1CrossDomainMessengerProxy,
+			deployedContracts.SuperchainConfigProxy,
+			deployedContracts.OptimismPortalProxy,
+			deployedContracts.SystemConfigProxy,
+			t.deployConfig.L1ChainID,
+		); cdmErr != nil {
+			return fmt.Errorf("failed to initialize L1CrossDomainMessenger: %w", cdmErr)
+		}
+		t.logger.Info("✅ L1CrossDomainMessenger initialized")
+
+		if !t.deployConfig.EnableFraudProof {
+			// L2OO mode: OptimismPortal (l2Oracle path) + L2OutputOracle.
+			if portalErr := initOptimismPortal(
+				ctx,
+				t.logger,
+				t.deployConfig.L1RPCURL,
+				t.deployConfig.AdminPrivateKey,
+				deployedContracts.OptimismPortalProxy,
+				deployedContracts.L2OutputOracleProxy,
+				deployedContracts.SystemConfigProxy,
+				deployedContracts.SuperchainConfigProxy,
+				t.deployConfig.L1ChainID,
+			); portalErr != nil {
+				return fmt.Errorf("failed to initialize OptimismPortal: %w", portalErr)
+			}
+			t.logger.Info("✅ OptimismPortal initialized")
+
+			if deployedContracts.L2OutputOracleProxy != "" {
+				l2ooErr := initL2OutputOracle(
+					ctx,
+					t.logger,
+					t.deployConfig.L1RPCURL,
+					t.deployConfig.AdminPrivateKey,
+					deployedContracts.L2OutputOracleProxy,
+					bedrockCfg.L2OutputOracleSubmissionInterval,
+					t.deployConfig.ChainConfiguration.L2BlockTime,
+					bedrockCfg.L2OutputOracleStartingBlockNumber,
+					bedrockCfg.L2OutputOracleStartingTimestamp,
+					bedrockCfg.L2OutputOracleProposer,
+					bedrockCfg.L2OutputOracleChallenger,
+					t.deployConfig.ChainConfiguration.GetFinalizationPeriodSeconds(),
+					t.deployConfig.L1ChainID,
+				)
+				if l2ooErr != nil {
+					return fmt.Errorf("failed to initialize L2OutputOracle: %w", l2ooErr)
+				}
+				t.logger.Info("✅ L2OutputOracle initialized")
+			} else {
+				t.logger.Warn("⚠️  L2OutputOracleProxy address not found in deployed contracts — skipping L2OO init")
+			}
+		} else {
+			// Fault proof mode: DisputeGameFactory + FaultDisputeGame impl, then OptimismPortal2.
+			mipsAddr := deployedContracts.Mips
+			if mipsAddr == "" {
+				if chainCfg, ok := constants.L1ChainConfigurations[t.deployConfig.L1ChainID]; ok && chainCfg.MipsAddress != "" {
+					t.logger.Info("Mips address not in deploy-output.json, using canonical address for chain",
+						"l1ChainID", t.deployConfig.L1ChainID, "mipsAddress", chainCfg.MipsAddress)
+					mipsAddr = chainCfg.MipsAddress
+				}
+			}
+
+			if dgfErr := initDisputeGameFactory(
+				ctx,
+				t.logger,
+				t.deployConfig.L1RPCURL,
+				t.deployConfig.AdminPrivateKey,
+				deployedContracts.DisputeGameFactoryProxy,
+				mipsAddr,
+				deployedContracts.DelayedWETHProxy,
+				deployedContracts.AnchorStateRegistryProxy,
+				t.deployConfig.L1ChainID,
+				t.deployConfig.L2ChainID,
+				uint32(bedrockCfg.RespectedGameType),
+				bedrockCfg.FaultGameAbsolutePrestate,
+				bedrockCfg.FaultGameMaxDepth,
+				bedrockCfg.FaultGameSplitDepth,
+				bedrockCfg.FaultGameClockExtension,
+				bedrockCfg.FaultGameMaxClockDuration,
+			); dgfErr != nil {
+				return fmt.Errorf("failed to initialize DisputeGameFactory: %w", dgfErr)
+			}
+			t.logger.Info("✅ DisputeGameFactory initialized")
+
+			if portal2Err := initOptimismPortal2(
+				ctx,
+				t.logger,
+				t.deployConfig.L1RPCURL,
+				t.deployConfig.AdminPrivateKey,
+				deployedContracts.OptimismPortalProxy,
+				deployedContracts.ProxyAdmin,
+				deployedContracts.DisputeGameFactoryProxy,
+				deployedContracts.SystemConfigProxy,
+				deployedContracts.SuperchainConfigProxy,
+				t.deployConfig.L1ChainID,
+				bedrockCfg.ProofMaturityDelaySeconds,
+				bedrockCfg.DisputeGameFinalityDelaySeconds,
+				uint32(bedrockCfg.RespectedGameType),
+			); portal2Err != nil {
+				return fmt.Errorf("failed to initialize OptimismPortal2: %w", portal2Err)
+			}
+			t.logger.Info("✅ OptimismPortal2 initialized")
+		}
 	}
 
 	backupEnabled := false
