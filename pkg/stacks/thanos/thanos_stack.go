@@ -85,6 +85,10 @@ func NewThanosStack(
 	}, nil
 }
 
+func (t *ThanosStack) isAWSDeployment() bool {
+	return t.awsProfile != nil
+}
+
 // SetOutput sets the writer for binary subprocess stdout/stderr.
 // If not set, os.Stdout is used as default.
 func (t *ThanosStack) SetOutput(w io.Writer) {
