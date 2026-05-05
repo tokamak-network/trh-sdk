@@ -16,6 +16,12 @@ import (
 
 // TokamakDeployerVersion is the pinned version of the tokamak-deployer binary.
 //
+// v0.0.8: AnchorStateRegistry constructor now receives the DisputeGameFactory
+// proxy address instead of the implementation address. Previously the ASR
+// immutable DISPUTE_GAME_FACTORY pointed at the impl (no storage state), so
+// tryUpdateAnchorState() always reverted with UnregisteredGame() and
+// FaultDisputeGame.resolve() could never succeed.
+//
 // v0.0.7: DelayedWETH proxy/impl deployment added as steps 33-35 inside the
 // fault-proof block. Without it initDisputeGameFactory fails with
 // "delayedWETHProxyAddr is empty". --delayed-weth-delay flag added (default 0).
@@ -27,7 +33,7 @@ import (
 // v0.0.5: --gas-price / --gas-price-multiplier flags introduced. trh-sdk now
 // resolves a conservative fixed gas price once and passes it via --gas-price,
 // so tokamak-deployer no longer calls SuggestGasPrice per TX.
-const TokamakDeployerVersion = "v0.0.7"
+const TokamakDeployerVersion = "v0.0.8"
 
 const tokamakDeployerRepo = "tokamak-network/tokamak-thanos"
 
