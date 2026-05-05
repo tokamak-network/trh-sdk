@@ -66,7 +66,11 @@ var refillMu sync.Mutex
 // checkAndRefillEntryPoint checks the EntryPoint deposit balance for MultiTokenPaymaster
 // and calls depositTo() from the admin wallet if the balance is below the threshold.
 func (t *ThanosStack) checkAndRefillEntryPoint(ctx context.Context) error {
-	l2Client, err := ethclient.DialContext(ctx, localL2RPCURL())
+	l2URL := localL2RPCURL()
+	if t.deployConfig.L2RpcUrl != "" {
+		l2URL = t.deployConfig.L2RpcUrl
+	}
+	l2Client, err := ethclient.DialContext(ctx, l2URL)
 	if err != nil {
 		return fmt.Errorf("dial L2: %w", err)
 	}

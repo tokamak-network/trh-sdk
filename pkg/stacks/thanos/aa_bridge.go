@@ -40,7 +40,11 @@ func (t *ThanosStack) bridgeAdminTONForAASetup(ctx context.Context) error {
 	adminAddr := crypto.PubkeyToAddress(privKey.PublicKey)
 
 	// Step 1: Check admin L2 balance. Skip bridge if already sufficient.
-	l2Client, err := ethclient.DialContext(ctx, localL2RPCURL())
+	l2URL := localL2RPCURL()
+	if t.deployConfig.L2RpcUrl != "" {
+		l2URL = t.deployConfig.L2RpcUrl
+	}
+	l2Client, err := ethclient.DialContext(ctx, l2URL)
 	if err != nil {
 		return fmt.Errorf("failed to connect to L2 RPC: %w", err)
 	}

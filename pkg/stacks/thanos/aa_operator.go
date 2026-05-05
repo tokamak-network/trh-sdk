@@ -14,6 +14,9 @@ type AAOperatorConfig struct {
 	// AdminPrivateKey is the L2 admin wallet private key used to push oracle prices and
 	// refill the EntryPoint deposit.
 	AdminPrivateKey string
+	// L2RpcUrl is the L2 RPC endpoint. When empty, localL2RPCURL() is used as a fallback
+	// (correct for local Docker deployments). AWS deployments must supply the EKS endpoint.
+	L2RpcUrl string
 }
 
 // RunAAOperatorFromConfig starts the AA operator background services using the ThanosStack's
@@ -28,6 +31,7 @@ func (s *ThanosStack) RunAAOperatorFromConfig(ctx context.Context) {
 	RunAAOperator(ctx, AAOperatorConfig{
 		FeeToken:        s.deployConfig.FeeToken,
 		AdminPrivateKey: s.deployConfig.AdminPrivateKey,
+		L2RpcUrl:        s.deployConfig.L2RpcUrl,
 	})
 }
 
@@ -52,6 +56,7 @@ func RunAAOperator(ctx context.Context, cfg AAOperatorConfig) {
 		deployConfig: &types.Config{
 			FeeToken:        cfg.FeeToken,
 			AdminPrivateKey: cfg.AdminPrivateKey,
+			L2RpcUrl:        cfg.L2RpcUrl,
 		},
 		logger: sugar,
 	}

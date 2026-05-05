@@ -170,7 +170,11 @@ func (t *ThanosStack) fetchOraclePrice(feeToken string) (*big.Int, error) {
 
 // pushOraclePrice calls SimplePriceOracle.updatePrice(newPrice) on L2 from the admin wallet.
 func (t *ThanosStack) pushOraclePrice(ctx context.Context, price *big.Int) error {
-	l2Client, err := ethclient.DialContext(ctx, localL2RPCURL())
+	l2URL := localL2RPCURL()
+	if t.deployConfig.L2RpcUrl != "" {
+		l2URL = t.deployConfig.L2RpcUrl
+	}
+	l2Client, err := ethclient.DialContext(ctx, l2URL)
 	if err != nil {
 		return fmt.Errorf("dial L2: %w", err)
 	}

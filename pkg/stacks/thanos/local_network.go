@@ -167,11 +167,15 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 		if deployedContracts.AnchorStateRegistryProxy == "" {
 			return fmt.Errorf("AnchorStateRegistryProxy address not found in deployed contracts — cannot initialize genesis anchor state")
 		}
+		anchorL2URL := localL2RPCURL()
+		if t.deployConfig.L2RpcUrl != "" {
+			anchorL2URL = t.deployConfig.L2RpcUrl
+		}
 		anchorErr := initGenesisAnchorState(
 			ctx,
 			t.logger,
 			t.deployConfig.L1RPCURL,
-			localL2RPCURL(),
+			anchorL2URL,
 			t.deployConfig.AdminPrivateKey,
 			deployedContracts.AnchorStateRegistryProxy,
 			deployedContracts.ProxyAdmin,
@@ -1330,6 +1334,9 @@ func (t *ThanosStack) orchestrateDRBOperators(ctx context.Context, composePath s
 	// still at genesis (block 0), and depositAndActivate reverts until the chain
 	// is live and sequencing.
 	l2RPC := localL2RPCURL()
+	if t.deployConfig.L2RpcUrl != "" {
+		l2RPC = t.deployConfig.L2RpcUrl
+	}
 	t.logger.Infof("⏳ Waiting for L2 to produce blocks (rpc: %s)...", l2RPC)
 	if err := waitForL2Ready(ctx, l2RPC, t.logger); err != nil {
 		return fmt.Errorf("L2 not ready after timeout: %w", err)
