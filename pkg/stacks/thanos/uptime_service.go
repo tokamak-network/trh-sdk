@@ -376,6 +376,17 @@ func (t *ThanosStack) waitForPVCBound(ctx context.Context, namespace string, pvc
 
 // cleanupExistingUptimeServiceStorage removes existing uptime-service PVs and PVCs
 func (t *ThanosStack) cleanupExistingUptimeServiceStorage(ctx context.Context, config *types.UptimeServiceConfig) error {
+	// Pre-clear stuck finalizers on Services/PVCs/PVs in this namespace before
+	// attempting deletes. Without this, a PVC bound to an EFS-backed PV cannot
+	// be deleted while the EFS mount targets are still alive — EFS-CSI keeps
+	// the kubernetes.io/pv-protection finalizer on the PV, and a synchronous
+	// `kubectl delete pvc` blocks indefinitely. This mirrors the self-heal
+	// pattern that tryToDeleteK8sNamespace applies for the main chain
+	// namespace (see commit 4099570) and extends it to the uptime-service
+	// uninstall path, which runs *before* main-namespace EFS reorder and is
+	// therefore not protected by it.
+	t.clearStuckResourceFinalizers(ctx, config.Namespace)
+
 	// Get existing monitoring PVCs
 	output, err := utils.ExecuteCommand(ctx, "kubectl", "get", "pvc", "-n", config.Namespace, "--no-headers", "-o", "custom-columns=NAME:.metadata.name")
 	if err != nil {
@@ -401,8 +412,11 @@ func (t *ThanosStack) cleanupExistingUptimeServiceStorage(ctx context.Context, c
 			}
 		}
 
-		// Delete PVC
-		_, err = utils.ExecuteCommand(ctx, "kubectl", "delete", "pvc", pvcName, "-n", config.Namespace, "--ignore-not-found=true")
+		// Delete PVC. --wait=false ensures the call returns immediately even if
+		// a controller-managed finalizer is still attached; the pre-clear above
+		// is best-effort and may race controllers, so this is the second line
+		// of defense against synchronous hangs.
+		_, err = utils.ExecuteCommand(ctx, "kubectl", "delete", "pvc", pvcName, "-n", config.Namespace, "--wait=false", "--ignore-not-found=true")
 		if err == nil {
 			deletedPVCs++
 		}
