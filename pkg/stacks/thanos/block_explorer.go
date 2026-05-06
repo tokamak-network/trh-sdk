@@ -73,6 +73,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 			DatabaseName:     "blockscout",
 			VpcId:            vpcId,
 			AwsRegion:        t.deployConfig.AWS.Region,
+			StackName:        namespace,
 		},
 	)
 	if err != nil {
@@ -346,6 +347,7 @@ func (t *ThanosStack) UpdateBlockExplorer(ctx context.Context, inputs *InstallBl
 			DatabaseName:     "blockscout",
 			VpcId:            vpcId,
 			AwsRegion:        t.deployConfig.AWS.Region,
+			StackName:        namespace,
 		},
 	)
 	if err != nil {

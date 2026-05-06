@@ -1841,10 +1841,18 @@ func makeBlockExplorerEnvs(dirPath string, filename string, config types.AwsData
 		"export TF_VAR_thanos_stack_name=",
 	}
 
-	// filter out existing db vars to avoid duplicates on re-run
+	// filter out existing db vars to avoid duplicates on re-run, but recover
+	// the existing TF_VAR_thanos_stack_name value if the caller did not
+	// supply one. block-explorer/variables.tf marks it required and
+	// `terraform plan` runs without -input=false, so a missing value hangs
+	// on an interactive stdin prompt indefinitely.
+	stackName := config.StackName
 	var lines []string
 	if content, err := os.ReadFile(filePath); err == nil {
 		for _, line := range strings.Split(string(content), "\n") {
+			if stackName == "" && strings.HasPrefix(line, "export TF_VAR_thanos_stack_name=") {
+				stackName = strings.Trim(strings.TrimPrefix(line, "export TF_VAR_thanos_stack_name="), `"`)
+			}
 			skip := false
 			for _, prefix := range dbVarPrefixes {
 				if strings.HasPrefix(line, prefix) {
@@ -1869,8 +1877,8 @@ func makeBlockExplorerEnvs(dirPath string, filename string, config types.AwsData
 		fmt.Sprintf("export TF_VAR_vpc_id=\"%s\"", config.VpcId),
 		fmt.Sprintf("export TF_VAR_aws_region=\"%s\"", config.AwsRegion),
 	)
-	if config.StackName != "" {
-		lines = append(lines, fmt.Sprintf("export TF_VAR_thanos_stack_name=\"%s\"", config.StackName))
+	if stackName != "" {
+		lines = append(lines, fmt.Sprintf("export TF_VAR_thanos_stack_name=\"%s\"", stackName))
 	}
 	lines = append(lines, "")
 
