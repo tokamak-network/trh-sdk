@@ -98,9 +98,9 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
 		source .envrc &&
 		cd block-explorer &&
-		terraform init &&
-		terraform plan &&
-		terraform apply -auto-approve
+		terraform init -input=false &&
+		terraform plan -input=false &&
+		terraform apply -input=false -auto-approve
 		`, t.deploymentPath),
 	}...)
 	if err != nil {
@@ -370,7 +370,7 @@ func (t *ThanosStack) UpdateBlockExplorer(ctx context.Context, inputs *InstallBl
 		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
 		source .envrc &&
 		cd block-explorer &&
-		terraform init &&
+		terraform init -input=false &&
 		terraform output -json rds_connection_url`, t.deploymentPath),
 	}...)
 	if err != nil {

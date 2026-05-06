@@ -325,9 +325,9 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
 		source .envrc &&
 		cd backend &&
-		terraform init &&
-		terraform plan &&
-		terraform apply -auto-approve
+		terraform init -input=false &&
+		terraform plan -input=false &&
+		terraform apply -input=false -auto-approve
 		`, t.deploymentPath),
 	}...)
 	if err != nil {
@@ -342,9 +342,9 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
 		source .envrc &&
 		cd thanos-stack &&
-		terraform init &&
-		terraform plan &&
-		terraform apply -auto-approve`, t.deploymentPath),
+		terraform init -input=false &&
+		terraform plan -input=false &&
+		terraform apply -input=false -auto-approve`, t.deploymentPath),
 	}...)
 	if err != nil {
 		t.logger.Error("Error deploying Thanos stack infrastructure", "err", err)
