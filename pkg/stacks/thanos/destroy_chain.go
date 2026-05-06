@@ -120,21 +120,13 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 		}
 	}
 
-	// Delete namespace before destroying the infrastructure
-	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
-
-	err = t.tryToDeleteK8sNamespace(ctxTimeout, namespace)
-	if err != nil {
-		t.logger.Error("❌ Failed to delete namespace", "namespace", namespace, "err", err)
-		return err
-	}
-	t.logger.Info("✅ Namespace destroyed successfully!")
-
-	// Delete EFS mount targets before terraform destroy to prevent subnet deletion blocking
+	// Delete EFS mount targets first — DetectEFSId reads PVCs in the
+	// namespace, so this must run before namespace deletion. Removing the
+	// mount targets also frees the EFS PV finalizers that often stall
+	// namespace termination.
 	if t.deployConfig.AWS != nil {
 		if efsID, detectErr := utils.DetectEFSId(ctx, namespace); detectErr == nil && efsID != "" {
-			t.logger.Infof("Deleting EFS mount targets for %s before terraform destroy...", efsID)
+			t.logger.Infof("Deleting EFS mount targets for %s before namespace deletion...", efsID)
 			if mtErr := backup.DeleteEFSMountTargets(ctx, t.logger, t.deployConfig.AWS.Region, efsID); mtErr != nil {
 				t.logger.Warnf("Failed to delete EFS mount targets: %v. Continuing with destroy.", mtErr)
 			} else {
@@ -142,6 +134,17 @@ func (t *ThanosStack) destroyInfraOnAWS(ctx context.Context) error {
 				time.Sleep(30 * time.Second)
 			}
 		}
+	}
+
+	// Best-effort namespace deletion. If this fails, terraform destroy still
+	// removes the EKS cluster and the namespace disappears with it.
+	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	if err := t.tryToDeleteK8sNamespace(ctxTimeout, namespace); err != nil {
+		t.logger.Warnw("Namespace deletion did not complete; Terraform destroy will continue and clean up the cluster", "namespace", namespace, "err", err)
+	} else {
+		t.logger.Info("✅ Namespace destroyed successfully!")
 	}
 
 	err = t.clearTerraformState(ctx)
