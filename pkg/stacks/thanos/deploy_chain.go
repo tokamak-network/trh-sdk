@@ -2181,8 +2181,9 @@ func initOptimismPortal2(
 }
 
 // installPresetModules installs all modules enabled for the configured preset.
-// Modules that require user input (blockExplorer, crossTrade) are skipped with
-// a guidance log; they must be installed manually via 'trh install <plugin>'.
+// On AWS (K8s != nil) blockExplorer is auto-installed with exchange rates disabled;
+// on local (K8s == nil) a guidance log is printed instead.
+// crossTrade follows the same K8s guard pattern.
 // Failures are logged but do not abort the deployment — already-installed
 // modules are not rolled back.
 func (t *ThanosStack) installPresetModules(ctx context.Context) error {
@@ -2242,9 +2243,22 @@ func (t *ThanosStack) installPresetModules(ctx context.Context) error {
 		}
 	}
 
-	// blockExplorer requires external API keys — cannot auto-install.
+	// blockExplorer: auto-install on AWS (K8s available) with exchange rates disabled;
+	// manual on local (separate Helm chart not available without K8s).
 	if modules["blockExplorer"] {
-		t.logger.Info("ℹ️  Block Explorer is included in your preset. Run 'trh install block-explorer' to configure and deploy it.")
+		if t.deployConfig.K8s != nil {
+			t.logger.Info("  ↳ block-explorer (auto-config: exchange rates disabled)")
+			blockExplorerInput, err := BuildDefaultBlockExplorerInput()
+			if err != nil {
+				t.logger.Errorw("Failed to build default block explorer config", "err", err)
+				installErr = err
+			} else if _, err := t.InstallBlockExplorer(ctx, blockExplorerInput); err != nil {
+				t.logger.Errorw("Failed to auto-install block explorer", "err", err)
+				installErr = err
+			}
+		} else {
+			t.logger.Info("ℹ️  Block Explorer is included in your preset. Run 'trh install block-explorer' to configure and deploy it.")
+		}
 	}
 
 	// crossTrade: auto-install on AWS (K8s available); manual on local (separate Docker Compose).

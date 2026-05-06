@@ -22,6 +22,23 @@ func BuildDefaultMonitoringInput() (*InstallMonitoringInput, error) {
 	}, nil
 }
 
+// BuildDefaultBlockExplorerInput returns a non-interactive block explorer configuration
+// suitable for preset-based auto-deployment. CMC/WalletConnect are left empty so the
+// shell script disables exchange rates; DB password is randomly generated.
+func BuildDefaultBlockExplorerInput() (*InstallBlockExplorerInput, error) {
+	dbPassword, err := generateRandomPassword(16)
+	if err != nil {
+		return nil, err
+	}
+	return &InstallBlockExplorerInput{
+		DatabaseUsername:       "blockscout",
+		DatabasePassword:       dbPassword,
+		CoinmarketcapKey:       "",
+		CoinmarketcapTokenID:   "",
+		WalletConnectProjectID: "",
+	}, nil
+}
+
 // generateRandomPassword returns a hex-encoded random password of the given byte length.
 func generateRandomPassword(byteLen int) (string, error) {
 	b := make([]byte, byteLen)

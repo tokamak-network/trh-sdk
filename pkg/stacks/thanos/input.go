@@ -248,14 +248,6 @@ func (c *InstallBlockExplorerInput) Validate(ctx context.Context) error {
 		return errors.New("database password is required")
 	}
 
-	if c.CoinmarketcapKey == "" {
-		return errors.New("coinmarketcap key is required")
-	}
-
-	if c.WalletConnectProjectID == "" {
-		return errors.New("wallet connect project id is required")
-	}
-
 	if err := utils.ValidatePostgresUsername(c.DatabaseUsername); err != nil {
 		return errors.New("database username is invalid")
 	}
@@ -268,8 +260,8 @@ func (c *InstallBlockExplorerInput) Validate(ctx context.Context) error {
 		return errors.New("database password is invalid")
 	}
 
-	// fill out missing fields by default values
-	if c.CoinmarketcapTokenID == "" {
+	// fill default TokenID only when a CMC key is provided
+	if c.CoinmarketcapKey != "" && c.CoinmarketcapTokenID == "" {
 		c.CoinmarketcapTokenID = constants.TonCoinMarketCapTokenID
 	}
 
@@ -654,56 +646,24 @@ func InputInstallBlockExplorer() (*InstallBlockExplorerInput, error) {
 		break
 	}
 
-	for {
-		fmt.Print("Please input your CoinMarketCap key: ")
-		coinmarketcapKey, err = scanner.ScanString()
-		if err != nil {
-			fmt.Println("Error scanning CoinMarketCap key:", err)
-			return nil, err
-		}
-
-		if coinmarketcapKey == "" {
-			fmt.Println("CoinMarketCap key cannot be empty")
-			continue
-		}
-		break
+	fmt.Print("Please input your CoinMarketCap key (press Enter to skip): ")
+	coinmarketcapKey, err = scanner.ScanString()
+	if err != nil {
+		fmt.Println("Error scanning CoinMarketCap key:", err)
+		return nil, err
 	}
 
-	//for {
-	//	fmt.Print("Please input your CoinMarketCap Token ID: ")
-	//	coinmarketcapTokenID, err = scanner.ScanString()
-	//	if err != nil {
-	//		fmt.Println("Error scanning CoinMarketCap token id:", err)
-	//		return nil, err
-	//	}
-	//
-	//	if coinmarketcapTokenID == "" {
-	//		fmt.Println("Coinmarketcap ID cannot be empty")
-	//		continue
-	//	}
-	//	break
-	//}
-
-	for {
-		fmt.Print("Please input your wallet connect id: ")
-		walletConnectID, err = scanner.ScanString()
-		if err != nil {
-			fmt.Println("Error scanning wallet connect id:", err)
-			return nil, err
-		}
-
-		if walletConnectID == "" {
-			fmt.Println("WalletConnectID cannot be empty")
-			continue
-		}
-		break
+	fmt.Print("Please input your wallet connect project id (press Enter to skip): ")
+	walletConnectID, err = scanner.ScanString()
+	if err != nil {
+		fmt.Println("Error scanning wallet connect id:", err)
+		return nil, err
 	}
 
 	return &InstallBlockExplorerInput{
 		DatabaseUsername:       databaseUserName,
 		DatabasePassword:       databasePassword,
 		CoinmarketcapKey:       coinmarketcapKey,
-		CoinmarketcapTokenID:   constants.TonCoinMarketCapTokenID,
 		WalletConnectProjectID: walletConnectID,
 	}, nil
 }

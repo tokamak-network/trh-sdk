@@ -13,8 +13,8 @@ const (
 var ValidPresets = []string{PresetGeneral, PresetDeFi, PresetGaming, PresetFull}
 
 // PresetModules defines which operational tools are enabled for each preset.
-// bridge is always included. uptimeService and crossTrade are auto-installed.
-// blockExplorer and monitoring require user configuration after deployment.
+// bridge is always included. uptimeService, monitoring, crossTrade, and blockExplorer
+// are auto-installed on AWS; blockExplorer and crossTrade fall back to a manual hint on local.
 var PresetModules = map[string]map[string]bool{
 	PresetGeneral: {
 		"bridge":        true,

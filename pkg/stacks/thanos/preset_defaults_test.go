@@ -53,3 +53,48 @@ func TestBuildDefaultMonitoringInput_Randomness(t *testing.T) {
 		t.Error("Two consecutive calls returned identical passwords — randomness may be broken")
 	}
 }
+
+func TestBuildDefaultBlockExplorerInput(t *testing.T) {
+	input, err := BuildDefaultBlockExplorerInput()
+	if err != nil {
+		t.Fatalf("BuildDefaultBlockExplorerInput() returned error: %v", err)
+	}
+
+	if input.DatabaseUsername != "blockscout" {
+		t.Errorf("DatabaseUsername: got %q, want %q", input.DatabaseUsername, "blockscout")
+	}
+
+	if len(input.DatabasePassword) != 32 {
+		t.Errorf("DatabasePassword length: got %d, want 32 (16 bytes hex-encoded)", len(input.DatabasePassword))
+	}
+	for _, c := range input.DatabasePassword {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			t.Errorf("DatabasePassword is not lowercase hex: %q", input.DatabasePassword)
+			break
+		}
+	}
+
+	if input.CoinmarketcapKey != "" {
+		t.Errorf("CoinmarketcapKey: got %q, want empty string", input.CoinmarketcapKey)
+	}
+	if input.CoinmarketcapTokenID != "" {
+		t.Errorf("CoinmarketcapTokenID: got %q, want empty string", input.CoinmarketcapTokenID)
+	}
+	if input.WalletConnectProjectID != "" {
+		t.Errorf("WalletConnectProjectID: got %q, want empty string", input.WalletConnectProjectID)
+	}
+}
+
+func TestBuildDefaultBlockExplorerInput_Randomness(t *testing.T) {
+	a, err := BuildDefaultBlockExplorerInput()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := BuildDefaultBlockExplorerInput()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.DatabasePassword == b.DatabasePassword {
+		t.Error("Two consecutive calls returned identical passwords — randomness may be broken")
+	}
+}
