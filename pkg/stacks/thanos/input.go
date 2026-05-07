@@ -150,6 +150,30 @@ type DeployInfraInput struct {
 	MetadataInfo      *types.MetadataInfo
 }
 
+// AWSStageAInput holds all fields needed by DeployAWSStageA.
+// L1-derived fields (operator keys, L1 RPC info) are sourced directly from the
+// deployment DTO so Stage A can start in parallel with DeployContracts before
+// t.deployConfig is populated with L1 outputs.
+type AWSStageAInput struct {
+	ChainName           string
+	L1BeaconURL         string
+	IgnoreInstallBridge bool
+	BackupConfig        *BackupConfig
+
+	// L1-derived fields passed from DTO (not yet written to deployConfig at Stage A start)
+	AdminPrivateKey      string
+	SequencerPrivateKey  string
+	BatcherPrivateKey    string
+	ProposerPrivateKey   string
+	ChallengerPrivateKey string
+	L1RPCURL             string
+	L1ChainID            uint64
+	EnableFaultProof     bool
+	ChainConfiguration   *types.ChainConfiguration
+	Preset               string
+	TxmgrCellProofTime   uint64
+}
+
 func (c *DeployInfraInput) Validate(ctx context.Context) error {
 	if c.L1BeaconURL == "" {
 		return errors.New("L1BeaconURL is required")

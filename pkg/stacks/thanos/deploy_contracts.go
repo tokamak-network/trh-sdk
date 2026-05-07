@@ -340,8 +340,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 		t.deployConfig.DeployContractState = &types.DeployContractState{
 			Status: types.DeployContractStatusInProgress,
 		}
-		err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
-		if err != nil {
+		if err = t.writeSettings(); err != nil {
 			t.logger.Error("Failed to write settings file", "err", err)
 			return err
 		}
@@ -490,7 +489,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 	// checks. This persist was accidentally dropped in df52538 when the forge
 	// pipeline was replaced by the tokamak-deployer binary.
 	t.deployConfig.DeployContractState.Status = types.DeployContractStatusCompleted
-	if err = t.deployConfig.WriteToJSONFile(t.deploymentPath); err != nil {
+	if err = t.writeSettings(); err != nil {
 		t.logger.Error("Failed to persist Completed deploy-contract state", "err", err)
 		return err
 	}

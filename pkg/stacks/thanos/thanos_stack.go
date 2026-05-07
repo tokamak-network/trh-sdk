@@ -2,8 +2,10 @@ package thanos
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"path/filepath"
+	"sync"
 
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
@@ -21,6 +23,8 @@ type ThanosStack struct {
 	deploymentPath    string
 	registerCandidate bool
 	output            io.Writer
+	settingsMu        sync.Mutex
+	toolReadiness     *ToolReadiness
 }
 
 func NewThanosStack(
@@ -101,4 +105,21 @@ func (t *ThanosStack) rollupConfigPath() string {
 
 func (t *ThanosStack) genesisConfigPath() string {
 	return filepath.Join(t.deploymentPath, "genesis.json")
+}
+
+func (t *ThanosStack) writeSettings() error {
+	t.settingsMu.Lock()
+	defer t.settingsMu.Unlock()
+	return t.deployConfig.WriteToJSONFile(t.deploymentPath)
+}
+
+func (t *ThanosStack) reloadDeployConfig() error {
+	t.settingsMu.Lock()
+	defer t.settingsMu.Unlock()
+	cfg, err := utils.ReadConfigFromJSONFile(t.deploymentPath)
+	if err != nil {
+		return fmt.Errorf("reload deployConfig: %w", err)
+	}
+	t.deployConfig = cfg
+	return nil
 }

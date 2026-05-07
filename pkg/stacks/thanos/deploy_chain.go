@@ -83,7 +83,7 @@ func (t *ThanosStack) Deploy(ctx context.Context, infraOpt string, inputs *Deplo
 			t.deployConfig.ChainName = inputs.ChainName
 			t.deployConfig.L1BeaconURL = inputs.L1BeaconURL
 			t.deployConfig.Mnemonic = inputs.Mnemonic
-			if err := t.deployConfig.WriteToJSONFile(t.deploymentPath); err != nil {
+			if err := t.writeSettings(); err != nil {
 				return fmt.Errorf("failed to write settings file: %w", err)
 			}
 			return t.deployLocalNetwork(ctx)
@@ -148,6 +148,8 @@ func (t *ThanosStack) deployLocalDevnet(ctx context.Context) error {
 	return nil
 }
 
+// deployNetworkToAWS is the serial wrapper kept for backward-compatibility.
+// Parallel callers should invoke DeployAWSStageA and DeployAWSStageB directly.
 func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfraInput) error {
 	if inputs == nil {
 		return fmt.Errorf("inputs is required")
@@ -157,27 +159,66 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		return fmt.Errorf("fault proof is enabled but challenger private key is not set; re-run deploy-contracts with --enable-fault-proof")
 	}
 
-	// Start parallel tool installation (non-blocking)
-	arch, err := dependencies.GetArchitecture(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to detect architecture: %w", err)
-	}
-	toolReadiness := NewToolReadiness(t.logger, arch)
-	toolReadiness.Start(ctx)
-
-	if err := inputs.Validate(ctx); err != nil {
-		t.logger.Error("Error validating inputs", "err", err)
-		return err
-	}
-
 	// Check if the contracts deployed successfully
 	if t.deployConfig.DeployContractState.Status != types.DeployContractStatusCompleted {
 		return fmt.Errorf("contracts are not deployed successfully, please deploy the contracts first")
 	}
 
-	// STEP 1. Clone the charts repository
-	err = t.cloneSourcecode(ctx, "tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git")
+	stageAInput := &AWSStageAInput{
+		ChainName:            inputs.ChainName,
+		L1BeaconURL:          inputs.L1BeaconURL,
+		IgnoreInstallBridge:  inputs.IgnoreInstallBridge,
+		BackupConfig:         inputs.BackupConfig,
+		AdminPrivateKey:      t.deployConfig.AdminPrivateKey,
+		SequencerPrivateKey:  t.deployConfig.SequencerPrivateKey,
+		BatcherPrivateKey:    t.deployConfig.BatcherPrivateKey,
+		ProposerPrivateKey:   t.deployConfig.ProposerPrivateKey,
+		ChallengerPrivateKey: t.deployConfig.ChallengerPrivateKey,
+		L1RPCURL:             t.deployConfig.L1RPCURL,
+		L1ChainID:            t.deployConfig.L1ChainID,
+		EnableFaultProof:     t.deployConfig.EnableFraudProof,
+		ChainConfiguration:   t.deployConfig.ChainConfiguration,
+		Preset:               t.deployConfig.Preset,
+		TxmgrCellProofTime:   t.deployConfig.TxmgrCellProofTime,
+	}
+
+	if err := t.DeployAWSStageA(ctx, stageAInput); err != nil {
+		return err
+	}
+	return t.DeployAWSStageB(ctx, inputs)
+}
+
+// DeployAWSStageA runs the L1-independent portion of AWS infrastructure deployment:
+// tool installation, repo clone, AWS auth, clearTerraformState, .envrc generation,
+// Terraform backend apply, and targeted apply of vpc/eks/efs/secretsmanager modules.
+// It stores the ToolReadiness instance in t.toolReadiness so DeployAWSStageB can
+// call WaitFor on the same background install goroutines.
+func (t *ThanosStack) DeployAWSStageA(ctx context.Context, input *AWSStageAInput) error {
+	if input == nil {
+		return fmt.Errorf("AWSStageAInput is required")
+	}
+
+	// Start parallel tool installation (non-blocking)
+	arch, err := dependencies.GetArchitecture(ctx)
 	if err != nil {
+		return fmt.Errorf("failed to detect architecture: %w", err)
+	}
+	t.toolReadiness = NewToolReadiness(t.logger, arch)
+	t.toolReadiness.Start(ctx)
+
+	deployInfraInput := &DeployInfraInput{
+		ChainName:           input.ChainName,
+		L1BeaconURL:         input.L1BeaconURL,
+		BackupConfig:        input.BackupConfig,
+		IgnoreInstallBridge: input.IgnoreInstallBridge,
+	}
+	if err := deployInfraInput.Validate(ctx); err != nil {
+		t.logger.Error("Error validating inputs", "err", err)
+		return err
+	}
+
+	// STEP 1. Clone the charts repository
+	if err := t.cloneSourcecode(ctx, "tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git"); err != nil {
 		t.logger.Error("Error cloning repository", "err", err)
 		return err
 	}
@@ -190,45 +231,149 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	awsLoginInputs := t.awsProfile.AwsConfig
 
 	t.deployConfig.AWS = awsLoginInputs
-	if err := t.deployConfig.WriteToJSONFile(t.deploymentPath); err != nil {
+	if err := t.writeSettings(); err != nil {
 		t.logger.Error("failed to write settings file", "err", err)
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
 	t.logger.Info("⚡️Removing the previous deployment state...")
-	err = t.clearTerraformState(ctx)
-	if err != nil {
+	if err := t.clearTerraformState(ctx); err != nil {
 		t.logger.Error("Failed to clear the existing terraform state", "err", err)
 		return err
 	}
-
 	t.logger.Info("✅ Removed the previous deployment state...")
 
-	var (
-		chainConfiguration = t.deployConfig.ChainConfiguration
-	)
-
-	if chainConfiguration == nil {
-		t.logger.Error("chain configuration is not set")
+	if input.ChainConfiguration == nil {
 		return fmt.Errorf("chain configuration is not set")
 	}
 
-	// STEP 3. Create .envrc file
-	// Read prestate hash from the cannon prestate file built by start-deploy.sh build.
-	// When EnableFraudProof is set and the file is missing (e.g., re-deploy after env reset),
-	// automatically build it by running 'make cannon-prestate' in tokamak-thanos.
+	// STEP 3. Create .envrc file using AWSStageAInput fields.
+	// L1-derived keys come from the input; prestate vars default to "" (Terraform
+	// variable defaults allow Stage A targeted apply without the genesis/rollup files).
+	namespace := utils.ConvertChainNameToNamespace(input.ChainName)
+	l1RPCProvider := utils.DetectRPCKind(input.L1RPCURL)
+	tonConfig := constants.GetFeeTokenConfig(constants.FeeTokenTON, input.L1ChainID)
+	if err := makeTerraformEnvFile(fmt.Sprintf("%s/tokamak-thanos-stack/terraform", t.deploymentPath), types.TerraformEnvConfig{
+		Namespace:           namespace,
+		AwsRegion:           awsLoginInputs.Region,
+		SequencerKey:        input.SequencerPrivateKey,
+		BatcherKey:          input.BatcherPrivateKey,
+		ProposerKey:         input.ProposerPrivateKey,
+		ChallengerKey:       input.ChallengerPrivateKey,
+		EksClusterAdmins:    awsAccountProfile.Arn,
+		DeploymentFilePath:  "",
+		L1BeaconUrl:         input.L1BeaconURL,
+		L1RpcUrl:            input.L1RPCURL,
+		L1RpcProvider:       l1RPCProvider,
+		Azs:                 awsAccountProfile.AvailabilityZones,
+		ThanosStackImageTag: constants.DockerImageTag[t.network].ThanosStackImageTag,
+		OpGethImageTag:      constants.DockerImageTag[t.network].OpGethImageTag,
+		MaxChannelDuration:  input.ChainConfiguration.GetMaxChannelDuration(),
+		TxmgrCellProofTime:  input.TxmgrCellProofTime,
+		PrestateHash:        "",
+		EnableFaultProof:    input.EnableFaultProof,
+		Preset:              input.Preset,
+		NativeTokenName:     tonConfig.Name,
+		NativeTokenSymbol:   tonConfig.Symbol,
+		NativeTokenAddress:  tonConfig.L1Address,
+	}); err != nil {
+		t.logger.Error("Error generating Terraform environment configuration", "err", err)
+		return err
+	}
+
+	// Wait for terraform to be installed before infrastructure provisioning
+	if err := t.toolReadiness.WaitFor(ctx, "terraform"); err != nil {
+		return fmt.Errorf("tool installation failed before infrastructure provisioning: %w", err)
+	}
+
+	// STEP 4. Initialize Terraform backend
+	if err := utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
+		"-c",
+		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
+		source .envrc &&
+		cd backend &&
+		terraform init -input=false &&
+		terraform plan -input=false &&
+		terraform apply -input=false -auto-approve
+		`, t.deploymentPath),
+	}...); err != nil {
+		t.logger.Error("Error initializing Terraform backend", "err", err)
+		return err
+	}
+
+	// STEP 5. Targeted apply — L1-independent modules only.
+	// Stage B will run a full apply to add chain_config and k8s modules once L1 is done.
+	t.logger.Info("Deploying Stage A AWS infrastructure (vpc/eks/efs/secretsmanager)")
+	if err := utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
+		"-c",
+		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
+		source .envrc &&
+		cd thanos-stack &&
+		terraform init -input=false &&
+		terraform apply -input=false -auto-approve \
+			-target=module.vpc \
+			-target=module.eks \
+			-target=module.efs \
+			-target=module.secretsmanager`, t.deploymentPath),
+	}...); err != nil {
+		t.logger.Error("Error deploying Stage A AWS infrastructure", "err", err)
+		return err
+	}
+
+	return nil
+}
+
+// DeployAWSStageB runs the L1-dependent portion of AWS infrastructure deployment.
+// It must be called after DeployContracts has completed (Status == Completed) and
+// after DeployAWSStageA has run (t.toolReadiness must be initialized).
+// It reloads deployConfig from disk to pick up operator keys and L1 outputs written
+// by DeployContracts, re-generates .envrc with real values, copies L1 artifacts,
+// runs the full Terraform apply, and then completes the Helm/k8s post-init flow.
+func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraInput) error {
+	if inputs == nil {
+		return fmt.Errorf("inputs is required")
+	}
+
+	// Reload deployConfig to pick up L1 outputs written by DeployContracts goroutine.
+	if err := t.reloadDeployConfig(); err != nil {
+		return err
+	}
+
+	if t.deployConfig.DeployContractState == nil || t.deployConfig.DeployContractState.Status != types.DeployContractStatusCompleted {
+		return fmt.Errorf("L1 contracts not completed — Stage B requires DeployContracts to succeed first")
+	}
+
+	if t.deployConfig.EnableFraudProof && t.deployConfig.ChallengerPrivateKey == "" {
+		return fmt.Errorf("fault proof is enabled but challenger private key is not set; re-run deploy-contracts with --enable-fault-proof")
+	}
+
+	if t.toolReadiness == nil {
+		return fmt.Errorf("toolReadiness not initialized — DeployAWSStageA must run before DeployAWSStageB")
+	}
+
+	if t.awsProfile == nil {
+		return fmt.Errorf("AWS configuration is not set")
+	}
+	awsAccountProfile := t.awsProfile.AccountProfile
+	awsLoginInputs := t.awsProfile.AwsConfig
+	chainConfiguration := t.deployConfig.ChainConfiguration
+	if chainConfiguration == nil {
+		return fmt.Errorf("chain configuration is not set")
+	}
+
+	namespace := utils.ConvertChainNameToNamespace(inputs.ChainName)
+
+	// Cannon prestate: build if missing (DeployContracts normally builds this;
+	// this path handles re-deploy scenarios where the file was lost).
 	prestateSrc := fmt.Sprintf("%s/tokamak-thanos/op-program/bin/prestate.json", t.deploymentPath)
 	if t.deployConfig.EnableFraudProof {
 		if _, statErr := os.Stat(prestateSrc); os.IsNotExist(statErr) {
 			t.logger.Info("Cannon prestate not found, building...", "path", prestateSrc)
 			if cloneErr := t.cloneSourcecode(ctx, "tokamak-thanos", "https://github.com/tokamak-network/tokamak-thanos.git"); cloneErr != nil {
-				t.logger.Error("Failed to clone tokamak-thanos for cannon build", "err", cloneErr)
 				return fmt.Errorf("failed to clone tokamak-thanos for cannon build: %w", cloneErr)
 			}
 			tokamakThanosDir := fmt.Sprintf("%s/tokamak-thanos", t.deploymentPath)
 			if buildErr := buildCannonPrestate(ctx, t.logger, tokamakThanosDir); buildErr != nil {
-				t.logger.Error("Failed to build cannon prestate", "err", buildErr,
-					"hint", "Ensure Go toolchain and build tools are installed")
 				return fmt.Errorf("failed to build cannon prestate: %w", buildErr)
 			}
 			t.logger.Info("✅ Cannon prestate built successfully")
@@ -248,11 +393,9 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		t.logger.Info("Cannon prestate hash loaded", "hash", prestateHash)
 	}
 
-	namespace := utils.ConvertChainNameToNamespace(inputs.ChainName)
-	// L2 native token is always TON regardless of fee token.
-	// Non-TON fee tokens are handled by the AA paymaster layer.
+	// Re-generate .envrc with real L1 values (overwrites Stage A placeholder .envrc).
 	tonConfig := constants.GetFeeTokenConfig(constants.FeeTokenTON, t.deployConfig.L1ChainID)
-	err = makeTerraformEnvFile(fmt.Sprintf("%s/tokamak-thanos-stack/terraform", t.deploymentPath), types.TerraformEnvConfig{
+	if err := makeTerraformEnvFile(fmt.Sprintf("%s/tokamak-thanos-stack/terraform", t.deploymentPath), types.TerraformEnvConfig{
 		Namespace:           namespace,
 		AwsRegion:           awsLoginInputs.Region,
 		SequencerKey:        t.deployConfig.SequencerPrivateKey,
@@ -275,69 +418,38 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		NativeTokenName:     tonConfig.Name,
 		NativeTokenSymbol:   tonConfig.Symbol,
 		NativeTokenAddress:  tonConfig.L1Address,
-	})
-	if err != nil {
-		t.logger.Error("Error generating Terraform environment configuration", "err", err)
+	}); err != nil {
+		t.logger.Error("Error regenerating Terraform environment configuration for Stage B", "err", err)
 		return err
 	}
 
-	// STEP 4. Copy configuration files
-	err = utils.CopyFile(
+	// STEP B-1. Copy L1 artifacts to Terraform config-files/
+	if err := utils.CopyFile(
 		t.rollupConfigPath(),
 		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/config-files/rollup.json", t.deploymentPath),
-	)
-	if err != nil {
+	); err != nil {
 		t.logger.Error("Error copying rollup configuration", "err", err)
 		return err
 	}
-
-	err = utils.CopyFile(
+	if err := utils.CopyFile(
 		t.genesisConfigPath(),
 		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/config-files/genesis.json", t.deploymentPath),
-	)
-	if err != nil {
+	); err != nil {
 		t.logger.Error("Error copying genesis configuration", "err", err)
 		return err
 	}
-
-	// Copy cannon prestate to Terraform config-files directory only when fault proof
-	// is enabled; the file is only built in that path.
 	if t.deployConfig.EnableFraudProof {
 		prestateDstPath := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/config-files/prestate.json", t.deploymentPath)
-		err = utils.CopyFile(prestateSrc, prestateDstPath)
-		if err != nil {
-			t.logger.Error("Error copying cannon prestate file",
-				"err", err,
-				"src", prestateSrc,
-				"hint", "Run 'make cannon-prestate' in tokamak-thanos to build the prestate")
+		if err := utils.CopyFile(prestateSrc, prestateDstPath); err != nil {
+			t.logger.Error("Error copying cannon prestate file", "err", err, "src", prestateSrc)
 			return err
 		}
 	}
 
-	// Wait for terraform to be installed before infrastructure provisioning
-	if err := toolReadiness.WaitFor(ctx, "terraform"); err != nil {
-		return fmt.Errorf("tool installation failed before infrastructure provisioning: %w", err)
-	}
-
-	// STEP 5. Initialize Terraform backend
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
-		"-c",
-		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
-		source .envrc &&
-		cd backend &&
-		terraform init -input=false &&
-		terraform plan -input=false &&
-		terraform apply -input=false -auto-approve
-		`, t.deploymentPath),
-	}...)
-	if err != nil {
-		t.logger.Error("Error initializing Terraform backend", "err", err)
-		return err
-	}
-
-	t.logger.Info("Deploying Thanos stack infrastructure")
-	// STEP 6. Deploy Thanos stack infrastructure
-	err = utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
+	// STEP B-2. Full Terraform apply (no -target) — adds chain_config and k8s modules;
+	// vpc/eks/efs/secretsmanager are reconciled (no drift expected from Stage A).
+	t.logger.Info("Deploying Thanos stack infrastructure (Stage B — full apply)")
+	if err := utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
 		"-c",
 		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
 		source .envrc &&
@@ -345,9 +457,8 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		terraform init -input=false &&
 		terraform plan -input=false &&
 		terraform apply -input=false -auto-approve`, t.deploymentPath),
-	}...)
-	if err != nil {
-		t.logger.Error("Error deploying Thanos stack infrastructure", "err", err)
+	}...); err != nil {
+		t.logger.Error("Error deploying Thanos stack infrastructure (Stage B)", "err", err)
 		return err
 	}
 
@@ -368,7 +479,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		return fmt.Errorf("terraform output vpc_id is empty — thanos-stack apply may not have completed successfully")
 	}
 	t.deployConfig.AWS.VpcID = vpcID
-	if err := t.deployConfig.WriteToJSONFile(t.deploymentPath); err != nil {
+	if err := t.writeSettings(); err != nil {
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
@@ -378,7 +489,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	}
 
 	t.deployConfig.ChainName = inputs.ChainName
-	if err := t.deployConfig.WriteToJSONFile(t.deploymentPath); err != nil {
+	if err := t.writeSettings(); err != nil {
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
@@ -386,7 +497,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	time.Sleep(30 * time.Second)
 
 	// Wait for AWS CLI and kubectl before EKS configuration
-	if err := toolReadiness.WaitFor(ctx, "aws-cli", "kubectl"); err != nil {
+	if err := t.toolReadiness.WaitFor(ctx, "aws-cli", "kubectl"); err != nil {
 		return fmt.Errorf("tool installation failed before EKS configuration: %w", err)
 	}
 
@@ -420,7 +531,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 
 	// ---------------------------------------- Deploy chain --------------------------//
 	// Wait for helm before chart deployment
-	if err := toolReadiness.WaitFor(ctx, "helm"); err != nil {
+	if err := t.toolReadiness.WaitFor(ctx, "helm"); err != nil {
 		return fmt.Errorf("tool installation failed before Helm deployment: %w", err)
 	}
 
@@ -720,8 +831,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 		Enabled: backupEnabled,
 	}
 
-	err = t.deployConfig.WriteToJSONFile(t.deploymentPath)
-	if err != nil {
+	if err := t.writeSettings(); err != nil {
 		t.logger.Error("Error saving configuration file", "err", err)
 		return err
 	}
