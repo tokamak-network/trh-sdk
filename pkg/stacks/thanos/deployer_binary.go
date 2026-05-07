@@ -16,6 +16,13 @@ import (
 
 // TokamakDeployerVersion is the pinned version of the tokamak-deployer binary.
 //
+// v0.0.9: --reuse-deployment / --reuse-impls / --reuse-strict flags introduced.
+// The deployer can now skip re-deploying the 9 Proxy-backed L1 implementation
+// contracts when they match an embedded or CLI-supplied registry. Pre-deploy
+// preflight verifies on-chain code via eth_getCode + keccak256 against the
+// binary's embedded deployedBytecode.object; mismatches silently fall back to
+// fresh deploy (lenient default) or abort with --reuse-strict.
+//
 // v0.0.8: AnchorStateRegistry constructor now receives the DisputeGameFactory
 // proxy address instead of the implementation address. Previously the ASR
 // immutable DISPUTE_GAME_FACTORY pointed at the impl (no storage state), so
@@ -33,7 +40,7 @@ import (
 // v0.0.5: --gas-price / --gas-price-multiplier flags introduced. trh-sdk now
 // resolves a conservative fixed gas price once and passes it via --gas-price,
 // so tokamak-deployer no longer calls SuggestGasPrice per TX.
-const TokamakDeployerVersion = "v0.0.8"
+const TokamakDeployerVersion = "v0.0.9"
 
 const tokamakDeployerRepo = "tokamak-network/tokamak-thanos"
 
@@ -171,6 +178,17 @@ type deployContractsOpts struct {
 	// trh-sdk sets this to (current suggested) × 2 so the bump-on-timeout
 	// retry path inside the deployer rarely activates.
 	GasPriceWei *big.Int
+
+	// ReuseDeployment, when true, adds --reuse-deployment so tokamak-deployer
+	// skips re-deploying any of the 9 Proxy-backed L1 implementation contracts
+	// whose embedded-registry address verifies on-chain. Available since
+	// tokamak-deployer v0.0.9.
+	ReuseDeployment bool
+
+	// RegistryPath, when non-empty AND ReuseDeployment=true, adds --reuse-impls
+	// to override the binary's embedded registry with a custom JSON file.
+	// Available since tokamak-deployer v0.0.9.
+	RegistryPath string
 }
 
 // genesisOpts holds inputs for the generate-genesis subcommand.
@@ -216,6 +234,12 @@ func buildDeployContractsArgs(opts deployContractsOpts) []string {
 	}
 	if opts.GasPriceWei != nil && opts.GasPriceWei.Sign() > 0 {
 		args = append(args, "--gas-price", opts.GasPriceWei.String())
+	}
+	if opts.ReuseDeployment {
+		args = append(args, "--reuse-deployment")
+		if opts.RegistryPath != "" {
+			args = append(args, "--reuse-impls", opts.RegistryPath)
+		}
 	}
 	return args
 }

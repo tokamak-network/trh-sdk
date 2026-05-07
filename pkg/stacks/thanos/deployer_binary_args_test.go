@@ -95,3 +95,82 @@ func TestBuildDeployContractsArgs_GasPricePreserved(t *testing.T) {
 		t.Errorf("expected --gas-price 3000000000 in args, got: %v", args)
 	}
 }
+
+// TestBuildDeployContractsArgs_ReuseDeploymentOn verifies that ReuseDeployment=true
+// causes --reuse-deployment to be appended to the deploy-contracts argv.
+// Available since tokamak-deployer v0.0.9.
+func TestBuildDeployContractsArgs_ReuseDeploymentOn(t *testing.T) {
+	args := buildDeployContractsArgs(deployContractsOpts{
+		L1RPCURL:        "https://example",
+		PrivateKey:      "0xabc",
+		L2ChainID:       42,
+		OutPath:         "/tmp/out.json",
+		ReuseDeployment: true,
+	})
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--reuse-deployment") {
+		t.Errorf("expected --reuse-deployment in args, got: %v", args)
+	}
+}
+
+// TestBuildDeployContractsArgs_ReuseDeploymentOff verifies that the default
+// (ReuseDeployment=false) omits --reuse-deployment so older deployers ignore the
+// feature entirely.
+func TestBuildDeployContractsArgs_ReuseDeploymentOff(t *testing.T) {
+	args := buildDeployContractsArgs(deployContractsOpts{
+		L1RPCURL:        "https://example",
+		PrivateKey:      "0xabc",
+		L2ChainID:       42,
+		OutPath:         "/tmp/out.json",
+		ReuseDeployment: false,
+	})
+
+	for _, a := range args {
+		if strings.HasPrefix(a, "--reuse") {
+			t.Errorf("expected no --reuse-* flag when disabled, got: %v", args)
+		}
+	}
+}
+
+// TestBuildDeployContractsArgs_RegistryPathRequiresReuse verifies that
+// RegistryPath alone (without ReuseDeployment=true) does not pass --reuse-impls.
+// Mirrors the deployer-side warn-and-ignore behavior so trh-sdk does not
+// generate an inconsistent argv.
+func TestBuildDeployContractsArgs_RegistryPathRequiresReuse(t *testing.T) {
+	args := buildDeployContractsArgs(deployContractsOpts{
+		L1RPCURL:     "https://example",
+		PrivateKey:   "0xabc",
+		L2ChainID:    42,
+		OutPath:      "/tmp/out.json",
+		RegistryPath: "/tmp/registry.json",
+		// ReuseDeployment intentionally false.
+	})
+
+	for _, a := range args {
+		if strings.HasPrefix(a, "--reuse") {
+			t.Errorf("RegistryPath without ReuseDeployment must not emit --reuse-* flags, got: %v", args)
+		}
+	}
+}
+
+// TestBuildDeployContractsArgs_ReuseWithRegistryPath verifies that both flags
+// are passed together when ReuseDeployment=true and RegistryPath is set.
+func TestBuildDeployContractsArgs_ReuseWithRegistryPath(t *testing.T) {
+	args := buildDeployContractsArgs(deployContractsOpts{
+		L1RPCURL:        "https://example",
+		PrivateKey:      "0xabc",
+		L2ChainID:       42,
+		OutPath:         "/tmp/out.json",
+		ReuseDeployment: true,
+		RegistryPath:    "/tmp/registry.json",
+	})
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--reuse-deployment") {
+		t.Errorf("expected --reuse-deployment in args, got: %v", args)
+	}
+	if !strings.Contains(joined, "--reuse-impls /tmp/registry.json") {
+		t.Errorf("expected --reuse-impls /tmp/registry.json in args, got: %v", args)
+	}
+}
