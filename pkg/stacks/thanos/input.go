@@ -38,7 +38,11 @@ type DeployContractsInput struct {
 	Operators          *types.Operators
 	RegisterCandidate  *RegisterCandidateInput
 	ReuseDeployment    bool
-	EnableFaultProof   bool
+	// RegistryPath, when non-empty AND ReuseDeployment=true, forwards to
+	// tokamak-deployer's --reuse-impls so a custom JSON overrides the binary's
+	// embedded registry. Source: --reuse-impls CLI flag (tokamak-deployer v0.0.9+).
+	RegistryPath     string
+	EnableFaultProof bool
 	// Preset and fee token selection
 	Preset   string // "general", "defi", "gaming", "full"
 	FeeToken string // "TON", "ETH", "USDT", "USDC"

@@ -369,6 +369,7 @@ func (t *ThanosStack) DeployContracts(ctx context.Context, deployContractsConfig
 			EnableFaultProof: deployContractsConfig.EnableFaultProof,
 			GasPriceWei:      fixedGasPrice,
 			ReuseDeployment:  deployContractsConfig.ReuseDeployment,
+			RegistryPath:     deployContractsConfig.RegistryPath,
 		}, t.output); err != nil {
 			t.logger.Error("failed to deploy contracts", "err", err)
 			return err

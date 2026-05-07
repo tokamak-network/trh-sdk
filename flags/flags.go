@@ -37,6 +37,12 @@ var (
 		Value: true,
 	}
 
+	ReuseImplsFlag = &cli.StringFlag{
+		Name:    "reuse-impls",
+		Usage:   "Path to a registry JSON overriding the embedded registry (requires --reuse-deployment, tokamak-deployer v0.0.9+)",
+		Sources: cli.EnvVars(PrefixEnvVars(envPrefix, "REUSE_IMPLS")...),
+	}
+
 	EnableFaultProofFlag = &cli.BoolFlag{
 		Name:    "enable-fault-proof",
 		Usage:   "Enable the fault proof system (deploys DisputeGameFactory and FaultDisputeGame contracts)",
@@ -62,6 +68,7 @@ var DeployContractsFlag = []cli.Flag{
 	NetworkFlag,
 	NoCandidateFlag,
 	ReuseDeploymentFlag,
+	ReuseImplsFlag,
 	EnableFaultProofFlag,
 	PresetFlag,
 	FeeTokenFlag,

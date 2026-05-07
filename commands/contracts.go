@@ -62,6 +62,7 @@ func ActionDeployContracts() cli.ActionFunc {
 				deployContractsConfig.RegisterCandidate = registerCandidateInputs
 			}
 			deployContractsConfig.ReuseDeployment = cmd.Bool(flags.ReuseDeploymentFlag.Name)
+			deployContractsConfig.RegistryPath = cmd.String(flags.ReuseImplsFlag.Name)
 
 			return thanosStack.DeployContracts(ctx, deployContractsConfig)
 		default:
