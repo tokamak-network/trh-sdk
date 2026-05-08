@@ -1702,7 +1702,7 @@ func makeTerraformEnvFile(dirPath string, config types.TerraformEnvConfig) error
 	writer.WriteString(fmt.Sprintf("export TF_VAR_thanos_stack_name=\"%s\"\n", config.Namespace))
 	writer.WriteString(fmt.Sprintf("export TF_VAR_aws_region=\"%s\"\n", config.AwsRegion))
 
-	writer.WriteString(fmt.Sprintf("export TF_VAR_backend_bucket_name=\"%s\"\n", ""))
+	writer.WriteString(fmt.Sprintf("export TF_VAR_backend_bucket_name=\"%s\"\n", config.BackendBucketName))
 
 	writer.WriteString(fmt.Sprintf("export TF_CLI_ARGS_init=\"%s\"\n", "-backend-config='bucket=$TF_VAR_backend_bucket_name'"))
 	writer.WriteString(fmt.Sprintf("export TF_CLI_ARGS_init=\"%s\"\n", "$TF_CLI_ARGS_init -backend-config='region=${TF_VAR_aws_region}'"))
@@ -1955,4 +1955,40 @@ func (t *ThanosStack) cloneSourcecode(ctx context.Context, repositoryName, url s
 	fmt.Printf("\r✅ Clone the %s repository successfully \n", repositoryName)
 
 	return nil
+}
+
+// readBackendStateFromTfstate reads thanos-stack/.terraform/terraform.tfstate (written by
+// Stage A's `terraform init`) and extracts the S3 bucket name and the namespace derived
+// from it.  This is the only reliable source of truth for Stage B because:
+//   - .envrc is overwritten by makeTerraformEnvFile at the start of Stage B (before the
+//     bucket is known), so it cannot be used as a source.
+//   - ConvertChainNameToNamespace is non-deterministic (random suffix) and must NOT be
+//     called again in Stage B.
+//
+// Bucket format: "<namespace>-thanos-stack-tfstate-<random>"
+// Namespace is extracted as the prefix before "-thanos-stack-tfstate-".
+func readBackendStateFromTfstate(terraformDir string) (namespace, bucket string, err error) {
+	tfstatePath := filepath.Join(terraformDir, "thanos-stack", ".terraform", "terraform.tfstate")
+	data, err := os.ReadFile(tfstatePath)
+	if err != nil {
+		return "", "", fmt.Errorf("read terraform backend state: %w", err)
+	}
+
+	var state types.ThanosStackTerraformState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return "", "", fmt.Errorf("parse terraform backend state: %w", err)
+	}
+
+	bucket = state.Backend.Config.Bucket
+	if bucket == "" {
+		return "", "", fmt.Errorf("terraform backend state has empty bucket — was terraform init run in Stage A?")
+	}
+
+	const sep = "-thanos-stack-tfstate-"
+	idx := strings.Index(bucket, sep)
+	if idx < 0 {
+		return "", "", fmt.Errorf("bucket %q does not match expected format <namespace>%s<random>", bucket, sep)
+	}
+	namespace = bucket[:idx]
+	return namespace, bucket, nil
 }

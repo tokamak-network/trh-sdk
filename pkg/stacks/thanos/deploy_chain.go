@@ -361,7 +361,16 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 		return fmt.Errorf("chain configuration is not set")
 	}
 
-	namespace := utils.ConvertChainNameToNamespace(inputs.ChainName)
+	// Read namespace and backend bucket from the terraform state written by Stage A.
+	// ConvertChainNameToNamespace must NOT be called here — it generates a new random
+	// suffix on every invocation, causing terraform init to see a different S3 bucket
+	// name and fail with "Backend configuration changed".
+	terraformDir := fmt.Sprintf("%s/tokamak-thanos-stack/terraform", t.deploymentPath)
+	namespace, backendBucketName, err := readBackendStateFromTfstate(terraformDir)
+	if err != nil {
+		t.logger.Error("Failed to read backend state from Stage A terraform init — cannot determine namespace or bucket", "err", err)
+		return fmt.Errorf("Stage B requires Stage A terraform state: %w", err)
+	}
 
 	// Cannon prestate: build if missing (DeployContracts normally builds this;
 	// this path handles re-deploy scenarios where the file was lost).
@@ -394,10 +403,14 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 	}
 
 	// Re-generate .envrc with real L1 values (overwrites Stage A placeholder .envrc).
+	// BackendBucketName must be passed so TF_VAR_backend_bucket_name matches the bucket
+	// created in Stage A — terraform init will reuse it instead of failing with
+	// "Backend configuration changed".
 	tonConfig := constants.GetFeeTokenConfig(constants.FeeTokenTON, t.deployConfig.L1ChainID)
-	if err := makeTerraformEnvFile(fmt.Sprintf("%s/tokamak-thanos-stack/terraform", t.deploymentPath), types.TerraformEnvConfig{
+	if err := makeTerraformEnvFile(terraformDir, types.TerraformEnvConfig{
 		Namespace:           namespace,
 		AwsRegion:           awsLoginInputs.Region,
+		BackendBucketName:   backendBucketName,
 		SequencerKey:        t.deployConfig.SequencerPrivateKey,
 		BatcherKey:          t.deployConfig.BatcherPrivateKey,
 		ProposerKey:         t.deployConfig.ProposerPrivateKey,
