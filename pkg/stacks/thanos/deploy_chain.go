@@ -160,7 +160,7 @@ func (t *ThanosStack) deployNetworkToAWS(ctx context.Context, inputs *DeployInfr
 	}
 
 	// Check if the contracts deployed successfully
-	if t.deployConfig.DeployContractState.Status != types.DeployContractStatusCompleted {
+	if t.deployConfig.DeployContractState == nil || t.deployConfig.DeployContractState.Status != types.DeployContractStatusCompleted {
 		return fmt.Errorf("contracts are not deployed successfully, please deploy the contracts first")
 	}
 
