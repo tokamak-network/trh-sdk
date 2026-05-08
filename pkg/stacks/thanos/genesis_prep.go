@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
@@ -77,9 +78,14 @@ func writeAddressesOnly(srcPath, dstPath string) error {
 	}
 	out := make(map[string]json.RawMessage, len(all))
 	for k, v := range all {
-		// Drop known metadata keys. forge L2Genesis parses every remaining key as
-		// an address, so numbers / non-address values must not be present.
-		if k == "l1ChainId" || k == "l2ChainId" {
+		// Drop numeric metadata keys and any nested JSON object/array.
+		// forge L2Genesis calls vm.parseJsonAddress on every key and reverts
+		// with "expected address, found JSON object" if a non-address value
+		// is present. tokamak-deployer v0.0.10 added an "implementations"
+		// key whose value is a nested object — skip it and any future
+		// non-address values by checking the first byte of the raw JSON.
+		first := strings.TrimSpace(string(v))
+		if len(first) == 0 || first[0] == '{' || first[0] == '[' || first[0] >= '0' && first[0] <= '9' {
 			continue
 		}
 		out[k] = v
