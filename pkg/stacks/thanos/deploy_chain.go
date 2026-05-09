@@ -2388,7 +2388,7 @@ func (t *ThanosStack) installPresetModules(ctx context.Context) error {
 	if modules["crossTrade"] {
 		if t.deployConfig.K8s != nil {
 			t.logger.Info("  ↳ cross-trade (AWS auto-install)")
-			if err := t.autoInstallCrossTradeAWS(ctx); err != nil {
+			if _, err := t.AutoInstallCrossTradeAWS(ctx); err != nil {
 				t.logger.Errorw("Failed to auto-install CrossTrade", "err", err)
 				installErr = err
 			}

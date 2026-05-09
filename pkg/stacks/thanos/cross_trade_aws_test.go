@@ -31,9 +31,12 @@ func makeCrossTradeStack(t *testing.T, l1ChainID uint64, l2RpcUrl string) *Thano
 // return a clear error pointing to manual setup.
 func TestAutoInstallCrossTradeAWS_UnsupportedL1Chain(t *testing.T) {
 	stack := makeCrossTradeStack(t, 1234, "http://localhost:9545")
-	err := stack.autoInstallCrossTradeAWS(context.Background())
+	out, err := stack.AutoInstallCrossTradeAWS(context.Background())
 	if err == nil {
 		t.Fatal("expected error for unsupported L1 chain, got nil")
+	}
+	if out != nil {
+		t.Errorf("expected nil output on error, got: %+v", out)
 	}
 	if !strings.Contains(err.Error(), "1234") {
 		t.Errorf("error should mention unsupported chain ID 1234, got: %v", err)
@@ -47,9 +50,12 @@ func TestAutoInstallCrossTradeAWS_UnsupportedL1Chain(t *testing.T) {
 // rejected before any deployment attempt.
 func TestAutoInstallCrossTradeAWS_L2RpcUrlEmpty(t *testing.T) {
 	stack := makeCrossTradeStack(t, constants.EthereumSepoliaChainID, "")
-	err := stack.autoInstallCrossTradeAWS(context.Background())
+	out, err := stack.AutoInstallCrossTradeAWS(context.Background())
 	if err == nil {
 		t.Fatal("expected error for empty L2RpcUrl, got nil")
+	}
+	if out != nil {
+		t.Errorf("expected nil output on error, got: %+v", out)
 	}
 	if !strings.Contains(err.Error(), "L2RpcUrl") {
 		t.Errorf("error should mention L2RpcUrl, got: %v", err)
@@ -61,13 +67,29 @@ func TestAutoInstallCrossTradeAWS_L2RpcUrlEmpty(t *testing.T) {
 func TestAutoInstallCrossTradeAWS_MissingDeployOutput(t *testing.T) {
 	stack := makeCrossTradeStack(t, constants.EthereumSepoliaChainID, "http://localhost:9545")
 	// deploymentPath is a TempDir with no deploy-output.json — read should fail.
-	err := stack.autoInstallCrossTradeAWS(context.Background())
+	out, err := stack.AutoInstallCrossTradeAWS(context.Background())
 	if err == nil {
 		t.Fatal("expected error for missing deploy-output.json, got nil")
+	}
+	if out != nil {
+		t.Errorf("expected nil output on error, got: %+v", out)
 	}
 	if !strings.Contains(err.Error(), "deployed contracts") && !strings.Contains(err.Error(), "deploy-output") {
 		t.Errorf("error should mention deploy-output / deployed contracts, got: %v", err)
 	}
+}
+
+// TestAutoInstallCrossTradeAWS_OutputFields verifies that AutoInstallCrossTradeAWSOutput
+// has all required fields for backend consumption: two contract addresses and two dApp URLs.
+func TestAutoInstallCrossTradeAWS_OutputFields(t *testing.T) {
+	// Compile-time check: AutoInstallCrossTradeAWSOutput must have all contract/URL fields.
+	var out AutoInstallCrossTradeAWSOutput
+	_ = out.L2CrossTradeProxy
+	_ = out.L2toL2CrossTradeProxy
+	_ = out.L1CrossTradeProxy
+	_ = out.L2toL2CrossTradeL1
+	_ = out.L2L1DAppURL
+	_ = out.L2L2DAppURL
 }
 
 // --- Address regression tests ---
@@ -114,6 +136,15 @@ func TestCrossTradeReleaseName(t *testing.T) {
 	want := "cross-trade-12345"
 	if got != want {
 		t.Errorf("crossTradeReleaseName(12345) = %q, want %q", got, want)
+	}
+}
+
+// TestCrossTradeL2L2ReleaseName verifies the deterministic L2→L2 release name format.
+func TestCrossTradeL2L2ReleaseName(t *testing.T) {
+	got := crossTradeL2L2ReleaseName(12345)
+	want := "cross-trade-l2l2-12345"
+	if got != want {
+		t.Errorf("crossTradeL2L2ReleaseName(12345) = %q, want %q", got, want)
 	}
 }
 
