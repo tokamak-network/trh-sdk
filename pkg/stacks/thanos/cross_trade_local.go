@@ -233,9 +233,9 @@ func (t *ThanosStack) DeployCrossTradeLocal(
 // Returns nil when the contract is deployed (code length > 0) or error on timeout.
 // Per D-04: used for creation deposit tx verification.
 func waitForContractCode(ctx context.Context, l2Client *ethclient.Client, addr common.Address, logger *zap.SugaredLogger) error {
-	for attempt := 1; attempt <= 60; attempt++ {
+	for attempt := 1; attempt <= 150; attempt++ {
 		if attempt%10 == 0 {
-			logger.Infof("waiting for contract at %s (attempt %d/60)", addr.Hex(), attempt)
+			logger.Infof("waiting for contract at %s (attempt %d/150)", addr.Hex(), attempt)
 		}
 
 		code, err := l2Client.CodeAt(ctx, addr, nil)
@@ -243,7 +243,7 @@ func waitForContractCode(ctx context.Context, l2Client *ethclient.Client, addr c
 			return fmt.Errorf("failed to call CodeAt for %s: %w", addr.Hex(), err)
 		}
 		if len(code) > 0 {
-			logger.Infof("contract deployed at %s (attempt %d/60)", addr.Hex(), attempt)
+			logger.Infof("contract deployed at %s (attempt %d/150)", addr.Hex(), attempt)
 			return nil
 		}
 
@@ -253,16 +253,16 @@ func waitForContractCode(ctx context.Context, l2Client *ethclient.Client, addr c
 		case <-time.After(2 * time.Second):
 		}
 	}
-	return fmt.Errorf("contract at %s not deployed after 120s", addr.Hex())
+	return fmt.Errorf("contract at %s not deployed after 300s", addr.Hex())
 }
 
 // verifyDepositCallEffect checks that a function-call deposit tx actually executed on L2
 // by calling a view function on the target contract to verify state change.
 // Per D-04: used for non-creation deposit tx verification.
 func verifyDepositCallEffect(ctx context.Context, l2Client *ethclient.Client, contractAddr common.Address, checkCalldata []byte, logger *zap.SugaredLogger) error {
-	for attempt := 1; attempt <= 60; attempt++ {
+	for attempt := 1; attempt <= 150; attempt++ {
 		if attempt%10 == 0 {
-			logger.Infof("verifying deposit call effect at %s (attempt %d/60)", contractAddr.Hex(), attempt)
+			logger.Infof("verifying deposit call effect at %s (attempt %d/150)", contractAddr.Hex(), attempt)
 		}
 
 		result, err := l2Client.CallContract(ctx, ethereum.CallMsg{
@@ -281,7 +281,7 @@ func verifyDepositCallEffect(ctx context.Context, l2Client *ethclient.Client, co
 				}
 			}
 			if hasNonZero {
-				logger.Infof("deposit call effect verified at %s (attempt %d/60)", contractAddr.Hex(), attempt)
+				logger.Infof("deposit call effect verified at %s (attempt %d/150)", contractAddr.Hex(), attempt)
 				return nil
 			}
 		}
@@ -292,7 +292,7 @@ func verifyDepositCallEffect(ctx context.Context, l2Client *ethclient.Client, co
 		case <-time.After(2 * time.Second):
 		}
 	}
-	return fmt.Errorf("deposit call effect not verified at %s after 120s", contractAddr.Hex())
+	return fmt.Errorf("deposit call effect not verified at %s after 300s", contractAddr.Hex())
 }
 
 // sendDepositCreation sends an L1 OptimismPortal.depositTransaction for contract creation.
