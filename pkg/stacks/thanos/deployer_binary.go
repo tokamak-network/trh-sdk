@@ -46,7 +46,7 @@ import (
 // v0.0.5: --gas-price / --gas-price-multiplier flags introduced. trh-sdk now
 // resolves a conservative fixed gas price once and passes it via --gas-price,
 // so tokamak-deployer no longer calls SuggestGasPrice per TX.
-const TokamakDeployerVersion = "v0.0.10"
+const TokamakDeployerVersion = "v0.0.11"
 
 const tokamakDeployerRepo = "tokamak-network/tokamak-thanos"
 
