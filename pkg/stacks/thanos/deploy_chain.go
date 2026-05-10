@@ -22,6 +22,7 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
 	"github.com/tokamak-network/trh-sdk/pkg/dependencies"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
@@ -1245,10 +1246,14 @@ func initGenesisAnchorState(
 	gameType uint32,
 ) error {
 	// 1. Connect to L2 and wait for genesis block.
-	l2Client, err := ethclient.DialContext(ctx, l2RPCURL)
+	// Use a custom HTTP client with authoritative DNS to bypass public DNS cache
+	// propagation delays for newly created AWS ELB hostnames (saves ~8 minutes).
+	httpClient := utils.NewELBHTTPClient(ctx, l2RPCURL)
+	rpcClient, err := rpc.DialOptions(ctx, l2RPCURL, rpc.WithHTTPClient(httpClient))
 	if err != nil {
 		return fmt.Errorf("failed to connect to L2 RPC %s: %w", l2RPCURL, err)
 	}
+	l2Client := ethclient.NewClient(rpcClient)
 	defer l2Client.Close()
 
 	var genesisBlock *ethtypes.Block

@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -194,12 +196,64 @@ func StringToBytes32(s string) []uint64 {
 	return result
 }
 
-// IsURLReachable checks if a URL is publicly reachable via HTTP
-func IsURLReachable(url string) bool {
-	client := &http.Client{
-		Timeout: 3 * time.Second,
+// newELBDialer creates a net.Dialer that resolves AWS ELB hostnames by querying
+// the authoritative Route53 nameservers directly, bypassing public DNS cache
+// propagation delays (typically 5-10 minutes for newly created ELB records).
+func newELBDialer(ctx context.Context, elbHostname string) *net.Dialer {
+	parts := strings.SplitN(elbHostname, ".", 2)
+	if len(parts) < 2 {
+		return &net.Dialer{Timeout: 30 * time.Second}
 	}
-	resp, err := client.Get(url)
+	zone := parts[1]
+
+	nss, err := net.DefaultResolver.LookupNS(ctx, zone)
+	if err != nil || len(nss) == 0 {
+		return &net.Dialer{Timeout: 30 * time.Second}
+	}
+
+	nsHost := strings.TrimSuffix(nss[0].Host, ".")
+	addrs, err := net.DefaultResolver.LookupHost(ctx, nsHost)
+	if err != nil || len(addrs) == 0 {
+		return &net.Dialer{Timeout: 30 * time.Second}
+	}
+	nsAddr := net.JoinHostPort(addrs[0], "53")
+
+	authResolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := &net.Dialer{Timeout: 5 * time.Second}
+			return d.DialContext(ctx, "udp", nsAddr)
+		},
+	}
+	return &net.Dialer{
+		Timeout:  30 * time.Second,
+		Resolver: authResolver,
+	}
+}
+
+// NewELBHTTPClient returns an *http.Client that resolves AWS ELB hostnames
+// via authoritative DNS, bypassing public DNS cache propagation delays.
+// For non-ELB URLs the returned client uses the default transport.
+func NewELBHTTPClient(ctx context.Context, rawURL string) *http.Client {
+	parsed, err := neturl.Parse(rawURL)
+	if err != nil || !strings.HasSuffix(parsed.Hostname(), ".elb.amazonaws.com") {
+		return &http.Client{Timeout: 3 * time.Second}
+	}
+
+	dialer := newELBDialer(ctx, parsed.Hostname())
+	return &http.Client{
+		Timeout: 3 * time.Second,
+		Transport: &http.Transport{
+			DialContext: dialer.DialContext,
+		},
+	}
+}
+
+// IsURLReachable checks if a URL is publicly reachable via HTTP.
+// For AWS ELB URLs it queries authoritative DNS directly to avoid cache propagation delays.
+func IsURLReachable(rawURL string) bool {
+	client := NewELBHTTPClient(context.Background(), rawURL)
+	resp, err := client.Get(rawURL)
 	if err != nil {
 		log.Printf("⏳ Waiting for LoadBalancer to be publicly reachable...")
 		return false
