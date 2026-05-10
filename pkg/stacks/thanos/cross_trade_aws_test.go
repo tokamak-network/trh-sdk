@@ -80,7 +80,7 @@ func TestAutoInstallCrossTradeAWS_MissingDeployOutput(t *testing.T) {
 }
 
 // TestAutoInstallCrossTradeAWS_OutputFields verifies that AutoInstallCrossTradeAWSOutput
-// has all required fields for backend consumption: two contract addresses and two dApp URLs.
+// has all required fields for backend consumption: contract addresses and a single dApp URL.
 func TestAutoInstallCrossTradeAWS_OutputFields(t *testing.T) {
 	// Compile-time check: AutoInstallCrossTradeAWSOutput must have all contract/URL fields.
 	var out AutoInstallCrossTradeAWSOutput
@@ -88,8 +88,7 @@ func TestAutoInstallCrossTradeAWS_OutputFields(t *testing.T) {
 	_ = out.L2toL2CrossTradeProxy
 	_ = out.L1CrossTradeProxy
 	_ = out.L2toL2CrossTradeL1
-	_ = out.L2L1DAppURL
-	_ = out.L2L2DAppURL
+	_ = out.DAppURL
 }
 
 // --- Address regression tests ---

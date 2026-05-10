@@ -33,19 +33,19 @@ func crossTradeReleaseName(l2ChainID uint64) string {
 }
 
 // crossTradeL2L2ReleaseName generates a deterministic Helm release name for the L2→L2 bridge.
+// Kept for UninstallCrossTradeAWS backward compatibility with clusters that have the old split releases.
 func crossTradeL2L2ReleaseName(l2ChainID uint64) string {
 	return fmt.Sprintf("cross-trade-l2l2-%d", l2ChainID)
 }
 
-// AutoInstallCrossTradeAWSOutput contains deployed contract addresses and dApp URLs
+// AutoInstallCrossTradeAWSOutput contains deployed contract addresses and the dApp URL
 // produced by AutoInstallCrossTradeAWS. Consumed by trh-backend to update stack metadata.
 type AutoInstallCrossTradeAWSOutput struct {
 	L2CrossTradeProxy     string // L2→L1 bridge proxy on user's L2
 	L2toL2CrossTradeProxy string // L2→L2 bridge proxy on user's L2
 	L1CrossTradeProxy     string // L1-side L2→L1 bridge proxy (shared Sepolia contract)
 	L2toL2CrossTradeL1    string // L1-side L2→L2 bridge proxy (shared Sepolia contract)
-	L2L1DAppURL           string // CrossTrade L2→L1 dApp ALB URL
-	L2L2DAppURL           string // CrossTrade L2→L2 dApp ALB URL
+	DAppURL               string // CrossTrade dApp ALB URL (single release serving both L2→L1 and L2→L2)
 }
 
 // AutoInstallCrossTradeAWS deploys CrossTrade L2 contracts via L1 OptimismPortal depositTransaction
@@ -98,8 +98,8 @@ func (t *ThanosStack) AutoInstallCrossTradeAWS(ctx context.Context) (*AutoInstal
 	t.logger.Infof("L2 CrossTrade contracts deployed: proxy=%s l2l2proxy=%s",
 		localOutput.L2CrossTradeProxy, localOutput.L2toL2CrossTradeProxy)
 
-	// Deploy both CrossTrade dApp Helm releases and retrieve their ALB URLs.
-	l2l1URL, l2l2URL, err := t.installCrossTradeHelmAWS(ctx, l1CT.L1CrossTradeProxy, localOutput.L2CrossTradeProxy, l1CT.L2toL2CrossTradeL1, localOutput.L2toL2CrossTradeProxy, l2RPC)
+	// Deploy a single CrossTrade dApp Helm release that handles both L2→L1 and L2→L2 modes.
+	dAppURL, err := t.installCrossTradeHelmAWS(ctx, l1CT.L1CrossTradeProxy, localOutput.L2CrossTradeProxy, l1CT.L2toL2CrossTradeL1, localOutput.L2toL2CrossTradeProxy, l2RPC)
 	if err != nil {
 		return nil, fmt.Errorf("autoInstallCrossTradeAWS: Helm dApp deployment failed: %w", err)
 	}
@@ -109,18 +109,17 @@ func (t *ThanosStack) AutoInstallCrossTradeAWS(ctx context.Context) (*AutoInstal
 		L2toL2CrossTradeProxy: localOutput.L2toL2CrossTradeProxy,
 		L1CrossTradeProxy:     l1CT.L1CrossTradeProxy,
 		L2toL2CrossTradeL1:    l1CT.L2toL2CrossTradeL1,
-		L2L1DAppURL:           l2l1URL,
-		L2L2DAppURL:           l2l2URL,
+		DAppURL:               dAppURL,
 	}, nil
 }
 
-// installCrossTradeHelmAWS installs both CrossTrade Helm releases (L2→L1 and L2→L2)
-// and returns their ALB URLs. This reimplements the Helm portion of DeployCrossTradeApplication
-// directly to avoid the L2ChainConfig[l2ChainID] slice-indexing bug in the existing function.
+// installCrossTradeHelmAWS installs a single CrossTrade Helm release that serves both
+// L2→L1 and L2→L2 modes. The dApp auto-selects the mode based on the destination chain,
+// so a single instance with both chain configs handles all CrossTrade transactions.
 func (t *ThanosStack) installCrossTradeHelmAWS(
 	ctx context.Context,
 	l1CTProxy, l2CTProxy, l2toL2CrossTradeL1, l2toL2CTProxy, l2RPC string,
-) (l2l1URL, l2l2URL string, err error) {
+) (string, error) {
 	namespace := t.deployConfig.K8s.Namespace
 	l1ChainID := t.deployConfig.L1ChainID
 	l2ChainID := t.deployConfig.L2ChainID
@@ -129,13 +128,13 @@ func (t *ThanosStack) installCrossTradeHelmAWS(
 	chartPath := fmt.Sprintf("%s/tokamak-thanos-stack/charts/cross-trade", t.deploymentPath)
 
 	if err := os.MkdirAll(configDir, os.ModePerm); err != nil {
-		return "", "", fmt.Errorf("failed to create config dir: %w", err)
+		return "", fmt.Errorf("failed to create config dir: %w", err)
 	}
 
 	l1ChainKey := fmt.Sprintf("%d", l1ChainID)
 	l2ChainKey := fmt.Sprintf("%d", l2ChainID)
 
-	// --- L2→L1 release ---
+	// L2→L1 config: L1CrossTrade proxy on L1, L2CrossTrade proxy on L2.
 	l2l1ChainCfg := map[string]types.CrossTradeChainConfig{
 		l1ChainKey: {
 			Name:        l1Config.ChainName,
@@ -152,22 +151,10 @@ func (t *ThanosStack) installCrossTradeHelmAWS(
 	}
 	l2l1ConfigJSON, err := json.Marshal(l2l1ChainCfg)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to marshal L2→L1 chain config: %w", err)
-	}
-	l2l1HelmEnv := types.CrossTradeEnvConfig{
-		NextPublicProjectID: "568b8d3d0528e743b0e2c6c92f54d721",
-		L2L1Config:          string(l2l1ConfigJSON),
-	}
-	l2l1URL, err = t.installOneHelmRelease(ctx, namespace, chartPath,
-		crossTradeReleaseName(l2ChainID),
-		filepath.Join(configDir, "cross-trade-values.yaml"),
-		"cross-trade",
-		l2l1HelmEnv)
-	if err != nil {
-		return "", "", fmt.Errorf("L2→L1 Helm install failed: %w", err)
+		return "", fmt.Errorf("failed to marshal L2→L1 chain config: %w", err)
 	}
 
-	// --- L2→L2 release ---
+	// L2→L2 config: L2toL2CrossTradeL1 proxy on L1, L2toL2CrossTrade proxy on L2.
 	l2l2ChainCfg := map[string]types.CrossTradeChainConfig{
 		l1ChainKey: {
 			Name:        l1Config.ChainName,
@@ -184,22 +171,25 @@ func (t *ThanosStack) installCrossTradeHelmAWS(
 	}
 	l2l2ConfigJSON, err := json.Marshal(l2l2ChainCfg)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to marshal L2→L2 chain config: %w", err)
-	}
-	l2l2HelmEnv := types.CrossTradeEnvConfig{
-		NextPublicProjectID: "568b8d3d0528e743b0e2c6c92f54d721",
-		L2L2Config:          string(l2l2ConfigJSON),
-	}
-	l2l2URL, err = t.installOneHelmRelease(ctx, namespace, chartPath,
-		crossTradeL2L2ReleaseName(l2ChainID),
-		filepath.Join(configDir, "cross-trade-l2l2-values.yaml"),
-		"cross-trade-l2l2",
-		l2l2HelmEnv)
-	if err != nil {
-		return "", "", fmt.Errorf("L2→L2 Helm install failed: %w", err)
+		return "", fmt.Errorf("failed to marshal L2→L2 chain config: %w", err)
 	}
 
-	return l2l1URL, l2l2URL, nil
+	helmEnv := types.CrossTradeEnvConfig{
+		NextPublicProjectID: "568b8d3d0528e743b0e2c6c92f54d721",
+		L2L1Config:          string(l2l1ConfigJSON),
+		L2L2Config:          string(l2l2ConfigJSON),
+	}
+
+	url, err := t.installOneHelmRelease(ctx, namespace, chartPath,
+		crossTradeReleaseName(l2ChainID),
+		filepath.Join(configDir, "cross-trade-values.yaml"),
+		"cross-trade",
+		helmEnv)
+	if err != nil {
+		return "", fmt.Errorf("CrossTrade Helm install failed: %w", err)
+	}
+
+	return url, nil
 }
 
 // installOneHelmRelease writes the values YAML, runs helm install, and polls for the ALB URL.
