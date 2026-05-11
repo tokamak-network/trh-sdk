@@ -218,13 +218,22 @@ func (t *ThanosStack) DeployAWSStageA(ctx context.Context, input *AWSStageAInput
 		return err
 	}
 
-	// STEP 1. Clone the charts repository
+	const stageTotalSteps = 5
+	stageStep := 0
+	logStep := func(desc string) {
+		stageStep++
+		t.logger.Infof("[deployer] Step %d/%d: %s", stageStep, stageTotalSteps, desc)
+	}
+
+	// Step 1: Clone the charts repository
+	logStep("Cloning tokamak-thanos-stack repository")
 	if err := t.cloneSourcecode(ctx, "tokamak-thanos-stack", "https://github.com/tokamak-network/tokamak-thanos-stack.git"); err != nil {
 		t.logger.Error("Error cloning repository", "err", err)
 		return err
 	}
 
-	// STEP 2. AWS Authentication
+	// Step 2: AWS Authentication
+	logStep("Authenticating AWS credentials")
 	if t.awsProfile == nil {
 		return fmt.Errorf("AWS configuration is not set")
 	}
@@ -248,9 +257,10 @@ func (t *ThanosStack) DeployAWSStageA(ctx context.Context, input *AWSStageAInput
 		return fmt.Errorf("chain configuration is not set")
 	}
 
-	// STEP 3. Create .envrc file using AWSStageAInput fields.
+	// Step 3: Create .envrc file using AWSStageAInput fields.
 	// L1-derived keys come from the input; prestate vars default to "" (Terraform
 	// variable defaults allow Stage A targeted apply without the genesis/rollup files).
+	logStep("Generating Terraform environment configuration")
 	namespace := utils.ConvertChainNameToNamespace(input.ChainName)
 	l1RPCProvider := utils.DetectRPCKind(input.L1RPCURL)
 	tonConfig := constants.GetFeeTokenConfig(constants.FeeTokenTON, input.L1ChainID)
@@ -287,7 +297,8 @@ func (t *ThanosStack) DeployAWSStageA(ctx context.Context, input *AWSStageAInput
 		return fmt.Errorf("tool installation failed before infrastructure provisioning: %w", err)
 	}
 
-	// STEP 4. Initialize Terraform backend
+	// Step 4: Initialize Terraform backend
+	logStep("Initializing Terraform backend")
 	if err := utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
 		"-c",
 		fmt.Sprintf(`cd %s/tokamak-thanos-stack/terraform &&
@@ -302,8 +313,9 @@ func (t *ThanosStack) DeployAWSStageA(ctx context.Context, input *AWSStageAInput
 		return err
 	}
 
-	// STEP 5. Targeted apply — L1-independent modules only.
+	// Step 5: Targeted apply — L1-independent modules only.
 	// Stage B will run a full apply to add chain_config and k8s modules once L1 is done.
+	logStep("Deploying AWS infrastructure (vpc/eks/efs/secretsmanager)")
 	t.logger.Info("Deploying Stage A AWS infrastructure (vpc/eks/efs/secretsmanager)")
 	if err := utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
 		"-c",
@@ -373,6 +385,32 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 		return fmt.Errorf("Stage B requires Stage A terraform state: %w", err)
 	}
 
+	// Read deployed contracts early to determine accurate totalSteps.
+	// Contracts are written by DeployContracts (which completed before Stage B runs).
+	deployedContracts, contractsErr := t.readDeploymentContracts()
+	if contractsErr != nil {
+		return fmt.Errorf("failed to read deployed contracts: %w", contractsErr)
+	}
+
+	// Calculate totalSteps based on conditional init paths.
+	// base infra steps (all modes): env, copy-artifacts, tf-apply, eks-config,
+	//   k8s-check, helm-repo, helm-pvc, helm-full, wait-ingress = 9
+	// + SystemConfig + CDM = 11
+	// FP adds: anchorState + DGF + Portal2 = 14
+	// non-FP adds: Portal = 12, + L2OO if present = 13
+	hasL2OO := !t.deployConfig.EnableFraudProof && deployedContracts.L2OutputOracleProxy != ""
+	stageBTotalSteps := 12 // non-FP, no L2OO baseline
+	if t.deployConfig.EnableFraudProof {
+		stageBTotalSteps = 14
+	} else if hasL2OO {
+		stageBTotalSteps = 13
+	}
+	stageBStep := 0
+	logStep := func(desc string) {
+		stageBStep++
+		t.logger.Infof("[deployer] Step %d/%d: %s", stageBStep, stageBTotalSteps, desc)
+	}
+
 	// Cannon prestate: build if missing (DeployContracts normally builds this;
 	// this path handles re-deploy scenarios where the file was lost).
 	prestateSrc := fmt.Sprintf("%s/tokamak-thanos/op-program/bin/prestate.json", t.deploymentPath)
@@ -403,10 +441,11 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 		t.logger.Info("Cannon prestate hash loaded", "hash", prestateHash)
 	}
 
-	// Re-generate .envrc with real L1 values (overwrites Stage A placeholder .envrc).
+	// Step 1: Re-generate .envrc with real L1 values (overwrites Stage A placeholder .envrc).
 	// BackendBucketName must be passed so TF_VAR_backend_bucket_name matches the bucket
 	// created in Stage A — terraform init will reuse it instead of failing with
 	// "Backend configuration changed".
+	logStep("Preparing Stage B configuration")
 	tonConfig := constants.GetFeeTokenConfig(constants.FeeTokenTON, t.deployConfig.L1ChainID)
 	if err := makeTerraformEnvFile(terraformDir, types.TerraformEnvConfig{
 		Namespace:           namespace,
@@ -437,7 +476,8 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 		return err
 	}
 
-	// STEP B-1. Copy L1 artifacts to Terraform config-files/
+	// Step 2: Copy L1 artifacts to Terraform config-files/
+	logStep("Copying L1 artifacts")
 	if err := utils.CopyFile(
 		t.rollupConfigPath(),
 		fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack/config-files/rollup.json", t.deploymentPath),
@@ -460,8 +500,9 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 		}
 	}
 
-	// STEP B-2. Full Terraform apply (no -target) — adds chain_config and k8s modules;
+	// Step 3: Full Terraform apply (no -target) — adds chain_config and k8s modules;
 	// vpc/eks/efs/secretsmanager are reconciled (no drift expected from Stage A).
+	logStep("Running Terraform full apply")
 	t.logger.Info("Deploying Thanos stack infrastructure (Stage B — full apply)")
 	if err := utils.ExecuteCommandStream(ctx, t.logger, "bash", []string{
 		"-c",
@@ -515,7 +556,8 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 		return fmt.Errorf("tool installation failed before EKS configuration: %w", err)
 	}
 
-	// Step 7. Configure EKS access
+	// Step 4. Configure EKS access
+	logStep("Configuring EKS access")
 	if _, err := utils.SetAWSConfigFile(t.deploymentPath); err != nil {
 		t.logger.Error("Error setting AWS config file", "err", err)
 		return err
@@ -534,7 +576,8 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 		return err
 	}
 
-	// Step 7.1. Check if K8s cluster is ready
+	// Step 5. Check if K8s cluster is ready
+	logStep("Checking K8s cluster readiness")
 	t.logger.Info("Checking if K8s cluster is ready...")
 	k8sReady, err := utils.CheckK8sReady(ctx, namespace)
 	if err != nil {
@@ -549,7 +592,8 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 		return fmt.Errorf("tool installation failed before Helm deployment: %w", err)
 	}
 
-	// Step 8. Add Helm repository
+	// Step 6. Add Helm repository
+	logStep("Adding Helm repository")
 	helmAddOuput, err := utils.ExecuteCommand(ctx, "helm", []string{
 		"repo",
 		"add",
@@ -603,7 +647,8 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 		t.logger.Info("✅ Testnet resource optimizations applied")
 	}
 
-	// Install the PVC first
+	// Step 7. Install the PVC first
+	logStep("Installing Helm charts (PVC)")
 	err = utils.UpdateYAMLField(valueFile, "enable_vpc", true)
 	if err != nil {
 		t.logger.Error("Error updating `enable_vpc` configuration", "err", err)
@@ -622,7 +667,8 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 		return err
 	}
 
-	// Install the rest of the charts
+	// Step 8. Install the rest of the charts
+	logStep("Installing Helm charts (full deployment)")
 	err = utils.UpdateYAMLField(valueFile, "enable_deployment", true)
 	if err != nil {
 		t.logger.Error("Error updating `enable_deployment` configuration", "err", err)
@@ -636,6 +682,8 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 
 	t.logger.Info("✅ Helm charts installed successfully")
 
+	// Step 9. Wait for network ingress
+	logStep("Waiting for network ingress")
 	ingressAddr, err := utils.WaitForIngressAddress(ctx, namespace, helmReleaseName, 45*time.Minute)
 	if err != nil {
 		t.logger.Error("Error retrieving L2 RPC ingress address", "err", err)
@@ -651,16 +699,11 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 	t.deployConfig.L2RpcUrl = l2RPCUrl
 	t.deployConfig.L1BeaconURL = inputs.L1BeaconURL
 
-	// Read deployed contracts once — shared by Steps 8.2.5 and 8.2.6.
-	deployedContracts, contractsErr := t.readDeploymentContracts()
-	if contractsErr != nil {
-		return fmt.Errorf("failed to read deployed contracts for post-deploy init: %w", contractsErr)
-	}
-
-	// Step 8.2.5. Initialize AnchorStateRegistry genesis anchor state (fault proof chains only).
+	// Step 10 (FP only). Initialize AnchorStateRegistry genesis anchor state.
 	// Without this, every FaultDisputeGame.initialize() reverts with AnchorRootNotFound because
 	// the registry starts with bytes32(0) as the anchor root for every game type.
 	if t.deployConfig.EnableFraudProof {
+		logStep("Initializing genesis anchor state")
 		if deployedContracts.AnchorStateRegistryProxy == "" {
 			return fmt.Errorf("AnchorStateRegistryProxy address not found in deployed contracts — cannot initialize genesis anchor state")
 		}
@@ -682,7 +725,7 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 		t.logger.Info("✅ Genesis anchor state initialized in AnchorStateRegistry")
 	}
 
-	// Step 8.2.6. Initialize proxy contracts.
+	// Steps 10/11+ (all paths). Initialize proxy contracts.
 	// tokamak-deployer calls upgrade(proxy, impl) but never initialize(), leaving all proxy
 	// storage slots at zero. Consequences:
 	//   - SystemConfig zero → op-node cannot derive batches (batcherHash=0, gasLimit=0)
@@ -700,6 +743,7 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 			return fmt.Errorf("invalid L2GenesisBlockGasLimit %q: %w", bedrockCfg.L2GenesisBlockGasLimit, parseErr)
 		}
 
+		logStep("Initializing SystemConfig")
 		if scErr := initSystemConfig(
 			ctx,
 			t.logger,
@@ -724,6 +768,7 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 		}
 		t.logger.Info("✅ SystemConfig initialized")
 
+		logStep("Initializing L1CrossDomainMessenger")
 		if cdmErr := initL1CrossDomainMessenger(
 			ctx,
 			t.logger,
@@ -741,6 +786,7 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 
 		if !t.deployConfig.EnableFraudProof {
 			// L2OO mode: OptimismPortal (l2Oracle path) + L2OutputOracle.
+			logStep("Initializing OptimismPortal")
 			if portalErr := initOptimismPortal(
 				ctx,
 				t.logger,
@@ -757,6 +803,7 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 			t.logger.Info("✅ OptimismPortal initialized")
 
 			if deployedContracts.L2OutputOracleProxy != "" {
+				logStep("Initializing L2OutputOracle")
 				l2ooErr := initL2OutputOracle(
 					ctx,
 					t.logger,
@@ -790,6 +837,7 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 				}
 			}
 
+			logStep("Initializing DisputeGameFactory")
 			if dgfErr := initDisputeGameFactory(
 				ctx,
 				t.logger,
@@ -812,6 +860,7 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 			}
 			t.logger.Info("✅ DisputeGameFactory initialized")
 
+			logStep("Initializing OptimismPortal2")
 			if portal2Err := initOptimismPortal2(
 				ctx,
 				t.logger,

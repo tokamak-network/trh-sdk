@@ -140,30 +140,53 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 		return fmt.Errorf("fault proof is enabled but challenger private key is not set; re-run deploy-contracts with --enable-fault-proof")
 	}
 
-	// Generate compose file
-	composePath := filepath.Join(t.deploymentPath, "docker-compose.local.yml")
-	if err := t.generateLocalComposeFile(ctx, composePath); err != nil {
-		return fmt.Errorf("failed to generate docker compose file: %w", err)
-	}
-
-	// Initialize op-geth genesis
-	if err := t.initLocalOpGeth(ctx, composePath); err != nil {
-		return fmt.Errorf("failed to initialize op-geth: %w", err)
-	}
-
-	// Start core services (proposer always, challenger if fraud proof enabled)
-	if err := t.startLocalCoreServices(ctx, composePath); err != nil {
-		return fmt.Errorf("failed to start core services: %w", err)
-	}
-
-	// Read deployed contracts for initialization steps (anchor state and CDM init).
+	// Read deployed contracts early to determine accurate totalSteps.
 	deployedContracts, contractsErr := t.readDeploymentContracts()
 	if contractsErr != nil {
 		return fmt.Errorf("failed to read deployed contracts: %w", contractsErr)
 	}
 
-	// Initialize AnchorStateRegistry for fault proof chains
+	// Calculate totalSteps based on which conditional init paths will run.
+	// Fraud proof path: generateCompose, initOpGeth, startCore, initAnchorState,
+	//   initSystemConfig, initCDM, initDGF, initPortal2, startModules = 9
+	// Non-FP with L2OO:  generateCompose, initOpGeth, startCore, initSystemConfig,
+	//   initCDM, initPortal, initL2OO, startModules = 8
+	// Non-FP no L2OO:    same minus initL2OO = 7
+	hasL2OO := !t.deployConfig.EnableFraudProof && deployedContracts.L2OutputOracleProxy != ""
+	totalSteps := 7
 	if t.deployConfig.EnableFraudProof {
+		totalSteps = 9
+	} else if hasL2OO {
+		totalSteps = 8
+	}
+	step := 0
+	logStep := func(desc string) {
+		step++
+		t.logger.Infof("[deployer] Step %d/%d: %s", step, totalSteps, desc)
+	}
+
+	// Step 1: Generate compose file
+	logStep("Generating Docker Compose file")
+	composePath := filepath.Join(t.deploymentPath, "docker-compose.local.yml")
+	if err := t.generateLocalComposeFile(ctx, composePath); err != nil {
+		return fmt.Errorf("failed to generate docker compose file: %w", err)
+	}
+
+	// Step 2: Initialize op-geth genesis
+	logStep("Initializing op-geth genesis")
+	if err := t.initLocalOpGeth(ctx, composePath); err != nil {
+		return fmt.Errorf("failed to initialize op-geth: %w", err)
+	}
+
+	// Step 3: Start core services (proposer always, challenger if fraud proof enabled)
+	logStep("Starting core services")
+	if err := t.startLocalCoreServices(ctx, composePath); err != nil {
+		return fmt.Errorf("failed to start core services: %w", err)
+	}
+
+	// Step 4 (fraud proof only): Initialize AnchorStateRegistry
+	if t.deployConfig.EnableFraudProof {
+		logStep("Initializing genesis anchor state")
 		if deployedContracts.AnchorStateRegistryProxy == "" {
 			return fmt.Errorf("AnchorStateRegistryProxy address not found in deployed contracts — cannot initialize genesis anchor state")
 		}
@@ -189,10 +212,12 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 		t.logger.Info("✅ Genesis anchor state initialized in AnchorStateRegistry")
 	}
 
-	// Initialize SystemConfig. tokamak-deployer upgrade(proxy, impl) does not call initialize(),
+	// Step 4 or 5: Initialize SystemConfig.
+	// tokamak-deployer upgrade(proxy, impl) does not call initialize(),
 	// leaving batcherHash, gasLimit, and all L1 contract references at zero. op-node reads
 	// batcherHash + gasLimit from SystemConfig for the derivation pipeline — without this the
 	// chain cannot derive L2 blocks from L1 batches.
+	logStep("Initializing SystemConfig")
 	{
 		bedrockCfg, bedrockErr := t.readBedrockDeployConfigTemplate()
 		if bedrockErr != nil {
@@ -230,8 +255,10 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 		t.logger.Info("✅ SystemConfig initialized")
 	}
 
-	// Initialize L1CrossDomainMessenger. tokamak-deployer upgrade(proxy, impl) does not call
+	// Step 5 or 6: Initialize L1CrossDomainMessenger.
+	// tokamak-deployer upgrade(proxy, impl) does not call
 	// initialize(), leaving portal = 0x0. Required for CDM-based message passing (CRT-02).
+	logStep("Initializing L1CrossDomainMessenger")
 	cdmErr := initL1CrossDomainMessenger(
 		ctx,
 		t.logger,
@@ -251,6 +278,7 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 	// L2OO mode: initialize OptimismPortal (l2Oracle path) and L2OutputOracle.
 	// DGF mode: OptimismPortal2 upgrade + initialization is handled below.
 	if !t.deployConfig.EnableFraudProof {
+		logStep("Initializing OptimismPortal")
 		portalErr := initOptimismPortal(
 			ctx,
 			t.logger,
@@ -269,7 +297,8 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 
 		// Initialize L2OutputOracle. tokamak-deployer upgrade(proxy, impl) does not call
 		// initialize(), leaving proposer = address(0) and op-proposer unable to submit outputs.
-		if deployedContracts.L2OutputOracleProxy != "" {
+		if hasL2OO {
+			logStep("Initializing L2OutputOracle")
 			bedrockCfg, bedrockErr := t.readBedrockDeployConfigTemplate()
 			if bedrockErr != nil {
 				return fmt.Errorf("failed to read bedrock deploy config for L2OO init: %w", bedrockErr)
@@ -313,6 +342,7 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 			}
 		}
 
+		logStep("Initializing DisputeGameFactory")
 		dgfErr := initDisputeGameFactory(
 			ctx,
 			t.logger,
@@ -336,6 +366,7 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 		}
 		t.logger.Info("✅ DisputeGameFactory initialized")
 
+		logStep("Initializing OptimismPortal2")
 		portal2Err := initOptimismPortal2(
 			ctx,
 			t.logger,
@@ -404,7 +435,8 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 		}()
 	}
 
-	// Start preset module services
+	// Last step: Start preset module services
+	logStep("Starting local modules")
 	modules := constants.PresetModules[t.deployConfig.Preset]
 	if err := t.startLocalModules(ctx, composePath, modules); err != nil {
 		return fmt.Errorf("failed to start preset modules: %w", err)
