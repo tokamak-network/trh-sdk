@@ -28,6 +28,7 @@ import (
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
 //go:embed artifacts/FaultDisputeGame.json
@@ -548,9 +549,6 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
-	// Sleep for 30 seconds to allow the infrastructure to be fully deployed
-	time.Sleep(30 * time.Second)
-
 	// Wait for AWS CLI and kubectl before EKS configuration
 	if err := t.toolReadiness.WaitFor(ctx, "aws-cli", "kubectl"); err != nil {
 		return fmt.Errorf("tool installation failed before EKS configuration: %w", err)
@@ -682,70 +680,47 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 
 	t.logger.Info("✅ Helm charts installed successfully")
 
-	// Step 9. Wait for network ingress
-	logStep("Waiting for network ingress")
-	ingressAddr, err := utils.WaitForIngressAddress(ctx, namespace, helmReleaseName, 45*time.Minute)
-	if err != nil {
-		t.logger.Error("Error retrieving L2 RPC ingress address", "err", err)
-		return err
-	}
-	l2RPCUrl := "http://" + ingressAddr
-	t.logger.Info("✅ Network deployment completed successfully!")
-	t.logger.Infof("🌐 RPC endpoint: %s", l2RPCUrl)
+	// Steps 9-11: Wait for network ingress and initialize L1-only proxy contracts in parallel.
+	// All init functions (SystemConfig, CDM, OptimismPortal, L2OO, DGF, OP2) use only L1 RPC
+	// and can run concurrently with the ingress wait. initGenesisAnchorState (FP only) requires
+	// L2 RPC so it runs after both goroutines complete.
+	logStep("Waiting for network ingress + initializing L1 proxy contracts in parallel")
 
-	t.deployConfig.K8s = &types.K8sConfig{
-		Namespace: namespace,
+	bedrockCfg, bedrockErr := t.readBedrockDeployConfigTemplate()
+	if bedrockErr != nil {
+		return fmt.Errorf("failed to read bedrock deploy config for contract init: %w", bedrockErr)
 	}
-	t.deployConfig.L2RpcUrl = l2RPCUrl
-	t.deployConfig.L1BeaconURL = inputs.L1BeaconURL
-
-	// Step 10 (FP only). Initialize AnchorStateRegistry genesis anchor state.
-	// Without this, every FaultDisputeGame.initialize() reverts with AnchorRootNotFound because
-	// the registry starts with bytes32(0) as the anchor root for every game type.
-	if t.deployConfig.EnableFraudProof {
-		logStep("Initializing genesis anchor state")
-		if deployedContracts.AnchorStateRegistryProxy == "" {
-			return fmt.Errorf("AnchorStateRegistryProxy address not found in deployed contracts — cannot initialize genesis anchor state")
-		}
-		anchorErr := initGenesisAnchorState(
-			ctx,
-			t.logger,
-			t.deployConfig.L1RPCURL,
-			l2RPCUrl,
-			t.deployConfig.AdminPrivateKey,
-			deployedContracts.AnchorStateRegistryProxy,
-			deployedContracts.ProxyAdmin,
-			deployedContracts.AnchorStateRegistry, // impl addr for StorageSetter fallback restore
-			t.deployConfig.L1ChainID,
-			0, // gameType 0 = CANNON (default respected game type)
-		)
-		if anchorErr != nil {
-			return fmt.Errorf("failed to initialize genesis anchor state (op-proposer will fail with AnchorRootNotFound): %w", anchorErr)
-		}
-		t.logger.Info("✅ Genesis anchor state initialized in AnchorStateRegistry")
+	gasLimitHex := strings.TrimPrefix(bedrockCfg.L2GenesisBlockGasLimit, "0x")
+	gasLimit, parseErr := strconv.ParseUint(gasLimitHex, 16, 64)
+	if parseErr != nil {
+		return fmt.Errorf("invalid L2GenesisBlockGasLimit %q: %w", bedrockCfg.L2GenesisBlockGasLimit, parseErr)
 	}
 
-	// Steps 10/11+ (all paths). Initialize proxy contracts.
-	// tokamak-deployer calls upgrade(proxy, impl) but never initialize(), leaving all proxy
-	// storage slots at zero. Consequences:
-	//   - SystemConfig zero → op-node cannot derive batches (batcherHash=0, gasLimit=0)
-	//   - L1CrossDomainMessenger zero → CDM message passing fails (portal=0)
-	//   - OptimismPortal zero → depositTransaction reverts inside _metered() when
-	//     systemConfig=0 causes address(0).resourceConfig() to return empty bytes
-	{
-		bedrockCfg, bedrockErr := t.readBedrockDeployConfigTemplate()
-		if bedrockErr != nil {
-			return fmt.Errorf("failed to read bedrock deploy config for contract init: %w", bedrockErr)
-		}
-		gasLimitHex := strings.TrimPrefix(bedrockCfg.L2GenesisBlockGasLimit, "0x")
-		gasLimit, parseErr := strconv.ParseUint(gasLimitHex, 16, 64)
-		if parseErr != nil {
-			return fmt.Errorf("invalid L2GenesisBlockGasLimit %q: %w", bedrockCfg.L2GenesisBlockGasLimit, parseErr)
-		}
+	eg, egCtx := errgroup.WithContext(ctx)
 
+	var ingressAddr string
+	eg.Go(func() error {
+		addr, err := utils.WaitForIngressAddress(egCtx, namespace, helmReleaseName, 45*time.Minute)
+		if err != nil {
+			t.logger.Error("Error retrieving L2 RPC ingress address", "err", err)
+			return err
+		}
+		ingressAddr = addr
+		t.logger.Info("✅ Network deployment completed successfully!")
+		t.logger.Infof("🌐 RPC endpoint: http://%s", addr)
+		return nil
+	})
+
+	eg.Go(func() error {
+		// L1-only contract init. Sequential within this goroutine to preserve admin nonce ordering.
+		// tokamak-deployer calls upgrade(proxy, impl) but never initialize(), leaving all proxy
+		// storage slots at zero. Consequences:
+		//   - SystemConfig zero → op-node cannot derive batches (batcherHash=0, gasLimit=0)
+		//   - L1CrossDomainMessenger zero → CDM message passing fails (portal=0)
+		//   - OptimismPortal zero → depositTransaction reverts inside _metered()
 		logStep("Initializing SystemConfig")
 		if scErr := initSystemConfig(
-			ctx,
+			egCtx,
 			t.logger,
 			t.deployConfig.L1RPCURL,
 			t.deployConfig.AdminPrivateKey,
@@ -770,7 +745,7 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 
 		logStep("Initializing L1CrossDomainMessenger")
 		if cdmErr := initL1CrossDomainMessenger(
-			ctx,
+			egCtx,
 			t.logger,
 			t.deployConfig.L1RPCURL,
 			t.deployConfig.AdminPrivateKey,
@@ -788,7 +763,7 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 			// L2OO mode: OptimismPortal (l2Oracle path) + L2OutputOracle.
 			logStep("Initializing OptimismPortal")
 			if portalErr := initOptimismPortal(
-				ctx,
+				egCtx,
 				t.logger,
 				t.deployConfig.L1RPCURL,
 				t.deployConfig.AdminPrivateKey,
@@ -805,7 +780,7 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 			if deployedContracts.L2OutputOracleProxy != "" {
 				logStep("Initializing L2OutputOracle")
 				l2ooErr := initL2OutputOracle(
-					ctx,
+					egCtx,
 					t.logger,
 					t.deployConfig.L1RPCURL,
 					t.deployConfig.AdminPrivateKey,
@@ -839,7 +814,7 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 
 			logStep("Initializing DisputeGameFactory")
 			if dgfErr := initDisputeGameFactory(
-				ctx,
+				egCtx,
 				t.logger,
 				t.deployConfig.L1RPCURL,
 				t.deployConfig.AdminPrivateKey,
@@ -862,7 +837,7 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 
 			logStep("Initializing OptimismPortal2")
 			if portal2Err := initOptimismPortal2(
-				ctx,
+				egCtx,
 				t.logger,
 				t.deployConfig.L1RPCURL,
 				t.deployConfig.AdminPrivateKey,
@@ -880,6 +855,47 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 			}
 			t.logger.Info("✅ OptimismPortal2 initialized")
 		}
+		return nil
+	})
+
+	if err := eg.Wait(); err != nil {
+		return err
+	}
+
+	l2RPCUrl := "http://" + ingressAddr
+	t.deployConfig.K8s = &types.K8sConfig{
+		Namespace: namespace,
+	}
+	t.deployConfig.L2RpcUrl = l2RPCUrl
+	t.deployConfig.L1BeaconURL = inputs.L1BeaconURL
+
+	// Step 12 (FP only). Initialize AnchorStateRegistry genesis anchor state.
+	// Runs after both ingress wait and L1 contract init complete — requires L2 RPC.
+	// DGF does not create games during init, so running initGenesisAnchorState after
+	// initDisputeGameFactory is safe; anchor state just needs to be set before end users create games.
+	// Without this, every FaultDisputeGame.initialize() reverts with AnchorRootNotFound because
+	// the registry starts with bytes32(0) as the anchor root for every game type.
+	if t.deployConfig.EnableFraudProof {
+		logStep("Initializing genesis anchor state")
+		if deployedContracts.AnchorStateRegistryProxy == "" {
+			return fmt.Errorf("AnchorStateRegistryProxy address not found in deployed contracts — cannot initialize genesis anchor state")
+		}
+		anchorErr := initGenesisAnchorState(
+			ctx,
+			t.logger,
+			t.deployConfig.L1RPCURL,
+			l2RPCUrl,
+			t.deployConfig.AdminPrivateKey,
+			deployedContracts.AnchorStateRegistryProxy,
+			deployedContracts.ProxyAdmin,
+			deployedContracts.AnchorStateRegistry, // impl addr for StorageSetter fallback restore
+			t.deployConfig.L1ChainID,
+			0, // gameType 0 = CANNON (default respected game type)
+		)
+		if anchorErr != nil {
+			return fmt.Errorf("failed to initialize genesis anchor state (op-proposer will fail with AnchorRootNotFound): %w", anchorErr)
+		}
+		t.logger.Info("✅ Genesis anchor state initialized in AnchorStateRegistry")
 	}
 
 	backupEnabled := false

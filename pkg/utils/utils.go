@@ -14,6 +14,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tokamak-network/trh-sdk/pkg/constants"
@@ -196,9 +197,21 @@ func StringToBytes32(s string) []uint64 {
 	return result
 }
 
+// elbNSCache caches authoritative nameserver addresses per ELB DNS zone.
+// ELB NS records are stable for the lifetime of the load balancer, so a 5-minute
+// TTL avoids repeated LookupNS calls during rapid polling loops.
+var elbNSCache sync.Map // key: zone string, value: elbNSCacheEntry
+
+type elbNSCacheEntry struct {
+	nsAddr    string
+	expiresAt time.Time
+}
+
 // newELBDialer creates a net.Dialer that resolves AWS ELB hostnames by querying
 // the authoritative Route53 nameservers directly, bypassing public DNS cache
 // propagation delays (typically 5-10 minutes for newly created ELB records).
+// NS lookup results are cached for 5 minutes to avoid repeated resolver calls
+// during polling loops.
 func newELBDialer(ctx context.Context, elbHostname string) *net.Dialer {
 	parts := strings.SplitN(elbHostname, ".", 2)
 	if len(parts) < 2 {
@@ -206,17 +219,30 @@ func newELBDialer(ctx context.Context, elbHostname string) *net.Dialer {
 	}
 	zone := parts[1]
 
-	nss, err := net.DefaultResolver.LookupNS(ctx, zone)
-	if err != nil || len(nss) == 0 {
-		return &net.Dialer{Timeout: 30 * time.Second}
+	var nsAddr string
+	if cached, ok := elbNSCache.Load(zone); ok {
+		entry := cached.(elbNSCacheEntry)
+		if time.Now().Before(entry.expiresAt) {
+			nsAddr = entry.nsAddr
+		}
 	}
 
-	nsHost := strings.TrimSuffix(nss[0].Host, ".")
-	addrs, err := net.DefaultResolver.LookupHost(ctx, nsHost)
-	if err != nil || len(addrs) == 0 {
-		return &net.Dialer{Timeout: 30 * time.Second}
+	if nsAddr == "" {
+		nss, err := net.DefaultResolver.LookupNS(ctx, zone)
+		if err != nil || len(nss) == 0 {
+			return &net.Dialer{Timeout: 30 * time.Second}
+		}
+		nsHost := strings.TrimSuffix(nss[0].Host, ".")
+		addrs, err := net.DefaultResolver.LookupHost(ctx, nsHost)
+		if err != nil || len(addrs) == 0 {
+			return &net.Dialer{Timeout: 30 * time.Second}
+		}
+		nsAddr = net.JoinHostPort(addrs[0], "53")
+		elbNSCache.Store(zone, elbNSCacheEntry{
+			nsAddr:    nsAddr,
+			expiresAt: time.Now().Add(5 * time.Minute),
+		})
 	}
-	nsAddr := net.JoinHostPort(addrs[0], "53")
 
 	authResolver := &net.Resolver{
 		PreferGo: true,
@@ -249,17 +275,28 @@ func NewELBHTTPClient(ctx context.Context, rawURL string) *http.Client {
 	}
 }
 
-// IsURLReachable checks if a URL is publicly reachable via HTTP.
+// IsURLReachableCtx checks if a URL is publicly reachable via HTTP, respecting ctx cancellation.
 // For AWS ELB URLs it queries authoritative DNS directly to avoid cache propagation delays.
-func IsURLReachable(rawURL string) bool {
-	client := NewELBHTTPClient(context.Background(), rawURL)
-	resp, err := client.Get(rawURL)
+func IsURLReachableCtx(ctx context.Context, rawURL string) bool {
+	client := NewELBHTTPClient(ctx, rawURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("⏳ Waiting for LoadBalancer to be publicly reachable...")
 		return false
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode < 500
+}
+
+// IsURLReachable checks if a URL is publicly reachable via HTTP.
+// For AWS ELB URLs it queries authoritative DNS directly to avoid cache propagation delays.
+// Deprecated: prefer IsURLReachableCtx to propagate context cancellation.
+func IsURLReachable(rawURL string) bool {
+	return IsURLReachableCtx(context.Background(), rawURL)
 }
 
 func GetContractAddressFromOutput(filePath string) (map[string]string, error) {

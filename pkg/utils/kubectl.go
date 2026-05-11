@@ -371,7 +371,7 @@ func WaitForIngressAddress(ctx context.Context, namespace, name string, timeout 
 			}
 		}
 		select {
-		case <-time.After(15 * time.Second):
+		case <-time.After(5 * time.Second):
 		case <-ctx.Done():
 			return "", ctx.Err()
 		}

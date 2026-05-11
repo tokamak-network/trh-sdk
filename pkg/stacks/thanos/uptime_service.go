@@ -218,7 +218,7 @@ func (t *ThanosStack) InstallUptimeService(ctx context.Context, config *types.Up
 	checkInterval := 5 * time.Second
 
 	for {
-		if utils.IsURLReachable(uptimeURL) {
+		if utils.IsURLReachableCtx(ctx, uptimeURL) {
 			t.logger.Info("✅ LoadBalancer is publicly reachable, configuring monitors...")
 			// Configure default monitors automatically
 			if err := t.handleDefaultMonitorSetup(ctx, uptimeURL, config.Namespace); err != nil {
