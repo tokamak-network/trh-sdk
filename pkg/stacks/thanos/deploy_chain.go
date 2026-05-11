@@ -2393,9 +2393,15 @@ func (t *ThanosStack) installPresetModules(ctx context.Context) error {
 			if err != nil {
 				t.logger.Errorw("Failed to get monitoring config", "err", err)
 				installErr = err
-			} else if _, err := t.InstallMonitoring(ctx, monitoringCfg); err != nil {
+			} else if monitoringInfo, err := t.InstallMonitoring(ctx, monitoringCfg); err != nil {
 				t.logger.Errorw("Failed to install monitoring", "err", err)
 				installErr = err
+			} else {
+				t.deployConfig.GrafanaAdminPassword = monitoringInput.AdminPassword
+				if writeErr := t.writeSettings(); writeErr != nil {
+					t.logger.Warnw("Failed to persist Grafana admin password", "err", writeErr)
+				}
+				t.logger.Infow("Grafana admin password saved to settings", "grafana_url", monitoringInfo.GrafanaURL)
 			}
 		}
 	}

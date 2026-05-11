@@ -9,6 +9,7 @@ type ChainInformation struct {
 	RollupFilePath   string `json:"rollup_file_path,omitempty"`
 	DeploymentPath   string `json:"deployment_path,omitempty"`
 	ContractsPath    string `json:"contracts_path,omitempty"`
-	MonitoringUrl    string `json:"monitoring_url,omitempty"`
-	DeployConfigPath string `json:"deploy_config_path,omitempty"`
+	MonitoringUrl        string `json:"monitoring_url,omitempty"`
+	GrafanaAdminPassword string `json:"grafana_admin_password,omitempty"`
+	DeployConfigPath     string `json:"deploy_config_path,omitempty"`
 }

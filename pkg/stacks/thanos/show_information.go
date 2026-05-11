@@ -132,14 +132,15 @@ func (t *ThanosStack) ShowInformation(ctx context.Context) (*types.ChainInformat
 	}
 
 	return &types.ChainInformation{
-		L2ChainID:      int(t.deployConfig.L2ChainID),
-		L2RpcUrl:       l2RpcUrl,
-		BridgeUrl:      bridgeUrl,
-		BlockExplorer:  blockExplorerUrl,
-		L1ChainID:      int(t.deployConfig.L1ChainID),
-		DeploymentPath: t.deployConfig.DeploymentFilePath,
-		MonitoringUrl:  monitoringUrl,
-		RollupFilePath: t.rollupConfigPath(),
+		L2ChainID:            int(t.deployConfig.L2ChainID),
+		L2RpcUrl:             l2RpcUrl,
+		BridgeUrl:            bridgeUrl,
+		BlockExplorer:        blockExplorerUrl,
+		L1ChainID:            int(t.deployConfig.L1ChainID),
+		DeploymentPath:       t.deployConfig.DeploymentFilePath,
+		MonitoringUrl:        monitoringUrl,
+		GrafanaAdminPassword: t.deployConfig.GrafanaAdminPassword,
+		RollupFilePath:       t.rollupConfigPath(),
 	}, nil
 }
 

@@ -170,6 +170,9 @@ type Config struct {
 
 	// CrossTrade local deployment contracts (set after DeployCrossTradeLocal succeeds)
 	CrossTradeContracts *CrossTradeLocalContracts `json:"cross_trade_contracts,omitempty"`
+
+	// Grafana admin password set by preset auto-install (local deploy only)
+	GrafanaAdminPassword string `json:"grafana_admin_password,omitempty"`
 }
 
 // CrossTradeLocalContracts holds deployed contract addresses for the local CrossTrade stack.
