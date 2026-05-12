@@ -61,8 +61,8 @@ func TestMaybeFundAAAdmin_PatchesGenesis_WhenNeedsAASetup(t *testing.T) {
 	var entry map[string]string
 	json.Unmarshal(raw, &entry)
 
-	// Expected: 2 × DefaultEntryPointDeposit = 2e18 = 0x1bc16d674ec80000
-	expected := "0x" + new(big.Int).Mul(constants.DefaultEntryPointDeposit, big.NewInt(2)).Text(16)
+	// Expected: 6 × DefaultEntryPointDeposit = 6e18
+	expected := "0x" + new(big.Int).Mul(constants.DefaultEntryPointDeposit, big.NewInt(6)).Text(16)
 	if entry["balance"] != expected {
 		t.Errorf("admin balance = %s, want %s", entry["balance"], expected)
 	}
@@ -110,7 +110,7 @@ func TestMaybeFundAAAdmin_UpdatesExistingAllocEntry(t *testing.T) {
 	// balance should be updated
 	var balance string
 	json.Unmarshal(entry["balance"], &balance)
-	expected := "0x" + new(big.Int).Mul(constants.DefaultEntryPointDeposit, big.NewInt(2)).Text(16)
+	expected := "0x" + new(big.Int).Mul(constants.DefaultEntryPointDeposit, big.NewInt(6)).Text(16)
 	if balance != expected {
 		t.Errorf("balance = %s, want %s", balance, expected)
 	}

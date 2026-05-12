@@ -394,17 +394,17 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 	}
 
 	// Calculate totalSteps based on conditional init paths.
-	// base infra steps (all modes): env, copy-artifacts, tf-apply, eks-config,
-	//   k8s-check, helm-repo, helm-pvc, helm-full, wait-ingress = 9
-	// + SystemConfig + CDM = 11
-	// FP adds: anchorState + DGF + Portal2 = 14
-	// non-FP adds: Portal = 12, + L2OO if present = 13
+	// base infra steps (all modes): env, genesis-sync, copy-artifacts, tf-apply, eks-config,
+	//   k8s-check, helm-repo, helm-pvc, helm-full, wait-ingress = 10
+	// + SystemConfig + CDM = 12
+	// FP adds: anchorState + DGF + Portal2 = 15
+	// non-FP adds: Portal = 13, + L2OO if present = 14
 	hasL2OO := !t.deployConfig.EnableFraudProof && deployedContracts.L2OutputOracleProxy != ""
-	stageBTotalSteps := 12 // non-FP, no L2OO baseline
+	stageBTotalSteps := 13 // non-FP, no L2OO baseline
 	if t.deployConfig.EnableFraudProof {
-		stageBTotalSteps = 14
+		stageBTotalSteps = 15
 	} else if hasL2OO {
-		stageBTotalSteps = 13
+		stageBTotalSteps = 14
 	}
 	stageBStep := 0
 	logStep := func(desc string) {
@@ -477,7 +477,52 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 		return err
 	}
 
-	// Step 2: Copy L1 artifacts to Terraform config-files/
+	// Step 2: Verify rollup.json genesis.l2.hash matches genesis.json block 0 hash.
+	// maybeFundAAAdmin (run during DeployContracts) patches genesis.json alloc, changing
+	// the block hash. If rollup.json was not re-synced (e.g., stacks deployed before this
+	// fix), op-node CrashLoopBackOff at startup with "l2_genesis_block_hash mismatch".
+	logStep("Checking genesis/rollup hash consistency")
+	{
+		genesisSyncRegenerate := func(syncCtx context.Context, rollupOutPath string) error {
+			homeDir, homeErr := os.UserHomeDir()
+			if homeErr != nil {
+				return fmt.Errorf("get home dir for genesis sync: %w", homeErr)
+			}
+			binaryPath, binErr := ensureTokamakDeployer(filepath.Join(homeDir, ".trh", "bin"))
+			if binErr != nil {
+				return fmt.Errorf("ensure tokamak-deployer for genesis sync: %w", binErr)
+			}
+			tokamakThanosDir := fmt.Sprintf("%s/tokamak-thanos", t.deploymentPath)
+			deployOutputPath := filepath.Join(t.deploymentPath, "deploy-output.json")
+			deployConfigFilePath := filepath.Join(t.deploymentPath, "deploy-config.json")
+			stagedAddrPath, _, prepErr := prepareL2GenesisInputs(tokamakThanosDir, deployOutputPath, deployConfigFilePath, t.deployConfig.L2ChainID)
+			if prepErr != nil {
+				return fmt.Errorf("prepare genesis inputs for genesis sync: %w", prepErr)
+			}
+			// Use a separate temp file for OutPath to avoid truncating BaseGenesisPath
+			// before it is read (both would be the same file otherwise).
+			tmpOut, tmpErr := os.CreateTemp("", "genesis-sync-*.json")
+			if tmpErr != nil {
+				return fmt.Errorf("create temp genesis out for genesis sync: %w", tmpErr)
+			}
+			tmpOutPath := tmpOut.Name()
+			tmpOut.Close()
+			defer os.Remove(tmpOutPath)
+			return runGenerateGenesis(syncCtx, binaryPath, genesisOpts{
+				DeployOutputPath: stagedAddrPath,
+				ConfigPath:       deployConfigFilePath,
+				OutPath:          tmpOutPath,
+				RollupOutPath:    rollupOutPath,
+				BaseGenesisPath:  t.genesisConfigPath(),
+			}, t.output)
+		}
+		if syncErr := ensureRollupGenesisHashSync(ctx, t.genesisConfigPath(), t.rollupConfigPath(), genesisSyncRegenerate, t.logger); syncErr != nil {
+			t.logger.Error("Genesis/rollup hash sync preflight failed", "err", syncErr)
+			return fmt.Errorf("genesis/rollup hash sync preflight: %w", syncErr)
+		}
+	}
+
+	// Step 3: Copy L1 artifacts to Terraform config-files/
 	logStep("Copying L1 artifacts")
 	if err := utils.CopyFile(
 		t.rollupConfigPath(),

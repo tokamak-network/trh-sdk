@@ -14,7 +14,7 @@ import (
 
 // maybeFundAAAdmin injects genesis balance for the AA admin wallet when AA setup is needed.
 // AA setup is required for all presets when fee token is not TON.
-// Funded amount: 2 × DefaultEntryPointDeposit (1× for EntryPoint deposit, 1× for setup gas).
+// Funded amount: 6 × DefaultEntryPointDeposit (5× for one refill cycle, 1× for setup gas).
 func maybeFundAAAdmin(genesisPath, preset, feeToken, adminPrivKey string) error {
 	if !constants.NeedsAASetup(preset, feeToken) {
 		return nil
@@ -27,7 +27,7 @@ func maybeFundAAAdmin(genesisPath, preset, feeToken, adminPrivKey string) error 
 }
 
 // patchGenesisWithAAAdminFunding ensures the AA admin's genesis balance is at least
-// 2 × DefaultEntryPointDeposit wei, preserving all other alloc entries and fields.
+// 6 × DefaultEntryPointDeposit wei, preserving all other alloc entries and fields.
 // If the admin already has a higher balance, it is not lowered.
 func patchGenesisWithAAAdminFunding(genesisPath string, adminAddr common.Address) error {
 	data, err := os.ReadFile(genesisPath)
@@ -48,8 +48,8 @@ func patchGenesisWithAAAdminFunding(genesisPath string, adminAddr common.Address
 		alloc = make(map[string]json.RawMessage)
 	}
 
-	// 2 × DefaultEntryPointDeposit = 2e18 wei
-	minimum := new(big.Int).Mul(constants.DefaultEntryPointDeposit, big.NewInt(2))
+	// 6 × DefaultEntryPointDeposit = 6e18 wei
+	minimum := new(big.Int).Mul(constants.DefaultEntryPointDeposit, big.NewInt(6))
 
 	// Find existing entry using case/prefix-insensitive key lookup.
 	// Genesis alloc keys vary: lowercase 0x, checksum (EIP-55), uppercase 0X, no prefix.
