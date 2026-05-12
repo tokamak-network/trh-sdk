@@ -22,6 +22,22 @@ import (
 // on Sepolia automatically skips the 9 impl deploys and reuses the embedded
 // addresses — saving ~1.5-3 min per Sepolia deploy with zero configuration.
 //
+// v0.0.12: go-ethereum bumped v1.14.0 → v1.17.1 in tokamak-deployer. Fixes
+// genesis/rollup hash mismatch: with Prague (EIP-7685) active, v1.14.0 excluded
+// RequestsHash from block 0 computation while trh-sdk (v1.17.x) included it,
+// causing ensureRollupGenesisHashSync to fail on every AA-enabled deploy after
+// maybeFundAAAdmin patched genesis.json alloc.
+//
+// v0.0.11: MultiTokenPaymaster + USDC artifacts embedded in binary; missing-
+// artifact errors hardened. go-ethereum v1.14.0 (pre-fix — genesis hash mismatch
+// still present in this version).
+//
+// v0.0.10: Sepolia (chainId 11155111) embedded registry populated with the 9
+// reuse-target impls verified against v0.0.9/v0.0.10 deployedBytecode (seeded
+// 2026-05-07). With this version, `trh-sdk deploy-contracts --reuse-deployment`
+// on Sepolia automatically skips the 9 impl deploys and reuses the embedded
+// addresses — saving ~1.5-3 min per Sepolia deploy with zero configuration.
+//
 // v0.0.9: --reuse-deployment / --reuse-impls / --reuse-strict flags introduced.
 // The deployer can now skip re-deploying the 9 Proxy-backed L1 implementation
 // contracts when they match an embedded or CLI-supplied registry. Pre-deploy
@@ -46,7 +62,7 @@ import (
 // v0.0.5: --gas-price / --gas-price-multiplier flags introduced. trh-sdk now
 // resolves a conservative fixed gas price once and passes it via --gas-price,
 // so tokamak-deployer no longer calls SuggestGasPrice per TX.
-const TokamakDeployerVersion = "v0.0.11"
+const TokamakDeployerVersion = "v0.0.12"
 
 const tokamakDeployerRepo = "tokamak-network/tokamak-thanos"
 
