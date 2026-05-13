@@ -804,6 +804,22 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 		}
 		t.logger.Info("✅ L1CrossDomainMessenger initialized")
 
+		logStep("Initializing L1StandardBridge")
+		if bridgeErr := initL1StandardBridge(
+			egCtx,
+			t.logger,
+			t.deployConfig.L1RPCURL,
+			t.deployConfig.AdminPrivateKey,
+			deployedContracts.L1StandardBridgeProxy,
+			deployedContracts.L1CrossDomainMessengerProxy,
+			deployedContracts.SuperchainConfigProxy,
+			deployedContracts.SystemConfigProxy,
+			t.deployConfig.L1ChainID,
+		); bridgeErr != nil {
+			return fmt.Errorf("failed to initialize L1StandardBridge: %w", bridgeErr)
+		}
+		t.logger.Info("✅ L1StandardBridge initialized")
+
 		if !t.deployConfig.EnableFraudProof {
 			// L2OO mode: OptimismPortal (l2Oracle path) + L2OutputOracle.
 			logStep("Initializing OptimismPortal")
@@ -1586,6 +1602,102 @@ func initL1CrossDomainMessenger(
 		return fmt.Errorf("L1CrossDomainMessenger.initialize() tx reverted (tx: %s)", signedTx.Hash().Hex())
 	}
 	logger.Info("✅ L1CrossDomainMessenger initialized successfully")
+	return nil
+}
+
+// initL1StandardBridge calls initialize(CrossDomainMessenger, SuperchainConfig, SystemConfig)
+// on the L1StandardBridgeProxy. tokamak-deployer only calls upgrade(proxy, impl), so the
+// initialize() initializer is never invoked, leaving messenger = address(0) and
+// bridgeETH/bridgeERC20 always reverting inside the messenger check.
+// Idempotency: skipped if messenger() already returns a non-zero address.
+func initL1StandardBridge(
+	ctx context.Context,
+	logger *zap.SugaredLogger,
+	l1RPCURL string,
+	adminPrivateKey string,
+	bridgeProxyAddr string,
+	cdmProxyAddr string,
+	superchainConfigAddr string,
+	systemConfigAddr string,
+	l1ChainID uint64,
+) error {
+	for _, pair := range []struct{ name, val string }{
+		{"bridgeProxyAddr", bridgeProxyAddr},
+		{"cdmProxyAddr", cdmProxyAddr},
+		{"superchainConfigAddr", superchainConfigAddr},
+		{"systemConfigAddr", systemConfigAddr},
+	} {
+		if pair.val == "" {
+			return fmt.Errorf("initL1StandardBridge: %s is empty", pair.name)
+		}
+	}
+
+	l1Client, err := ethclient.DialContext(ctx, l1RPCURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to L1 RPC for L1StandardBridge init: %w", err)
+	}
+	defer l1Client.Close()
+
+	bridgeAddr := common.HexToAddress(bridgeProxyAddr)
+
+	// Idempotency guard: read messenger() slot. If already non-zero, bridge is initialized.
+	messengerSelector := crypto.Keccak256([]byte("messenger()"))[:4]
+	if result, callErr := l1Client.CallContract(ctx, ethereum.CallMsg{To: &bridgeAddr, Data: messengerSelector}, nil); callErr == nil && len(result) >= 32 {
+		existingMessenger := common.BytesToAddress(result[12:32])
+		if existingMessenger != (common.Address{}) {
+			logger.Infof("✅ L1StandardBridge already initialized (messenger=%s), skipping", existingMessenger.Hex())
+			return nil
+		}
+	}
+
+	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(adminPrivateKey, "0x"))
+	if err != nil {
+		return fmt.Errorf("invalid admin private key for L1StandardBridge init: %w", err)
+	}
+	adminAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	chainID := big.NewInt(int64(l1ChainID))
+
+	// Build initialize(address,address,address) calldata.
+	// Params: (CrossDomainMessenger, SuperchainConfig, SystemConfig)
+	selector := crypto.Keccak256([]byte("initialize(address,address,address)"))[:4]
+	calldata := make([]byte, 100)
+	copy(calldata[0:4], selector)
+	copy(calldata[16:36], common.HexToAddress(cdmProxyAddr).Bytes())          // slot 0: _messenger
+	copy(calldata[48:68], common.HexToAddress(superchainConfigAddr).Bytes())  // slot 1: _superchainConfig
+	copy(calldata[80:100], common.HexToAddress(systemConfigAddr).Bytes())     // slot 2: _systemConfig
+
+	if _, simErr := l1Client.CallContract(ctx, ethereum.CallMsg{From: adminAddr, To: &bridgeAddr, Data: calldata}, nil); simErr != nil {
+		return fmt.Errorf("L1StandardBridge initialize pre-flight failed: %w", simErr)
+	}
+
+	nonce, err := l1Client.PendingNonceAt(ctx, adminAddr)
+	if err != nil {
+		return fmt.Errorf("failed to get nonce for L1StandardBridge init: %w", err)
+	}
+	gasPrice, err := l1Client.SuggestGasPrice(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get gas price for L1StandardBridge init: %w", err)
+	}
+	gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(2))
+
+	tx := ethtypes.NewTransaction(nonce, bridgeAddr, big.NewInt(0), 300_000, gasPrice, calldata)
+	signedTx, err := ethtypes.SignTx(tx, ethtypes.NewEIP155Signer(chainID), privKey)
+	if err != nil {
+		return fmt.Errorf("failed to sign L1StandardBridge init tx: %w", err)
+	}
+	if err := l1Client.SendTransaction(ctx, signedTx); err != nil {
+		return fmt.Errorf("failed to send L1StandardBridge init tx: %w", err)
+	}
+	logger.Infof("L1StandardBridge.initialize() tx sent: %s (waiting for receipt...)", signedTx.Hash().Hex())
+
+	receipt, err := bind.WaitMined(ctx, l1Client, signedTx)
+	if err != nil {
+		return fmt.Errorf("failed to wait for L1StandardBridge init tx receipt: %w", err)
+	}
+	if receipt.Status != ethtypes.ReceiptStatusSuccessful {
+		return fmt.Errorf("L1StandardBridge.initialize() tx reverted (tx: %s)", signedTx.Hash().Hex())
+	}
+	logger.Info("✅ L1StandardBridge initialized successfully")
 	return nil
 }
 
@@ -2522,4 +2634,103 @@ func (t *ThanosStack) installPresetModules(ctx context.Context) error {
 	}
 
 	return installErr
+}
+
+// setL1CrossTradeChainInfo calls setChainInfo(cdm, l2CrossTrade, l2ChainId) on the shared
+// L1CrossTradeProxy to register the deployed L2 chain. The manual path does this via the
+// SetChainInfoL1_L2L1.sol forge script; AWS auto-install must replicate it on-chain so that
+// L1CrossTradeProxy.chainData(l2ChainId) returns the registered messenger and L2 proxy.
+// Without this call, provideCT reverts because the L1 contract has no record of the L2 chain.
+// Idempotency: skipped if chainData(l2ChainId) already returns a non-zero crossDomainMessenger.
+func setL1CrossTradeChainInfo(
+	ctx context.Context,
+	logger *zap.SugaredLogger,
+	l1RPCURL string,
+	adminPrivateKey string,
+	l1CrossTradeProxy string,
+	l1CrossDomainMessenger string,
+	l2CrossTradeProxy string,
+	l2ChainID uint64,
+	l1ChainID uint64,
+) error {
+	for _, pair := range []struct{ name, val string }{
+		{"l1CrossTradeProxy", l1CrossTradeProxy},
+		{"l1CrossDomainMessenger", l1CrossDomainMessenger},
+		{"l2CrossTradeProxy", l2CrossTradeProxy},
+	} {
+		if pair.val == "" {
+			return fmt.Errorf("setL1CrossTradeChainInfo: %s is empty", pair.name)
+		}
+	}
+
+	l1Client, err := ethclient.DialContext(ctx, l1RPCURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to L1 RPC for setL1CrossTradeChainInfo: %w", err)
+	}
+	defer l1Client.Close()
+
+	ctAddr := common.HexToAddress(l1CrossTradeProxy)
+
+	// Idempotency guard: read chainData(l2ChainId). If crossDomainMessenger is non-zero, already registered.
+	// ABI: chainData(uint256) returns (address crossDomainMessenger, address l2CrossTradeContract)
+	chainDataSelector := crypto.Keccak256([]byte("chainData(uint256)"))[:4]
+	l2ChainIDBig := new(big.Int).SetUint64(l2ChainID)
+	checkCalldata := append(chainDataSelector, common.LeftPadBytes(l2ChainIDBig.Bytes(), 32)...)
+	if result, callErr := l1Client.CallContract(ctx, ethereum.CallMsg{To: &ctAddr, Data: checkCalldata}, nil); callErr == nil && len(result) >= 32 {
+		existingCDM := common.BytesToAddress(result[12:32])
+		if existingCDM != (common.Address{}) {
+			logger.Infof("✅ L1CrossTradeProxy already has chainData for l2ChainId=%d (cdm=%s), skipping", l2ChainID, existingCDM.Hex())
+			return nil
+		}
+	}
+
+	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(adminPrivateKey, "0x"))
+	if err != nil {
+		return fmt.Errorf("invalid admin private key for setL1CrossTradeChainInfo: %w", err)
+	}
+	adminAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	chainID := big.NewInt(int64(l1ChainID))
+
+	// Build setChainInfo(address,address,uint256) calldata.
+	// Params: (_crossDomainMessenger, _l2CrossTrade, _l2chainId)
+	selector := crypto.Keccak256([]byte("setChainInfo(address,address,uint256)"))[:4]
+	calldata := make([]byte, 100)
+	copy(calldata[0:4], selector)
+	copy(calldata[16:36], common.HexToAddress(l1CrossDomainMessenger).Bytes()) // slot 0
+	copy(calldata[48:68], common.HexToAddress(l2CrossTradeProxy).Bytes())      // slot 1
+	copy(calldata[68:100], common.LeftPadBytes(l2ChainIDBig.Bytes(), 32))      // slot 2
+
+	if _, simErr := l1Client.CallContract(ctx, ethereum.CallMsg{From: adminAddr, To: &ctAddr, Data: calldata}, nil); simErr != nil {
+		return fmt.Errorf("L1CrossTradeProxy.setChainInfo pre-flight failed: %w", simErr)
+	}
+
+	nonce, err := l1Client.PendingNonceAt(ctx, adminAddr)
+	if err != nil {
+		return fmt.Errorf("failed to get nonce for setL1CrossTradeChainInfo: %w", err)
+	}
+	gasPrice, err := l1Client.SuggestGasPrice(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get gas price for setL1CrossTradeChainInfo: %w", err)
+	}
+	gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(2))
+
+	tx := ethtypes.NewTransaction(nonce, ctAddr, big.NewInt(0), 200_000, gasPrice, calldata)
+	signedTx, err := ethtypes.SignTx(tx, ethtypes.NewEIP155Signer(chainID), privKey)
+	if err != nil {
+		return fmt.Errorf("failed to sign setChainInfo tx: %w", err)
+	}
+	if err := l1Client.SendTransaction(ctx, signedTx); err != nil {
+		return fmt.Errorf("failed to send setChainInfo tx: %w", err)
+	}
+	logger.Infof("L1CrossTradeProxy.setChainInfo() tx sent: %s (waiting for receipt...)", signedTx.Hash().Hex())
+
+	receipt, err := bind.WaitMined(ctx, l1Client, signedTx)
+	if err != nil {
+		return fmt.Errorf("failed to wait for setChainInfo tx receipt: %w", err)
+	}
+	if receipt.Status != ethtypes.ReceiptStatusSuccessful {
+		return fmt.Errorf("L1CrossTradeProxy.setChainInfo() tx reverted (tx: %s)", signedTx.Hash().Hex())
+	}
+	logger.Infof("✅ L1CrossTradeProxy.setChainInfo registered l2ChainId=%d", l2ChainID)
+	return nil
 }
