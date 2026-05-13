@@ -155,7 +155,7 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 	hasL2OO := !t.deployConfig.EnableFraudProof && deployedContracts.L2OutputOracleProxy != ""
 	totalSteps := 7
 	if t.deployConfig.EnableFraudProof {
-		totalSteps = 9
+		totalSteps = 10 // 8 shared + "Waiting for L2 genesis block" + "Submitting anchor state to L1"
 	} else if hasL2OO {
 		totalSteps = 8
 	}
@@ -184,9 +184,9 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 		return fmt.Errorf("failed to start core services: %w", err)
 	}
 
-	// Step 4 (fraud proof only): Initialize AnchorStateRegistry
+	// Steps 4-5 (fraud proof only): Initialize AnchorStateRegistry.
+	// onProgress emits two substeps: "Waiting for L2 genesis block" + "Submitting anchor state to L1".
 	if t.deployConfig.EnableFraudProof {
-		logStep("Initializing genesis anchor state")
 		if deployedContracts.AnchorStateRegistryProxy == "" {
 			return fmt.Errorf("AnchorStateRegistryProxy address not found in deployed contracts — cannot initialize genesis anchor state")
 		}
@@ -205,6 +205,7 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 			deployedContracts.AnchorStateRegistry, // impl addr for StorageSetter fallback restore
 			t.deployConfig.L1ChainID,
 			0, // gameType 0 = CANNON
+			logStep,
 		)
 		if anchorErr != nil {
 			return fmt.Errorf("failed to initialize genesis anchor state (op-proposer will fail with AnchorRootNotFound): %w", anchorErr)

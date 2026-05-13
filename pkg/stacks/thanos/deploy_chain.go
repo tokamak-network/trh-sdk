@@ -397,12 +397,12 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 	// base infra steps (all modes): env, genesis-sync, copy-artifacts, tf-apply, eks-config,
 	//   k8s-check, helm-repo, helm-pvc, helm-full, wait-ingress = 10
 	// + SystemConfig + CDM = 12
-	// FP adds: anchorState + DGF + Portal2 = 15
+	// FP adds: DGF + Portal2 = 14, then initGenesisAnchorState emits 2 more via onProgress = 16
 	// non-FP adds: Portal = 13, + L2OO if present = 14
 	hasL2OO := !t.deployConfig.EnableFraudProof && deployedContracts.L2OutputOracleProxy != ""
 	stageBTotalSteps := 13 // non-FP, no L2OO baseline
 	if t.deployConfig.EnableFraudProof {
-		stageBTotalSteps = 15
+		stageBTotalSteps = 16 // 14 shared + "Waiting for L2 genesis block" + "Submitting anchor state to L1"
 	} else if hasL2OO {
 		stageBTotalSteps = 14
 	}
@@ -914,14 +914,15 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 	t.deployConfig.L2RpcUrl = l2RPCUrl
 	t.deployConfig.L1BeaconURL = inputs.L1BeaconURL
 
-	// Step 12 (FP only). Initialize AnchorStateRegistry genesis anchor state.
+	// Steps 15-16 (FP only): Initialize AnchorStateRegistry genesis anchor state.
+	// initGenesisAnchorState emits two logStep calls via onProgress: "Waiting for L2 genesis block"
+	// (covers the ~15-18 min op-geth startup wait) and "Submitting anchor state to L1".
 	// Runs after both ingress wait and L1 contract init complete — requires L2 RPC.
 	// DGF does not create games during init, so running initGenesisAnchorState after
 	// initDisputeGameFactory is safe; anchor state just needs to be set before end users create games.
 	// Without this, every FaultDisputeGame.initialize() reverts with AnchorRootNotFound because
 	// the registry starts with bytes32(0) as the anchor root for every game type.
 	if t.deployConfig.EnableFraudProof {
-		logStep("Initializing genesis anchor state")
 		if deployedContracts.AnchorStateRegistryProxy == "" {
 			return fmt.Errorf("AnchorStateRegistryProxy address not found in deployed contracts — cannot initialize genesis anchor state")
 		}
@@ -936,6 +937,7 @@ func (t *ThanosStack) DeployAWSStageB(ctx context.Context, inputs *DeployInfraIn
 			deployedContracts.AnchorStateRegistry, // impl addr for StorageSetter fallback restore
 			t.deployConfig.L1ChainID,
 			0, // gameType 0 = CANNON (default respected game type)
+			logStep,
 		)
 		if anchorErr != nil {
 			return fmt.Errorf("failed to initialize genesis anchor state (op-proposer will fail with AnchorRootNotFound): %w", anchorErr)
@@ -1354,10 +1356,12 @@ func initGenesisAnchorState(
 	implAddr string,
 	l1ChainID uint64,
 	gameType uint32,
+	onProgress func(string),
 ) error {
 	// 1. Connect to L2 and wait for genesis block.
 	// Use a custom HTTP client with authoritative DNS to bypass public DNS cache
 	// propagation delays for newly created AWS ELB hostnames (saves ~8 minutes).
+	onProgress("Waiting for L2 genesis block")
 	httpClient := utils.NewELBHTTPClient(ctx, l2RPCURL)
 	rpcClient, err := rpc.DialOptions(ctx, l2RPCURL, rpc.WithHTTPClient(httpClient))
 	if err != nil {
@@ -1373,7 +1377,11 @@ func initGenesisAnchorState(
 			break
 		}
 		logger.Warnf("Waiting for L2 genesis block (attempt %d/3600): %v", attempt, err)
-		time.Sleep(5 * time.Second)
+		select {
+		case <-time.After(5 * time.Second):
+		case <-ctx.Done():
+			return fmt.Errorf("L2 genesis block unavailable (context cancelled after %d attempts): %w", attempt, ctx.Err())
+		}
 	}
 	if err != nil {
 		return fmt.Errorf("L2 genesis block unavailable after retries: %w", err)
@@ -1406,6 +1414,7 @@ func initGenesisAnchorState(
 	// calldata[68:100] = 0 already (genesis l2BlockNumber = 0)
 
 	// 4. Connect to L1 and send transaction from admin (= guardian).
+	onProgress("Submitting anchor state to L1")
 	l1Client, err := ethclient.DialContext(ctx, l1RPCURL)
 	if err != nil {
 		return fmt.Errorf("failed to connect to L1 RPC: %w", err)
