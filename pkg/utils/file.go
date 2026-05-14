@@ -83,7 +83,7 @@ func ReadConfigFromJSONFile(deploymentPath string) (*types.Config, error) {
 
 	fileExist := CheckFileExists(filePath)
 	if !fileExist {
-		return nil, nil
+		return &types.Config{}, nil
 	}
 
 	data, err := os.ReadFile(filePath)
