@@ -276,6 +276,25 @@ func (t *ThanosStack) deployLocalNetwork(ctx context.Context) error {
 	}
 	t.logger.Info("✅ L1CrossDomainMessenger initialized")
 
+	// Initialize L1StandardBridge. tokamak-deployer upgrade(proxy, impl) does not call
+	// initialize(), leaving messenger = address(0) and bridgeETH/bridgeERC20 always reverting.
+	logStep("Initializing L1StandardBridge")
+	bridgeErr := initL1StandardBridge(
+		ctx,
+		t.logger,
+		t.deployConfig.L1RPCURL,
+		t.deployConfig.AdminPrivateKey,
+		deployedContracts.L1StandardBridgeProxy,
+		deployedContracts.L1CrossDomainMessengerProxy,
+		deployedContracts.SuperchainConfigProxy,
+		deployedContracts.SystemConfigProxy,
+		t.deployConfig.L1ChainID,
+	)
+	if bridgeErr != nil {
+		return fmt.Errorf("failed to initialize L1StandardBridge: %w", bridgeErr)
+	}
+	t.logger.Info("✅ L1StandardBridge initialized")
+
 	// L2OO mode: initialize OptimismPortal (l2Oracle path) and L2OutputOracle.
 	// DGF mode: OptimismPortal2 upgrade + initialization is handled below.
 	if !t.deployConfig.EnableFraudProof {
