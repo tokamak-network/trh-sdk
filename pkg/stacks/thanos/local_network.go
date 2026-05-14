@@ -294,10 +294,10 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 
 	data := localComposeData{
 		OpGethImage:               fmt.Sprintf("tokamaknetwork/thanos-op-geth:%s", imageTags.OpGethImageTag),
-		OpNodeImage:               fmt.Sprintf("tokamaknetwork/thanos-op-node:%s", imageTags.ThanosStackImageTag),
-		OpBatcherImage:            fmt.Sprintf("tokamaknetwork/thanos-op-batcher:%s", imageTags.ThanosStackImageTag),
-		OpProposerImage:           fmt.Sprintf("tokamaknetwork/thanos-op-proposer:%s", imageTags.ThanosStackImageTag),
-		OpChallengerImage:         fmt.Sprintf("tokamaknetwork/thanos-op-challenger:%s", imageTags.ThanosStackImageTag),
+		OpNodeImage:               "tokamaknetwork/thanos-op-node:nightly",
+		OpBatcherImage:            "tokamaknetwork/thanos-op-batcher:nightly",
+		OpProposerImage:           "tokamaknetwork/thanos-op-proposer:nightly",
+		OpChallengerImage:         "tokamaknetwork/thanos-op-challenger:nightly",
 		L1RpcUrl:                  t.deployConfig.L1RPCURL,
 		L1BeaconUrl:               t.deployConfig.L1BeaconURL,
 		SequencerKey:              t.deployConfig.SequencerPrivateKey,
