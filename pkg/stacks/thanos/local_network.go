@@ -112,6 +112,7 @@ type localComposeData struct {
 	BlockExplorerCoinSymbol          string
 	BlockExplorerCoinName            string
 	BlockExplorerCoinDecimals        uint8
+	BlockExplorerCoinGeckoID         string
 	BlockExplorerStableCoin          bool
 	// Monitoring
 	MonitoringConfigVolume string
@@ -606,6 +607,7 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		BlockExplorerCoinSymbol:          feeTokenConfig.Symbol,
 		BlockExplorerCoinName:            feeTokenConfig.Name,
 		BlockExplorerCoinDecimals:        feeTokenDecimals(t.deployConfig.FeeToken),
+		BlockExplorerCoinGeckoID:         feeTokenConfig.CoinGeckoID,
 		BlockExplorerStableCoin:          t.deployConfig.FeeToken == constants.FeeTokenUSDC || t.deployConfig.FeeToken == constants.FeeTokenUSDT,
 		MonitoringConfigVolume:           localMonitoringVolume,
 	}

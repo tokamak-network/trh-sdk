@@ -218,6 +218,8 @@ services:
       - COIN={{.BlockExplorerCoinSymbol}}
 {{- if .BlockExplorerStableCoin}}
       - DISABLE_EXCHANGE_RATES=true
+{{- else}}
+      - EXCHANGE_RATES_COINGECKO_COIN_ID={{.BlockExplorerCoinGeckoID}}
 {{- end}}
       - NETWORK=L2
       - SUBNETWORK=Optimism

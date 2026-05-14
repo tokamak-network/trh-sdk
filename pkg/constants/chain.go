@@ -58,9 +58,10 @@ var ValidFeeTokens = []string{FeeTokenTON, FeeTokenETH, FeeTokenUSDT, FeeTokenUS
 
 // FeeTokenConfig holds the L1 metadata for a fee token.
 type FeeTokenConfig struct {
-	Name      string
-	Symbol    string
-	L1Address string
+	Name        string
+	Symbol      string
+	L1Address   string
+	CoinGeckoID string
 }
 
 // GetFeeTokenConfig returns the fee token configuration for the given token and L1 chain.
@@ -69,33 +70,38 @@ func GetFeeTokenConfig(token string, l1ChainID uint64) FeeTokenConfig {
 	switch strings.ToUpper(token) {
 	case FeeTokenTON:
 		return FeeTokenConfig{
-			Name:      "Tokamak Network Token",
-			Symbol:    "TON",
-			L1Address: chainConfig.TON,
+			Name:        "Tokamak Network Token",
+			Symbol:      "TON",
+			L1Address:   chainConfig.TON,
+			CoinGeckoID: "tokamak-network",
 		}
 	case FeeTokenETH:
 		return FeeTokenConfig{
-			Name:      "Ether",
-			Symbol:    "ETH",
-			L1Address: "0x0000000000000000000000000000000000000000",
+			Name:        "Ether",
+			Symbol:      "ETH",
+			L1Address:   "0x0000000000000000000000000000000000000000",
+			CoinGeckoID: "ethereum",
 		}
 	case FeeTokenUSDT:
 		return FeeTokenConfig{
-			Name:      "Tether USD",
-			Symbol:    "USDT",
-			L1Address: chainConfig.USDTAddress,
+			Name:        "Tether USD",
+			Symbol:      "USDT",
+			L1Address:   chainConfig.USDTAddress,
+			CoinGeckoID: "tether",
 		}
 	case FeeTokenUSDC:
 		return FeeTokenConfig{
-			Name:      "USD Coin",
-			Symbol:    "USDC",
-			L1Address: chainConfig.USDCAddress,
+			Name:        "USD Coin",
+			Symbol:      "USDC",
+			L1Address:   chainConfig.USDCAddress,
+			CoinGeckoID: "usd-coin",
 		}
 	default:
 		return FeeTokenConfig{
-			Name:      "Tokamak Network Token",
-			Symbol:    "TON",
-			L1Address: chainConfig.TON,
+			Name:        "Tokamak Network Token",
+			Symbol:      "TON",
+			L1Address:   chainConfig.TON,
+			CoinGeckoID: "tokamak-network",
 		}
 	}
 }
