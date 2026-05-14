@@ -209,6 +209,11 @@ func (c *Config) WriteToJSONFile(deploymentPath string) error {
 		return err
 	}
 
+	if err := os.MkdirAll(deploymentPath, 0755); err != nil {
+		fmt.Println("Error creating deployment directory:", err)
+		return err
+	}
+
 	fileName := fmt.Sprintf("%s/%s", deploymentPath, ConfigFileName)
 	// Write JSON to a file
 	err = os.WriteFile(fileName, data, 0644)
