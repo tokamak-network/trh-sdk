@@ -179,7 +179,7 @@ services:
       - NEXT_PUBLIC_L1_CROSS_DOMAIN_MESSENGER_ADDRESS={{.BridgeL1CrossDomainMessengerAddress}}
       - NEXT_PUBLIC_OPTIMISM_PORTAL_ADDRESS={{.BridgeOptimismPortalAddress}}
       - NEXT_PUBLIC_L2_OUTPUT_ORACLE_ADDRESS={{.BridgeL2OutputOracleAddress}}
-      - NEXT_PUBLIC_L1_USDC_BRIDGE_ADDRESS={{.BridgeL1USDCBridgeAddress}}
+      - NEXT_PUBLIC_L1_USDC_BRIDGE_ADDRESS={{if .BridgeL1USDCBridgeAddress}}{{.BridgeL1USDCBridgeAddress}}{{else}}0x0000000000000000000000000000000000000000{{end}}
       - NEXT_PUBLIC_DISPUTE_GAME_FACTORY_ADDRESS={{.BridgeDisputeGameFactoryAddress}}
       - NEXT_PUBLIC_BATCH_SUBMISSION_FREQUENCY={{.BridgeBatchSubmissionFrequency}}
       - NEXT_PUBLIC_L1_BLOCK_TIME={{.BridgeL1BlockTime}}
