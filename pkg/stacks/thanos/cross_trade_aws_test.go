@@ -163,3 +163,134 @@ func TestUninstallCrossTradeAWS_NoK8s(t *testing.T) {
 		t.Errorf("expected nil when K8s is nil, got: %v", err)
 	}
 }
+
+// --- Chain config builder tests ---
+
+const (
+	testL1ChainID = constants.EthereumSepoliaChainID
+	testL2ChainID = uint64(111551187746)
+	testL2RPC     = "http://l2.example.com"
+	testL1RPC     = "http://l1.example.com"
+	testL2Name    = "My L2"
+)
+
+// TestBuildCrossTradeL2L1Config_BothChainsPresent verifies that L1 and L2 entries exist.
+func TestBuildCrossTradeL2L1Config_BothChainsPresent(t *testing.T) {
+	cfg := buildCrossTradeL2L1Config(testL1ChainID, testL1RPC, "l1proxy", testL2ChainID, testL2Name, testL2RPC, "l2proxy")
+	l1Key := "11155111"
+	l2Key := "111551187746"
+	if _, ok := cfg[l1Key]; !ok {
+		t.Errorf("L1 chain key %q missing from L2→L1 config", l1Key)
+	}
+	if _, ok := cfg[l2Key]; !ok {
+		t.Errorf("L2 chain key %q missing from L2→L1 config", l2Key)
+	}
+}
+
+// TestBuildCrossTradeL2L1Config_L2TokensPointToL1 verifies L2 tokens have DestinationChains=[l1ChainID],
+// which makes the L2 appear as a selectable source in the dApp's chain dropdown.
+func TestBuildCrossTradeL2L1Config_L2TokensPointToL1(t *testing.T) {
+	cfg := buildCrossTradeL2L1Config(testL1ChainID, testL1RPC, "l1proxy", testL2ChainID, testL2Name, testL2RPC, "l2proxy")
+	l2 := cfg["111551187746"]
+	if len(l2.Tokens) == 0 {
+		t.Fatal("L2 chain must have at least one token in L2→L1 config")
+	}
+	for _, tok := range l2.Tokens {
+		if len(tok.DestinationChains) == 0 {
+			t.Errorf("L2 token %q: DestinationChains must not be empty (L2 is a source chain)", tok.Name)
+		}
+		found := false
+		for _, dst := range tok.DestinationChains {
+			if dst == testL1ChainID {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("L2 token %q: DestinationChains must include L1 chainID %d", tok.Name, testL1ChainID)
+		}
+	}
+}
+
+// TestBuildCrossTradeL2L1Config_NativeTokenFields verifies NativeTokenName/Symbol are set on both chains.
+func TestBuildCrossTradeL2L1Config_NativeTokenFields(t *testing.T) {
+	cfg := buildCrossTradeL2L1Config(testL1ChainID, testL1RPC, "l1proxy", testL2ChainID, testL2Name, testL2RPC, "l2proxy")
+	for key, chain := range cfg {
+		if chain.NativeTokenName == "" {
+			t.Errorf("chain %q: NativeTokenName must not be empty", key)
+		}
+		if chain.NativeTokenSymbol == "" {
+			t.Errorf("chain %q: NativeTokenSymbol must not be empty", key)
+		}
+	}
+}
+
+// TestBuildCrossTradeL2L2Config_ThanosSepolia verifies the fixed Thanos Sepolia chain entry
+// is always included (chainID 111551119090). Without it the dApp has no destination for L2→L2.
+func TestBuildCrossTradeL2L2Config_ThanosSepolia(t *testing.T) {
+	cfg := buildCrossTradeL2L2Config(testL1ChainID, testL1RPC, "l2tol2l1", testL2ChainID, testL2Name, testL2RPC, "l2tol2proxy")
+	thanosSepKey := "111551119090"
+	entry, ok := cfg[thanosSepKey]
+	if !ok {
+		t.Fatalf("Thanos Sepolia key %q missing from L2→L2 config — dApp has no destination chain", thanosSepKey)
+	}
+	if entry.RPCURL != crossTradeThanosSepRPCURL {
+		t.Errorf("Thanos Sepolia RPCURL: got %q, want %q", entry.RPCURL, crossTradeThanosSepRPCURL)
+	}
+}
+
+// TestBuildCrossTradeL2L2Config_L2TokensPointToThanosSepolia verifies L2 tokens point to Thanos Sepolia,
+// making the custom L2 appear as a source chain in L2→L2 mode.
+func TestBuildCrossTradeL2L2Config_L2TokensPointToThanosSepolia(t *testing.T) {
+	cfg := buildCrossTradeL2L2Config(testL1ChainID, testL1RPC, "l2tol2l1", testL2ChainID, testL2Name, testL2RPC, "l2tol2proxy")
+	l2 := cfg["111551187746"]
+	if len(l2.Tokens) == 0 {
+		t.Fatal("L2 chain must have at least one token in L2→L2 config")
+	}
+	for _, tok := range l2.Tokens {
+		found := false
+		for _, dst := range tok.DestinationChains {
+			if dst == crossTradeThanosSepolia {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("L2 token %q: DestinationChains must include Thanos Sepolia (%d)", tok.Name, crossTradeThanosSepolia)
+		}
+	}
+}
+
+// TestBuildCrossTradeL2L2Config_ThanosTokensEmptyDestination verifies Thanos Sepolia tokens
+// have empty DestinationChains — prevents the dApp from routing Thanos→newL2 (unregistered direction).
+func TestBuildCrossTradeL2L2Config_ThanosTokensEmptyDestination(t *testing.T) {
+	cfg := buildCrossTradeL2L2Config(testL1ChainID, testL1RPC, "l2tol2l1", testL2ChainID, testL2Name, testL2RPC, "l2tol2proxy")
+	thanos := cfg["111551119090"]
+	for _, tok := range thanos.Tokens {
+		if len(tok.DestinationChains) != 0 {
+			t.Errorf("Thanos Sepolia token %q: DestinationChains must be empty (reverse direction not registered)", tok.Name)
+		}
+	}
+}
+
+// TestBuildCrossTradeL2L2Config_AllChainsHaveTokens verifies every chain entry has at least one token,
+// otherwise the dApp's source/destination dropdowns will be empty.
+func TestBuildCrossTradeL2L2Config_AllChainsHaveTokens(t *testing.T) {
+	cfg := buildCrossTradeL2L2Config(testL1ChainID, testL1RPC, "l2tol2l1", testL2ChainID, testL2Name, testL2RPC, "l2tol2proxy")
+	for key, chain := range cfg {
+		if len(chain.Tokens) == 0 {
+			t.Errorf("chain %q: Tokens must not be empty (dApp uses Tokens to populate dropdowns)", key)
+		}
+	}
+}
+
+// TestBuildCrossTradeL2L2Config_ContractAddresses verifies contract addresses are plumbed correctly.
+func TestBuildCrossTradeL2L2Config_ContractAddresses(t *testing.T) {
+	cfg := buildCrossTradeL2L2Config(testL1ChainID, testL1RPC, "l2tol2l1addr", testL2ChainID, testL2Name, testL2RPC, "l2tol2proxyaddr")
+	l1 := cfg["11155111"]
+	if l1.Contracts.L1CrossTrade == nil || *l1.Contracts.L1CrossTrade != "l2tol2l1addr" {
+		t.Errorf("L1 chain: L1CrossTrade contract mismatch, got %v", l1.Contracts.L1CrossTrade)
+	}
+	l2 := cfg["111551187746"]
+	if l2.Contracts.L2CrossTrade == nil || *l2.Contracts.L2CrossTrade != "l2tol2proxyaddr" {
+		t.Errorf("L2 chain: L2CrossTrade contract mismatch, got %v", l2.Contracts.L2CrossTrade)
+	}
+}
