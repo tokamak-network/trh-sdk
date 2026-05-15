@@ -117,6 +117,26 @@ func (t *ThanosStack) AutoInstallCrossTradeAWS(ctx context.Context) (*AutoInstal
 	}
 	t.logger.Info("✅ L1CrossTradeProxy chain info registered")
 
+	// Register the deployed L2 chain on L2toL2CrossTradeL1 (L2→L2 direction).
+	// setL1CrossTradeChainInfo above covers L2→L1; this call covers L2→L2.
+	// Without this, L2toL2CrossTradeL1.chainData(l2ChainId) returns zero addresses
+	// and any L2→L2 bridge request reverts.
+	if err := setL2toL2CrossTradeL1ChainInfo(
+		ctx,
+		t.logger,
+		t.deployConfig.L1RPCURL,
+		t.deployConfig.AdminPrivateKey,
+		l1CT.L2toL2CrossTradeL1,
+		deployedContracts.L1CrossDomainMessengerProxy,
+		localOutput.L2toL2CrossTradeProxy,
+		deployedContracts.L1StandardBridgeProxy,
+		l2ChainID,
+		l1ChainID,
+	); err != nil {
+		return nil, fmt.Errorf("autoInstallCrossTradeAWS: failed to set L2toL2 chain info: %w", err)
+	}
+	t.logger.Info("✅ L2toL2CrossTradeL1 chain info registered")
+
 	// Deploy a single CrossTrade dApp Helm release that handles both L2→L1 and L2→L2 modes.
 	dAppURL, err := t.installCrossTradeHelmAWS(ctx, l1CT.L1CrossTradeProxy, localOutput.L2CrossTradeProxy, l1CT.L2toL2CrossTradeL1, localOutput.L2toL2CrossTradeProxy, l2RPC)
 	if err != nil {

@@ -2734,3 +2734,121 @@ func setL1CrossTradeChainInfo(
 	logger.Infof("✅ L1CrossTradeProxy.setChainInfo registered l2ChainId=%d", l2ChainID)
 	return nil
 }
+
+// setL2toL2CrossTradeL1ChainInfo registers a new L2 chain on the shared L2toL2CrossTradeL1
+// contract on L1. This is required for L2→L2 bridging: the L2toL2CrossTrade dApp calls
+// L2toL2CrossTradeL1.chainData(l2ChainId) to resolve the L2 contract address, and if it
+// returns zero the request reverts.
+//
+// setChainInfo signature (7-param):
+//
+//	setChainInfo(address _crossDomainMessenger, address _l2CrossTrade,
+//	             address _l2NativeTokenAddressOnL1, address _l1StandardBridge,
+//	             address _l1USDCBridge, uint256 _l2ChainId, bool _useCustomBridge)
+//
+// l1StandardBridge must be the L1-side proxy (not the L2 predeploy 0x4200...0010).
+// l1USDCBridge="" disables USDC bridging — address(0) is passed.
+func setL2toL2CrossTradeL1ChainInfo(
+	ctx context.Context,
+	logger *zap.SugaredLogger,
+	l1RPCURL string,
+	adminPrivateKey string,
+	l2toL2CrossTradeL1 string,
+	l1CrossDomainMessenger string,
+	l2toL2CrossTradeProxy string,
+	l1StandardBridge string,
+	l2ChainID uint64,
+	l1ChainID uint64,
+) error {
+	for _, pair := range []struct{ name, val string }{
+		{"l2toL2CrossTradeL1", l2toL2CrossTradeL1},
+		{"l1CrossDomainMessenger", l1CrossDomainMessenger},
+		{"l2toL2CrossTradeProxy", l2toL2CrossTradeProxy},
+		{"l1StandardBridge", l1StandardBridge},
+	} {
+		if pair.val == "" {
+			return fmt.Errorf("setL2toL2CrossTradeL1ChainInfo: %s is empty", pair.name)
+		}
+	}
+
+	l1Config, ok := constants.L1ChainConfigurations[l1ChainID]
+	if !ok || l1Config.TON == "" {
+		return fmt.Errorf("setL2toL2CrossTradeL1ChainInfo: TON address not found for L1 chain %d", l1ChainID)
+	}
+
+	l1Client, err := ethclient.DialContext(ctx, l1RPCURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to L1 RPC for setL2toL2CrossTradeL1ChainInfo: %w", err)
+	}
+	defer l1Client.Close()
+
+	ctAddr := common.HexToAddress(l2toL2CrossTradeL1)
+	l2ChainIDBig := new(big.Int).SetUint64(l2ChainID)
+
+	// Idempotency guard: read chainData(l2ChainId). If crossDomainMessenger is non-zero, already registered.
+	chainDataSelector := crypto.Keccak256([]byte("chainData(uint256)"))[:4]
+	checkCalldata := append(chainDataSelector, common.LeftPadBytes(l2ChainIDBig.Bytes(), 32)...)
+	if result, callErr := l1Client.CallContract(ctx, ethereum.CallMsg{To: &ctAddr, Data: checkCalldata}, nil); callErr == nil && len(result) >= 32 {
+		existingCDM := common.BytesToAddress(result[12:32])
+		if existingCDM != (common.Address{}) {
+			logger.Infof("✅ L2toL2CrossTradeL1 already has chainData for l2ChainId=%d (cdm=%s), skipping", l2ChainID, existingCDM.Hex())
+			return nil
+		}
+	}
+
+	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(adminPrivateKey, "0x"))
+	if err != nil {
+		return fmt.Errorf("invalid admin private key for setL2toL2CrossTradeL1ChainInfo: %w", err)
+	}
+	adminAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	chainID := big.NewInt(int64(l1ChainID))
+
+	// Build setChainInfo(address,address,address,address,address,uint256,bool) calldata.
+	// ABI layout: selector (4 bytes) + 7 slots × 32 bytes = 228 bytes total.
+	// slot 0: _crossDomainMessenger, slot 1: _l2CrossTrade, slot 2: _l2NativeTokenAddressOnL1,
+	// slot 3: _l1StandardBridge, slot 4: _l1USDCBridge (address(0)), slot 5: _l2ChainId, slot 6: _useCustomBridge (false)
+	selector := crypto.Keccak256([]byte("setChainInfo(address,address,address,address,address,uint256,bool)"))[:4]
+	calldata := make([]byte, 228) // 4 + 7*32
+	copy(calldata[0:4], selector)
+	copy(calldata[16:36], common.HexToAddress(l1CrossDomainMessenger).Bytes())  // slot 0
+	copy(calldata[48:68], common.HexToAddress(l2toL2CrossTradeProxy).Bytes())   // slot 1
+	copy(calldata[80:100], common.HexToAddress(l1Config.TON).Bytes())           // slot 2
+	copy(calldata[112:132], common.HexToAddress(l1StandardBridge).Bytes())      // slot 3
+	// slot 4 (_l1USDCBridge = address(0)): zero — already zero
+	copy(calldata[164:196], common.LeftPadBytes(l2ChainIDBig.Bytes(), 32))      // slot 5
+	// slot 6 (_useCustomBridge = false): zero — already zero
+
+	if _, simErr := l1Client.CallContract(ctx, ethereum.CallMsg{From: adminAddr, To: &ctAddr, Data: calldata}, nil); simErr != nil {
+		return fmt.Errorf("L2toL2CrossTradeL1.setChainInfo pre-flight failed: %w", simErr)
+	}
+
+	nonce, err := l1Client.PendingNonceAt(ctx, adminAddr)
+	if err != nil {
+		return fmt.Errorf("failed to get nonce for setL2toL2CrossTradeL1ChainInfo: %w", err)
+	}
+	gasPrice, err := l1Client.SuggestGasPrice(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get gas price for setL2toL2CrossTradeL1ChainInfo: %w", err)
+	}
+	gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(2))
+
+	tx := ethtypes.NewTransaction(nonce, ctAddr, big.NewInt(0), 200_000, gasPrice, calldata)
+	signedTx, err := ethtypes.SignTx(tx, ethtypes.NewEIP155Signer(chainID), privKey)
+	if err != nil {
+		return fmt.Errorf("failed to sign L2toL2CrossTradeL1.setChainInfo tx: %w", err)
+	}
+	if err := l1Client.SendTransaction(ctx, signedTx); err != nil {
+		return fmt.Errorf("failed to send L2toL2CrossTradeL1.setChainInfo tx: %w", err)
+	}
+	logger.Infof("L2toL2CrossTradeL1.setChainInfo() tx sent: %s (waiting for receipt...)", signedTx.Hash().Hex())
+
+	receipt, err := bind.WaitMined(ctx, l1Client, signedTx)
+	if err != nil {
+		return fmt.Errorf("failed to wait for L2toL2CrossTradeL1.setChainInfo tx receipt: %w", err)
+	}
+	if receipt.Status != ethtypes.ReceiptStatusSuccessful {
+		return fmt.Errorf("L2toL2CrossTradeL1.setChainInfo() tx reverted (tx: %s)", signedTx.Hash().Hex())
+	}
+	logger.Infof("✅ L2toL2CrossTradeL1.setChainInfo registered l2ChainId=%d", l2ChainID)
+	return nil
+}
