@@ -22,8 +22,8 @@ var l1CrossTradeAddresses = map[uint64]struct {
 	L2toL2CrossTradeL1 string // L2toL2CrossTradeProxyL1 (L2→L2 bridge)
 }{
 	constants.EthereumSepoliaChainID: {
-		L1CrossTradeProxy:  "0xf3473E20F1d9EB4468C72454a27aA1C65B67AB35",
-		L2toL2CrossTradeL1: "0xDa2CbF69352cB46d9816dF934402b421d93b6BC2",
+		L1CrossTradeProxy:  "0xfea37d39bec823d503ed6fb9d3a6e151190821fb",
+		L2toL2CrossTradeL1: "0xd038d89655f106d88c5bd56a9442d9ecee675c1c",
 	},
 }
 

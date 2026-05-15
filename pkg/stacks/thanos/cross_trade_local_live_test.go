@@ -28,8 +28,8 @@ func TestDeployCrossTradeLocalLive(t *testing.T) {
 		L2ChainID:            111551215120,
 		OptimismPortalProxy:  "0xC0337869d225FDb7F7e31e6761bcc9c9F6Ac2fc7",
 		CrossDomainMessenger: "0x58060E91B14a5E7c7e5069f6330b4e11a9D00558",
-		L1CrossTradeProxy:    "0xf3473E20F1d9EB4468C72454a27aA1C65B67AB35",
-		L2toL2CrossTradeL1:   "0xDa2CbF69352cB46d9816dF934402b421d93b6BC2",
+		L1CrossTradeProxy:    "0xfea37d39bec823d503ed6fb9d3a6e151190821fb",
+		L2toL2CrossTradeL1:   "0xd038d89655f106d88c5bd56a9442d9ecee675c1c",
 		SupportedTokens:      []TokenPair{},
 	}
 

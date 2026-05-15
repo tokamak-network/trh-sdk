@@ -112,11 +112,13 @@ func TestL1CrossTradeAddresses_SepoliaExists(t *testing.T) {
 // live-verified contract addresses for Sepolia. If these change, the AWS
 // auto-install will reference the wrong contracts — this test will catch it.
 //
-// Address source: live test verified in cross_trade_local_live_test.go (April 2026).
+// Address source: crossTrade broadcast/DeployL1CrossTrade_L2L1.s.sol/11155111 and
+// broadcast/DeployL1CrossTrade_L2L2.s.sol/11155111 — deployed by admin key
+// 0x7220c734653ae8Ca014d4D82A84041EE4169499c so setChainInfo succeeds.
 func TestL1CrossTradeAddresses_SepoliaValues(t *testing.T) {
 	const (
-		wantL1CTProxy  = "0xf3473E20F1d9EB4468C72454a27aA1C65B67AB35"
-		wantL2toL2CTL1 = "0xDa2CbF69352cB46d9816dF934402b421d93b6BC2"
+		wantL1CTProxy  = "0xfea37d39bec823d503ed6fb9d3a6e151190821fb"
+		wantL2toL2CTL1 = "0xd038d89655f106d88c5bd56a9442d9ecee675c1c"
 	)
 
 	addrs := l1CrossTradeAddresses[constants.EthereumSepoliaChainID]
