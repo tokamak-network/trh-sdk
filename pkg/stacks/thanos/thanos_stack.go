@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/tokamak-network/trh-sdk/pkg/cloud-provider/aws"
+	"github.com/tokamak-network/trh-sdk/pkg/dependencies"
 	"github.com/tokamak-network/trh-sdk/pkg/types"
 	"github.com/tokamak-network/trh-sdk/pkg/utils"
 
@@ -71,6 +72,19 @@ func NewThanosStack(
 
 		// Switch to this context
 		if config != nil && config.K8s != nil {
+			// Ensure aws-cli is available before calling SwitchKubernetesContext.
+			// This handles the case where the container was recreated (e.g. after make update)
+			// and the lazily-installed tools have been wiped from the ephemeral filesystem.
+			arch, archErr := dependencies.GetArchitecture(ctx)
+			if archErr != nil {
+				return nil, fmt.Errorf("failed to detect architecture: %w", archErr)
+			}
+			tr := NewToolReadiness(l, arch)
+			tr.Start(ctx)
+			if waitErr := tr.WaitFor(ctx, "aws-cli"); waitErr != nil {
+				return nil, fmt.Errorf("aws-cli not available: %w", waitErr)
+			}
+
 			err = utils.SwitchKubernetesContext(ctx, config.K8s.Namespace, awsConfig.Region)
 			if err != nil {
 				return nil, err
