@@ -608,7 +608,7 @@ func (t *ThanosStack) generateLocalComposeFile(ctx context.Context, composePath 
 		BlockExplorerCoinName:            feeTokenConfig.Name,
 		BlockExplorerCoinDecimals:        feeTokenDecimals(t.deployConfig.FeeToken),
 		BlockExplorerCoinGeckoID:         feeTokenConfig.CoinGeckoID,
-		BlockExplorerStableCoin:          t.deployConfig.FeeToken == constants.FeeTokenUSDC || t.deployConfig.FeeToken == constants.FeeTokenUSDT,
+		BlockExplorerStableCoin:          feeTokenConfig.DisableExchangeRates,
 		MonitoringConfigVolume:           localMonitoringVolume,
 	}
 

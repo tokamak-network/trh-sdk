@@ -134,6 +134,7 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 	}
 
 	// generate the helm chart value file
+	installFeeTokenConfig := constants.GetFeeTokenConfig(t.deployConfig.FeeToken, t.deployConfig.L1ChainID)
 	envValues := fmt.Sprintf(`
 		export stack_deployments_path=%s
 		export stack_l1_rpc_url=%s
@@ -152,6 +153,8 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		export enable_fault_proof=%t
 		export stack_nativetoken_name=%s
 		export stack_nativetoken_symbol=%s
+		export stack_coingecko_coin_id=%s
+		export stack_disable_exchange_rates=%t
 		`,
 		t.deployConfig.DeploymentFilePath,
 		t.deployConfig.L1RPCURL,
@@ -168,8 +171,10 @@ func (t *ThanosStack) InstallBlockExplorer(ctx context.Context, inputs *InstallB
 		opGethPublicUrl,
 		t.deployConfig.NextPublicRollupL1BaseUrl,
 		t.deployConfig.EnableFraudProof,
-		constants.GetFeeTokenConfig(t.deployConfig.FeeToken, t.deployConfig.L1ChainID).Name,
-		constants.GetFeeTokenConfig(t.deployConfig.FeeToken, t.deployConfig.L1ChainID).Symbol,
+		installFeeTokenConfig.Name,
+		installFeeTokenConfig.Symbol,
+		installFeeTokenConfig.CoinGeckoID,
+		installFeeTokenConfig.DisableExchangeRates,
 	)
 	_, err = utils.ExecuteCommand(ctx,
 		"bash",
@@ -390,6 +395,7 @@ func (t *ThanosStack) UpdateBlockExplorer(ctx context.Context, inputs *InstallBl
 		return "", err
 	}
 
+	updateFeeTokenConfig := constants.GetFeeTokenConfig(t.deployConfig.FeeToken, t.deployConfig.L1ChainID)
 	envValues := fmt.Sprintf(`
 		export stack_deployments_path=%s
 		export stack_l1_rpc_url=%s
@@ -408,6 +414,8 @@ func (t *ThanosStack) UpdateBlockExplorer(ctx context.Context, inputs *InstallBl
 		export enable_fault_proof=%t
 		export stack_nativetoken_name=%s
 		export stack_nativetoken_symbol=%s
+		export stack_coingecko_coin_id=%s
+		export stack_disable_exchange_rates=%t
 		`,
 		t.deployConfig.DeploymentFilePath,
 		t.deployConfig.L1RPCURL,
@@ -424,8 +432,10 @@ func (t *ThanosStack) UpdateBlockExplorer(ctx context.Context, inputs *InstallBl
 		opGethPublicUrl,
 		t.deployConfig.NextPublicRollupL1BaseUrl,
 		t.deployConfig.EnableFraudProof,
-		constants.GetFeeTokenConfig(t.deployConfig.FeeToken, t.deployConfig.L1ChainID).Name,
-		constants.GetFeeTokenConfig(t.deployConfig.FeeToken, t.deployConfig.L1ChainID).Symbol,
+		updateFeeTokenConfig.Name,
+		updateFeeTokenConfig.Symbol,
+		updateFeeTokenConfig.CoinGeckoID,
+		updateFeeTokenConfig.DisableExchangeRates,
 	)
 	_, err = utils.ExecuteCommand(ctx,
 		"bash",
