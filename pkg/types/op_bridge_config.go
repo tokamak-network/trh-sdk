@@ -10,6 +10,7 @@ type OpBridgeConfig struct {
 			L1NativeCurrencySymbol        string `yaml:"l1_native_currency_symbol"`
 			L1NativeCurrencyDecimals      int    `yaml:"l1_native_currency_decimals"`
 			L1BlockExplorer               string `yaml:"l1_block_explorer"`
+			L2BlockExplorer               string `yaml:"l2_block_explorer"`
 			L2ChainName                   string `yaml:"l2_chain_name"`
 			L2ChainID                     string `yaml:"l2_chain_id"`
 			L2RPC                         string `yaml:"l2_rpc"`

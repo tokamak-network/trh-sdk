@@ -65,6 +65,7 @@ func (t *ThanosStack) InstallBridge(ctx context.Context) (string, error) {
 	opBridgeConfig.OpBridge.Env.NativeTokenL1Address = feeTokenConfig.L1Address
 
 	opBridgeConfig.OpBridge.Env.L1BlockExplorer = constants.L1ChainConfigurations[l1ChainID].BlockExplorer
+	opBridgeConfig.OpBridge.Env.L2BlockExplorer = t.deployConfig.BlockExplorerURL
 	opBridgeConfig.OpBridge.Env.L1USDTAddress = constants.L1ChainConfigurations[l1ChainID].USDTAddress
 	opBridgeConfig.OpBridge.Env.L1USDCAddress = constants.L1ChainConfigurations[l1ChainID].USDCAddress
 
@@ -154,6 +155,67 @@ func (t *ThanosStack) InstallBridge(ctx context.Context) (string, error) {
 	t.logger.Infof("✅ Bridge component is up and running. You can access it at: %s", bridgeUrl)
 
 	return bridgeUrl, nil
+}
+
+// UpdateBridgeBlockExplorer upgrades the op-bridge helm release with an updated
+// L2 block explorer URL. The deployment.yaml checksum annotation causes the pod
+// to restart automatically when the ConfigMap changes.
+func (t *ThanosStack) UpdateBridgeBlockExplorer(ctx context.Context, l2BlockExplorerURL string) error {
+	if t.deployConfig.K8s == nil {
+		return fmt.Errorf("K8s configuration is not set")
+	}
+
+	namespace := t.deployConfig.K8s.Namespace
+
+	releases, err := utils.FilterHelmReleases(ctx, namespace, "op-bridge")
+	if err != nil {
+		return fmt.Errorf("failed to find op-bridge helm releases: %w", err)
+	}
+	if len(releases) == 0 {
+		return fmt.Errorf("no op-bridge helm release found in namespace %s", namespace)
+	}
+
+	// Read the existing values file and update only the l2_block_explorer field.
+	configFileDir := fmt.Sprintf("%s/tokamak-thanos-stack/terraform/thanos-stack", t.deploymentPath)
+	filePath := filepath.Join(configFileDir, "/op-bridge-values.yaml")
+
+	raw, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read op-bridge-values.yaml: %w", err)
+	}
+
+	var opBridgeConfig types.OpBridgeConfig
+	if err := yaml.Unmarshal(raw, &opBridgeConfig); err != nil {
+		return fmt.Errorf("failed to parse op-bridge-values.yaml: %w", err)
+	}
+
+	opBridgeConfig.OpBridge.Env.L2BlockExplorer = l2BlockExplorerURL
+
+	data, err := yaml.Marshal(&opBridgeConfig)
+	if err != nil {
+		return fmt.Errorf("failed to marshal updated op-bridge values: %w", err)
+	}
+	if err := os.WriteFile(filePath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write updated op-bridge-values.yaml: %w", err)
+	}
+
+	for _, release := range releases {
+		_, err = utils.ExecuteCommand(ctx, "helm", []string{
+			"upgrade",
+			release,
+			fmt.Sprintf("%s/tokamak-thanos-stack/charts/op-bridge", t.deploymentPath),
+			"--values",
+			filePath,
+			"--namespace",
+			namespace,
+		}...)
+		if err != nil {
+			return fmt.Errorf("helm upgrade op-bridge failed for release %s: %w", release, err)
+		}
+		t.logger.Infof("✅ Bridge block explorer URL updated for release %s", release)
+	}
+
+	return nil
 }
 
 func (t *ThanosStack) UninstallBridge(ctx context.Context) error {
