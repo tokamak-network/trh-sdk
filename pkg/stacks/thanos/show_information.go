@@ -85,22 +85,16 @@ func (t *ThanosStack) ShowInformation(ctx context.Context) (*types.ChainInformat
 		return nil, fmt.Errorf("failed to get ingresses: %w", err)
 	}
 
-	for ingressName, addresses := range ingresses {
-		if len(addresses) == 0 {
-			continue
-		}
-		ingress := addresses[0]
-		switch {
-		case strings.Contains(ingressName, namespace) && status["chain"]:
-			l2RpcUrl = fmt.Sprintf("http://%s", ingress)
-			fmt.Printf("✅ L2 network is running on %s\n", l2RpcUrl)
-		case strings.Contains(ingressName, "bridge") && status["bridge"]:
-			bridgeUrl = fmt.Sprintf("http://%s", ingress)
-			fmt.Printf("✅ Bridge is running on %s\n", bridgeUrl)
-		case strings.Contains(ingressName, "block-explorer-be") && status["block-explorer-be"]:
-			blockExplorerUrl = fmt.Sprintf("http://%s", ingress)
-			fmt.Printf("✅ Block Explorer is running on %s\n", blockExplorerUrl)
-		}
+	l2RpcUrl, bridgeUrl, blockExplorerUrl = buildIngressURLs(status, ingresses, namespace)
+
+	if l2RpcUrl != "" {
+		fmt.Printf("✅ L2 network is running on %s\n", l2RpcUrl)
+	}
+	if bridgeUrl != "" {
+		fmt.Printf("✅ Bridge is running on %s\n", bridgeUrl)
+	}
+	if blockExplorerUrl != "" {
+		fmt.Printf("✅ Block Explorer is running on %s\n", blockExplorerUrl)
 	}
 
 	if config.MetadataPRLink != "" {
@@ -142,6 +136,28 @@ func (t *ThanosStack) ShowInformation(ctx context.Context) (*types.ChainInformat
 		GrafanaAdminPassword: t.deployConfig.GrafanaAdminPassword,
 		RollupFilePath:       t.rollupConfigPath(),
 	}, nil
+}
+
+// buildIngressURLs maps K8s ingress addresses to service URLs.
+// block-explorer-be does NOT require a Running pod — InstallBlockExplorer returns
+// as soon as the K8s ingress gets an ELB hostname, which can precede pod readiness.
+// Requiring pod+ingress caused the auto-mark to skip and left integrations in AwaitingConfig.
+func buildIngressURLs(podStatuses map[string]bool, ingresses map[string][]string, namespace string) (l2RpcUrl, bridgeUrl, blockExplorerUrl string) {
+	for ingressName, addresses := range ingresses {
+		if len(addresses) == 0 {
+			continue
+		}
+		ingress := addresses[0]
+		switch {
+		case strings.Contains(ingressName, namespace) && podStatuses["chain"]:
+			l2RpcUrl = fmt.Sprintf("http://%s", ingress)
+		case strings.Contains(ingressName, "bridge") && podStatuses["bridge"]:
+			bridgeUrl = fmt.Sprintf("http://%s", ingress)
+		case strings.Contains(ingressName, "block-explorer-be"):
+			blockExplorerUrl = fmt.Sprintf("http://%s", ingress)
+		}
+	}
+	return
 }
 
 func (t *ThanosStack) ShowLogs(ctx context.Context, config *types.Config, component string, isTroubleshoot bool) error {
